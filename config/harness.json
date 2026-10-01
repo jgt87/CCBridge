@@ -1,0 +1,14 @@
+{
+  "port": 8765,
+  "cdpPort": 9333,
+  "projectsFolder": "CCBridge",
+  "maxRounds": 12,
+  "promptCharBudget": 75000,
+  "resultCharBudget": 40000,
+  "replyTimeoutSec": 300,
+  "commandTimeoutSec": 180,
+  "rolloverMargin": 2,
+  "autoApproveCommands": [],
+  "workIq": "leave",
+  "saveReplyFrames": true
+}

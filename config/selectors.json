@@ -1,0 +1,13 @@
+{
+  "chatUrl": "https://m365.cloud.microsoft/chat",
+  "editor": "#m365-chat-editor-target-element, [role='textbox'][contenteditable='true']",
+  "sendButton": "button[aria-label='Send'], button.fai-SendButton",
+  "stopButton": "button[aria-label*='Stop' i]",
+  "chatHubUrlPattern": "/Chathub/",
+  "workIq": {
+    "toggle": "",
+    "stateAttribute": "aria-checked",
+    "onValue": "true",
+    "note": "Fill in from capture-report.json (capture.cmd on a Microsoft 365 Copilot licence). Empty toggle = Work IQ control unavailable."
+  }
+}

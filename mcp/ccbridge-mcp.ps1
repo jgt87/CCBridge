@@ -1,0 +1,420 @@
+<#
+.SYNOPSIS
+  CCBridge MCP server (stdio). Lets an MCP client (Claude Code, VS Code, ...) offload work to
+  Microsoft 365 Copilot Chat through the same bridge and agent loop as the CCBridge web app.
+.DESCRIPTION
+  Register it in your MCP client as:
+    command: powershell.exe
+    args:    -NoProfile -ExecutionPolicy Bypass -File <path>\mcp\ccbridge-mcp.ps1
+  stdout carries JSON-RPC only; diagnostics go to stderr.
+#>
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+
+# Update before anything is loaded; the updater writes only to stderr.
+if ($env:CCBRIDGE_NO_UPDATE -ne '1') { & (Join-Path $root 'tools\update.ps1') }
+
+$utf8 = New-Object Text.UTF8Encoding($false)
+$stdin = New-Object IO.StreamReader([Console]::OpenStandardInput(), $utf8)
+$stdout = New-Object IO.StreamWriter([Console]::OpenStandardOutput(), $utf8)
+$stdout.NewLine = "`n"
+$stdout.AutoFlush = $true
+
+function Write-Log([string]$Message) { [Console]::Error.WriteLine("[ccbridge-mcp] $Message") }
+
+Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
+Import-Module (Join-Path $root 'lib\Workspace.psm1') -Force
+
+Import-Module (Join-Path $root 'lib\Config.psm1') -Force
+$config = Get-CCBridgeConfig harness $root
+# Log level: $env:CCBRIDGE_LOG (set it in the MCP client's server config) or logLevel in harness.local.json.
+Import-Module (Join-Path $root 'lib\Log.psm1')
+Initialize-CCBLog -Config $config
+$State = New-AgentState -Config $config -AppRoot $root
+$State.LogLevel = Get-CCBLogLevel
+$State.Headless = $true
+$State.Mode = 'auto'
+
+# --- Worker: the same agent loop the web app uses, in a background runspace -----------------
+$rs = [runspacefactory]::CreateRunspace()
+$rs.ApartmentState = 'STA'
+$rs.Open()
+$rs.SessionStateProxy.SetVariable('State', $State)
+$worker = [powershell]::Create()
+$worker.Runspace = $rs
+$null = $worker.AddScript("`$ErrorActionPreference = 'Stop'; Import-Module '$(Join-Path $root 'lib\Agent.psm1')'; Start-AgentWorker -State `$State")
+$workerHandle = $worker.BeginInvoke()
+
+# --- Jobs --------------------------------------------------------------------------------------
+
+function New-BridgeJob([string]$Kind, [hashtable]$Extra = @{}) {
+    $id = 'job-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $job = [hashtable]::Synchronized(@{ id = $id; kind = $Kind; status = 'queued'; created = (Get-Date).ToString('s') })
+    foreach ($k in $Extra.Keys) { $job[$k] = $Extra[$k] }
+    $State.Jobs[$id] = $job
+    $script:LastJobId = $id
+    $job
+}
+
+function Get-JobOrThrow([string]$Id) {
+    if (-not $Id) { $Id = $script:LastJobId }
+    if (-not $Id -or -not $State.Jobs.ContainsKey($Id)) { throw "Unknown job '$Id'." }
+    $State.Jobs[$Id]
+}
+
+function Test-JobActive {
+    foreach ($j in $State.Jobs.Values) { if ($j.status -eq 'queued' -or $j.status -eq 'running') { return $j } }
+    $null
+}
+
+function Wait-BridgeJob($Job, [int]$Seconds, [scriptblock]$Until) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if ($Job.status -ne 'queued' -and $Job.status -ne 'running') { return }
+        if ($Until -and (& $Until)) { return }
+        Start-Sleep -Milliseconds 300
+    }
+}
+
+function Get-JobEvents($Job) {
+    $from = if ($null -ne $Job.startSeq) { [int]$Job.startSeq } else { [int]$Job.queuedSeq }
+    $events = @(Get-AgentEvents $State $from)
+    if ($null -ne $Job.endSeq) { $events = @($events | Where-Object { $_.seq -le $Job.endSeq }) }
+    $events
+}
+
+function Get-JobActions($Events) {
+    $order = New-Object System.Collections.Generic.List[string]
+    $map = @{}
+    foreach ($e in $Events) {
+        if ($e.type -eq 'action') {
+            if (-not $map.ContainsKey($e.id)) { $order.Add($e.id); $map[$e.id] = @{ id = $e.id; action = $e.action } }
+            foreach ($k in 'target', 'status', 'preview', 'warning', 'error') { if ($null -ne $e[$k]) { $map[$e.id][$k] = $e[$k] } }
+        } elseif ($e.type -eq 'action-result' -and $map.ContainsKey($e.id)) {
+            foreach ($k in 'status', 'summary', 'output') { if ($null -ne $e[$k]) { $map[$e.id][$k] = $e[$k] } }
+        }
+    }
+    @($order | ForEach-Object { $map[$_] })
+}
+
+# --- Unified diff for approvals ---------------------------------------------------------------
+
+function Format-UnifiedDiff([string]$Path, [string]$Old, [string]$New, [int]$Context = 3) {
+    $a = if ($Old) { $Old.Replace("`r`n", "`n").TrimEnd("`n").Split("`n") } else { @() }
+    $b = if ($New) { $New.Replace("`r`n", "`n").TrimEnd("`n").Split("`n") } else { @() }
+    if (-not $Old) { return "--- /dev/null`n+++ $Path (new file)`n" + (($b | ForEach-Object { "+$_" }) -join "`n") }
+    $n = $a.Length; $m = $b.Length
+    if ($n * $m -gt 4000000) { return "(file too large for a diff: $n -> $m lines)" }
+    # LCS table as a flat array: cell (i, j) lives at i * w + j.
+    $w = $m + 1
+    $t = New-Object 'int[]' (($n + 1) * $w)
+    for ($i = $n - 1; $i -ge 0; $i--) {
+        for ($j = $m - 1; $j -ge 0; $j--) {
+            if ($a[$i] -ceq $b[$j]) { $t[$i * $w + $j] = $t[($i + 1) * $w + $j + 1] + 1 }
+            else {
+                $down = $t[($i + 1) * $w + $j]; $right = $t[$i * $w + $j + 1]
+                $t[$i * $w + $j] = if ($down -gt $right) { $down } else { $right }
+            }
+        }
+    }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $i = 0; $j = 0
+    while ($i -lt $n -or $j -lt $m) {
+        if ($i -lt $n -and $j -lt $m -and $a[$i] -ceq $b[$j]) { $rows.Add(@(' ', $a[$i])); $i++; $j++ }
+        elseif ($j -lt $m -and ($i -ge $n -or $t[$i * $w + $j + 1] -ge $t[($i + 1) * $w + $j])) { $rows.Add(@('+', $b[$j])); $j++ }
+        else { $rows.Add(@('-', $a[$i])); $i++ }
+    }
+    $keep = New-Object bool[] $rows.Count
+    for ($k = 0; $k -lt $rows.Count; $k++) {
+        if ($rows[$k][0] -ne ' ') { for ($q = [Math]::Max(0, $k - $Context); $q -le [Math]::Min($rows.Count - 1, $k + $Context); $q++) { $keep[$q] = $true } }
+    }
+    $out = New-Object System.Collections.Generic.List[string]
+    $out.Add("--- $Path"); $out.Add("+++ $Path")
+    $gap = $false
+    for ($k = 0; $k -lt $rows.Count; $k++) {
+        if ($keep[$k]) { if ($gap) { $out.Add('@@ ... @@') }; $gap = $false; $out.Add($rows[$k][0] + $rows[$k][1]) } else { $gap = $true }
+    }
+    $out -join "`n"
+}
+
+# --- Tool implementations --------------------------------------------------------------------
+
+function Limit([string]$Text, [int]$Max) { if (-not $Text -or $Text.Length -le $Max) { return $Text }; $Text.Substring(0, $Max) + "`n...(truncated, $($Text.Length - $Max) more characters)" }
+
+function Format-JobStatus($Job, [switch]$Full) {
+    $events = Get-JobEvents $Job
+    $sb = New-Object Text.StringBuilder
+    $null = $sb.AppendLine("job: $($Job.id) ($($Job.kind)) status: $($Job.status)")
+    if ($Job.project) { $null = $sb.AppendLine("project: $($Job.project)  mode: $($Job.mode)  commands allowed: $($Job.allowCommands)") }
+    if ($State.WorkIq -ne 'leave') { $null = $sb.AppendLine("Work IQ: requested $($State.WorkIq), actual $(if ($State.WorkIqActual) { $State.WorkIqActual } else { 'unknown' })") }
+    $rounds = @($events | Where-Object { $_.type -eq 'assistant' }).Count
+    $null = $sb.AppendLine("Copilot rounds: $rounds  chat messages: $($State.Throttle.used)/$($State.Throttle.max)")
+    if ($State.Credits) { $null = $sb.AppendLine("Copilot credits left today: $($State.Credits.remaining)/$($State.Credits.total)") }
+    if ($Job.error) { $null = $sb.AppendLine("error: $($Job.error)") }
+
+    $todos = @($events | Where-Object { $_.type -eq 'todos' } | Select-Object -Last 1)
+    if ($todos.Count) { $null = $sb.AppendLine("plan:"); foreach ($t in $todos[0].items) { $null = $sb.AppendLine("  [$(if ($t.done) { 'x' } else { ' ' })] $($t.text)") } }
+
+    $actions = Get-JobActions $events
+    if ($actions.Count) {
+        $null = $sb.AppendLine('actions:')
+        foreach ($a in $actions) {
+            $line = "  [$($a.id)] $($a.action) $($a.target) -> $($a.status)"
+            if ($a.summary) { $line += " ($($a.summary))" }
+            if ($a.error) { $line += " error: $($a.error)" }
+            $null = $sb.AppendLine($line)
+            if ($Full -and $a.output) { $null = $sb.AppendLine('      ' + ((Limit $a.output 1500) -replace "`n", "`n      ")) }
+        }
+    }
+    $pending = @($actions | Where-Object { $_.status -eq 'awaiting' })
+    foreach ($p in $pending) {
+        $null = $sb.AppendLine("PENDING APPROVAL [$($p.id)] $($p.action) $($p.target) - call copilot_approve with job_id and action_id")
+        if ($p.warning) { $null = $sb.AppendLine("  warning: $($p.warning)") }
+        if ($p.preview) { $null = $sb.AppendLine((Limit (Format-UnifiedDiff $p.preview.path $p.preview.old $p.preview.new) 12000)) }
+    }
+    foreach ($e in $events) {
+        if ($e.type -in 'error', 'status') { $null = $sb.AppendLine("$($e.type): $($e.text)") }
+        if ($e.type -eq 'human-required') { $null = $sb.AppendLine("HUMAN REQUIRED: $($e.text)") }
+    }
+    $done = @($events | Where-Object { $_.type -eq 'done' } | Select-Object -Last 1)
+    if ($done.Count) { $null = $sb.AppendLine("done: $($done[0].text)") }
+    $changed = @($events | Where-Object { $_.type -eq 'checkpoint' } | ForEach-Object { $_.files }) | Select-Object -Unique
+    if ($changed) { $null = $sb.AppendLine("files changed: $($changed -join ', ')  (copilot_undo reverts them)") }
+    $refs = @($events | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { $_.references })
+    $src = Format-Sources $refs
+    if ($src) { $null = $sb.AppendLine($src) }
+    if ($Full) {
+        $last = @($events | Where-Object { $_.type -eq 'assistant' } | Select-Object -Last 1)
+        if ($last.Count) { $null = $sb.AppendLine("last Copilot reply:`n" + (Limit $last[0].text 8000)) }
+    }
+    if ($Job.kind -eq 'ask' -and $Job.reply) { $null = $sb.AppendLine("reply:`n$($Job.reply)") }
+    $sb.ToString().TrimEnd()
+}
+
+function Set-WorkIqFromArgs($ToolArgs) {
+    $v = Get-Arg $ToolArgs 'work_iq' $null
+    if ($null -eq $v) { return }
+    $State.WorkIq = if ([bool]$v) { 'on' } else { 'off' }
+    $State.WorkIqWarned = $false
+}
+
+function Format-Sources($Refs) {
+    $refs = @($Refs | Where-Object { $_ })
+    if (-not $refs.Count) { return '' }
+    "sources Copilot cited:`n" + (($refs | ForEach-Object { "  - $(if ($_.kind) { "[$($_.kind)] " })$($_.title)$(if ($_.url) { " <$($_.url)>" })" }) -join "`n")
+}
+
+function Get-Arg($ToolArgs, [string]$Name, $Default) {
+    if ($ToolArgs -and $ToolArgs.PSObject.Properties[$Name] -and $null -ne $ToolArgs.$Name) { return $ToolArgs.$Name }
+    $Default
+}
+
+function Invoke-Tool([string]$Name, $ToolArgs) {
+    switch ($Name) {
+        'copilot_ask' {
+            $prompt = [string](Get-Arg $ToolArgs 'prompt' '')
+            if (-not $prompt.Trim()) { throw 'prompt is required' }
+            $active = Test-JobActive
+            if ($active) { throw "Copilot is busy with $($active.id) ($($active.kind)); wait for it or cancel it first." }
+            Set-WorkIqFromArgs $ToolArgs
+            $job = New-BridgeJob 'ask'
+            $job.queuedSeq = $State.Seq
+            $State.Tasks.Enqueue(@{ kind = 'ask'; jobId = $job.id; text = $prompt; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false) })
+            Wait-BridgeJob $job ([int](Get-Arg $ToolArgs 'timeout_sec' 240))
+            if ($job.status -eq 'finished') {
+                $note = if ($job.uncertain) { "`n`n(CCBridge note: parts of this reply were repaired after Copilot's link filter removed text; check code carefully.)" } else { '' }
+                $src = Format-Sources $job.references
+                if (@($job.proposedActions).Count) { $note += "`n`nHUMAN REQUIRED: Copilot proposed a Microsoft 365 action (" + ((@($job.proposedActions) | ForEach-Object { $_.title }) -join '; ') + "). CCBridge never confirms it; the user must review it in the Copilot window." }
+                foreach ($c in @($job.actionClaims)) { $note += "`n`nHUMAN CHECK: Copilot's reply says ""$c"" - CCBridge confirmed no Microsoft 365 action." }
+                return @{ text = "$($job.reply)$note$(if ($src) { "`n`n$src" })" }
+            }
+            if ($job.status -eq 'error') { return @{ text = "Copilot error: $($job.error)"; isError = $true } }
+            return @{ text = "Copilot has not finished yet. Job $($job.id) keeps running; poll it with copilot_task_status." }
+        }
+        'copilot_start_task' {
+            $path = [string](Get-Arg $ToolArgs 'project_path' '')
+            $task = [string](Get-Arg $ToolArgs 'task' '')
+            if (-not $path -or -not [IO.Path]::IsPathRooted($path)) { throw 'project_path must be an absolute folder path' }
+            if (-not $task.Trim()) { throw 'task is required' }
+            $mode = [string](Get-Arg $ToolArgs 'mode' 'auto')
+            if (@('auto', 'plan', 'ask') -notcontains $mode) { throw "mode must be auto, plan or ask" }
+            $active = Test-JobActive
+            if ($active) { throw "Copilot is busy with $($active.id) ($($active.kind)); wait for it or cancel it first." }
+            $full = [IO.Path]::GetFullPath($path).TrimEnd('\')
+            if (-not (Test-Path -LiteralPath $full)) { $null = New-Item -ItemType Directory -Path $full }
+            $allow = [bool](Get-Arg $ToolArgs 'allow_commands' $false)
+            Set-WorkIqFromArgs $ToolArgs
+            $State.Mode = $mode
+            $State.AllowCommands = $allow
+            $State.Busy = $true
+            $job = New-BridgeJob 'task' @{ project = $full; mode = $mode; allowCommands = $allow; task = $task }
+            $job.queuedSeq = $State.Seq
+            $State.Tasks.Enqueue(@{ kind = 'chat'; jobId = $job.id; text = $task; projectRoot = $full; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false) })
+            Wait-BridgeJob $job 3
+            return @{ text = "Started $($job.id) in $full (mode $mode, commands $(if ($allow) { 'allowed' } else { 'not allowed' })).`nPoll with copilot_task_status (it waits up to wait_sec for progress); get the full report with copilot_task_result." }
+        }
+        'copilot_task_status' {
+            $job = Get-JobOrThrow ([string](Get-Arg $ToolArgs 'job_id' ''))
+            $wait = [Math]::Min(120, [Math]::Max(0, [int](Get-Arg $ToolArgs 'wait_sec' 20)))
+            $seq = $State.Seq
+            # Return early on a new approval request or when the job ends.
+            Wait-BridgeJob $job $wait { @(Get-AgentEvents $State $seq | Where-Object { $_.type -eq 'action' -and $_.status -eq 'awaiting' }).Count -gt 0 }
+            return @{ text = (Format-JobStatus $job) }
+        }
+        'copilot_task_result' {
+            $job = Get-JobOrThrow ([string](Get-Arg $ToolArgs 'job_id' ''))
+            return @{ text = (Format-JobStatus $job -Full) }
+        }
+        'copilot_approve' {
+            $job = Get-JobOrThrow ([string](Get-Arg $ToolArgs 'job_id' ''))
+            $actionId = [string](Get-Arg $ToolArgs 'action_id' '')
+            $decision = [string](Get-Arg $ToolArgs 'decision' '')
+            if (@('approve', 'reject') -notcontains $decision) { throw 'decision must be approve or reject' }
+            $pending = @(Get-JobActions (Get-JobEvents $job) | Where-Object { $_.status -eq 'awaiting' } | ForEach-Object { $_.id })
+            if ($pending -notcontains $actionId) { throw "Action '$actionId' is not waiting for approval. Pending: $(if ($pending) { $pending -join ', ' } else { 'none' })" }
+            $State.Approvals[$actionId] = @{ decision = $decision; note = [string](Get-Arg $ToolArgs 'note' '') }
+            return @{ text = "$decision sent for $actionId. Poll copilot_task_status for progress." }
+        }
+        'copilot_cancel_task' {
+            $job = Get-JobOrThrow ([string](Get-Arg $ToolArgs 'job_id' ''))
+            if ($job.status -ne 'running' -and $job.status -ne 'queued') { return @{ text = "$($job.id) is already $($job.status)." } }
+            $job.cancelled = $true
+            $State.Cancel = $true
+            Wait-BridgeJob $job 60
+            return @{ text = "Cancel requested; $($job.id) is now $($job.status). Copilot finishes its current reply first; files already changed stay changed (copilot_undo reverts them)." }
+        }
+        'copilot_new_chat' {
+            $active = Test-JobActive
+            if ($active) { throw "Copilot is busy with $($active.id); wait for it or cancel it first." }
+            $job = New-BridgeJob 'newchat'
+            $State.Tasks.Enqueue(@{ kind = 'newchat'; jobId = $job.id })
+            Wait-BridgeJob $job 60
+            return @{ text = "New Copilot chat: $($job.status)$(if ($job.error) { " - $($job.error)" })" }
+        }
+        'copilot_undo' {
+            $path = [string](Get-Arg $ToolArgs 'project_path' '')
+            if (-not $path -or -not (Test-Path -LiteralPath $path -PathType Container)) { throw 'project_path must be an existing folder' }
+            $active = Test-JobActive
+            if ($active) { throw "Copilot is busy with $($active.id); wait for it or cancel it first." }
+            $State.ProjectRoot = [IO.Path]::GetFullPath($path).TrimEnd('\')
+            $job = New-BridgeJob 'undo'
+            $job.queuedSeq = $State.Seq
+            $State.Tasks.Enqueue(@{ kind = 'undo'; jobId = $job.id })
+            Wait-BridgeJob $job 60
+            $undo = @(Get-JobEvents $job | Where-Object { $_.type -eq 'undo' } | Select-Object -Last 1)
+            return @{ text = $(if ($undo.Count) { $undo[0].text } else { "Undo: $($job.status) $($job.error)" }) }
+        }
+    }
+    throw "Unknown tool '$Name'"
+}
+
+# --- Tool catalog ----------------------------------------------------------------------------
+
+$tools = @(
+    @{ name = 'copilot_ask'
+       description = 'Ask Microsoft 365 Copilot Chat a question and get its reply (markdown). No project files are read or changed. Use it to offload explanations, drafts, reviews or code snippets, or (with work_iq) to look things up in the user''s Microsoft 365 data such as emails, Teams chats, meetings and files. Waits up to timeout_sec; longer answers continue as a job you can poll with copilot_task_status.'
+       inputSchema = @{ type = 'object'; required = @('prompt'); properties = @{
+           prompt = @{ type = 'string'; description = 'The full prompt. Copilot sees nothing else, so include any code or context it needs (up to about 75,000 characters).' }
+           new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation first (default false: continue the current one).' }
+           work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' }
+           timeout_sec = @{ type = 'integer'; description = 'Seconds to wait for the reply (default 240).' } } } }
+    @{ name = 'copilot_start_task'
+       description = 'Start a coding task that Copilot carries out in a project folder through CCBridge''s agent loop: Copilot reads files, writes and edits them, runs commands (only if allow_commands) and reports when done. Runs in the background; returns a job id. Safety: paths stay inside the project, source/ is read-only user data, every task is one undoable change set.'
+       inputSchema = @{ type = 'object'; required = @('project_path', 'task'); properties = @{
+           project_path = @{ type = 'string'; description = 'Absolute path of the project folder (created if missing).' }
+           task = @{ type = 'string'; description = 'What to build or change, with acceptance criteria and how to verify.' }
+           mode = @{ type = 'string'; enum = @('auto', 'plan', 'ask'); description = 'auto: apply changes directly (default). plan: read-only, Copilot only proposes. ask: every change/command waits for copilot_approve.' }
+           allow_commands = @{ type = 'boolean'; description = 'Allow Copilot to run shell commands (cmd.exe) in the project folder, e.g. builds and tests. Default false.' }
+           new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation (default false; a different project always starts fresh).' }
+           work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' } } } }
+    @{ name = 'copilot_task_status'
+       description = 'Progress of a job: status, Copilot''s plan, actions so far, pending approvals with diffs, errors. Waits up to wait_sec for the job to finish or to need an approval, so you can poll without busy-looping.'
+       inputSchema = @{ type = 'object'; properties = @{
+           job_id = @{ type = 'string'; description = 'Job id (default: the most recent job).' }
+           wait_sec = @{ type = 'integer'; description = 'Long-poll up to this many seconds (default 20, max 120).' } } } }
+    @{ name = 'copilot_task_result'
+       description = 'Full report of a job: every action with its output, files changed, the done summary and Copilot''s last reply.'
+       inputSchema = @{ type = 'object'; properties = @{ job_id = @{ type = 'string'; description = 'Job id (default: the most recent job).' } } } }
+    @{ name = 'copilot_approve'
+       description = 'Approve or reject a pending action of a job in ask mode (see PENDING APPROVAL in copilot_task_status).'
+       inputSchema = @{ type = 'object'; required = @('job_id', 'action_id', 'decision'); properties = @{
+           job_id = @{ type = 'string' }
+           action_id = @{ type = 'string' }
+           decision = @{ type = 'string'; enum = @('approve', 'reject') }
+           note = @{ type = 'string'; description = 'Optional note for Copilot, e.g. why it was rejected.' } } } }
+    @{ name = 'copilot_cancel_task'
+       description = 'Stop a running job after Copilot''s current reply. Changes already made stay; use copilot_undo to revert them.'
+       inputSchema = @{ type = 'object'; properties = @{ job_id = @{ type = 'string'; description = 'Job id (default: the most recent job).' } } } }
+    @{ name = 'copilot_new_chat'
+       description = 'Start a fresh Copilot conversation (for example when switching topics).'
+       inputSchema = @{ type = 'object'; properties = @{} } }
+    @{ name = 'copilot_undo'
+       description = 'Revert the most recent change set (one task) in a project folder: restores edited files and deletes files the task created.'
+       inputSchema = @{ type = 'object'; required = @('project_path'); properties = @{ project_path = @{ type = 'string'; description = 'Absolute project folder path.' } } } }
+)
+
+# --- JSON-RPC loop ---------------------------------------------------------------------------
+
+function Send-Message($Object) { $stdout.WriteLine((ConvertTo-Json -InputObject $Object -Depth 30 -Compress)) }
+function Send-Result($Id, $Result) { Send-Message @{ jsonrpc = '2.0'; id = $Id; result = $Result } }
+function Send-Error($Id, [int]$Code, [string]$Message) { Send-Message @{ jsonrpc = '2.0'; id = $Id; error = @{ code = $Code; message = $Message } } }
+
+$instructions = 'CCBridge offloads work to Microsoft 365 Copilot Chat running in the user''s Edge browser. With work_iq=true Copilot can use the user''s Microsoft 365 data (Outlook, Teams, calendar, OneDrive/SharePoint); cited sources are listed in the results. Use copilot_ask for questions and drafts. Use copilot_start_task for coding work in a folder, then poll copilot_task_status until it is finished and read copilot_task_result. Copilot is slower than you (tens of seconds per round) and has a daily credit limit; give it complete, specific tasks. Verify its work before relying on it.'
+
+Write-Log "started (pid $PID), app root $root, log $(Get-CCBLogDir) (level $(Get-CCBLogLevel))"
+Write-CCBLog info mcp 'MCP server started' (Get-CCBridgeEnvironment $root)
+try {
+    while ($true) {
+        $line = $stdin.ReadLine()
+        if ($null -eq $line) { break }
+        if (-not $line.Trim()) { continue }
+        try { $msg = $line | ConvertFrom-Json } catch { Send-Error $null -32700 'Parse error'; continue }
+        $hasId = $msg.PSObject.Properties['id'] -ne $null
+        $id = if ($hasId) { $msg.id } else { $null }
+        if (-not $msg.method) { continue }   # a response to us; we send no requests
+        try {
+            if ($msg.method -ne 'tools/call') { Write-CCBLog verbose mcp "request $($msg.method)" }
+            switch ($msg.method) {
+                'initialize' {
+                    $pv = if ($msg.params -and $msg.params.protocolVersion) { [string]$msg.params.protocolVersion } else { '2025-06-18' }
+                    Send-Result $id @{
+                        protocolVersion = $pv
+                        capabilities = @{ tools = @{ listChanged = $false } }
+                        serverInfo = @{ name = 'ccbridge'; version = '0.1.0' }
+                        instructions = $instructions
+                    }
+                }
+                'ping' { Send-Result $id @{} }
+                'tools/list' { Send-Result $id @{ tools = $tools } }
+                'tools/call' {
+                    $name = [string]$msg.params.name
+                    $toolWatch = [Diagnostics.Stopwatch]::StartNew()
+                    Write-CCBLog verbose mcp "tool $name called" @{ arguments = @($msg.params.arguments.PSObject.Properties | ForEach-Object { $_.Name }) }
+                    Write-CCBLog trace mcp "tool $name arguments" $msg.params.arguments
+                    try {
+                        $r = Invoke-Tool $name $msg.params.arguments
+                        Write-CCBLog verbose mcp "tool $name done ($($toolWatch.ElapsedMilliseconds) ms)" @{ isError = [bool]$r.isError; chars = "$($r.text)".Length }
+                        Send-Result $id @{ content = @(@{ type = 'text'; text = [string]$r.text }); isError = [bool]$r.isError }
+                    } catch {
+                        Write-CCBLogError mcp "tool $name" $_
+                        Write-Log "tool $name failed: $($_.Exception.Message)"
+                        Send-Result $id @{ content = @(@{ type = 'text'; text = "Error: $($_.Exception.Message)" }); isError = $true }
+                    }
+                }
+                'resources/list' { Send-Result $id @{ resources = @() } }
+                'prompts/list' { Send-Result $id @{ prompts = @() } }
+                default {
+                    if ($hasId) { Send-Error $id -32601 "Method not found: $($msg.method)" }
+                }
+            }
+        } catch {
+            Write-Log "request failed: $($_.Exception.Message)"
+            if ($hasId) { Send-Error $id -32603 $_.Exception.Message }
+        }
+    }
+} finally {
+    $State.Stop = $true
+    if ($workerHandle.AsyncWaitHandle.WaitOne(5000)) { $null = $worker.EndInvoke($workerHandle) }
+    $worker.Dispose(); $rs.Dispose()
+    Write-Log 'stopped'
+}
