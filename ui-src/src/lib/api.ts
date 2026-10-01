@@ -55,7 +55,8 @@ export interface AgentEvent {
     | "project"
     | "checkpoint"
     | "undo"
-    | "human-required";
+    | "human-required"
+    | "newchat";
   time: string;
   text?: string;
   uncertain?: number;

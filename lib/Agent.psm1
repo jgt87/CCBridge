@@ -99,8 +99,9 @@ function Send-ToCopilot {
         }
     }
     $progress = { param($t) $State.Progress = $t }.GetNewClosure()
+    $cancel = { [bool]$State.Cancel }.GetNewClosure()
     try {
-        $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $State.Config.replyTimeoutSec -OnProgress $progress
+        $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $State.Config.replyTimeoutSec -OnProgress $progress -CancelCheck $cancel
     } catch {
         Reset-Bridge $State   # the next send reconnects
         throw
@@ -297,15 +298,15 @@ function Invoke-AgentAction {
             'write' { $out = Invoke-WriteAction $root $Action.arg $Action.body $Checkpoint; return @{ ok = $true; summary = $out; output = $out; changed = $true } }
             'edit'  { $out = Invoke-EditAction $root $Action.arg $Action.edits $Checkpoint; return @{ ok = $true; summary = $out; output = $out; changed = $true } }
             'run'   {
-                $r = Invoke-RunAction $root $evt.target -TimeoutSec $State.Config.commandTimeoutSec
-                $status = if ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
+                $r = Invoke-RunAction $root $evt.target -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
+                $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
                 $out = "$status`n~~~~`n$($r.output)`n~~~~"
                 $fixed = @(Restore-SourceData $root)
                 if ($fixed.Count) {
                     Add-AgentEvent $State 'status' @{ text = "Source data is read-only; CCBridge undid what the command did to it: " + ($fixed -join '; ') }
                     $out += "`nCCBridge: source/ is the user's read-only source data. This command changed it, so CCBridge " + ($fixed -join '; ') + '. Work on copies outside source/.'
                 }
-                return @{ ok = (-not $r.timedOut -and $r.exitCode -eq 0); summary = "ran: $status"; output = $out }
+                return @{ ok = (-not $r.timedOut -and -not $r.cancelled -and $r.exitCode -eq 0); summary = "ran: $status"; output = $out }
             }
         }
     } catch {
@@ -339,6 +340,10 @@ function Invoke-AgentTurn {
 
             Write-CCBLog verbose agent "Round ${round}: sending" @{ chars = $message.Length }
             $r = Send-ToCopilot $State $message
+            if ($r.Cancelled) {
+                Add-AgentEvent $State 'status' @{ text = 'Stopped while Copilot was writing; its partial reply was discarded.' }
+                break
+            }
             $actions = @(Get-ActionBlocks $r.Text)
             Write-CCBLog verbose agent "Round ${round}: reply parsed" @{ actions = @($actions | ForEach-Object { "$($_.type) $($_.arg)".Trim() }) }
             Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @($r.References) }
@@ -364,7 +369,8 @@ function Invoke-AgentTurn {
                 if (-not $res.reported) { Add-AgentEvent $State 'action-result' @{ id = $id; ok = $res.ok; status = $(if ($res.ok) { 'ok' } else { 'failed' }); summary = $res.summary; output = (Limit-Text $res.output 4000); changed = [bool]$res.changed } }
                 $results.Add("### $($k + 1). $($a.type) $($a.arg)`n$($res.output)".TrimEnd())
             }
-            if ($isDone -or $State.Cancel) { break }
+            if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
+            if ($isDone) { break }
             if ($round -eq $State.Config.maxRounds) { Add-AgentEvent $State 'status' @{ text = "Stopped after $($State.Config.maxRounds) rounds. Send a message to continue." }; break }
 
             $perResult = [Math]::Max(1500, [int]($State.Config.resultCharBudget / [Math]::Max(1, $results.Count)))
@@ -412,6 +418,7 @@ function Start-AgentWorker {
                     # A plain question to Copilot, without project context or actions.
                     if ($task.newChat -or (Test-OtherSender)) { Start-NewChat $State }
                     $r = Send-ToCopilot $State $task.text
+                    if ($r.Cancelled) { $job.cancelled = $true }
                     $job.reply = $r.Text; $job.result = $r.Result; $job.resultMessage = $r.ResultMessage; $job.uncertain = $r.Uncertain; $job.references = @($r.References)
                     $job.proposedActions = @($r.ProposedActions); $job.actionClaims = @($r.ActionClaims)
                     if ($r.Result -and $r.Result -ne 'Success') { $job.status = 'error'; $job.error = "Copilot answered with '$($r.Result)': $($r.ResultMessage)" }
@@ -419,7 +426,8 @@ function Start-AgentWorker {
                 'newchat' {
                     Start-NewChat $State
                     $State.Todos = @()
-                    Add-AgentEvent $State 'status' @{ text = 'Started a new Copilot chat.' }
+                    $State.Summary = $null
+                    Add-AgentEvent $State 'newchat' @{ text = 'New Copilot chat started.' }
                 }
                 'undo' {
                     $files = @(Undo-LastCheckpoint $State.ProjectRoot)

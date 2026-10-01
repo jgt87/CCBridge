@@ -369,9 +369,10 @@ function Send-CopilotPrompt {
         [Parameter(Mandatory)]$Bridge,
         [Parameter(Mandatory)][string]$Text,
         [int]$TimeoutSec = 300,
-        [scriptblock]$OnProgress
+        [scriptblock]$OnProgress,
+        [scriptblock]$CancelCheck   # returns $true to stop now: Copilot's Stop is pressed and Cancelled = $true is returned
     )
-    Use-CopilotLock { Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress }
+    Use-CopilotLock { Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck }
 }
 
 function Send-CopilotPromptUnlocked {
@@ -379,7 +380,8 @@ function Send-CopilotPromptUnlocked {
         [Parameter(Mandatory)]$Bridge,
         [Parameter(Mandatory)][string]$Text,
         [int]$TimeoutSec = 300,
-        [scriptblock]$OnProgress
+        [scriptblock]$OnProgress,
+        [scriptblock]$CancelCheck
     )
     $s = $Bridge.Session
     while ($s.Events.Count) { $null = $s.Events.Dequeue() }   # drop stale events
@@ -395,7 +397,13 @@ function Send-CopilotPromptUnlocked {
     $reported = 0
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
-        $m = Receive-CdpEvent $s 500
+        if ($CancelCheck -and (& $CancelCheck)) {
+            Stop-CopilotReply $Bridge
+            Write-CCBLog info bridge 'Reply cancelled by the user' @{ partialChars = $merger.Text.Length; ms = $sendWatch.ElapsedMilliseconds }
+            return [pscustomobject]@{ Cancelled = $true; Text = $merger.Text; ServerText = $null; Uncertain = $merger.Uncertain; Result = 'Cancelled'
+                ResultMessage = 'Stopped by the user'; SentMatches = $true; References = @(); ProposedActions = @(); ActionClaims = @() }
+        }
+        $m = Receive-CdpEvent $s 400
         if (-not $m) { continue }
         if ($m.method -eq 'Network.webSocketCreated') {
             if ($m.params.url -match $hubPattern) { $Bridge.HubSockets[$m.params.requestId] = $true }
@@ -426,7 +434,35 @@ function Send-CopilotPromptUnlocked {
     }
     Write-CCBLog info bridge "No complete reply within $TimeoutSec s" @{ partialChars = $merger.Text.Length; frames = $frames.Count }
     if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
+    Stop-CopilotReply $Bridge
     throw "No complete reply within $TimeoutSec s (partial: $($merger.Text.Length) chars)"
+}
+
+function Stop-CopilotReply {
+    <# Presses Copilot's Stop button, then reads the socket until the cancelled reply has ended,
+       so its late completion record cannot be taken for the answer to the next prompt. #>
+    param([Parameter(Mandatory)]$Bridge, [int]$DrainSec = 15)
+    $stopSel = ConvertTo-JsString $Bridge.Selectors.stopButton
+    $clicked = $false
+    try {
+        $clicked = Invoke-CdpEval $Bridge.Session @"
+(() => {
+  const b = [...document.querySelectorAll($stopSel)].find(e => e.offsetParent !== null && !e.disabled);
+  if (!b) return false;
+  b.click(); return true;
+})()
+"@
+    } catch { }
+    Write-CCBLog verbose bridge "Stop pressed in Copilot: $clicked"
+    $deadline = (Get-Date).AddSeconds($DrainSec)
+    while ((Get-Date) -lt $deadline) {
+        $m = Receive-CdpEvent $Bridge.Session 400
+        if (-not $m -or $m.method -ne 'Network.webSocketFrameReceived') { continue }
+        foreach ($rec in Read-HubRecords $m.params.response.payloadData) {
+            if ($rec.type -eq 2 -or $rec.type -eq 3 -or $rec.type -eq 7) { Write-CCBLog verbose bridge 'Cancelled reply drained'; return }
+        }
+    }
+    Write-CCBLog verbose bridge 'Cancelled reply did not end within the drain time'
 }
 
 function Disconnect-Copilot {

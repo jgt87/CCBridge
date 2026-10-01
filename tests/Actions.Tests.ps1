@@ -168,6 +168,22 @@ Describe 'Executor' {
         Get-ChildItem (Join-Path $proj 'source') -File | ForEach-Object { $_.IsReadOnly = $false }
     }
 
+    It 'stops a running command at once when cancelled, including its child processes' {
+        $start = Get-Date
+        $flag = @{ stop = $false }
+        $timer = New-Object Timers.Timer 1000
+        $timer.AutoReset = $false
+        Register-ObjectEvent $timer Elapsed -Action { $Event.MessageData.stop = $true } -MessageData $flag | Out-Null
+        $timer.Start()
+        $r = Invoke-RunAction $proj 'ping -n 30 127.0.0.1' -TimeoutSec 60 -CancelCheck ({ $flag.stop }.GetNewClosure())
+        $elapsed = ((Get-Date) - $start).TotalSeconds
+        $r.cancelled | Should Be $true
+        $r.exitCode | Should Be $null
+        $elapsed -lt 8 | Should Be $true
+        @(Get-CimInstance Win32_Process -Filter "Name = 'PING.EXE'" | Where-Object { $_.CommandLine -match '-n 30 127\.0\.0\.1' }).Count | Should Be 0
+        Get-EventSubscriber | Unregister-Event
+    }
+
     It 'reads files with a four-backtick fence' {
         (Invoke-ReadAction $proj @('lib/x.ps1')) | Should Match "(?s)### lib/x.ps1\n${fence4}\nWrite-Output 'needle'"
     }

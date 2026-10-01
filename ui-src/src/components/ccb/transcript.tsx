@@ -63,6 +63,9 @@ export function buildTranscript(events: AgentEvent[]): TranscriptItem[] {
       case "undo":
         items.push({ kind: "note", seq: e.seq, tone: "undo", text: e.text ?? "" });
         break;
+      case "newchat":
+        items.push({ kind: "note", seq: e.seq, tone: "info", text: e.text ?? "New Copilot chat started." });
+        break;
       case "human-required":
         items.push({ kind: "note", seq: e.seq, tone: "human", text: e.text ?? "" });
         break;
@@ -120,11 +123,13 @@ export function Transcript({
   busy,
   progress,
   empty,
+  stopping = false,
 }: {
   items: TranscriptItem[];
   busy: boolean;
   progress: string;
   empty?: React.ReactNode;
+  stopping?: boolean;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const awaiting = items.some((i) => i.kind === "action" && i.item.status === "awaiting");
@@ -133,7 +138,8 @@ export function Transcript({
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [items.length, busy, awaiting, progress.length > 0]);
 
-  if (!items.length && !busy) return <>{empty}</>;
+  // A fresh chat shows the welcome view until something happens in it.
+  if (!busy && items.every((i) => i.kind === "note" && i.tone === "info")) return <>{empty}</>;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-6">
@@ -173,7 +179,7 @@ export function Transcript({
             className="font-semibold text-base"
             containerClassName="justify-start p-0"
             interval={1800}
-            texts={progress ? ["Copilot is writing...", "Receiving the reply..."] : ["Asking Copilot...", "Waiting for the reply...", "Copilot is thinking..."]}
+            texts={stopping ? ["Stopping..."] : progress ? ["Copilot is writing...", "Receiving the reply..."] : ["Asking Copilot...", "Waiting for the reply...", "Copilot is thinking..."]}
           />
           {progress && (
             <pre className="mt-2 max-h-32 overflow-hidden whitespace-pre-wrap font-mono text-muted-foreground text-xs [mask-image:linear-gradient(to_bottom,transparent,black_40%)]">

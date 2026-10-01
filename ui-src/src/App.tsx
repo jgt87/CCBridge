@@ -46,6 +46,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ text: string; path?: string } | null>(null);
   const [focusKey, setFocusKey] = useState(0);
+  const [newChatPending, setNewChatPending] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const lastSeq = useRef(0);
 
   const refreshFiles = useCallback(() => {
@@ -60,10 +62,12 @@ export default function App() {
       try {
         const r = await api.poll(lastSeq.current);
         setState(r.state);
+        if (!r.state.busy) setStopping(false);
         if (r.events.length) {
           lastSeq.current = r.events[r.events.length - 1].seq;
           setEvents((prev) => [...prev, ...r.events]);
           if (r.events.some((e) => e.type === "project" || e.type === "undo" || (e.type === "action-result" && e.changed))) refreshFiles();
+          if (r.events.some((e) => e.type === "newchat" || e.type === "error")) setNewChatPending(false);
         }
         setError("");
       } catch (e) {
@@ -103,7 +107,30 @@ export default function App() {
     return idx >= 0 ? events.slice(idx) : events;
   }, [events]);
 
-  const transcript = useMemo(() => buildTranscript(projectEvents), [projectEvents]);
+  // The chat view starts at the last explicit "New chat"; the Changes tab keeps the whole project session.
+  const chatEvents = useMemo(() => {
+    let idx = -1;
+    projectEvents.forEach((e, i) => {
+      if (e.type === "newchat") idx = i;
+    });
+    return idx >= 0 ? projectEvents.slice(idx) : projectEvents;
+  }, [projectEvents]);
+  const transcript = useMemo(() => buildTranscript(chatEvents), [chatEvents]);
+
+  const startNewChat = () => {
+    setNewChatPending(true);
+    if (state.busy) setStopping(true);
+    api.newChat().catch((e) => {
+      setNewChatPending(false);
+      setError((e as Error).message);
+    });
+    window.setTimeout(() => setNewChatPending(false), 30000);
+  };
+
+  const stop = () => {
+    setStopping(true);
+    api.stop().catch(() => setStopping(false));
+  };
   const changes = useMemo(
     () => projectEvents.filter((e) => e.type === "checkpoint").map((e) => ({ seq: e.seq, time: e.time, files: e.files ?? [] })),
     [projectEvents]
@@ -141,7 +168,7 @@ export default function App() {
   }));
 
   const commandActions: Action[] = [
-    { id: "new-chat", label: "New Copilot chat", description: "Start fresh; the project stays open", icon: <MessageSquarePlus className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => api.newChat() },
+    { id: "new-chat", label: "New Copilot chat", description: "Start fresh; the project stays open", icon: <MessageSquarePlus className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: startNewChat },
     { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: <RotateCcw className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => api.undo() },
     { id: "project", label: "Switch project", description: "Open or create a OneDrive project", icon: <FolderOpen className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setShowPicker(true) },
     { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: <AtSign className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setPalette("attach"), 0) },
@@ -246,6 +273,7 @@ export default function App() {
             <div className="min-h-0 flex-1 overflow-y-auto">
               <Transcript
                 busy={state.busy}
+                stopping={stopping}
                 empty={
                   <div className="flex h-full flex-col items-center justify-center gap-6 px-6 py-16 text-center">
                     {state.copilot === "connecting" ? (
@@ -311,8 +339,8 @@ export default function App() {
                           {state.throttle.used}/{state.throttle.max}
                         </span>
                       )}
-                      <button className="hover:underline" onClick={() => api.newChat()} type="button">
-                        New chat
+                      <button className="hover:underline disabled:opacity-50" disabled={newChatPending} onClick={startNewChat} type="button">
+                        {newChatPending ? "Starting..." : "New chat"}
                       </button>
                     </span>
                   }
@@ -320,7 +348,7 @@ export default function App() {
                   modes={MODES}
                   onAttach={() => setPalette("attach")}
                   onModeChange={(m) => api.setMode(m as Mode)}
-                  onStop={() => api.stop()}
+                  onStop={stop}
                   onSubmit={send}
                   onValueChange={setDraft}
                   placeholder="Ask Copilot to build or change something..."

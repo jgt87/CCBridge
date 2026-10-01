@@ -129,7 +129,11 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ($b.path -and (Test-Path -LiteralPath $b.path)) { Start-Process explorer.exe "/select,`"$($b.path)`"" }
             return Send-Json $Ctx @{ ok = $true }
         }
-        '^POST /api/newchat$' { $State.Tasks.Enqueue(@{ kind = 'newchat' }); return Send-Json $Ctx @{ ok = $true } }
+        '^POST /api/newchat$' {
+            if ($State.Busy) { $State.Cancel = $true }   # stop the current step now; the new chat follows
+            $State.Tasks.Enqueue(@{ kind = 'newchat' })
+            return Send-Json $Ctx @{ ok = $true }
+        }
         '^POST /api/undo$'    { $State.Tasks.Enqueue(@{ kind = 'undo' }); return Send-Json $Ctx @{ ok = $true } }
         '^POST /api/stop$'    { $State.Cancel = $true; return Send-Json $Ctx @{ ok = $true } }
         '^POST /api/connect$' { $State.Tasks.Enqueue(@{ kind = 'connect' }); return Send-Json $Ctx @{ ok = $true } }

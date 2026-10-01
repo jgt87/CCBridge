@@ -256,7 +256,7 @@ function Get-CommandRisk {
 
 function Invoke-RunAction {
     <# Runs a command with cmd.exe in the project folder. Output is trimmed to head + tail. #>
-    param([string]$ProjectRoot, [string]$Command, [int]$TimeoutSec = 120, [int]$MaxChars = 8000)
+    param([string]$ProjectRoot, [string]$Command, [int]$TimeoutSec = 120, [int]$MaxChars = 8000, [scriptblock]$CancelCheck)
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = "$env:ComSpec"
     $psi.Arguments = '/d /s /c "' + $Command + ' 2>&1"'
@@ -270,15 +270,21 @@ function Invoke-RunAction {
     $p.StandardInput.Close()
     $out = $p.StandardOutput.ReadToEndAsync()
     $err = $p.StandardError.ReadToEndAsync()
-    $timedOut = -not $p.WaitForExit($TimeoutSec * 1000)
-    if ($timedOut) { cmd.exe /c "taskkill /PID $($p.Id) /T /F >nul 2>&1"; $p.WaitForExit(5000) | Out-Null }
+    # Wait in short steps so a Stop from the user ends the command (and its children) at once.
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $timedOut = $false; $cancelled = $false
+    while (-not $p.WaitForExit(250)) {
+        if ($CancelCheck -and (& $CancelCheck)) { $cancelled = $true; break }
+        if ((Get-Date) -gt $deadline) { $timedOut = $true; break }
+    }
+    if ($timedOut -or $cancelled) { cmd.exe /c "taskkill /PID $($p.Id) /T /F >nul 2>&1"; $p.WaitForExit(5000) | Out-Null }
     $text = ($out.Result + $err.Result).Replace("`r`n", "`n").TrimEnd()
-    Write-CCBLog verbose exec "run finished" @{ command = $Command; exitCode = $(if ($timedOut) { $null } else { $p.ExitCode }); timedOut = $timedOut; outputChars = $text.Length }
+    Write-CCBLog verbose exec "run finished" @{ command = $Command; exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; outputChars = $text.Length }
     if ($text.Length -gt $MaxChars) {
         $head = [int]($MaxChars * 0.25)
         $text = $text.Substring(0, $head) + "`n... ($($text.Length - $MaxChars) characters omitted) ...`n" + $text.Substring($text.Length - ($MaxChars - $head))
     }
-    [pscustomobject]@{ exitCode = $(if ($timedOut) { $null } else { $p.ExitCode }); timedOut = $timedOut; output = $text }
+    [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
 Export-ModuleMember -Function Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,

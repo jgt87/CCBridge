@@ -9,7 +9,10 @@
   Writes only to stderr, so it is safe before the MCP server starts (stdout is its protocol).
   Set "autoUpdate": false in config\harness.local.json to turn automatic updates off.
 #>
-param([switch]$Force)
+param(
+    [switch]$Force,    # check even when automatic updates are turned off
+    [switch]$Report    # print the outcome (used by update.cmd)
+)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -45,12 +48,13 @@ try {
     $git = Get-Command git -ErrorAction SilentlyContinue
     if (Test-Path (Join-Path $root '.git')) {
         if (-not $git) { Say 'git is not available; cannot update this clone.'; return }
-        if ((Invoke-Git @('rev-parse', '--abbrev-ref', 'HEAD')) -ne $branch) { Write-CCBLog verbose update 'git clone not on main: no update'; return }
-        if (Invoke-Git @('status', '--porcelain', '--untracked-files=no')) { Write-CCBLog verbose update 'git clone has local changes: no update'; return }
+        if ((Invoke-Git @('rev-parse', '--abbrev-ref', 'HEAD')) -ne $branch) { Write-CCBLog verbose update 'git clone not on main: no update'; if ($Report) { Say 'This is a git clone on another branch than main; not updated.' }; return }
+        if (Invoke-Git @('status', '--porcelain', '--untracked-files=no')) { Write-CCBLog verbose update 'git clone has local changes: no update'; if ($Report) { Say 'This git clone has local changes; not updated.' }; return }
         $before = Invoke-Git @('rev-parse', 'HEAD')
         $null = Invoke-Git @('pull', '--ff-only', '--quiet') 60
         $after = Invoke-Git @('rev-parse', 'HEAD')
         if ($after -ne $before) { Say "updated $($before.Substring(0, 7)) -> $($after.Substring(0, 7))" }
+        elseif ($Report) { Say "Already up to date ($($after.Substring(0, 7)))." }
         return
     }
 
@@ -59,7 +63,7 @@ try {
     $current = if (Test-Path $verFile) { ([IO.File]::ReadAllText($verFile)).Trim() } else { '' }
     $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -TimeoutSec 15 -Headers @{ 'User-Agent' = 'CCBridge-updater' }
     $latest = [string]$release.tag_name
-    if (-not $latest -or $latest -eq $current) { Write-CCBLog verbose update "up to date ($current)"; return }
+    if (-not $latest -or $latest -eq $current) { Write-CCBLog verbose update "up to date ($current)"; if ($Report) { Say "Already up to date ($current)." }; return }
     $asset = @($release.assets | Where-Object { $_.name -like 'CCBridge-*.zip' }) | Select-Object -First 1
     if (-not $asset) { Say "release $latest has no CCBridge zip"; return }
 
