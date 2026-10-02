@@ -33,6 +33,10 @@ export interface ActionItem {
   output?: string;
   /** Who approved or rejected it: "user" (you, in the web app), "api" or "mcp". */
   decidedBy?: string;
+  /** Failed step: category, possible reasons and what happens next. */
+  code?: string;
+  reasons?: string[];
+  next?: string;
 }
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -93,7 +97,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
     }
   };
 
-  const hasDetails = Boolean(item.preview || item.output || item.error || item.action === "run");
+  const hasDetails = Boolean(item.preview || item.output || item.error || item.reasons?.length || item.action === "run");
   const counts = useMemo(() => {
     if (!item.preview) return null;
     const lines = diffLines(item.preview.old ?? "", item.preview.new ?? "");
@@ -137,6 +141,25 @@ export function ActionCard({ item }: { item: ActionItem }) {
             </div>
           )}
           {item.error && <div className="text-rose-500 text-xs">{item.error}</div>}
+          {item.reasons && item.reasons.length > 0 && (
+            <div className="space-y-1 rounded-md bg-black/[0.03] p-2 text-xs dark:bg-white/[0.04]">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">Possible reasons</span>
+                {item.code && <span className="rounded bg-black/5 px-1.5 py-0.5 font-mono text-muted-foreground dark:bg-white/10">{item.code}</span>}
+              </div>
+              <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+                {item.reasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+              {item.next && (
+                <div className="text-muted-foreground">
+                  <span className="font-medium text-foreground">What happens next: </span>
+                  {item.next}
+                </div>
+              )}
+            </div>
+          )}
           {item.preview && <DiffView preview={item.preview} />}
           {item.action === "run" && (
             <pre className="overflow-auto rounded-lg bg-black/80 px-3 py-2 font-mono text-xs text-zinc-100">

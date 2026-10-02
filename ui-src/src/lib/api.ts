@@ -23,7 +23,11 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
     }
     throw new Error("session expired; reload the page");
   }
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+  if (!res.ok) {
+    const d = data as { error?: string; errId?: string; code?: string; hint?: string };
+    // The id is also in the log: it leads to the details when investigating.
+    throw new Error(`${d.error ?? `HTTP ${res.status}`}${d.hint ? ` ${d.hint}` : ""}${d.errId ? ` (error ${d.errId}${d.code ? `, ${d.code}` : ""})` : ""}`);
+  }
   return data as T;
 }
 
@@ -80,8 +84,17 @@ export interface AgentEvent {
   decidedBy?: string;
   items?: TodoItem[];
   files?: string[];
+  /** Failed step: possible reasons and what happens next. */
+  reasons?: string[];
+  next?: string;
   /** next-steps: follow-ups found in Copilot's last reply, offered as one-click prompts. */
   steps?: string[];
+  /** error: id also written to the log, category, what to do, technical detail, CCBridge version. */
+  errId?: string;
+  code?: string;
+  hint?: string;
+  detail?: string;
+  version?: string;
   name?: string;
   path?: string;
 }
@@ -140,7 +153,7 @@ export interface FileInfo {
 }
 
 // Whatever the server (and Copilot behind it) sends, the UI only ever renders strings here.
-const TEXT_FIELDS = ["text", "target", "summary", "output", "error", "warning", "status", "action", "id", "decidedBy"] as const;
+const TEXT_FIELDS = ["text", "target", "summary", "output", "error", "warning", "status", "action", "id", "decidedBy", "errId", "code", "hint", "detail", "version"] as const;
 
 function asText(v: unknown): string | undefined {
   if (v === null || v === undefined) return undefined;
@@ -158,6 +171,8 @@ export function normalizeEvent(raw: AgentEvent): AgentEvent {
   if (e.items !== undefined && !Array.isArray(e.items)) e.items = [];
   if (e.files !== undefined && !Array.isArray(e.files)) e.files = [];
   if (e.steps !== undefined) e.steps = (Array.isArray(e.steps) ? e.steps : []).map((s) => asText(s) ?? "").filter(Boolean);
+  if (e.reasons !== undefined) e.reasons = (Array.isArray(e.reasons) ? e.reasons : [e.reasons]).map((s) => asText(s) ?? "").filter(Boolean);
+  if (e.next !== undefined) e.next = asText(e.next);
   return e;
 }
 

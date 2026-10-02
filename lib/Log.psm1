@@ -79,4 +79,45 @@ function Write-CCBLogError {
     Write-CCBLog info $Component "ERROR $Context`: $msg" @{ stack = $stack }
 }
 
-Export-ModuleMember -Function Initialize-CCBLog, Set-CCBLogLevel, Get-CCBLogLevel, Get-CCBLogDir, Test-CCBLog, Write-CCBLog, Write-CCBLogError, Protect-LogText
+function New-CCBErrorId {
+    <# A short id that ties an error in the app to its lines in the log: E-HHmmss-xxxx. #>
+    'E-' + (Get-Date).ToString('HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 4)
+}
+
+# What went wrong, by the error text: a category code and what the person can do about it.
+$script:ErrorHelp = @(
+    @{ re = 'Lost the connection to the Copilot tab'; code = 'EDGE-LOST'; hint = 'Edge or its Copilot tab was closed, crashed or replaced (for example by a sign-in). CCBridge reconnects by itself; send your message again.' }
+    @{ re = 'Could not connect to the Copilot tab|no page targets|could not connect to ws'; code = 'EDGE-CONNECT'; hint = 'CCBridge could not reach Edge. Close the Edge window CCBridge opened and start CCBridge again; if it keeps happening, run probe.cmd and send the report.' }
+    @{ re = 'human-verification'; code = 'VERIFY'; hint = 'Copilot shows a "verify you are human" check: complete it in the Copilot window in Edge, then send your message again.' }
+    @{ re = '(?i)sign-in|sign in|signed in'; code = 'SIGN-IN'; hint = 'Complete the sign-in in the Copilot window in Edge; CCBridge continues afterwards (or send your message again).' }
+    @{ re = 'message box (did not appear|not found|never appeared)'; code = 'PAGE'; hint = 'Copilot''s page did not show its message box. Look at the Copilot window in Edge (the message names a screenshot). If Copilot''s page changed, run capture.cmd and send the result.' }
+    @{ re = 'could not clear the Copilot message box|message box holds'; code = 'TYPING'; hint = 'Typing into Copilot failed. Click once into the Copilot window and send again; if it repeats, export diagnostics.' }
+    @{ re = 'Send button never became clickable'; code = 'SEND'; hint = 'Copilot''s Send button did not respond. Check the Copilot window: a dialog or sign-in may be in the way.' }
+    @{ re = '(?i)OutOfCredits|daily limit|usage limit'; code = 'CREDITS'; hint = 'Copilot''s daily limit is reached. It resets at the time Copilot shows; try again then.' }
+    @{ re = '(?i)throttl'; code = 'THROTTLED'; hint = 'Copilot is limiting requests. Wait a minute and try again.' }
+    @{ re = 'No complete reply within'; code = 'TIMEOUT'; hint = 'Copilot took longer than replyTimeoutSec. Raise it in config\harness.local.json, or split the task into smaller steps.' }
+    @{ re = '(?i)NoAnswer|stopped without answering|finished without a reply|no usable answer'; code = 'NO-ANSWER'; hint = 'Copilot did not answer. Usually a source it needed was unavailable or the request was blocked. Try again, rephrase, or start a New chat.' }
+    @{ re = 'SEARCH text|SEARCH/REPLACE|edit block|half open|does not contain them yet|matches \d+ places'; code = 'EDIT'; hint = 'An edit could not be applied safely and nothing was changed. Copilot gets the reason and usually corrects it in its next reply.' }
+    @{ re = 'source/|source data'; code = 'SOURCE-DATA'; hint = 'Files in source/ are read-only. Ask for the result in another folder (for example work/ or output/).' }
+    @{ re = 'Open or create a project'; code = 'NO-PROJECT'; hint = 'Open or create a project first (Switch worktree).' }
+    @{ re = 'still working on the previous message'; code = 'BUSY'; hint = 'Wait until the current task has finished, or press Stop.' }
+    @{ re = '(?i)fetch prompt|Fetch '''; code = 'FETCH'; hint = 'The fetch did not complete; the previous answer file was kept. Try Refresh again later.' }
+)
+
+function Get-CCBErrorHelp([string]$Text) {
+    <# @{ code; hint } for an error text (UNEXPECTED when it is not recognised). #>
+    foreach ($h in $script:ErrorHelp) { if ($Text -match $h.re) { return @{ code = $h.code; hint = $h.hint } } }
+    @{ code = 'UNEXPECTED'; hint = 'CCBridge did not expect this. Use Copy details (or Menu > Export diagnostics) and send it along with the error id.' }
+}
+
+function Get-CCBErrorDetail($ErrorRecord) {
+    <# Message, inner causes and the first stack lines of an exception, masked like the log. #>
+    if (-not $ErrorRecord) { return '' }
+    $msg = if ($ErrorRecord.Exception) { "$($ErrorRecord.Exception.GetType().Name): $($ErrorRecord.Exception.Message)" } else { "$ErrorRecord" }
+    $inner = if ($ErrorRecord.Exception) { $ErrorRecord.Exception.InnerException } else { $null }
+    while ($inner) { $msg += "`n  caused by $($inner.GetType().Name): $($inner.Message)"; $inner = $inner.InnerException }
+    if ($ErrorRecord.ScriptStackTrace) { $msg += "`n" + (($ErrorRecord.ScriptStackTrace -split "`n" | Select-Object -First 8) -join "`n") }
+    Protect-LogText $msg
+}
+
+Export-ModuleMember -Function New-CCBErrorId, Get-CCBErrorHelp, Get-CCBErrorDetail, Initialize-CCBLog, Set-CCBLogLevel, Get-CCBLogLevel, Get-CCBLogDir, Test-CCBLog, Write-CCBLog, Write-CCBLogError, Protect-LogText

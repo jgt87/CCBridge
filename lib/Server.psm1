@@ -279,8 +279,10 @@ function Start-CCBridgeServer {
                     Send-StaticFile $ctx $uiDir $token
                 }
             } catch {
-                Write-CCBLogError server "$($ctx.Request.HttpMethod) $reqPath" $_
-                try { Send-Json $ctx @{ error = $_.Exception.Message } 400 } catch { }
+                $errId = New-CCBErrorId
+                $help = Get-CCBErrorHelp $_.Exception.Message
+                Write-CCBLogError server "$errId [$($help.code)] $($ctx.Request.HttpMethod) $reqPath" $_
+                try { Send-Json $ctx @{ error = $_.Exception.Message; errId = $errId; code = $help.code; hint = $help.hint } 400 } catch { }
             }
             if ($reqPath -ne '/api/poll' -and $reqPath.StartsWith('/api/')) { Write-CCBLog verbose server "$($ctx.Request.HttpMethod) $reqPath ($($reqWatch.ElapsedMilliseconds) ms)" }
         }

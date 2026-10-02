@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef , useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
@@ -15,7 +15,8 @@ export type TranscriptItem =
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[] }
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string }
-  | { kind: "next"; seq: number; steps: string[] };
+  | { kind: "next"; seq: number; steps: string[] }
+  | { kind: "error"; seq: number; text: string; time: string; errId?: string; code?: string; hint?: string; detail?: string; version?: string };
 
 // --- Building the transcript from events ------------------------------------------------
 
@@ -67,11 +68,16 @@ function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
     summary: e.summary ?? existing.summary,
     output: e.output ?? existing.output,
     decidedBy: e.decidedBy ?? existing.decidedBy,
+    code: e.code ?? existing.code,
+    reasons: e.reasons ?? existing.reasons,
+    next: e.next ?? existing.next,
   });
 }
 
 const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildContext) => void>> = {
   user: (e, ctx) => ctx.items.push({ kind: "user", seq: e.seq, text: e.text ?? "" }),
+  error: (e, ctx) =>
+    ctx.items.push({ kind: "error", seq: e.seq, text: e.text ?? "", time: e.time, errId: e.errId, code: e.code, hint: e.hint, detail: e.detail, version: e.version }),
   "next-steps": (e, ctx) => {
     if (e.steps?.length) ctx.items.push({ kind: "next", seq: e.seq, steps: e.steps });
   },
@@ -165,6 +171,41 @@ function NoteLine({ tone, text }: { tone: NoteTone; text: string }) {
   );
 }
 
+/** An error with what is needed to investigate it: category, what to do, and the details to copy. */
+function ErrorNote({ item }: { item: Extract<TranscriptItem, { kind: "error" }> }) {
+  const [copied, setCopied] = useState(false);
+  const details = [
+    `CCBridge ${item.version ?? ""} | error ${item.errId ?? "-"} | ${item.time} | ${item.code ?? "UNEXPECTED"}`,
+    item.text,
+    item.hint ? `What to do: ${item.hint}` : "",
+    item.detail ? `Detail:\n${item.detail}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(details);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard blocked: the details stay visible in the tooltip */
+    }
+  };
+  return (
+    <div className="space-y-1 px-1 text-sm">
+      <NoteLine text={item.text} tone="error" />
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6 text-muted-foreground text-xs" title={details}>
+        {item.code && <span className="rounded bg-black/5 px-1.5 py-0.5 font-mono dark:bg-white/10">{item.code}</span>}
+        {item.hint && <span>{item.hint}</span>}
+        <button className="text-foreground hover:underline" onClick={copy} type="button">
+          {copied ? "Copied" : "Copy details"}
+        </button>
+        {item.errId && <span className="font-mono">{item.errId}</span>}
+      </div>
+    </div>
+  );
+}
+
 /** Follow-ups Copilot suggested; a click puts the text in the message box (nothing is sent yet). */
 function NextSteps({ steps, onUse }: { steps: string[]; onUse?: (text: string) => void }) {
   return (
@@ -201,6 +242,8 @@ function TranscriptRow({ item, onUsePrompt }: { item: TranscriptItem; onUsePromp
       return <NoteLine text={item.text} tone={item.tone} />;
     case "next":
       return <NextSteps onUse={onUsePrompt} steps={item.steps} />;
+    case "error":
+      return <ErrorNote item={item} />;
   }
 }
 

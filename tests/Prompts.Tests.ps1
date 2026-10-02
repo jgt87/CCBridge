@@ -1,5 +1,6 @@
 # The prompt sent to Copilot is as small as the request allows.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+Import-Module (Join-Path $root 'lib\Log.psm1') -Force
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
@@ -147,5 +148,55 @@ Describe 'Follow-ups in a work chat (Get-TurnKind)' {
     It 'leaves a plain chat alone' {
         $s = @{ ChatKind = $null; SentParts = (New-Object 'System.Collections.Generic.HashSet[string]'); FollowUps = 0; LastTurnActed = $null }
         (& $m { param($st) Get-TurnKind $st 'thanks!' } $s) | Should Be 'chat'
+    }
+}
+Describe 'Errors carry what is needed to investigate them' {
+    It 'recognises the main kinds of errors' {
+        (Get-CCBErrorHelp 'Lost the connection to the Copilot tab in Edge (connection Aborted)').code | Should Be 'EDGE-LOST'
+        (Get-CCBErrorHelp "Copilot answered with 'NoAnswer': Copilot stopped without answering").code | Should Be 'NO-ANSWER'
+        (Get-CCBErrorHelp 'No complete reply within 300 s (partial: 0 chars)').code | Should Be 'TIMEOUT'
+        (Get-CCBErrorHelp "pair 1: SEARCH text not found in the file").code | Should Be 'EDIT'
+        (Get-CCBErrorHelp 'Copilot message box did not appear after starting a new chat; the page shows a sign-in page').code | Should Be 'SIGN-IN'
+        (Get-CCBErrorHelp "You've reached your daily limit").code | Should Be 'CREDITS'
+        $u = Get-CCBErrorHelp 'Something entirely new'
+        $u.code | Should Be 'UNEXPECTED'
+        $u.hint | Should Match 'Copy details'
+    }
+    It 'gives error events an id, a category, a hint and the technical detail' {
+        $s = New-AgentState -Config ([pscustomobject]@{}) -AppRoot $root
+        $s.Version = 'v9.9.9'
+        try { throw 'No complete reply within 300 s (partial: 0 chars)' } catch { Add-AgentEvent $s 'error' @{ text = $_.Exception.Message; record = $_ } }
+        $e = $s.Events[$s.Events.Count - 1]
+        $e.errId | Should Match '^E-\d{6}-[0-9a-f]{4}$'
+        $e.code | Should Be 'TIMEOUT'
+        $e.hint | Should Match 'replyTimeoutSec'
+        $e.detail | Should Match 'RuntimeException: No complete reply'
+        $e.version | Should Be 'v9.9.9'
+        $e.ContainsKey('record') | Should Be $false
+    }
+}
+Describe 'Why a step failed (Get-StepFailureInfo)' {
+    $m = Get-Module Agent
+    It 'explains the common step failures, one category each' {
+        $cases = @{
+            'edit index.html failed error: pair 1: SEARCH text not found in the file. The closest place is lines 2-5' = 'EDIT-NOT-FOUND'
+            'edit failed error: pair 2: SEARCH text matches 3 places (lines 4, 9, 12)' = 'EDIT-AMBIGUOUS'
+            'edit failed error: this edit would leave a <style> block half open or half closed in the file' = 'EDIT-HALF-BLOCK'
+            'edit failed error: ... but styles.css does not contain them yet (only 0 of 22 found)' = 'EDIT-MOVE-ORDER'
+            'edit refused (source data) error: source/x.csv is in source/, which holds the user''s source data and is read-only' = 'SOURCE-DATA'
+            'ran: exit code 1 exit code 1 ~~~~ build failed' = 'RUN-FAILED'
+            'ran: timed out after 180s' = 'RUN-TIMEOUT'
+            'edit failed error: file not found: app.js (use write to create it)' = 'FILE-NOT-FOUND'
+        }
+        foreach ($k in $cases.Keys) {
+            $i = & $m { param($r) Get-StepFailureInfo 'edit' $r } $k
+            @($i).Count | Should Be 1
+            $i.code | Should Be $cases[$k]
+            @($i.reasons).Count -ge 1 | Should Be $true
+            $i.next | Should Not BeNullOrEmpty
+        }
+    }
+    It 'has a fallback for anything else' {
+        (& $m { Get-StepFailureInfo 'grep' 'something odd' }).code | Should Be 'GREP-FAILED'
     }
 }

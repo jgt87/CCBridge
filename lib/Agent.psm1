@@ -44,6 +44,17 @@ function Add-AgentEvent {
     try {
         $State.Seq++
         $Data.seq = $State.Seq; $Data.type = $Type; $Data.time = (Get-Date).ToString('HH:mm:ss')
+        if ($Type -eq 'error') {
+            # For investigation: an id that is also in the log, a category, a hint and the technical detail.
+            $rec = $Data.record; [void]$Data.Remove('record')
+            if (-not $Data.text -and $rec) { $Data.text = "$($rec.Exception.Message)" }
+            $help = Get-CCBErrorHelp "$($Data.text)"
+            if (-not $Data.code) { $Data.code = $help.code }
+            if (-not $Data.hint) { $Data.hint = $help.hint }
+            $Data.errId = New-CCBErrorId
+            if ($rec) { $Data.detail = Get-CCBErrorDetail $rec }
+            $Data.version = "$($State.Version)"
+        }
         # The UI renders these as text; whatever Copilot returned, send strings (or nothing).
         foreach ($k in 'text', 'target', 'summary', 'output', 'error', 'warning', 'status', 'action', 'id') {
             if ($Data.ContainsKey($k) -and $null -ne $Data[$k] -and $Data[$k] -isnot [string]) {
@@ -57,11 +68,19 @@ function Add-AgentEvent {
         }
         [void]$State.Events.Add($Data)
         switch ($Type) {
-            'error'          { Write-CCBLog info agent "error event: $($Data.text)" }
+            'error'          { Write-CCBLog info agent "ERROR $($Data.errId) [$($Data.code)] $($Data.text)" @{ hint = $Data.hint; detail = $Data.detail } }
             'human-required' { Write-CCBLog info agent "HUMAN REQUIRED: $($Data.text)" }
             'status'         { Write-CCBLog verbose agent "status: $($Data.text)" }
-            'action'         { Write-CCBLog verbose agent "action $($Data.id) $($Data.action) -> $($Data.status)" @{ target = $Data.target; error = $Data.error } }
-            'action-result'  { Write-CCBLog verbose agent "result $($Data.id) $($Data.status)" @{ summary = $Data.summary } }
+            'action'         {
+                $lvl = if ($Data.status -eq 'failed') { 'info' } else { 'verbose' }
+                Write-CCBLog $lvl agent "action $($Data.id) $($Data.action) -> $($Data.status)" @{ target = $Data.target; error = $Data.error }
+            }
+            'action-result'  {
+                if ($Data.ok -eq $false -and $Data.status -ne 'rejected') {
+                    # Failed actions are always logged, with the reason Copilot was given.
+                    Write-CCBLog info agent "action failed $($Data.id) [$($Data.code)]: $($Data.summary)" @{ reasons = $Data.reasons; output = $(if ($Data.output) { "$($Data.output)".Substring(0, [Math]::Min(1200, "$($Data.output)".Length)) }) }
+                } else { Write-CCBLog verbose agent "result $($Data.id) $($Data.status)" @{ summary = $Data.summary } }
+            }
             'checkpoint'     { Write-CCBLog verbose agent "change set saved" @{ files = $Data.files } }
             'undo'           { Write-CCBLog info agent "undo: $($Data.text)" }
             'fetch'          { Write-CCBLog info agent "fetched $($Data.name) -> $($Data.path)" }
@@ -189,7 +208,7 @@ function Invoke-FetchJob {
         Add-AgentEvent $State 'fetch' @{ name = $Name; path = $path; text = "Saved the answer to $path. Attach it with @$path." }
     } catch {
         Write-CCBLogError agent "Fetch $Name failed" $_
-        Add-AgentEvent $State 'error' @{ text = "Fetch '$Name' failed: $($_.Exception.Message)" }
+        Add-AgentEvent $State 'error' @{ text = "Fetch '$Name' failed: $($_.Exception.Message)"; record = $_ }
     } finally {
         $State.NeedNewChat = $true   # the next message starts its own chat
         $State.Busy = $false; $State.Cancel = $false
@@ -247,6 +266,34 @@ function New-ActionRetryMessage {
     )
     foreach ($p in 'actions', 'rules') { [void]$State.SentParts.Add($p) }
     ($parts -join "`n`n") + "`n`nTask: $Task"
+}
+
+function Get-StepFailureInfo {
+    <# Why a step (read / grep / edit / write / run) may have failed and what happens next, from the
+       action type and the reason it reported. Fixed rules: the usual causes, not a diagnosis. #>
+    param([string]$Type, [string]$Reason)
+    $copilotRetries = 'Copilot gets this reason in the next message and usually corrects it itself. Nothing else is needed from you; if it keeps failing, use Copy details on the card or start a New chat.'
+    $r = "$Reason"
+    $info = switch -Regex ($r) {
+        'already contains these changes|already applied' { @{ code = 'EDIT-ALREADY-APPLIED'; reasons = @('Copilot sent a change that had already been made earlier in this task.'); next = 'Nothing to do; Copilot is asked to confirm.' }; break }
+        'does not contain them yet' { @{ code = 'EDIT-MOVE-ORDER'; reasons = @('Copilot removes code from this file and links another file, but that file does not hold the code yet (missing, or only a placeholder).', 'Copilot sent the edit before (or instead of) writing the new file.'); next = "Nothing was changed, so no code is lost. $copilotRetries" }; break }
+        'half open|half closed' { @{ code = 'EDIT-HALF-BLOCK'; reasons = @('Copilot''s SEARCH covered only part of a block (for example the first lines of a <style> or <script> block, or a function without its closing brace).', 'Copilot shortened a long block without a line containing only ... between its first and last lines.'); next = "Nothing was changed. $copilotRetries" }; break }
+        'matches \d+ places|matches more than once' { @{ code = 'EDIT-AMBIGUOUS'; reasons = @('The SEARCH text occurs more than once in the file (for example a repeated closing tag or line).', 'Copilot copied too few lines to point at one place.'); next = "Nothing was changed. $copilotRetries" }; break }
+        'no SEARCH/REPLACE pairs' { @{ code = 'EDIT-FORMAT'; reasons = @('Copilot''s edit block had no <<<<<<< SEARCH / ======= / >>>>>>> REPLACE markers (or they were not at the start of a line).', 'Copilot meant to replace the whole file; that needs a write block.'); next = "Nothing was changed. $copilotRetries" }; break }
+        'SEARCH text not found' { @{ code = 'EDIT-NOT-FOUND'; reasons = @('The file changed since Copilot read it: an earlier edit in this task, or you edited it.', 'Copilot''s SEARCH lines differ slightly from the file: spaces, quotes, or a line it remembered differently.', 'The change was already made earlier, but with different text.', 'Copilot shortened SEARCH without a line containing only ... (only its first lines were given).'); next = "Nothing was changed. Copilot gets the reason plus the file's closest current lines. $copilotRetries" }; break }
+        'is in source/|read-only' { @{ code = 'SOURCE-DATA'; reasons = @('The step tried to change a file in source/, which holds your source data and is read-only.'); next = 'Nothing was changed. Copilot is told to write its result elsewhere (for example work/ or output/).' }; break }
+        'file not found|\(file not found\)' { @{ code = 'FILE-NOT-FOUND'; reasons = @('The path does not exist in the project: a typo, another folder, or a file that was never created.', 'For a new file Copilot should use a write block, not an edit.'); next = $copilotRetries }; break }
+        'without a path' { @{ code = 'STEP-FORMAT'; reasons = @('The block had no file name after the action name (for example ````edit with nothing after it).'); next = $copilotRetries }; break }
+        'plan mode' { @{ code = 'PLAN-MODE'; reasons = @('"Plan only" mode is on, so changes and commands are not carried out.'); next = 'Switch the mode to "Ask before changes" or "Auto-accept edits" and ask again to carry out the plan.' }; break }
+        'commands are not allowed' { @{ code = 'RUN-NOT-ALLOWED'; reasons = @('Commands are not allowed for this task (MCP task started without permission to run commands).'); next = 'Copilot is told to finish without running commands.' }; break }
+        'needs a person|refused' { @{ code = 'RUN-NEEDS-PERSON'; reasons = @('The command would act on Microsoft 365 or delete data; that always needs a person.'); next = 'Run it yourself if you really want it; Copilot is told not to work around it.' }; break }
+        'stopped by the user' { @{ code = 'STOPPED'; reasons = @('You pressed Stop.'); next = 'Changes made so far in this message can be undone (Changes > Undo last change set).' }; break }
+        'timed out after' { @{ code = 'RUN-TIMEOUT'; reasons = @('The command ran longer than commandTimeoutSec (it may wait for input, or just be slow).'); next = 'Copilot sees the output so far. Raise commandTimeoutSec in config\harness.local.json for slow builds.' }; break }
+        'exit code [1-9]|exit code -' { @{ code = 'RUN-FAILED'; reasons = @('The command reported an error (see its output on this card).', 'A tool or module the command needs is not installed on this computer.', 'The command ran in the project folder with cmd.exe; it may have expected another folder or shell.'); next = $copilotRetries }; break }
+        'is not valid|invalid' { @{ code = 'STEP-INVALID'; reasons = @('The step''s input was not valid (see the reason above).'); next = $copilotRetries }; break }
+        default { @{ code = "$($Type.ToUpperInvariant())-FAILED"; reasons = @('See the reason above; this case has no specific explanation yet.'); next = 'Copilot gets the reason in the next message. If it keeps failing, use Copy details and send them.' }; break }
+    }
+    $info
 }
 
 function Test-NeedsReview {
@@ -642,7 +689,15 @@ function Invoke-AgentTurn {
                 if ($a.type -eq 'done') { $isDone = $true; $doneText = $a.body.Trim(); Add-AgentEvent $State 'done' @{ text = $doneText }; continue }
                 $id = "$($State.Seq)-$k"
                 $res = Invoke-AgentAction $State $a $id $checkpoint $r.Uncertain
-                if (-not $res.reported) { Add-AgentEvent $State 'action-result' @{ id = $id; ok = $res.ok; status = $(if ($res.ok) { 'ok' } else { 'failed' }); summary = $res.summary; output = (Limit-Text $res.output 4000); changed = [bool]$res.changed } }
+                if (-not $res.reported) {
+                    $result = @{ id = $id; ok = $res.ok; status = $(if ($res.ok) { 'ok' } else { 'failed' }); summary = $res.summary; output = (Limit-Text $res.output 4000); changed = [bool]$res.changed }
+                    if (-not $res.ok) {
+                        # Why it may have failed, and what happens next (shown on the step's card and logged).
+                        $why = Get-StepFailureInfo $a.type "$($res.summary) $($res.output)"
+                        $result.code = $why.code; $result.reasons = @($why.reasons); $result.next = $why.next
+                    }
+                    Add-AgentEvent $State 'action-result' $result
+                }
                 $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = "$($res.output)"; readPaths = $res.readPaths })
             }
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
@@ -672,7 +727,7 @@ function Invoke-AgentTurn {
         }
     } catch {
         Write-CCBLogError agent 'turn failed' $_
-        Add-AgentEvent $State 'error' @{ text = $_.Exception.Message }
+        Add-AgentEvent $State 'error' @{ text = $_.Exception.Message; record = $_ }
     } finally {
         Write-CCBLog info agent "Turn finished" @{ ms = $turnWatch.ElapsedMilliseconds; chat = "$($State.Throttle.used)/$($State.Throttle.max)"; cancelled = [bool]$State.Cancel }
         try {
@@ -741,7 +796,7 @@ function Start-AgentWorker {
             }
         } catch {
             Write-CCBLogError agent "task $($task.kind) failed" $_
-            Add-AgentEvent $State 'error' @{ text = $_.Exception.Message }
+            Add-AgentEvent $State 'error' @{ text = $_.Exception.Message; record = $_ }
             if ($job) { $job.status = 'error'; $job.error = $_.Exception.Message }
         } finally {
             if ($job) {
