@@ -130,8 +130,8 @@ export default function GradientButton({
         className={cn(
           "h-10 rounded-md px-4 font-medium text-sm shadow-none transition-colors disabled:opacity-40",
           variant === "neutral"
-            ? "bg-foreground text-background hover:bg-foreground/85"
-            : "bg-black/5 text-foreground hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15",
+            ? "bg-foreground text-background hover:bg-foreground/85 hover:text-background"
+            : "bg-black/5 text-foreground hover:bg-black/10 hover:text-foreground dark:bg-white/10 dark:hover:bg-white/15",
           className
         )}
         variant="ghost"
