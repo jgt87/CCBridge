@@ -21,7 +21,7 @@ Target machines have only what ships with Windows: **Windows PowerShell 5.1 + Ed
 | `lib/Executor.psm1` | Carries out actions, checkpoints/undo, `&lt;`/`&gt;` repair |
 | `lib/Agent.psm1` | Agent loop + worker runspace; talks to front ends via a synchronized `$State` |
 | `lib/Server.psm1` | HTTP server + JSON API for the web UI (token in `%LOCALAPPDATA%\CCBridge\session-token.txt`) |
-| `mcp/ccbridge-mcp.ps1` | MCP stdio server reusing `Agent.psm1` with `$State.Headless` |
+| `mcp/ccbridge-mcp.ps1` | MCP stdio server: hands its tasks to the running web app (`POST /api/jobs`, shown in the Queue); without the app (or with `CCBRIDGE_MCP_STANDALONE=1`) it runs `Agent.psm1` itself with `$State.Headless` |
 | `prompts/` | Small parts assembled per request by `lib/Prompts.psm1` (`New-PromptMessage`): `Get-TaskKind` picks chat / assistant / project / coding / mixed; chat sends the text alone; other kinds add only the parts the chat has not had (`roles/*.md`, `actions.md`, `rules.md`, `m365.md`, `save.md`, plus the project context from `Get-ProjectContext` with the OneDrive location) |
 | `config/` | `harness.json` (ports, budgets), `selectors.json` (Copilot page selectors) |
 | `ui-src/` | React + Vite + Tailwind + Kokonut UI source; builds into `ui/` (committed) |
@@ -83,6 +83,8 @@ The running web server holds `lib/*.psm1` in memory: restart it after backend ch
 - Text sent to Copilot (prompts/, results, notes, the AGENTS.md template) never mentions the name CCBridge; refer to "the helper program" instead. The UI, logs and docs may use the name.
 - Project instruction files are named `AGENTS.md` (sent to Copilot at the start of each chat).
 - UI: monochrome white/grey, flat buttons, no blue/green accents; side panel on the left. Kokonut components are adapted in place in `ui-src/src/components/kokonutui`.
+- Every task goes through `Submit-AgentTask` (Agent.psm1), so it shows in the Queue (under the Tasks tab) with its source, status, timing and Copilot messages. Approvals from other programs are recorded as `mcp`/`api`; Microsoft 365 actions and deletions can only be approved by `user` (the app page, checked by its Origin).
+- MCP tasks are reviewed by the calling model, not by Copilot (`ReviewByCaller`, unless `copilot_review=true`): no Copilot review round; the local checks still run, and the full report has a CHECK section (every change as a diff from `Get-ChangeSetContents`, local check results, failed or "already applied" actions, repaired replies).
 - Every agent turn is one checkpoint (backups under `%LOCALAPPDATA%\CCBridge\projects\...`, never in OneDrive).
 
 ## Repository

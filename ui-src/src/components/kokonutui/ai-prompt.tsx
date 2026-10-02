@@ -77,7 +77,8 @@ export default function AI_Prompt({
     maxHeight: 300,
   });
   const selected = modes.find((m) => m.id === mode) ?? modes[0];
-  const canSend = !busy && !disabled && value.trim().length > 0;
+  // CCBridge: while Copilot is busy, sending adds the message to the queue.
+  const canSend = !disabled && value.trim().length > 0;
 
   useEffect(() => {
     adjustHeight();
@@ -225,6 +226,17 @@ export default function AI_Prompt({
                     <AtSign className="h-4 w-4 transition-colors" />
                   </button>
                 </div>
+                {busy && canSend && (
+                  <button
+                    aria-label="Add to the queue"
+                    className="mr-1 rounded-lg bg-black/5 px-2 py-1.5 text-xs hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10"
+                    onClick={submit}
+                    title="Add to the queue: runs after the current task (Enter)"
+                    type="button"
+                  >
+                    Queue
+                  </button>
+                )}
                 {busy ? (
                   <button
                     aria-label="Stop"

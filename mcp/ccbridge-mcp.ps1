@@ -89,9 +89,9 @@ function Get-JobActions($Events) {
     foreach ($e in $Events) {
         if ($e.type -eq 'action') {
             if (-not $map.ContainsKey($e.id)) { $order.Add($e.id); $map[$e.id] = @{ id = $e.id; action = $e.action } }
-            foreach ($k in 'target', 'status', 'preview', 'warning', 'error') { if ($null -ne $e[$k]) { $map[$e.id][$k] = $e[$k] } }
+            foreach ($k in 'target', 'status', 'preview', 'warning', 'error') { if ($null -ne $e.$k) { $map[$e.id][$k] = $e.$k } }
         } elseif ($e.type -eq 'action-result' -and $map.ContainsKey($e.id)) {
-            foreach ($k in 'status', 'summary', 'output') { if ($null -ne $e[$k]) { $map[$e.id][$k] = $e[$k] } }
+            foreach ($k in 'status', 'summary', 'output', 'reasons', 'next', 'code') { if ($null -ne $e.$k) { $map[$e.id][$k] = $e.$k } }
         }
     }
     @($order | ForEach-Object { $map[$_] })
@@ -121,8 +121,8 @@ function Format-UnifiedDiff([string]$Path, [string]$Old, [string]$New, [int]$Con
     $i = 0; $j = 0
     while ($i -lt $n -or $j -lt $m) {
         if ($i -lt $n -and $j -lt $m -and $a[$i] -ceq $b[$j]) { $rows.Add(@(' ', $a[$i])); $i++; $j++ }
-        elseif ($j -lt $m -and ($i -ge $n -or $t[$i * $w + $j + 1] -ge $t[($i + 1) * $w + $j])) { $rows.Add(@('+', $b[$j])); $j++ }
-        else { $rows.Add(@('-', $a[$i])); $i++ }
+        elseif ($i -lt $n -and ($j -ge $m -or $t[($i + 1) * $w + $j] -ge $t[$i * $w + $j + 1])) { $rows.Add(@('-', $a[$i])); $i++ }
+        else { $rows.Add(@('+', $b[$j])); $j++ }
     }
     $keep = New-Object bool[] $rows.Count
     for ($k = 0; $k -lt $rows.Count; $k++) {
@@ -141,15 +141,16 @@ function Format-UnifiedDiff([string]$Path, [string]$Old, [string]$New, [int]$Con
 
 function Limit([string]$Text, [int]$Max) { if (-not $Text -or $Text.Length -le $Max) { return $Text }; $Text.Substring(0, $Max) + "`n...(truncated, $($Text.Length - $Max) more characters)" }
 
-function Format-JobStatus($Job, [switch]$Full) {
-    $events = Get-JobEvents $Job
+function Format-JobStatus($Job, [switch]$Full, $Events, $Info) {
+    $events = if ($null -ne $Events) { @($Events) } else { Get-JobEvents $Job }
+    if (-not $Info) { $Info = @{ workIq = $State.WorkIq; workIqActual = $State.WorkIqActual; throttle = $State.Throttle; credits = $State.Credits } }
     $sb = New-Object Text.StringBuilder
     $null = $sb.AppendLine("job: $($Job.id) ($($Job.kind)) status: $($Job.status)")
     if ($Job.project) { $null = $sb.AppendLine("project: $($Job.project)  mode: $($Job.mode)  commands allowed: $($Job.allowCommands)") }
-    if ($State.WorkIq -ne 'leave') { $null = $sb.AppendLine("Work IQ: requested $($State.WorkIq), actual $(if ($State.WorkIqActual) { $State.WorkIqActual } else { 'unknown' })") }
+    if ($Info.workIq -and $Info.workIq -ne 'leave') { $null = $sb.AppendLine("Work IQ: requested $($Info.workIq), actual $(if ($Info.workIqActual) { $Info.workIqActual } else { 'unknown' })") }
     $rounds = @($events | Where-Object { $_.type -eq 'assistant' }).Count
-    $null = $sb.AppendLine("Copilot rounds: $rounds  chat messages: $($State.Throttle.used)/$($State.Throttle.max)")
-    if ($State.Credits) { $null = $sb.AppendLine("Copilot credits left today: $($State.Credits.remaining)/$($State.Credits.total)") }
+    $null = $sb.AppendLine("Copilot rounds: $rounds  chat messages: $($Info.throttle.used)/$($Info.throttle.max)")
+    if ($Info.credits) { $null = $sb.AppendLine("Copilot credits left today: $($Info.credits.remaining)/$($Info.credits.total)") }
     if ($Job.error) { $null = $sb.AppendLine("error: $($Job.error)") }
 
     $todos = @($events | Where-Object { $_.type -eq 'todos' } | Select-Object -Last 1)
@@ -162,7 +163,9 @@ function Format-JobStatus($Job, [switch]$Full) {
             $line = "  [$($a.id)] $($a.action) $($a.target) -> $($a.status)"
             if ($a.summary) { $line += " ($($a.summary))" }
             if ($a.error) { $line += " error: $($a.error)" }
+            if ($a.code) { $line += " [$($a.code)]" }
             $null = $sb.AppendLine($line)
+            if ($a.reasons) { foreach ($r in @($a.reasons)) { $null = $sb.AppendLine("      possible reason: $r") } }
             if ($Full -and $a.output) { $null = $sb.AppendLine('      ' + ((Limit $a.output 1500) -replace "`n", "`n      ")) }
         }
     }
@@ -183,12 +186,39 @@ function Format-JobStatus($Job, [switch]$Full) {
     $refs = @($events | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { $_.references })
     $src = Format-Sources $refs
     if ($src) { $null = $sb.AppendLine($src) }
+    if ($Full) { $check = Format-CheckSection $events $actions; if ($check) { $null = $sb.AppendLine($check) } }
     if ($Full) {
         $last = @($events | Where-Object { $_.type -eq 'assistant' } | Select-Object -Last 1)
         if ($last.Count) { $null = $sb.AppendLine("last Copilot reply:`n" + (Limit $last[0].text 8000)) }
     }
     if ($Job.kind -eq 'ask' -and $Job.reply) { $null = $sb.AppendLine("reply:`n$($Job.reply)") }
     $sb.ToString().TrimEnd()
+}
+
+function Format-CheckSection($Events, $Actions) {
+    <# What the calling model should verify itself: StreamHub has no model of its own and, for MCP
+       tasks, does not ask Copilot to review its own work. Every change as a diff, the local check
+       results, and everything that went wrong or needed repair. #>
+    $out = New-Object System.Collections.Generic.List[string]
+    $diffs = @($Events | Where-Object { $_.type -eq 'checkpoint' -and $_.contents } | ForEach-Object { @($_.contents) })
+    foreach ($d in $diffs) {
+        $head = if ($d.created) { ' (new file)' } elseif ($d.deleted) { ' (deleted)' } else { '' }
+        $out.Add("diff $($d.path)${head}:")
+        $out.Add((Limit (Format-UnifiedDiff $d.path $d.old $d.new) 20000))
+    }
+    $checks = @($Events | Where-Object { $_.type -eq 'status' -and $_.review -eq 'caller' } | Select-Object -Last 1)
+    if ($checks.Count) { $out.Add($checks[0].text) }
+    foreach ($a in @($Actions | Where-Object { $_.status -in 'error', 'failed', 'rejected', 'skipped' })) {
+        $out.Add("not carried out: [$($a.id)] $($a.action) $($a.target) -> $($a.status)$(if ($a.summary) { " ($($a.summary))" })")
+    }
+    foreach ($a in @($Actions | Where-Object { "$($_.summary) $($_.output)" -match 'already (contains these changes|applied)' })) {
+        $out.Add("reported as already applied (check the file really has it): [$($a.id)] $($a.action) $($a.target)")
+    }
+    if (@($Events | Where-Object { $_.type -eq 'assistant' -and $_.uncertain }).Count) {
+        $out.Add('Some Copilot replies were repaired after its link filter removed text; check code with [name]: or [x](...) patterns.')
+    }
+    if (-not $out.Count) { return '' }
+    "CHECK (StreamHub has no model of its own; review Copilot's work before relying on it - compare the diffs with the task and Copilot's done summary, then run the project's tests):`n" + ($out -join "`n")
 }
 
 function Set-WorkIqFromArgs($ToolArgs) {
@@ -209,7 +239,139 @@ function Get-Arg($ToolArgs, [string]$Name, $Default) {
     $Default
 }
 
+# --- Through the web app ---------------------------------------------------------------------
+# When the StreamHub web app is running, tasks go to its queue: they show up in the app (queue,
+# chat, approvals) and only one program drives Copilot. Without the app, this server works alone.
+
+function Get-WebApp {
+    if ($env:CCBRIDGE_MCP_STANDALONE -eq '1') { return $null }
+    try {
+        $tokenFile = Join-Path $env:LOCALAPPDATA 'CCBridge\session-token.txt'
+        if (-not (Test-Path $tokenFile)) { return $null }
+        $token = ([IO.File]::ReadAllText($tokenFile)).Trim()
+        $port = [int](Get-CCBridgeConfig harness $root).port
+        $base = "http://localhost:$port"
+        $null = Invoke-RestMethod "$base/api/queue" -Headers @{ 'X-CCB-Token' = $token } -TimeoutSec 2
+        @{ base = $base; token = $token }
+    } catch { $null }
+}
+
+function Invoke-App($App, [string]$Method, [string]$Path, $Body) {
+    $p = @{ Method = $Method; Uri = "$($App.base)$Path"; Headers = @{ 'X-CCB-Token' = $App.token }; TimeoutSec = 20 }
+    if ($null -ne $Body) { $p.Body = ($Body | ConvertTo-Json -Depth 6 -Compress); $p.ContentType = 'application/json' }
+    try { Invoke-RestMethod @p }
+    catch {
+        $msg = $_.Exception.Message
+        try { $d = $_.ErrorDetails.Message | ConvertFrom-Json; if ($d.error) { $msg = "$($d.error)$(if ($d.errId) { " (error $($d.errId))" })" } } catch { }
+        throw $msg
+    }
+}
+
+function Get-AppJob($App, [string]$Id) {
+    if (-not $Id) { $Id = $script:LastJobId }
+    if (-not $Id) { throw 'No job yet; start one first.' }
+    Invoke-App $App GET "/api/jobs/$Id"
+}
+
+function Wait-AppJob($App, [string]$Id, [int]$Seconds, [switch]$UntilApproval) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    $r = Get-AppJob $App $Id
+    while ((Get-Date) -lt $deadline -and $r.job.status -in 'queued', 'running') {
+        if ($UntilApproval -and @(Get-JobActions $r.events | Where-Object { $_.status -eq 'awaiting' }).Count) { break }
+        Start-Sleep -Milliseconds 600
+        $r = Get-AppJob $App $Id
+    }
+    $r
+}
+
+function Format-AppJob($R, [switch]$Full) {
+    $note = "(running in the StreamHub app: it shows in the app's queue and chat, where the user can follow, approve or stop it)"
+    (Format-JobStatus $R.job -Full:$Full -Events @($R.events) -Info $R.info) + "`n$note"
+}
+
+function Invoke-RemoteTool([string]$Name, $ToolArgs, $App) {
+    $wiq = Get-Arg $ToolArgs 'work_iq' $null
+    switch ($Name) {
+        'copilot_ask' {
+            $prompt = [string](Get-Arg $ToolArgs 'prompt' '')
+            if (-not $prompt.Trim()) { throw 'prompt is required' }
+            $s = Invoke-App $App POST '/api/jobs' @{ kind = 'ask'; text = $prompt; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); workIq = $wiq; source = 'mcp' }
+            $script:LastJobId = $s.job.id
+            $r = Wait-AppJob $App $s.job.id ([int](Get-Arg $ToolArgs 'timeout_sec' 240))
+            $j = $r.job
+            if ($j.status -eq 'finished') {
+                $note = if ($j.uncertain) { "`n`n(StreamHub note: parts of this reply were repaired after Copilot's link filter removed text; check code carefully.)" } else { '' }
+                if (@($j.proposedActions).Count) { $note += "`n`nHUMAN REQUIRED: Copilot proposed a Microsoft 365 action (" + ((@($j.proposedActions) | ForEach-Object { $_.title }) -join '; ') + "). StreamHub never confirms it; the user must review it in the Copilot window." }
+                foreach ($c in @($j.actionClaims)) { if ($c) { $note += "`n`nHUMAN CHECK: Copilot's reply says ""$c"" - StreamHub confirmed no Microsoft 365 action." } }
+                $src = Format-Sources $j.references
+                return @{ text = "$($j.reply)$note$(if ($src) { "`n`n$src" })" }
+            }
+            if ($j.status -eq 'error') { return @{ text = "Copilot error: $($j.error)"; isError = $true } }
+            return @{ text = "Copilot has not answered yet; $($j.id) is $($j.status) in the StreamHub app's queue. Poll it with copilot_task_status." }
+        }
+        'copilot_start_task' {
+            $path = [string](Get-Arg $ToolArgs 'project_path' '')
+            $task = [string](Get-Arg $ToolArgs 'task' '')
+            if (-not $path -or -not [IO.Path]::IsPathRooted($path)) { throw 'project_path must be an absolute folder path' }
+            if (-not $task.Trim()) { throw 'task is required' }
+            $mode = [string](Get-Arg $ToolArgs 'mode' 'auto')
+            $allow = [bool](Get-Arg $ToolArgs 'allow_commands' $false)
+            $s = Invoke-App $App POST '/api/jobs' @{ kind = 'task'; text = $task; projectPath = $path; mode = $mode; allowCommands = $allow; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); copilotReview = [bool](Get-Arg $ToolArgs 'copilot_review' $false); workIq = $wiq; source = 'mcp' }
+            $script:LastJobId = $s.job.id
+            return @{ text = "Queued $($s.job.id) in the StreamHub app for $($s.job.project) (mode $mode, commands $(if ($allow) { 'allowed' } else { 'not allowed' })). The user sees it in the app's queue and chat.`nPoll with copilot_task_status; get the full report with copilot_task_result." }
+        }
+        'copilot_run_task' {
+            $null = Invoke-RemoteTool 'copilot_start_task' $ToolArgs $App
+            $wait = [Math]::Min(1800, [Math]::Max(10, [int](Get-Arg $ToolArgs 'wait_sec' 600)))
+            $r = Wait-AppJob $App $script:LastJobId $wait -UntilApproval
+            if ($r.job.status -in 'queued', 'running') {
+                return @{ text = "Copilot is still working on $($r.job.id) (or waits for an approval, or for earlier tasks in the app's queue). Call copilot_task_status with job_id $($r.job.id) until it is finished.`n`n" + (Format-AppJob $r) }
+            }
+            return @{ text = "Task $($r.job.status).`n`n" + (Format-AppJob $r -Full); isError = ($r.job.status -eq 'error') }
+        }
+        'copilot_task_status' {
+            $id = [string](Get-Arg $ToolArgs 'job_id' '')
+            $wait = [Math]::Min(120, [Math]::Max(0, [int](Get-Arg $ToolArgs 'wait_sec' 20)))
+            $r = Wait-AppJob $App $id $wait -UntilApproval
+            return @{ text = (Format-AppJob $r) }
+        }
+        'copilot_task_result' { return @{ text = (Format-AppJob (Get-AppJob $App ([string](Get-Arg $ToolArgs 'job_id' ''))) -Full) } }
+        'copilot_approve' {
+            $r = Get-AppJob $App ([string](Get-Arg $ToolArgs 'job_id' ''))
+            $actionId = [string](Get-Arg $ToolArgs 'action_id' '')
+            $decision = [string](Get-Arg $ToolArgs 'decision' '')
+            if (@('approve', 'reject') -notcontains $decision) { throw 'decision must be approve or reject' }
+            $pending = @(Get-JobActions $r.events | Where-Object { $_.status -eq 'awaiting' } | ForEach-Object { $_.id })
+            if ($pending -notcontains $actionId) { throw "Action '$actionId' is not waiting for approval. Pending: $(if ($pending) { $pending -join ', ' } else { 'none' })" }
+            $null = Invoke-App $App POST '/api/approve' @{ id = $actionId; decision = $decision; note = [string](Get-Arg $ToolArgs 'note' ''); by = 'mcp' }
+            return @{ text = "$decision sent for $actionId. Microsoft 365 actions and deleting data can only be approved by the user in the StreamHub app. Poll copilot_task_status for progress." }
+        }
+        'copilot_cancel_task' {
+            $r = Get-AppJob $App ([string](Get-Arg $ToolArgs 'job_id' ''))
+            if ($r.job.status -notin 'running', 'queued') { return @{ text = "$($r.job.id) is already $($r.job.status)." } }
+            $null = Invoke-App $App POST '/api/queue/cancel' @{ id = $r.job.id }
+            $r = Wait-AppJob $App $r.job.id 60
+            return @{ text = "Cancel requested; $($r.job.id) is now $($r.job.status). Files already changed stay changed (copilot_undo reverts them)." }
+        }
+        'copilot_new_chat' {
+            $s = Invoke-App $App POST '/api/jobs' @{ kind = 'newchat'; source = 'mcp' }
+            $r = Wait-AppJob $App $s.job.id 60
+            return @{ text = "New Copilot chat: $($r.job.status)$(if ($r.job.error) { " - $($r.job.error)" })" }
+        }
+        'copilot_undo' {
+            $path = [string](Get-Arg $ToolArgs 'project_path' '')
+            $s = Invoke-App $App POST '/api/jobs' @{ kind = 'undo'; projectPath = $path; source = 'mcp' }
+            $r = Wait-AppJob $App $s.job.id 60
+            $undo = @($r.events | Where-Object { $_.type -eq 'undo' } | Select-Object -Last 1)
+            return @{ text = $(if ($undo.Count) { $undo[0].text } else { "Undo: $($r.job.status) $($r.job.error)" }) }
+        }
+    }
+    throw "Unknown tool '$Name'"
+}
+
 function Invoke-Tool([string]$Name, $ToolArgs) {
+    $app = Get-WebApp
+    if ($app) { Write-CCBLog verbose mcp "$Name through the web app"; return Invoke-RemoteTool $Name $ToolArgs $app }
     switch ($Name) {
         'copilot_ask' {
             $prompt = [string](Get-Arg $ToolArgs 'prompt' '')
@@ -249,7 +411,7 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
             $State.Busy = $true
             $job = New-BridgeJob 'task' @{ project = $full; mode = $mode; allowCommands = $allow; task = $task }
             $job.queuedSeq = $State.Seq
-            $State.Tasks.Enqueue(@{ kind = 'chat'; jobId = $job.id; text = $task; projectRoot = $full; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false) })
+            $State.Tasks.Enqueue(@{ kind = 'chat'; jobId = $job.id; text = $task; projectRoot = $full; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); reviewByCaller = (-not [bool](Get-Arg $ToolArgs 'copilot_review' $false)) })
             Wait-BridgeJob $job 3
             return @{ text = "Started $($job.id) in $full (mode $mode, commands $(if ($allow) { 'allowed' } else { 'not allowed' })).`nPoll with copilot_task_status (it waits up to wait_sec for progress); get the full report with copilot_task_result." }
         }
@@ -332,7 +494,8 @@ $tools = @(
            allow_commands = @{ type = 'boolean'; description = 'true lets Copilot run commands such as builds and tests in the project folder. Default false.' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation (default false; a different project always starts fresh).' }
            work_iq = @{ type = 'boolean'; description = 'true: Copilot may use the user''s Microsoft 365 data (Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files). Omit to keep the current setting.' }
-           wait_sec = @{ type = 'integer'; description = 'How long to wait for the result (default 600, max 1800). If it is not finished by then, call copilot_task_status.' } } } }
+           wait_sec = @{ type = 'integer'; description = 'How long to wait for the result (default 600, max 1800). If it is not finished by then, call copilot_task_status.' }
+           copilot_review = @{ type = 'boolean'; description = 'true: after big changes Copilot also reviews its own work (costs extra Copilot messages). Default false: you review the diffs in the report yourself.' } } } }
     @{ name = 'copilot_ask'
        description = 'USE THIS for any question that needs reasoning: explaining code or an error, finding a root cause, reviewing code, choosing an approach, making a plan, writing longer text, or (with work_iq) looking things up in the user''s email, calendar, Teams chats and files. Copilot sees only the prompt, so paste the code or error you ask about. Returns Copilot''s answer. No files are changed.'
        inputSchema = @{ type = 'object'; required = @('prompt'); properties = @{
@@ -348,6 +511,7 @@ $tools = @(
            mode = @{ type = 'string'; enum = @('auto', 'plan', 'ask'); description = 'auto: apply changes directly (default). plan: read-only, Copilot only proposes. ask: every change/command waits for copilot_approve.' }
            allow_commands = @{ type = 'boolean'; description = 'Allow Copilot to run shell commands (cmd.exe) in the project folder, e.g. builds and tests. Default false.' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation (default false; a different project always starts fresh).' }
+           copilot_review = @{ type = 'boolean'; description = 'true: after big changes Copilot also reviews its own work (costs extra Copilot messages). Default false: you review the diffs in the report yourself.' }
            work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' } } } }
     @{ name = 'copilot_task_status'
        description = 'Progress of a job: status, Copilot''s plan, actions so far, pending approvals with diffs, errors. Waits up to wait_sec for the job to finish or to need an approval, so you can poll without busy-looping.'
@@ -389,7 +553,9 @@ WHEN TO USE IT. Do it yourself only when the task is small and clear: one file, 
 - copilot_ask: any question that needs reasoning (explain code or an error, find a root cause, review, plan, choose an approach, write longer text). Paste the code or error into the prompt.
 - With work_iq=true Copilot can also use the user's Outlook mail, Teams chats and meetings, calendar and OneDrive/SharePoint files (only read; it never sends or deletes anything).
 
-HOW. Give Copilot the whole task in plain words: the goal, the files if you know them, and how to check the result. Set allow_commands=true when Copilot should build or run tests. Copilot takes tens of seconds per step and has a daily limit, so send complete tasks, not tiny steps. Afterwards check the result (for example run the tests); copilot_undo reverts the last task.
+HOW. Give Copilot the whole task in plain words: the goal, the files if you know them, and how to check the result. Set allow_commands=true when Copilot should build or run tests. Copilot takes tens of seconds per step and has a daily limit, so send complete tasks, not tiny steps.
+
+CHECK EVERYTHING THAT COMES BACK. The program in between has no model of its own, so you are the reviewer. Compare Copilot's answers with what you know. For tasks, read the CHECK section of the report (every change as a diff, local check results, actions that failed or were reported as already applied), compare it with the task, and run the tests. Fix small mistakes yourself or send a follow-up task; copilot_undo reverts the last task.
 "@
 
 Write-Log "started (pid $PID), app root $root, log $(Get-CCBLogDir) (level $(Get-CCBLogLevel))"

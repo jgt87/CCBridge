@@ -385,6 +385,7 @@ export default function App() {
                 }}
                 onRunRunbook={(name) => api.runRunbook(name).catch((e) => setError((e as Error).message))}
                 project={state.project}
+                queue={state.queue ?? []}
                 runbookTemplates={runbookTemplates}
                 runbooks={runbooks}
                 todos={state.todos}

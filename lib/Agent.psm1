@@ -20,6 +20,9 @@ function New-AgentState {
         ChatKind = $null   # kind of task the current chat is about (chat, assistant, project, coding, mixed)
         SentParts = (New-Object 'System.Collections.Generic.HashSet[string]')   # prompt parts this chat already has
         PreviewToken = [guid]::NewGuid().ToString('N'); PreviewPort = 0   # page check: project served read-only at /preview/<token>/
+        Queue = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList))   # every task, whatever started it (Submit-AgentTask)
+        CurrentQueueId = $null; MessagesSent = 0; NoCommands = $false
+        ReviewByCaller = $false   # MCP tasks: the calling model checks the result, so no Copilot review round
         NextConnectAttempt = $null
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
         WorkIq = $(if ($Config.workIq) { [string]$Config.workIq } else { 'leave' }); WorkIqActual = $null; WorkIqWarned = $false
@@ -150,6 +153,7 @@ function Reset-Bridge($State) {
 function Send-ToCopilot {
     param($State, [string]$Message)
     $bridge = Get-Bridge $State
+    $State.MessagesSent = [int]$State.MessagesSent + 1
     if ($State.WorkIq -eq 'on' -or $State.WorkIq -eq 'off') {
         $State.WorkIqActual = Set-CopilotWorkIq $bridge ($State.WorkIq -eq 'on')
         if ($State.WorkIqActual -eq 'unavailable' -and -not $State.WorkIqWarned) {
@@ -202,6 +206,53 @@ function Send-ToCopilot {
 
 function Test-ConnectionLost($ErrorRecord) {
     "$($ErrorRecord.Exception.Message)" -match 'Lost the connection to the Copilot tab|Could not connect to the Copilot tab'
+}
+
+function Submit-AgentTask {
+    <# Puts a task in the worker's queue and records it in $State.Queue (shown in the Queue tab):
+       what was asked, where it came from (user, mcp, api), status, timing, Copilot messages used,
+       result or error. Returns the queue entry. #>
+    param($State, [hashtable]$Task, [string]$Source = 'user', [string]$Title = '')
+    $id = 'q-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    if (-not $Title) {
+        $Title = switch ($Task.kind) {
+            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Fetch: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" }
+            'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } default { "$($Task.kind)" }
+        }
+    }
+    $Title = ($Title -replace '\s+', ' ').Trim(); if ($Title.Length -gt 160) { $Title = $Title.Substring(0, 157) + '...' }
+    $entry = [hashtable]::Synchronized(@{ id = $id; kind = $Task.kind; title = $Title; source = $Source; status = 'queued'; created = (Get-Date).ToString('s')
+        project = $(if ($Task.projectRoot) { Split-Path $Task.projectRoot -Leaf } elseif ($State.ProjectRoot) { Split-Path $State.ProjectRoot -Leaf } else { $null })
+        jobId = $Task.jobId; started = $null; finished = $null; messages = 0; summary = $null; error = $null; resultPath = $null })
+    $Task.queueId = $id
+    [void]$State.Queue.Add($entry)
+    while ($State.Queue.Count -gt 100) { $State.Queue.RemoveAt(0) }
+    $State.Tasks.Enqueue($Task)
+    Write-CCBLog info agent "Queued $id ($($Task.kind), from $Source)" @{ title = $Title }
+    $entry
+}
+
+function Get-QueueEntry($State, [string]$Id) {
+    foreach ($e in @($State.Queue)) { if ($e.id -eq $Id -or ($e.jobId -and $e.jobId -eq $Id)) { return $e } }
+    $null
+}
+
+function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore, [bool]$Cancelled) {
+    <# Status and result of a finished task, from the events it produced. #>
+    $events = @(Get-AgentEvents $State $FromSeq)
+    $err = @($events | Where-Object { $_.type -eq 'error' } | Select-Object -Last 1)
+    $done = @($events | Where-Object { $_.type -in 'done', 'fetch', 'runbook', 'undo', 'newchat' } | Select-Object -Last 1)
+    $last = @($events | Where-Object { $_.type -eq 'assistant' } | Select-Object -Last 1)
+    $Entry.messages = [int]$State.MessagesSent - $MessagesBefore
+    $Entry.finished = (Get-Date).ToString('s')
+    $Entry.status = if ($Cancelled) { 'cancelled' } elseif ($err.Count) { 'failed' } else { 'done' }
+    if ($err.Count) { $Entry.error = "$($err[0].text)"; $Entry.errId = $err[0].errId }
+    $summary = if ($done.Count) { "$($done[0].text)" } elseif ($last.Count) { (("$($last[0].text)" -split "`n" | Where-Object { $_.Trim() } | Select-Object -First 1)) } else { $null }
+    if ($summary -and $summary.Length -gt 300) { $summary = $summary.Substring(0, 297) + '...' }
+    $Entry.summary = $summary
+    if ($done.Count -and $done[0].path) { $Entry.resultPath = "$($done[0].path)" }
+    $changed = @($events | Where-Object { $_.type -eq 'checkpoint' } | ForEach-Object { $_.files }) | Select-Object -Unique
+    if ($changed) { $Entry.changed = @($changed) }
 }
 
 function Invoke-RunbookJob {
@@ -583,12 +634,24 @@ function Join-Hash([hashtable]$A, [hashtable]$B) {
 }
 
 function Wait-Approval {
-    param($State, [string]$Id)
-    while (-not $State.Cancel -and -not $State.Stop) {
-        if ($State.Approvals.ContainsKey($Id)) { $d = $State.Approvals[$Id]; $State.Approvals.Remove($Id); return $d }
-        Start-Sleep -Milliseconds 150
-    }
-    @{ decision = 'reject'; note = 'cancelled' }
+    param($State, [string]$Id, [bool]$PersonOnly = $false)
+    $entry = if ($State.CurrentQueueId) { Get-QueueEntry $State $State.CurrentQueueId } else { $null }
+    if ($entry) { $entry.status = 'awaiting' }
+    try {
+        while (-not $State.Cancel -and -not $State.Stop) {
+            if ($State.Approvals.ContainsKey($Id)) {
+                $d = $State.Approvals[$Id]; $State.Approvals.Remove($Id)
+                # Microsoft 365 actions and deleting data: only a person in the app may approve them.
+                if ($PersonOnly -and $d.decision -eq 'approve' -and $d.by -ne 'user') {
+                    Write-CCBLog info agent "Approval of $Id by $($d.by) refused: needs a person in the app"
+                    return @{ decision = 'reject'; note = 'This needs a person: approve it in the StreamHub window, not from another program.'; by = $d.by }
+                }
+                return $d
+            }
+            Start-Sleep -Milliseconds 150
+        }
+        @{ decision = 'reject'; note = 'cancelled' }
+    } finally { if ($entry -and $entry.status -eq 'awaiting') { $entry.status = 'running' } }
 }
 
 function Test-AutoRun($State, [string]$Command) {
@@ -678,6 +741,10 @@ function Invoke-AgentAction {
         }
     }
 
+    if ($Action.type -eq 'run' -and $State.NoCommands -and $mode -ne 'plan') {
+        Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped' })
+        return @{ ok = $false; summary = 'run skipped (commands not allowed)'; output = 'not executed: commands are not allowed for this task. Finish without running commands, and state which command the user should run to verify.' }
+    }
     if ($State.Headless -and $mode -ne 'plan') {
         if ($Action.type -eq 'run' -and -not $State.AllowCommands) {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped' })
@@ -698,7 +765,7 @@ function Invoke-AgentAction {
         if ($riskWarning) { $warn = $riskWarning }
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; preview = $preview; warning = $warn })
         $waitWatch = [Diagnostics.Stopwatch]::StartNew()
-        $d = Wait-Approval $State $Id
+        $d = Wait-Approval $State $Id ([bool]$riskWarning)
         Write-CCBLog verbose agent "approval ${Id}: $($d.decision) by $($d.by) after $($waitWatch.ElapsedMilliseconds) ms"
         if ($d.decision -ne 'approve') {
             Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }
@@ -857,6 +924,17 @@ function Invoke-AgentTurn {
                             if (-not $pageIssues.Count) { Add-AgentEvent $State 'status' @{ text = "Page check: $($pages -join ', ') loaded without errors." } }
                         }
                     }
+                    if ($State.ReviewByCaller) {
+                        # The calling model reviews the result itself; give it the local check results.
+                        $reviewed = $true
+                        $paths = @($changes | Where-Object { $_.added -or $_.removed } | ForEach-Object { $_.path })
+                        if ($paths.Count) {
+                            $issues = @(@(Test-ProjectConsistency $State.ProjectRoot $paths) + @($pageIssues | ForEach-Object { "page check: $_" }))
+                            $text = if ($issues.Count) { "Local checks found $($issues.Count) problem(s):`n" + (($issues | ForEach-Object { "- $_" }) -join "`n") } else { 'Local checks (JSON, PowerShell syntax, local file references, page load) found no problems.' }
+                            Add-AgentEvent $State 'status' @{ text = $text; checks = @($issues); review = 'caller' }
+                        }
+                        break
+                    }
                     if ($pageIssues.Count -or (Test-NeedsReview $State $changes)) {
                         $reviewed = $true
                         $issues = @(@(Test-ProjectConsistency $State.ProjectRoot @($changes | ForEach-Object { $_.path })) + @($pageIssues | ForEach-Object { "page check: $_" }))
@@ -887,6 +965,10 @@ function Invoke-AgentTurn {
             if ($fixed.Count) { Add-AgentEvent $State 'status' @{ text = 'Source data is read-only; StreamHub undid changes to it: ' + ($fixed -join '; ') } }
         } catch { Add-AgentEvent $State 'error' @{ text = "Could not verify source data: $($_.Exception.Message)" } }
         if (-not $checkpoint.Files.Count) { Remove-Item $checkpoint.Dir -Recurse -Force -ErrorAction SilentlyContinue }
+        elseif ($State.ReviewByCaller) {
+            $contents = @(try { Get-ChangeSetContents $State.ProjectRoot $checkpoint } catch { Write-CCBLogError agent 'change set contents' $_ })
+            Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys); contents = $contents }
+        }
         else { Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys) } }
         $State.Busy = $false; $State.Cancel = $false
     }
@@ -912,12 +994,27 @@ function Start-AgentWorker {
         }
         # Jobs (MCP) track a task from queue to result.
         $job = if ($task.jobId) { $State.Jobs[$task.jobId] } else { $null }
+        $entry = if ($task.queueId) { Get-QueueEntry $State $task.queueId } else { $null }
+        if ($entry -and $entry.status -eq 'cancelled') {
+            if ($job) { $job.status = 'cancelled'; $job.endSeq = $State.Seq }
+            continue
+        }
         if ($job) { $job.status = 'running'; $job.startSeq = $State.Seq; $job.started = (Get-Date).ToString('s') }
+        $fromSeq = [int]$State.Seq; $msgsBefore = [int]$State.MessagesSent
+        if ($entry) { $entry.status = 'running'; $entry.started = (Get-Date).ToString('s'); $State.CurrentQueueId = $entry.id }
+        # A task from another program can bring its own mode, project and command rule; the app's
+        # own settings come back afterwards.
+        $saved = @{ Mode = $State.Mode; ProjectRoot = $State.ProjectRoot; NoCommands = $State.NoCommands; ReviewByCaller = $State.ReviewByCaller }
+        $State.ReviewByCaller = [bool]$task.reviewByCaller
+        $foreign = $task.source -and $task.source -ne 'user'
+        if ($task.mode) { $State.Mode = $task.mode }
+        $State.NoCommands = [bool]$task.noCommands
         try {
             switch ($task.kind) {
                 'connect' { $null = Get-Bridge $State }
                 'chat'    {
                     if ($task.projectRoot -and $task.projectRoot -ne $State.ProjectRoot) {
+                        if ($foreign) { Add-AgentEvent $State 'status' @{ text = "Task from $($task.source): working in $($task.projectRoot)." } }
                         $State.ProjectRoot = $task.projectRoot; $State.Todos = @(); $State.NeedNewChat = $true
                     }
                     if ($task.newChat) { $State.NeedNewChat = $true }
@@ -956,9 +1053,20 @@ function Start-AgentWorker {
                 if ($job.status -eq 'running') { $job.status = if ($job.cancelled) { 'cancelled' } else { 'finished' } }
                 $job.endSeq = $State.Seq; $job.finished = (Get-Date).ToString('s')
             }
+            if ($entry) {
+                try { Complete-QueueEntry $State $entry $fromSeq $msgsBefore ([bool]($job.cancelled -or $entry.cancelRequested)) } catch { Write-CCBLogError agent 'queue entry' $_ }
+                if ($job -and $job.status -eq 'error' -and $entry.status -ne 'failed') { $entry.status = 'failed'; $entry.error = $job.error }
+                Write-CCBLog info agent "Queue $($entry.id) $($entry.status)" @{ messages = $entry.messages }
+            }
+            $State.CurrentQueueId = $null
+            $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller
+            if ($foreign -and $saved.ProjectRoot -and $State.ProjectRoot -ne $saved.ProjectRoot) {
+                $State.ProjectRoot = $saved.ProjectRoot; $State.NeedNewChat = $true
+                Add-AgentEvent $State 'status' @{ text = "Back to $($saved.ProjectRoot)." }
+            }
         }
     }
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Submit-AgentTask, Get-QueueEntry, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

@@ -118,6 +118,8 @@ export interface AppState {
   logLevel: "off" | "info" | "verbose" | "trace";
   /** Installed CCBridge version (version.txt), or git-<sha> for a development copy. */
   version: string;
+  /** Every task, newest first, whatever started it (you, an MCP client, ...). */
+  queue?: QueueEntry[];
   /** Release tag (v0.1.12) and the commit it was built from (short hash). */
   release?: string;
   commit?: string;
@@ -133,6 +135,26 @@ export interface ProjectInfo {
   name: string;
   path: string;
   modified: string;
+}
+
+/** A task in the queue. */
+export interface QueueEntry {
+  id: string;
+  kind: string;
+  title: string;
+  source: string;
+  status: "queued" | "running" | "awaiting" | "done" | "failed" | "cancelled";
+  project: string | null;
+  created: string;
+  started: string | null;
+  finished: string | null;
+  messages: number;
+  summary: string | null;
+  error: string | null;
+  errId?: string | null;
+  resultPath: string | null;
+  changed?: string[];
+  jobId?: string | null;
 }
 
 /** A project runbook (runbooks/<name>.runbook.md) and its output file. */
@@ -250,6 +272,7 @@ export const api = {
   undo: () => call<{ ok: boolean }>("POST", "/api/undo"),
   stop: () => call<{ ok: boolean }>("POST", "/api/stop"),
   connect: () => call<{ ok: boolean }>("POST", "/api/connect"),
+  cancelQueued: (id: string) => call<{ ok: boolean }>("POST", "/api/queue/cancel", { id }),
   showProject: () => call<{ ok: boolean }>("POST", "/api/project/show"),
   settings: () => call<{ settings: Setting[] }>("GET", "/api/settings").then((r) => (Array.isArray(r.settings) ? r.settings : [])),
   setSetting: (key: string, value: string | number | null) =>

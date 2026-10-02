@@ -386,7 +386,12 @@ function Set-CopilotInput {
         $null = Wait-CopilotEditor $Bridge -TimeoutSec 10
         $null = Invoke-CdpEval $s "(() => { const e = document.querySelector($editorSel); if (!e) return false; e.focus(); return true; })()"
     }
-    if ($actual -ne $expected) { Write-CCBLog info bridge 'Message box content does not match the prompt' @{ expected = $expected; actual = $actual }; throw "message box holds $actual characters, expected $expected" }
+    if ($actual -ne $expected) {
+        # An empty box is often Copilot refusing input: its daily limit is reached (it shows a banner).
+        $st = try { Get-PageReplyState $Bridge } catch { $null }
+        if ($st -and $st.bar -and $st.bar -match $script:LimitPattern) { Write-CCBLog info bridge 'Copilot shows a usage limit; it does not accept a prompt' @{ message = $st.bar }; throw "Copilot does not accept prompts: $($st.bar)" }
+        Write-CCBLog info bridge 'Message box content does not match the prompt' @{ expected = $expected; actual = $actual }; throw "message box holds $actual characters, expected $expected"
+    }
     Write-CCBLog verbose bridge 'Prompt typed into the message box' @{ chars = $expected }
 }
 

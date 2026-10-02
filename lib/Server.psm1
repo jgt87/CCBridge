@@ -11,6 +11,23 @@ $script:Mime = @{
     '.woff2' = 'font/woff2'; '.woff' = 'font/woff'
 }
 
+function Get-QueueView($State, [int]$Max = 40) {
+    <# The queue for the app, newest first, as plain objects. #>
+    $list = @($State.Queue)
+    [array]::Reverse($list)
+    foreach ($e in ($list | Select-Object -First $Max)) {
+        [pscustomobject]@{ id = $e.id; kind = $e.kind; title = $e.title; source = $e.source; status = $e.status; project = $e.project
+            created = $e.created; started = $e.started; finished = $e.finished; messages = [int]$e.messages; summary = $e.summary; error = $e.error
+            errId = $e.errId; resultPath = $e.resultPath; changed = @($e.changed | Where-Object { $_ }); jobId = $e.jobId }
+    }
+}
+
+function Get-JobView($State, $Job) {
+    $view = @{}
+    foreach ($k in @($Job.Keys)) { $view[$k] = $Job[$k] }
+    $view
+}
+
 $script:LocationCache = @{}
 function Get-ProjectLocation([string]$ProjectRoot) {
     <# The folders the project sits in, for the side panel: OneDrive, CCBridge, <project>. Cached:
@@ -51,6 +68,7 @@ function Get-StateSnapshot($State) {
         promptLimit = $State.Config.promptCharBudget
         logLevel = (Get-CCBLogLevel)
         version = [string]$State.Version
+        queue = @(Get-QueueView $State 40)
         release = $(if ($State.Build) { [string]$State.Build.version } else { [string]$State.Version })
         commit = $(if ($State.Build) { [string]$State.Build.commit } else { '' })
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
@@ -97,6 +115,60 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ((Get-Item -LiteralPath $full).Length -gt 2MB) { throw 'File is larger than 2 MB' }
             return Send-Json $Ctx @{ path = $req.QueryString['path']; text = (Read-TextFile $full).Text }
         }
+        '^GET /api/queue$' { return Send-Json $Ctx @{ queue = @(Get-QueueView $State 100) } }
+        '^POST /api/queue/cancel$' {
+            $b = Read-JsonBody $Ctx
+            $e = Get-QueueEntry $State ([string]$b.id)
+            if (-not $e) { throw "Unknown queue entry '$($b.id)'" }
+            if ($e.status -eq 'queued') { $e.status = 'cancelled'; $e.finished = (Get-Date).ToString('s') }
+            elseif ($e.status -in 'running', 'awaiting') { $e.cancelRequested = $true; $State.Cancel = $true; if ($e.jobId -and $State.Jobs[$e.jobId]) { $State.Jobs[$e.jobId].cancelled = $true } }
+            Write-CCBLog info server "Queue $($e.id) cancel requested ($($e.status))"
+            return Send-Json $Ctx @{ ok = $true; status = $e.status }
+        }
+        '^POST /api/jobs$' {
+            # Tasks from other programs (the MCP server): queued like everything else, visible in the app.
+            $b = Read-JsonBody $Ctx
+            $source = if ($b.source) { [string]$b.source } else { 'api' }
+            $id = 'job-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+            $job = [hashtable]::Synchronized(@{ id = $id; kind = [string]$b.kind; status = 'queued'; created = (Get-Date).ToString('s'); queuedSeq = $State.Seq })
+            if ($null -ne $b.workIq) { $State.WorkIq = $(if ([bool]$b.workIq) { 'on' } else { 'off' }); $State.WorkIqWarned = $false }
+            $task = switch ([string]$b.kind) {
+                'ask' {
+                    if (-not "$($b.text)".Trim()) { throw 'text is required' }
+                    @{ kind = 'ask'; jobId = $id; text = [string]$b.text; newChat = [bool]$b.newChat; source = $source }
+                }
+                'task' {
+                    $p = [string]$b.projectPath
+                    if (-not $p -or -not [IO.Path]::IsPathRooted($p)) { throw 'projectPath must be an absolute folder path' }
+                    if (-not "$($b.text)".Trim()) { throw 'text is required' }
+                    $mode = if ($b.mode) { [string]$b.mode } else { 'auto' }
+                    if (@('auto', 'plan', 'ask') -notcontains $mode) { throw 'mode must be auto, plan or ask' }
+                    $full = [IO.Path]::GetFullPath($p).TrimEnd('\')
+                    if (-not (Test-Path -LiteralPath $full)) { $null = New-Item -ItemType Directory -Path $full }
+                    $job.project = $full; $job.mode = $mode; $job.allowCommands = [bool]$b.allowCommands; $job.task = [string]$b.text
+                    @{ kind = 'chat'; jobId = $id; text = [string]$b.text; projectRoot = $full; newChat = [bool]$b.newChat; mode = $mode; noCommands = (-not [bool]$b.allowCommands); source = $source; reviewByCaller = (-not [bool]$b.copilotReview) }
+                }
+                'undo' {
+                    $p = [string]$b.projectPath
+                    if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Container)) { throw 'projectPath must be an existing folder' }
+                    @{ kind = 'undo'; jobId = $id; projectRoot = [IO.Path]::GetFullPath($p).TrimEnd('\'); source = $source }
+                }
+                'newchat' { @{ kind = 'newchat'; jobId = $id; source = $source } }
+                default { throw "Unknown job kind '$($b.kind)'" }
+            }
+            $State.Jobs[$id] = $job
+            $entry = Submit-AgentTask $State $task $source
+            return Send-Json $Ctx @{ ok = $true; job = (Get-JobView $State $job); queueId = $entry.id }
+        }
+        '^GET /api/jobs/(job-[0-9a-f]+)$' {
+            $job = $State.Jobs[$Matches[1]]
+            if (-not $job) { throw "Unknown job '$($Matches[1])'" }
+            $from = if ($null -ne $job.startSeq) { [int]$job.startSeq } else { [int]$job.queuedSeq }
+            $events = @(Get-AgentEvents $State $from)
+            if ($null -ne $job.endSeq) { $events = @($events | Where-Object { $_.seq -le $job.endSeq }) }
+            return Send-Json $Ctx @{ job = (Get-JobView $State $job); events = $events
+                info = @{ workIq = $State.WorkIq; workIqActual = $State.WorkIqActual; throttle = $State.Throttle; credits = $State.Credits; seq = $State.Seq } }
+        }
         '^GET /api/runbooks$' {
             # @(if ...): an if expression would unroll a list of one into a single object.
             $list = @(if ($State.ProjectRoot) { Get-Runbooks $State.ProjectRoot })
@@ -112,9 +184,7 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/runbooks/run$' {
             if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
             $b = Read-JsonBody $Ctx
-            if ($State.Busy) { throw 'StreamHub is still working on the previous message' }
-            $State.Busy = $true
-            $State.Tasks.Enqueue(@{ kind = 'runbook'; name = [string]$b.name })
+            $null = Submit-AgentTask $State @{ kind = 'runbook'; name = [string]$b.name } 'user'
             return Send-Json $Ctx @{ ok = $true }
         }
         '^GET /api/fetch$' {
@@ -131,23 +201,23 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/fetch/run$' {
             if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
             $b = Read-JsonBody $Ctx
-            if ($State.Busy) { throw 'StreamHub is still working on the previous message' }
-            $State.Busy = $true
-            $State.Tasks.Enqueue(@{ kind = 'fetch'; name = [string]$b.name })
+            $null = Submit-AgentTask $State @{ kind = 'fetch'; name = [string]$b.name } 'user'
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/chat$' {
             $b = Read-JsonBody $Ctx
             if (-not $b.text -or -not $b.text.Trim()) { throw 'Empty message' }
-            if ($State.Busy) { throw 'StreamHub is still working on the previous message' }
-            $State.Busy = $true   # set now so a quick second click is refused
-            $State.Tasks.Enqueue(@{ kind = 'chat'; text = [string]$b.text })
-            return Send-Json $Ctx @{ ok = $true }
+            # While Copilot is busy the message waits in the queue.
+            $entry = Submit-AgentTask $State @{ kind = 'chat'; text = [string]$b.text } 'user'
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
         }
         '^POST /api/approve$' {
             $b = Read-JsonBody $Ctx
-            # Who decided: the web app sends "user"; anything else calling the API is recorded as "api".
-            $by = if ($b.PSObject.Properties['by'] -and $b.by -eq 'user') { 'user' } else { 'api' }
+            # Who decided. "user" only for the StreamHub page itself: the browser adds its Origin header,
+            # which other programs (the MCP server, scripts) do not send. Microsoft 365 actions and
+            # deleting data can only be approved by "user" (Wait-Approval).
+            $fromPage = $Ctx.Request.Headers['Origin'] -eq "http://localhost:$($State.Config.port)"
+            $by = if ($fromPage -and $b.by -eq 'user') { 'user' } elseif ($b.by -eq 'mcp') { 'mcp' } else { 'api' }
             $State.Approvals[[string]$b.id] = @{ decision = [string]$b.decision; note = [string]$b.note; by = $by }
             return Send-Json $Ctx @{ ok = $true }
         }
@@ -212,10 +282,10 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^POST /api/newchat$' {
             if ($State.Busy) { $State.Cancel = $true }   # stop the current step now; the new chat follows
-            $State.Tasks.Enqueue(@{ kind = 'newchat' })
+            $null = Submit-AgentTask $State @{ kind = 'newchat' } 'user'
             return Send-Json $Ctx @{ ok = $true }
         }
-        '^POST /api/undo$'    { $State.Tasks.Enqueue(@{ kind = 'undo' }); return Send-Json $Ctx @{ ok = $true } }
+        '^POST /api/undo$'    { $null = Submit-AgentTask $State @{ kind = 'undo' } 'user'; return Send-Json $Ctx @{ ok = $true } }
         '^POST /api/stop$'    { $State.Cancel = $true; return Send-Json $Ctx @{ ok = $true } }
         '^POST /api/connect$' { $State.Tasks.Enqueue(@{ kind = 'connect' }); return Send-Json $Ctx @{ ok = $true } }
     }

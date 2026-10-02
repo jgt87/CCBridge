@@ -9,6 +9,8 @@ import SmoothTab from "@/components/kokonutui/smooth-tab";
 import type { FetchItem, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
 import { FetchPanel } from "./fetch-panel";
 import { RunbooksPanel } from "./runbooks-panel";
+import { QueuePanel } from "./queue-panel";
+import type { QueueEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface TreeNode {
@@ -197,6 +199,7 @@ export function SidePanel({
   runbookTemplates,
   onCreateRunbook,
   onRunRunbook,
+  queue,
 }: {
   files: FileInfo[];
   todos: TodoItem[];
@@ -214,11 +217,14 @@ export function SidePanel({
   runbookTemplates: RunbookTemplate[];
   onCreateRunbook: (template: string, name: string) => Promise<void>;
   onRunRunbook: (name: string) => void;
+  queue: QueueEntry[];
 }) {
   const filesPanel = <FilesPanel files={files} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />;
 
   const tasksPanel = (
-    <div className="space-y-1 p-3">
+    <div className="space-y-4 p-3">
+      <div className="space-y-1">
+      <div className="font-medium text-sm">Plan</div>
       {todos.length ? (
         todos.map((t, i) => (
           <div className="flex items-start gap-2 text-sm" key={i}>
@@ -233,6 +239,11 @@ export function SidePanel({
       ) : (
         <p className="text-muted-foreground text-sm">Copilot's plan for the current task shows up here.</p>
       )}
+      </div>
+      <div className="space-y-1.5 border-black/10 border-t pt-3 dark:border-white/10">
+        <div className="font-medium text-sm">Queue</div>
+        <QueuePanel onOpen={onOpenFile} queue={queue} />
+      </div>
     </div>
   );
 

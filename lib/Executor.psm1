@@ -121,6 +121,24 @@ function Get-CheckpointChanges {
     }
 }
 
+function Get-ChangeSetContents {
+    <# Per changed file: the contents before and after the change set, so the calling program can
+       check them (MCP tasks). Each text is cut at 200,000 characters. #>
+    param([string]$ProjectRoot, $Checkpoint)
+    foreach ($rel in @($Checkpoint.Files.Keys)) {
+        $full = Join-Path $ProjectRoot ($rel.Replace('/', '\'))
+        $old = ''
+        if ($Checkpoint.Files[$rel] -ne 'new') {
+            $b = Join-Path $Checkpoint.Dir ($rel.Replace('/', '\'))
+            if ((Test-Path -LiteralPath $b) -and -not (Test-BinaryFile $b)) { $old = (Read-TextFile $b).Text }
+        }
+        $exists = Test-Path -LiteralPath $full -PathType Leaf
+        $new = if ($exists -and -not (Test-BinaryFile $full)) { (Read-TextFile $full).Text } else { '' }
+        if ($old -ceq $new) { continue }
+        @{ path = $rel; created = ($Checkpoint.Files[$rel] -eq 'new'); deleted = (-not $exists); old = $(if ($old.Length -gt 200000) { $old.Substring(0, 200000) } else { $old }); new = $(if ($new.Length -gt 200000) { $new.Substring(0, 200000) } else { $new }) }
+    }
+}
+
 function Test-ProjectConsistency {
     <# Fixed checks on the given project files (no judgement of the code): JSON parses, PowerShell has
        no syntax errors, and local files referenced from HTML, JavaScript and CSS (href, src, fetch,
@@ -687,5 +705,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-FileOutline, Get-CheckpointChanges, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

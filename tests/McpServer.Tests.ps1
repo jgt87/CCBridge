@@ -8,6 +8,7 @@ function Start-McpServer {
     $psi.FileName = 'powershell.exe'
     $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$server`""
     $psi.UseShellExecute = $false
+$psi.EnvironmentVariables['CCBRIDGE_MCP_STANDALONE'] = '1'   # never hand the calls to a running web app
     $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
     $psi.StandardOutputEncoding = New-Object Text.UTF8Encoding($false)
     $psi.CreateNoWindow = $true
