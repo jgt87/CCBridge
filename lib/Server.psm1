@@ -111,7 +111,7 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/fetch/run$' {
             if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
             $b = Read-JsonBody $Ctx
-            if ($State.Busy) { throw 'CCBridge is still working on the previous message' }
+            if ($State.Busy) { throw 'StreamHub is still working on the previous message' }
             $State.Busy = $true
             $State.Tasks.Enqueue(@{ kind = 'fetch'; name = [string]$b.name })
             return Send-Json $Ctx @{ ok = $true }
@@ -119,7 +119,7 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/chat$' {
             $b = Read-JsonBody $Ctx
             if (-not $b.text -or -not $b.text.Trim()) { throw 'Empty message' }
-            if ($State.Busy) { throw 'CCBridge is still working on the previous message' }
+            if ($State.Busy) { throw 'StreamHub is still working on the previous message' }
             $State.Busy = $true   # set now so a quick second click is refused
             $State.Tasks.Enqueue(@{ kind = 'chat'; text = [string]$b.text })
             return Send-Json $Ctx @{ ok = $true }
@@ -284,7 +284,7 @@ function Start-CCBridgeServer {
     $listener.Prefixes.Add("http://localhost:$port/")
     $listener.Start()
     $url = "http://localhost:$port/"
-    Write-Host "CCBridge is running at $url  (Ctrl+C to stop)"
+    Write-Host "StreamHub is running at $url  (Ctrl+C to stop)"
     Write-Host "Log: $(Get-CCBLogDir) (level $(Get-CCBLogLevel))"
     Write-CCBLog info server "Web app started on $url" (Get-CCBridgeEnvironment $appRoot)
     $State.PreviewPort = $port   # the page check can open project pages through this server
@@ -328,7 +328,7 @@ function Start-CCBridgeServer {
         $listener.Stop()
         if ($handle.AsyncWaitHandle.WaitOne(5000)) { $worker.EndInvoke($handle) | Out-Null }
         $worker.Dispose(); $rs.Dispose()
-        Write-Host 'CCBridge stopped.'
+        Write-Host 'StreamHub stopped.'
     }
 }
 

@@ -220,7 +220,7 @@ function Use-CopilotLock([scriptblock]$Body) {
     $owned = $false
     try {
         try { $owned = $mutex.WaitOne([TimeSpan]::FromMinutes(15)) } catch [Threading.AbandonedMutexException] { $owned = $true }
-        if (-not $owned) { throw 'Copilot is busy with another CCBridge task (waited 15 minutes).' }
+        if (-not $owned) { throw 'Copilot is busy with another StreamHub task (waited 15 minutes).' }
         & $Body
     } finally {
         if ($owned) { $mutex.ReleaseMutex() }
@@ -823,14 +823,14 @@ function Complete-StreamReply {
         Text = $text; ServerText = $(if ($bot) { $bot.text } else { $text }); Uncertain = $(if ($how -eq 'page page') { 1 } else { $S.Merger.Uncertain })
         SentText = $SentPrompt; SentMatches = $true
         Result = $(if ($S.Result -and $S.Result.value) { "$($S.Result.value)" } else { 'Success' })
-        ResultMessage = $(if ($S.Result -and $S.Result.message) { "$($S.Result.message)" } else { "StreamHub, $how" })
+        ResultMessage = $(if ($S.Result -and $S.Result.message) { "$($S.Result.message)" } else { "stream connection, $how" })
         ConversationId = $null; Throttling = $S.Throttling
         Metering = $(if ($S.Result) { @($S.Result.meteringInformation)[0] } else { $null })
         References = @(if ($bot) { Get-ReplyReferences $bot })
         ProposedActions = @(try { Get-ProposedActions $item } catch { })
         ActionClaims = @(Get-ActionClaims $text); Source = 'streamhub'
     }
-    Write-CCBLog verbose bridge 'Reply received over StreamHub' @{ ms = $Ms; end = $S.Why; text = $how; items = $S.Items; chars = $text.Length; result = $reply.Result
+    Write-CCBLog verbose bridge 'Reply received over the Copilot stream connection' @{ ms = $Ms; end = $S.Why; text = $how; items = $S.Items; chars = $text.Length; result = $reply.Result
         chat = "$($S.Throttling.numUserMessagesInConversation)/$($S.Throttling.maxNumUserMessagesInConversation)"; fields = @($S.Keys | Sort-Object) }
     $reply
 }
@@ -871,7 +871,7 @@ function Get-ReplyTimelineSummary {
     $stopOff = if ($stopOn) { @($pages | Where-Object { $_.at -gt $stopOn[0].at -and "$($_.data)" -match 'stop=False' } | Select-Object -First 1) } else { @() }
     $text1 = @($pages | Where-Object { "$($_.data)" -match 'len=[1-9]' } | Select-Object -First 1)
     $ret = @($tl.Events | Where-Object what -eq 'returned' | Select-Object -First 1)
-    $hub = @($tl.Events | Where-Object { $_.what -match '^first (Chathub|StreamHub) frame$' } | Sort-Object at | Select-Object -First 1)
+    $hub = @($tl.Events | Where-Object { $_.what -match '^first (Chathub|stream connection) frame$' } | Sort-Object at | Select-Object -First 1)
     $lastHub = @($tl.Sockets.Values | Where-Object { $_.url -match '(?i)chathub|streamhub' -and $_.last } | ForEach-Object { $_.last } | Sort-Object | Select-Object -Last 1)
     $o = [ordered]@{
         sentAt = $t0.ToString('HH:mm:ss.fff')
@@ -1030,7 +1030,7 @@ function Send-CopilotPromptUnlocked {
                     if (-not $placeholder -and $ptext.Trim() -and ($ptext -replace '\s', '') -ne ($Text -replace '\s', '')) {
                         Write-CCBLog info bridge "Reply read from the page ($($pt.how)); no completion arrived over the Chathub socket" @{ chars = $ptext.Length; hubChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; ms = $sendWatch.ElapsedMilliseconds }
                         Write-NetTrace $net 'reply read from the page'
-                        if ($stream.Items) { Write-CCBLog info bridge 'StreamHub carried the reply but its end was not recognised' @{ items = $stream.Items; fields = @($stream.Keys | Sort-Object) } }
+                        if ($stream.Items) { Write-CCBLog info bridge 'The Copilot stream connection carried the reply but its end was not recognised' @{ items = $stream.Items; fields = @($stream.Keys | Sort-Object) } }
                         Add-TimelineEvent $Bridge 'returned' "page ($($pt.how))"
                         if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
                         return [pscustomobject]@{ Cancelled = $false; Text = $ptext; ServerText = $ptext; Uncertain = $(if ($pt.how -eq 'state') { 0 } else { 1 })
@@ -1117,7 +1117,7 @@ function Send-CopilotPromptUnlocked {
         $frames.Add($payload)
         if ($kind -eq 'stream') {
             # StreamHub (primary where the tenant uses it): its end-of-reply ends the wait at once.
-            if ($frames.Count -eq 1 -or $stream.Items -eq 0) { Add-TimelineEvent $Bridge 'first StreamHub frame' $null $(if (Test-Timeline $Bridge) { Get-BrowserTime $Bridge.Timeline $m }) }
+            if ($frames.Count -eq 1 -or $stream.Items -eq 0) { Add-TimelineEvent $Bridge 'first stream connection frame' $null $(if (Test-Timeline $Bridge) { Get-BrowserTime $Bridge.Timeline $m }) }
             foreach ($rec in Read-HubRecords $payload) {
                 if ($myInvocation -and $null -ne $rec.invocationId -and [string]$rec.invocationId -ne $myInvocation) { continue }
                 # Handshakes ({}) and keep-alive pings (type 6) are not part of a reply.
@@ -1128,11 +1128,11 @@ function Send-CopilotPromptUnlocked {
                 $reply = Complete-StreamReply $Bridge $stream $pageBefore $Text $sendWatch.ElapsedMilliseconds
                 if ($reply) {
                     if ($Bridge.SaveFrames) { Save-ReplyFrames $frames }
-                    Write-NetTrace $net 'reply over StreamHub'
-                    Add-TimelineEvent $Bridge 'returned' "StreamHub ($($reply.ResultMessage))"
+                    Write-NetTrace $net 'reply over the Copilot stream connection'
+                    Add-TimelineEvent $Bridge 'returned' "stream connection ($($reply.ResultMessage))"
                     return $reply
                 }
-                Write-CCBLog verbose bridge 'StreamHub signalled an end that the page does not confirm; waiting' @{ why = $stream.Why; items = $stream.Items }
+                Write-CCBLog verbose bridge 'The Copilot stream connection signalled an end that the page does not confirm; waiting' @{ why = $stream.Why; items = $stream.Items }
                 $stream.Done = $false
             }
             continue

@@ -1,5 +1,7 @@
 # CCBridge - instructions for coding agents
 
+> Product name shown to people: **StreamHub** (UI, messages, README, releases). The code, scripts, data folder (`%LOCALAPPDATA%\CCBridge`), projects folder (`OneDrive\CCBridge`), MCP id (`ccbridge`) and the repository keep the name CCBridge. In visible texts and logs, Microsoft's own reply endpoint (`m365Copilot/StreamHub`) is called the "Copilot stream connection" so the two never get confused.
+
 CCBridge is a zero-install coding harness that uses Microsoft 365 Copilot Chat (in Edge) as its model. It ships two front ends over one engine:
 - **Web app**: `ccbridge.ps1` / `start.cmd` serves `ui/` on http://localhost:8765 (projects must be under OneDrive).
 - **MCP server**: `mcp/ccbridge-mcp.ps1` (stdio), so MCP clients can offload work to Copilot (any project folder).

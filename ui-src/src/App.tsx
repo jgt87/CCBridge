@@ -114,7 +114,7 @@ export default function App() {
         }
         setError("");
       } catch (e) {
-        setError(`Lost contact with CCBridge: ${(e as Error).message}. Is the PowerShell window still open?`);
+        setError(`Lost contact with StreamHub: ${(e as Error).message}. Is the PowerShell window still open?`);
       }
       if (!stop) timer = window.setTimeout(tick, 400);
     };
@@ -277,8 +277,8 @@ export default function App() {
           </button>
         )}
         <div className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background text-xs">CC</span>
-          CCBridge
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background text-xs">SH</span>
+          StreamHub
         </div>
         {state.project && (
           <button
@@ -380,9 +380,9 @@ export default function App() {
             {state.version && (
               <div
                 className="flex shrink-0 items-center gap-2 px-1 pt-2 text-muted-foreground text-xs"
-                title="Installed CCBridge release and the commit it was built from; updates install automatically at start (or run update.cmd)"
+                title="Installed StreamHub release and the commit it was built from; updates install automatically at start (or run update.cmd)"
               >
-                <span>CCBridge {state.release || state.version}</span>
+                <span>StreamHub {state.release || state.version}</span>
                 {state.commit && (
                   <>
                     <span aria-hidden className="h-3 w-px bg-black/15 dark:bg-white/20" />
@@ -414,7 +414,7 @@ export default function App() {
                         <div className="max-w-md space-y-1">
                           <p className="font-medium">What should we build in {state.project?.name}?</p>
                           <p className="text-muted-foreground text-sm">
-                            Describe the change. Copilot reads the project, proposes edits and commands, and CCBridge applies them after your approval.
+                            Describe the change. Copilot reads the project, proposes edits and commands, and StreamHub applies them after your approval.
                             Type <span className="font-mono">@</span> or use the @ button to attach files.
                           </p>
                         </div>
@@ -466,7 +466,7 @@ export default function App() {
                         </span>
                       )}
                       {state.throttle.max > 0 && (
-                        <span className="text-muted-foreground" title="Messages used in this Copilot chat; CCBridge starts a new chat with a summary before the limit">
+                        <span className="text-muted-foreground" title="Messages used in this Copilot chat; StreamHub starts a new chat with a summary before the limit">
                           {state.throttle.used}/{state.throttle.max}
                         </span>
                       )}

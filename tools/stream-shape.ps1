@@ -17,7 +17,7 @@ param([int]$Count = 3, [string]$OutRoot = 'C:\temp')
 $ErrorActionPreference = 'Stop'
 $dir = Join-Path $env:LOCALAPPDATA 'CCBridge\replies'
 $files = @(Get-ChildItem $dir -Filter *.jsonl -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First $Count)
-if (-not $files.Count) { Write-Host 'No reply recordings found. Ask Copilot something in CCBridge first, then run this again.' -ForegroundColor Yellow; exit 1 }
+if (-not $files.Count) { Write-Host 'No reply recordings found. Ask Copilot something in StreamHub first, then run this again.' -ForegroundColor Yellow; exit 1 }
 
 $sep = [char]0x1e
 function Get-Shape($Value) {

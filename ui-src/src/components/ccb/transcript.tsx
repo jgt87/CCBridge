@@ -175,7 +175,7 @@ function NoteLine({ tone, text }: { tone: NoteTone; text: string }) {
 function ErrorNote({ item }: { item: Extract<TranscriptItem, { kind: "error" }> }) {
   const [copied, setCopied] = useState(false);
   const details = [
-    `CCBridge ${item.version ?? ""} | error ${item.errId ?? "-"} | ${item.time} | ${item.code ?? "UNEXPECTED"}`,
+    `StreamHub ${item.version ?? ""} | error ${item.errId ?? "-"} | ${item.time} | ${item.code ?? "UNEXPECTED"}`,
     item.text,
     item.hint ? `What to do: ${item.hint}` : "",
     item.detail ? `Detail:\n${item.detail}` : "",

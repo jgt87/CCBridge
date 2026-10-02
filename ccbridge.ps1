@@ -76,7 +76,7 @@ try {
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $stopped += $_.ProcessId }
 } catch { }
 if ($stopped.Count) {
-    Write-Host "Stopped the CCBridge that was already running (process $($stopped -join ', ')), so this version starts."
+    Write-Host "Stopped the StreamHub that was already running (process $($stopped -join ', ')), so this version starts."
     # Wait until the port is free again.
     $until = (Get-Date).AddSeconds(10)
     do {
@@ -89,15 +89,15 @@ if ($stopped.Count) {
 # Still answering (for example another user's instance)? Then just open it instead of failing on the busy port.
 try {
     $page = Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 3
-    if ($page.Content -match '<title>CCBridge</title>') {
-        Write-Host "CCBridge is already running at $url - opening it."
+    if ($page.Content -match '<title>(CCBridge|StreamHub)</title>') {
+        Write-Host "StreamHub is already running at $url - opening it."
         if (-not $NoBrowser) { Start-Process $url }
         return
     }
-    throw "Port $($config.port) is used by another program. Start CCBridge on another port: ccbridge.ps1 -Port 8766"
+    throw "Port $($config.port) is used by another program. Start StreamHub on another port: ccbridge.ps1 -Port 8766"
 } catch [System.Net.WebException] {
     # No response at all: nothing is listening, so start normally.
-    if ($_.Exception.Response) { throw "Port $($config.port) is used by another program. Start CCBridge on another port: ccbridge.ps1 -Port 8766" }
+    if ($_.Exception.Response) { throw "Port $($config.port) is used by another program. Start StreamHub on another port: ccbridge.ps1 -Port 8766" }
 }
 Import-Module (Join-Path $root 'lib\Log.psm1')
 Initialize-CCBLog -Level $LogLevel -Config $config

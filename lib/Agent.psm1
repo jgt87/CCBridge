@@ -129,7 +129,7 @@ function Get-Bridge($State) {
             if ($bad.Count) {
                 $what = ($bad | ForEach-Object { "$($_.part) (selectors.$($_.setting): $($_.note))" }) -join '; '
                 $State.CopilotMessage = "Page check: $what"
-                Add-AgentEvent $State 'status' @{ text = "Copilot page check: $what. Copilot's page may have changed; CCBridge may not be able to $(if (@($bad | Where-Object needed).Count) { 'type or send prompts' } else { 'start new chats or read replies reliably' }). Run capture.cmd and send the report to update the selectors." }
+                Add-AgentEvent $State 'status' @{ text = "Copilot page check: $what. Copilot's page may have changed; StreamHub may not be able to $(if (@($bad | Where-Object needed).Count) { 'type or send prompts' } else { 'start new chats or read replies reliably' }). Run capture.cmd and send the report to update the selectors." }
             }
         } catch { Write-CCBLogError agent 'Copilot page check failed' $_ }
         $script:Bridge
@@ -178,7 +178,7 @@ function Send-ToCopilot {
             # Later in a chat the conversation cannot be resumed: the next message starts a new chat.
             $State.NeedNewChat = $true
             Reset-Bridge $State
-            throw "The connection to the Copilot tab was lost ($($_.Exception.Message)). CCBridge reconnects; send your message again (it starts a new Copilot chat)."
+            throw "The connection to the Copilot tab was lost ($($_.Exception.Message)). StreamHub reconnects; send your message again (it starts a new Copilot chat)."
         }
         Reset-Bridge $State   # the next send reconnects
         throw
@@ -418,7 +418,7 @@ function Start-NewChat($State) {
     catch {
         if ("$($_.Exception.Message)" -match 'the page shows a sign-in page') {
             # The organisation asks to sign in again (for example multi-factor authentication).
-            Add-AgentEvent $State 'status' @{ text = 'Copilot asks you to sign in again. Complete the sign-in in the Copilot window in Edge; CCBridge waits up to 5 minutes.' }
+            Add-AgentEvent $State 'status' @{ text = 'Copilot asks you to sign in again. Complete the sign-in in the Copilot window in Edge; StreamHub waits up to 5 minutes.' }
             $State.Copilot = 'connecting'; $State.CopilotMessage = 'Waiting for you to sign in to Copilot in Edge'
             $ok = Wait-CopilotSignIn (Get-Bridge $State) 300
             $State.Copilot = $(if ($ok) { 'ready' } else { 'error' }); $State.CopilotMessage = $(if ($ok) { '' } else { 'Sign-in was not completed' })
@@ -619,7 +619,7 @@ function Invoke-AgentAction {
             $why = $risk.reasons -join ', '
             if ($State.Headless) {
                 Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = "refused: this command $why; that needs a person to approve it" })
-                Add-AgentEvent $State 'human-required' @{ text = "Copilot wanted to run a command that $why. CCBridge does not run such commands without a person approving them. Command: $($evt.target)" }
+                Add-AgentEvent $State 'human-required' @{ text = "Copilot wanted to run a command that $why. StreamHub does not run such commands without a person approving them. Command: $($evt.target)" }
                 return @{ ok = $false; summary = 'run refused (needs a person)'; output = "not executed: this command $why. Microsoft 365 actions and deleting data always need a person. Do not try a workaround; prepare the change and tell the user what to run themselves." }
             }
             $needsApproval = $true
@@ -669,7 +669,7 @@ function Invoke-AgentAction {
                 $out = "$status`n~~~~`n$($r.output)`n~~~~"
                 $fixed = @(Restore-SourceData $root)
                 if ($fixed.Count) {
-                    Add-AgentEvent $State 'status' @{ text = "Source data is read-only; CCBridge undid what the command did to it: " + ($fixed -join '; ') }
+                    Add-AgentEvent $State 'status' @{ text = "Source data is read-only; StreamHub undid what the command did to it: " + ($fixed -join '; ') }
                     $out += "`nNote: source/ is the user's read-only source data. This command changed it, so it was put back: " + ($fixed -join '; ') + '. Work on copies outside source/.'
                 }
                 return @{ ok = (-not $r.timedOut -and -not $r.cancelled -and $r.exitCode -eq 0); summary = "ran: $status"; output = $out }
@@ -743,11 +743,11 @@ function Invoke-AgentTurn {
             }
             if (@($r.ProposedActions).Count) {
                 $what = (@($r.ProposedActions) | ForEach-Object { $_.title } | Where-Object { $_ } | Select-Object -Unique) -join '; '
-                Add-AgentEvent $State 'human-required' @{ text = "Copilot proposed an action in Microsoft 365 ($what). CCBridge never confirms Microsoft 365 actions. Look at it in the Copilot window in Edge and confirm or cancel it yourself; the task has stopped here." }
+                Add-AgentEvent $State 'human-required' @{ text = "Copilot proposed an action in Microsoft 365 ($what). StreamHub never confirms Microsoft 365 actions. Look at it in the Copilot window in Edge and confirm or cancel it yourself; the task has stopped here." }
                 break
             }
             foreach ($claim in @($r.ActionClaims)) {
-                Add-AgentEvent $State 'human-required' @{ text = "Copilot's reply says: ""$claim"" CCBridge did not confirm any Microsoft 365 action. Check Outlook / Teams if this is unexpected." }
+                Add-AgentEvent $State 'human-required' @{ text = "Copilot's reply says: ""$claim"" StreamHub did not confirm any Microsoft 365 action. Check Outlook / Teams if this is unexpected." }
             }
             if (-not $actions.Count) {
                 if ($State.LastTurnActed -ne $true) { $State.LastTurnActed = $false }
@@ -763,7 +763,7 @@ function Invoke-AgentTurn {
                     continue
                 }
                 if ($nudges -ge $maxRetries -and $effectiveKind -in 'coding', 'project', 'mixed' -and $State.Mode -ne 'plan') {
-                    Add-AgentEvent $State 'status' @{ text = "Copilot still explained instead of changing the files after $nudges attempts, so CCBridge stopped asking. Try a New chat, or phrase the request as a direct instruction (for example: ""Edit index.html so that ..."")." }
+                    Add-AgentEvent $State 'status' @{ text = "Copilot still explained instead of changing the files after $nudges attempts, so StreamHub stopped asking. Try a New chat, or phrase the request as a direct instruction (for example: ""Edit index.html so that ..."")." }
                 }
                 break
             }
@@ -833,7 +833,7 @@ function Invoke-AgentTurn {
         Write-CCBLog info agent "Turn finished" @{ ms = $turnWatch.ElapsedMilliseconds; chat = "$($State.Throttle.used)/$($State.Throttle.max)"; cancelled = [bool]$State.Cancel }
         try {
             $fixed = @(Restore-SourceData $State.ProjectRoot)
-            if ($fixed.Count) { Add-AgentEvent $State 'status' @{ text = 'Source data is read-only; CCBridge undid changes to it: ' + ($fixed -join '; ') } }
+            if ($fixed.Count) { Add-AgentEvent $State 'status' @{ text = 'Source data is read-only; StreamHub undid changes to it: ' + ($fixed -join '; ') } }
         } catch { Add-AgentEvent $State 'error' @{ text = "Could not verify source data: $($_.Exception.Message)" } }
         if (-not $checkpoint.Files.Count) { Remove-Item $checkpoint.Dir -Recurse -Force -ErrorAction SilentlyContinue }
         else { Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys) } }

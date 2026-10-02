@@ -27,7 +27,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode; area: string
         <p className="font-medium text-rose-500">Something in the {this.props.area} could not be shown.</p>
         <p className="mt-1 break-words font-mono text-muted-foreground text-xs">{this.state.error.message}</p>
         <p className="mt-2 text-muted-foreground text-xs">
-          The details were written to the CCBridge log; Menu, Export diagnostics includes them.
+          The details were written to the StreamHub log; Menu, Export diagnostics includes them.
         </p>
         <div className="mt-3 flex gap-2">
           <button className="rounded-md bg-black/5 px-3 py-1.5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15" onClick={() => this.setState({ error: null })} type="button">
