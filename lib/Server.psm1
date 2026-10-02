@@ -123,6 +123,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ($e.status -eq 'queued') { $e.status = 'cancelled'; $e.finished = (Get-Date).ToString('s') }
             elseif ($e.status -in 'running', 'awaiting') { $e.cancelRequested = $true; $State.Cancel = $true; if ($e.jobId -and $State.Jobs[$e.jobId]) { $State.Jobs[$e.jobId].cancelled = $true } }
             Write-CCBLog info server "Queue $($e.id) cancel requested ($($e.status))"
+            Save-AgentQueue $State
             return Send-Json $Ctx @{ ok = $true; status = $e.status }
         }
         '^POST /api/jobs$' {

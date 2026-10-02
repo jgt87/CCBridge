@@ -81,8 +81,9 @@ function Undo-LastCheckpoint {
         $files = Get-Content $manifest -Raw | ConvertFrom-Json
         $restored = @()
         foreach ($p in $files.PSObject.Properties) {
-            $full = Resolve-ProjectPath $ProjectRoot $p.Name
-            if ($p.Value -eq 'new') { if (Test-Path $full) { Remove-Item -LiteralPath $full -Force } }
+            # Resolve-ProjectPath refuses paths outside the project, also through links.
+            $full = try { Resolve-ProjectPath $ProjectRoot $p.Name } catch { Write-CCBLog info exec "Undo skipped $($p.Name): $($_.Exception.Message)"; continue }
+            if ($p.Value -eq 'new') { if (Test-Path -LiteralPath $full -PathType Leaf) { Remove-Item -LiteralPath $full -Force } }
             else { Copy-Item -LiteralPath (Join-Path $cp.FullName ($p.Name.Replace('/', '\'))) -Destination $full -Force }
             $restored += $p.Name
         }
@@ -753,6 +754,104 @@ $script:DestructiveCommandPatterns = @(
     @{ re = '\bgit\s+(clean\s+-[a-z]*f|reset\s+--hard|push\s+.*--force)'; why = 'discards data in git' }
 )
 
+# Commands that delete or move files (cmd, PowerShell and their aliases, Unix-style tools).
+$script:DeleteVerbs = '(?i)^(del|erase|rd|rmdir|rm|ri|move|mv|mi|Remove-Item|Move-Item|Clear-Content|clc|Clear-Item|cli|Remove-ItemProperty|rp|Clear-RecycleBin|unlink|shred)$'
+# Deleting from code: Python, Node, .NET, PowerShell methods.
+$script:CodeDeletePattern = '(?i)shutil\.(rmtree|move)|os\.(remove|unlink|rmdir|removedirs|rename|replace)\b|\.unlink\(|\.rmdir\(|\bfs(Promises)?\.(rm|rmSync|unlink|unlinkSync|rmdir|rmdirSync|rename|renameSync)\b|rimraf|\[(System\.)?IO\.(File|Directory|FileInfo|DirectoryInfo)\]::(Delete|Move)|\.(Delete|MoveTo)\(|Remove-Item|Move-Item'
+$script:FolderChange = '(?i)^(cd|chdir|pushd|popd|Set-Location|sl|Push-Location|Pop-Location)$|^cd\.\.|^cd\\'
+$script:CmdSwitch = '(?i)^/(s|q|f|p|y|-y|e|a(:\S*)?|mir|purge|mov|move|xd|xf|xo|xx|xc|xn|xl|nfl|ndl|njh|njs|np|nc|ns|ts|fp|r:\d+|w:\d+|mt(:\d+)?|z|b|l|copy:\S+|dcopy:\S+|xj|xjd|xjf|sl|v|create|is|it)$'
+$script:ScriptExt = '(?i)\.(ps1|psm1|cmd|bat|py|pyw|js|mjs|cjs)$'
+
+function Split-CommandGroups([string]$Command) {
+    <# Command text as groups of tokens, quotes respected: a group ends at & && || ; or a new line;
+       a pipe stays inside the group as the token |. Quotes are kept on the tokens. #>
+    $groups = New-Object System.Collections.Generic.List[object]
+    $cur = New-Object System.Collections.Generic.List[string]
+    $tok = New-Object Text.StringBuilder
+    $quote = [char]0
+    $flushTok = { if ($tok.Length) { $cur.Add($tok.ToString()); [void]$tok.Clear() } }
+    $flushGroup = { & $flushTok; if ($cur.Count) { $groups.Add($cur.ToArray()); $cur.Clear() } }
+    foreach ($ch in $Command.ToCharArray()) {
+        if ($quote) { [void]$tok.Append($ch); if ($ch -eq $quote) { $quote = [char]0 }; continue }
+        if ($ch -eq '"' -or $ch -eq "'") { $quote = $ch; [void]$tok.Append($ch); continue }
+        if ($ch -eq "`n" -or $ch -eq "`r" -or $ch -eq ';' -or $ch -eq '&') { & $flushGroup; continue }
+        if ($ch -eq '|') { & $flushTok; if ($cur.Count -and $cur[$cur.Count - 1] -eq '|') { $cur.RemoveAt($cur.Count - 1); & $flushGroup } else { $cur.Add('|') }; continue }
+        if ($ch -eq ' ' -or $ch -eq "`t") { & $flushTok; continue }
+        [void]$tok.Append($ch)
+    }
+    & $flushGroup
+    $groups.ToArray()
+}
+
+function Test-ScopedPath([string]$ProjectRoot, [string]$Token) {
+    <# Why a path written in a deleting command is not safely inside the project, or $null. #>
+    $t = $Token.Trim().Trim('"', "'").TrimEnd(';', ',', ')').TrimStart('(')
+    if (-not $t -or $t -eq '|' -or $t -match '^\d?>|^<' -or $t -match '(?i)^nul$') { return $null }
+    if ($t -match '[$%!`]' -or $t.StartsWith('~')) { return "'$t' uses a variable, so the target cannot be checked" }
+    $root = $ProjectRoot.TrimEnd('\')
+    $p = $t.Replace('/', '\') -replace '[*?]', 'x'
+    $full = try { [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $root $p })).TrimEnd('\') } catch { return "'$t' is not a path that can be checked" }
+    if ($full -eq $root) { return "'$t' is the project folder itself" }
+    if (-not $full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { return "'$t' is outside the project folder" }
+    try { Assert-NoOutsideLink $root $full $t } catch { return "'$t' goes through a link to a folder outside the project" }
+    $null
+}
+
+function Test-DeleteScope {
+    <# Hard boundary for commands: files may only be deleted or moved inside the project folder.
+       Returns why a command is refused, or $null. No approval overrides it. A command that deletes
+       or moves must name its targets as plain paths inside the project (relative or absolute):
+       no .., no variables, no changing folders first, no encoded commands. Deleting code inside
+       python -c / node -e / -Command text, and in project scripts the command runs, is checked
+       the same way (its quoted paths). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command, [int]$Depth = 0)
+    if ($Command -match '(?i)(^|\s)-(e|ec|enc|encodedcommand)\s+[A-Za-z0-9+/=]{16,}') { return 'it contains an encoded command, which cannot be checked' }
+    $groups = @(Split-CommandGroups $Command)
+    $all = @($groups | ForEach-Object { $_ })
+    $deletes = $false
+    foreach ($g in $groups) {
+        $verbs = @($g | Where-Object { ($_ -replace '^@', '') -match $script:DeleteVerbs })
+        $isGit = ($g -contains 'git') -and (@($g | Where-Object { $_ -in 'clean', 'rm', 'mv' }).Count -gt 0)
+        $isRobo = ($g | Where-Object { $_ -match '(?i)^robocopy(\.exe)?$' }) -and ($g | Where-Object { $_ -match '(?i)^/(mir|purge|mov|move)$' })
+        if (-not ($verbs.Count -or $isGit -or $isRobo)) { continue }
+        $deletes = $true
+        foreach ($t in $g) {
+            if ($t -match '^-' -or $t -match $script:CmdSwitch) { continue }
+            $why = Test-ScopedPath $ProjectRoot $t
+            if ($why) { return "it deletes or moves files and $why" }
+        }
+    }
+    # Code that deletes: every quoted path in it must be inside, and no paths from variables.
+    if ($Command -match $script:CodeDeletePattern) {
+        $deletes = $true
+        if ($Command -match '(?i)os\.environ|getenv|expanduser|process\.env|homedir\(|\$env:|%\w+%|GetFolderPath|\[Environment\]::') { return 'it deletes or moves files using a path from the environment, which cannot be checked' }
+        # Each quoted string on its own (double- and single-quoted separately); a string that wraps
+        # code (contains the other quote or ;) is skipped, as its own strings are checked.
+        $strings = @([regex]::Matches($Command, '"([^"\r\n]*)"') | ForEach-Object { $_.Groups[1].Value }) + @([regex]::Matches($Command, '''([^''\r\n]*)''') | ForEach-Object { $_.Groups[1].Value })
+        foreach ($s in $strings) {
+            if ($s -match '["'';]') { continue }
+            if ($s -notmatch '[\\/]|^\.\.?$' -and -not [IO.Path]::IsPathRooted($s)) { continue }   # only path-like strings
+            if ($s -match '^\w+://') { continue }
+            $why = Test-ScopedPath $ProjectRoot $s
+            if ($why) { return "it deletes or moves files and $why" }
+        }
+    }
+    if ($deletes -and @($all | Where-Object { $_ -match $script:FolderChange -or $_ -match '(?i)^--(work-tree|git-dir)' }).Count) { return 'it changes folder before deleting or moving files, so the targets cannot be checked' }
+    if ($deletes -and ($all -contains 'git') -and ($all -contains '-C')) { return 'it runs git in another folder while deleting or moving files' }
+    # Project scripts the command runs: the same check on their contents (one level deep).
+    if ($Depth -lt 1) {
+        foreach ($t in $all) {
+            $p = $t.Trim('"', "'")
+            if ($p -notmatch $script:ScriptExt) { continue }
+            $full = try { Resolve-ProjectPath $ProjectRoot $p } catch { $null }
+            if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf) -or (Get-Item -LiteralPath $full).Length -gt 500000) { continue }
+            $why = Test-DeleteScope $ProjectRoot ([IO.File]::ReadAllText($full)) ($Depth + 1)
+            if ($why) { return "the script $p $why" -replace "the script $([regex]::Escape($p)) it ", "the script $p " }
+        }
+    }
+    $null
+}
+
 function Get-CommandRisk {
     <# Returns @{ m365 = bool; destructive = bool; reasons = string[] } for a shell command. #>
     param([string]$Command)
@@ -813,5 +912,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

@@ -22,6 +22,7 @@ function New-AgentState {
         PreviewToken = [guid]::NewGuid().ToString('N'); PreviewPort = 0   # page check: project served read-only at /preview/<token>/
         Queue = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList))   # every task, whatever started it (Submit-AgentTask)
         CurrentQueueId = $null; MessagesSent = 0; NoCommands = $false
+        QueueFile = $null   # set by the web app: the queue survives restarts (Save-AgentQueue / Restore-AgentQueue)
         ReviewByCaller = $false   # MCP tasks: the calling model checks the result, so no Copilot review round
         NextConnectAttempt = $null
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
@@ -223,13 +224,84 @@ function Submit-AgentTask {
     $Title = ($Title -replace '\s+', ' ').Trim(); if ($Title.Length -gt 160) { $Title = $Title.Substring(0, 157) + '...' }
     $entry = [hashtable]::Synchronized(@{ id = $id; kind = $Task.kind; title = $Title; source = $Source; status = 'queued'; created = (Get-Date).ToString('s')
         project = $(if ($Task.projectRoot) { Split-Path $Task.projectRoot -Leaf } elseif ($State.ProjectRoot) { Split-Path $State.ProjectRoot -Leaf } else { $null })
-        jobId = $Task.jobId; started = $null; finished = $null; messages = 0; summary = $null; error = $null; resultPath = $null })
+        jobId = $Task.jobId; started = $null; finished = $null; messages = 0; summary = $null; error = $null; resultPath = $null
+        projectRoot = $(if ($Task.projectRoot) { $Task.projectRoot } else { $State.ProjectRoot }) })
     $Task.queueId = $id
+    $entry.task = @{}
+    foreach ($k in $Task.Keys) { if ($k -ne 'queueId') { $entry.task[$k] = $Task[$k] } }
     [void]$State.Queue.Add($entry)
     while ($State.Queue.Count -gt 100) { $State.Queue.RemoveAt(0) }
     $State.Tasks.Enqueue($Task)
+    Save-AgentQueue $State
     Write-CCBLog info agent "Queued $id ($($Task.kind), from $Source)" @{ title = $Title }
     $entry
+}
+
+function Save-AgentQueue {
+    <# Writes the queue to $State.QueueFile (the web app sets it) so it survives a restart or an
+       update. Finished entries are kept without their task; waiting ones with it. #>
+    param($State)
+    if (-not $State.QueueFile) { return }
+    [Threading.Monitor]::Enter($State.Queue.SyncRoot)
+    try {
+        $list = foreach ($e in @($State.Queue)) {
+            $copy = @{}
+            foreach ($k in @($e.Keys)) { if ($k -ne 'task' -or $e.status -eq 'queued') { $copy[$k] = $e[$k] } }
+            $copy
+        }
+        $json = ConvertTo-Json -InputObject @($list) -Depth 6 -Compress
+        $tmp = "$($State.QueueFile).tmp"
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path $State.QueueFile)
+        [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
+        if (Test-Path -LiteralPath $State.QueueFile) { [IO.File]::Replace($tmp, $State.QueueFile, [NullString]::Value) } else { [IO.File]::Move($tmp, $State.QueueFile) }
+    } catch {
+        Write-CCBLogError agent 'Could not save the queue' $_
+    } finally { [Threading.Monitor]::Exit($State.Queue.SyncRoot) }
+}
+
+function ConvertTo-PlainHash($Object) {
+    <# A JSON object (PSCustomObject) as a hashtable, one level deep. #>
+    $h = @{}
+    if ($Object) { foreach ($p in $Object.PSObject.Properties) { $h[$p.Name] = $p.Value } }
+    $h
+}
+
+function Restore-AgentQueue {
+    <# Loads the queue saved before the last stop. Waiting tasks are queued again (MCP jobs keep their
+       id, so a client polling them carries on); a task that was running when StreamHub stopped is
+       marked failed, as Copilot's work on it was cut off. Returns the number of tasks queued again. #>
+    param($State)
+    if (-not $State.QueueFile -or -not (Test-Path -LiteralPath $State.QueueFile)) { return 0 }
+    $saved = try { @(([IO.File]::ReadAllText($State.QueueFile)) | ConvertFrom-Json) } catch { Write-CCBLogError agent 'Could not read the saved queue' $_; @() }
+    $requeued = 0
+    foreach ($s in $saved) {
+        if (-not $s -or -not $s.id) { continue }
+        $e = [hashtable]::Synchronized((ConvertTo-PlainHash $s))
+        $e.changed = @($s.changed | Where-Object { $_ })
+        if ($e.status -in 'running', 'awaiting') {
+            $e.status = 'failed'; $e.finished = (Get-Date).ToString('s')
+            $e.error = 'StreamHub stopped while this task was running. Files it changed so far can be undone; send it again to finish it.'
+        }
+        if ($e.status -eq 'queued') {
+            $task = ConvertTo-PlainHash $s.task
+            if (-not $task.kind) { $e.status = 'failed'; $e.error = 'Could not be restored after the restart.'; $e.Remove('task') }
+            else {
+                if ($task.kind -eq 'chat' -and -not $task.projectRoot -and $e.projectRoot) { $task.projectRoot = $e.projectRoot }
+                $task.queueId = $e.id
+                if ($task.jobId) {
+                    $State.Jobs[$task.jobId] = [hashtable]::Synchronized(@{ id = $task.jobId; kind = $(if ($task.kind -eq 'chat') { 'task' } else { $task.kind }); status = 'queued'; created = $e.created; queuedSeq = $State.Seq; project = $task.projectRoot })
+                }
+                $e.task = $task
+                $State.Tasks.Enqueue($task)
+                $requeued++
+            }
+        }
+        [void]$State.Queue.Add($e)
+    }
+    while ($State.Queue.Count -gt 100) { $State.Queue.RemoveAt(0) }
+    Write-CCBLog info agent "Queue restored" @{ entries = $State.Queue.Count; requeued = $requeued }
+    if ($requeued) { Add-AgentEvent $State 'status' @{ text = "Picked up $requeued waiting task(s) from before the restart; they run in order (remove one in the Queue with its x)." } }
+    $requeued
 }
 
 function Get-QueueEntry($State, [string]$Id) {
@@ -673,7 +745,7 @@ function Join-Hash([hashtable]$A, [hashtable]$B) {
 function Wait-Approval {
     param($State, [string]$Id, [bool]$PersonOnly = $false)
     $entry = if ($State.CurrentQueueId) { Get-QueueEntry $State $State.CurrentQueueId } else { $null }
-    if ($entry) { $entry.status = 'awaiting' }
+    if ($entry) { $entry.status = 'awaiting'; Save-AgentQueue $State }
     try {
         while (-not $State.Cancel -and -not $State.Stop) {
             if ($State.Approvals.ContainsKey($Id)) {
@@ -688,7 +760,7 @@ function Wait-Approval {
             Start-Sleep -Milliseconds 150
         }
         @{ decision = 'reject'; note = 'cancelled' }
-    } finally { if ($entry -and $entry.status -eq 'awaiting') { $entry.status = 'running' } }
+    } finally { if ($entry -and $entry.status -eq 'awaiting') { $entry.status = 'running'; Save-AgentQueue $State } }
 }
 
 function Test-AutoRun($State, [string]$Command) {
@@ -764,6 +836,14 @@ function Invoke-AgentAction {
         $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0)
     } elseif ($Action.type -eq 'run') {
         $evt.target = $Action.body.Trim()
+        # Hard boundary: deleting or moving files only inside the project. Not even a person can
+        # approve past it.
+        $outside = Test-DeleteScope $State.ProjectRoot $evt.target
+        if ($outside) {
+            Write-CCBLog info agent 'Command refused: deletes or moves outside the project' @{ reason = $outside }
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = "refused: $outside" })
+            return @{ ok = $false; summary = 'run refused (outside the project)'; output = "not executed: $outside. Files may only be deleted or moved inside the project folder. Name each file or folder as a plain path inside the project (relative to it), without .., variables, or changing folders first." }
+        }
         $needsApproval = -not (Test-AutoRun $State $evt.target)
         $risk = Get-CommandRisk $evt.target
         if ($risk.m365 -or $risk.destructive) {
@@ -1044,7 +1124,7 @@ function Start-AgentWorker {
         }
         if ($job) { $job.status = 'running'; $job.startSeq = $State.Seq; $job.started = (Get-Date).ToString('s') }
         $fromSeq = [int]$State.Seq; $msgsBefore = [int]$State.MessagesSent
-        if ($entry) { $entry.status = 'running'; $entry.started = (Get-Date).ToString('s'); $State.CurrentQueueId = $entry.id }
+        if ($entry) { $entry.status = 'running'; $entry.started = (Get-Date).ToString('s'); $State.CurrentQueueId = $entry.id; Save-AgentQueue $State }
         # A task from another program can bring its own mode, project and command rule; the app's
         # own settings come back afterwards.
         $saved = @{ Mode = $State.Mode; ProjectRoot = $State.ProjectRoot; NoCommands = $State.NoCommands; ReviewByCaller = $State.ReviewByCaller }
@@ -1100,6 +1180,7 @@ function Start-AgentWorker {
                 try { Complete-QueueEntry $State $entry $fromSeq $msgsBefore ([bool]($job.cancelled -or $entry.cancelRequested)) } catch { Write-CCBLogError agent 'queue entry' $_ }
                 if ($job -and $job.status -eq 'error' -and $entry.status -ne 'failed') { $entry.status = 'failed'; $entry.error = $job.error }
                 Write-CCBLog info agent "Queue $($entry.id) $($entry.status)" @{ messages = $entry.messages }
+                Save-AgentQueue $State
             }
             $State.CurrentQueueId = $null
             $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller
@@ -1112,4 +1193,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Submit-AgentTask, Get-QueueEntry, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

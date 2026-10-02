@@ -51,3 +51,45 @@ Describe 'Get-ChangeSetContents (review by the calling program)' {
 
     Remove-Item $proj -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+Describe 'Queue across restarts (Save-AgentQueue / Restore-AgentQueue)' {
+    $config = Get-CCBridgeConfig harness $root
+    $file = Join-Path $env:TEMP ('ccb-queue-' + [guid]::NewGuid().ToString('N') + '.json')
+
+    It 'keeps history, queues waiting tasks again and fails the one that was running' {
+        $a = New-AgentState -Config $config -AppRoot $root
+        $a.QueueFile = $file
+        $a.ProjectRoot = 'C:\Projects\demo'
+        $done = Submit-AgentTask $a @{ kind = 'chat'; text = 'first' } 'user'
+        $run = Submit-AgentTask $a @{ kind = 'chat'; text = 'second' } 'user'
+        $wait = Submit-AgentTask $a @{ kind = 'chat'; text = 'third'; jobId = 'job-0000abcd'; projectRoot = 'C:\Projects\other'; mode = 'plan'; source = 'mcp' } 'mcp'
+        $done.status = 'done'; $done.summary = 'ok'; $done.changed = @('a.txt')
+        $run.status = 'running'
+        Save-AgentQueue $a
+        ([IO.File]::ReadAllText($file)) | Should Not Match '"text":"first"'
+
+        $b = New-AgentState -Config $config -AppRoot $root
+        $b.QueueFile = $file
+        Restore-AgentQueue $b | Should Be 1
+        $b.Queue.Count | Should Be 3
+        (Get-QueueEntry $b $done.id).status | Should Be 'done'
+        @((Get-QueueEntry $b $done.id).changed) -join ',' | Should Be 'a.txt'
+        (Get-QueueEntry $b $run.id).status | Should Be 'failed'
+        (Get-QueueEntry $b $run.id).error | Should Match 'stopped while this task was running'
+        $task = $null
+        $b.Tasks.TryDequeue([ref]$task) | Should Be $true
+        $task.text | Should Be 'third'
+        $task.queueId | Should Be $wait.id
+        $task.mode | Should Be 'plan'
+        $task.projectRoot | Should Be 'C:\Projects\other'
+        $b.Jobs['job-0000abcd'].status | Should Be 'queued'
+    }
+
+    It 'does nothing without a queue file (the MCP server''s own engine)' {
+        $s = New-AgentState -Config $config -AppRoot $root
+        $null = Submit-AgentTask $s @{ kind = 'newchat' } 'user'
+        Restore-AgentQueue $s | Should Be 0
+    }
+
+    Remove-Item $file -Force -ErrorAction SilentlyContinue
+}

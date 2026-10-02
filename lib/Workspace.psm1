@@ -88,7 +88,34 @@ function Resolve-ProjectPath {
     $root = $ProjectRoot.TrimEnd('\')
     $full = [IO.Path]::GetFullPath((Join-Path $root $rel))
     if (-not $full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw "Path is outside the project: '$RelativePath'" }
+    Assert-NoOutsideLink $root $full $RelativePath
     $full
+}
+
+function Assert-NoOutsideLink {
+    <# A junction or symbolic link inside the project can point outside it: a path through it looks
+       inside but is not. Throws when the path, or a folder on the way to it, is such a link whose
+       target is outside the project. Links that stay inside, and OneDrive's online-only
+       placeholders (no link type), are fine. #>
+    param([string]$Root, [string]$Full, [string]$Shown)
+    $root = $Root.TrimEnd('\')
+    $p = $Full.TrimEnd('\')
+    while ($p.Length -gt $root.Length) {
+        if (Test-Path -LiteralPath $p) {
+            $item = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+            if ($item -and $item.LinkType -in 'Junction', 'SymbolicLink') {
+                foreach ($t in @($item.Target)) {
+                    if (-not $t) { continue }
+                    $tf = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($t)) { $t } else { Join-Path (Split-Path -Parent $p) $t })).TrimEnd('\')
+                    if ($tf -ne $root -and -not $tf.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                        throw "Path is outside the project: '$Shown' goes through a link to $tf"
+                    }
+                }
+            }
+        }
+        $p = Split-Path -Parent $p
+        if (-not $p) { break }
+    }
 }
 
 function ConvertTo-RelativePath([string]$ProjectRoot, [string]$FullPath) {
@@ -258,6 +285,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile
