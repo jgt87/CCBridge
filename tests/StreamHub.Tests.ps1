@@ -51,3 +51,16 @@ Describe 'Add-StreamRecord' {
         $s.Done | Should Be $false
     }
 }
+Describe 'Page texts that are not an answer' {
+    $m = Get-Module CopilotBridge
+    It 'recognises usage-limit banners' {
+        (& $m { $args[0] -match $script:LimitPattern } "You've reached your daily limit. Get more usage now or check back at 2:00 AM.") | Should Be $true
+        (& $m { $args[0] -match $script:LimitPattern } 'Here is the recursion explanation.') | Should Be $false
+    }
+    It 'recognises progress placeholders but not real answers' {
+        $ell = [string][char]0x2026
+        (& $m { $args[0] -match $script:PlaceholderPattern } ('Working on it' + $ell)) | Should Be $true
+        (& $m { $args[0] -match $script:PlaceholderPattern } 'Taking a look...') | Should Be $true
+        (& $m { $args[0] -match $script:PlaceholderPattern } 'Recursion is when a function calls itself to solve smaller parts of a problem.') | Should Be $false
+    }
+}

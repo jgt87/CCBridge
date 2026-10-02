@@ -117,10 +117,72 @@ function New-CopilotChat {
 }
 
 function New-CopilotChatUnlocked {
+    <# Starts a new conversation the way a person does, with Copilot's own New chat button, so the
+       page and its connections stay alive; reloads the page only when that does not work. Then waits
+       until the page is ready to take a prompt (a prompt sent while the page is still connecting can
+       hang with a spinner forever on some tenants). #>
     param([Parameter(Mandatory)]$Bridge)
-    $null = Invoke-Cdp $Bridge.Session 'Page.navigate' @{ url = $Bridge.Selectors.chatUrl }
-    Start-Sleep -Milliseconds 500
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $how = 'reload'
+    $btnSel = Get-SelectorOrDefault $Bridge 'newChatButton' "a[aria-label='New chat' i]"
+    $reply = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'replyContainer' "[data-testid='copilot-message-reply-div']")
+    $clicked = $false
+    try {
+        $clicked = Invoke-CdpEval $Bridge.Session "(() => { const b = [...document.querySelectorAll($(ConvertTo-JsString $btnSel))].find(e => e.offsetParent !== null); if (!b) return false; b.click(); return true; })()"
+    } catch { if ($Bridge.Session.Lost) { throw } }
+    if ($clicked) {
+        # The conversation is cleared once no reply is left on the page.
+        $until = (Get-Date).AddSeconds(8)
+        do {
+            Start-Sleep -Milliseconds 200
+            $left = try { Invoke-CdpEval $Bridge.Session "document.querySelectorAll($reply).length" } catch { -1 }
+        } while ($left -ne 0 -and (Get-Date) -lt $until)
+        if ($left -eq 0) { $how = 'button' }
+    }
+    if ($how -ne 'button') {
+        $null = Invoke-Cdp $Bridge.Session 'Page.navigate' @{ url = $Bridge.Selectors.chatUrl }
+        Start-Sleep -Milliseconds 500
+    }
     if (-not (Wait-CopilotEditor $Bridge -TimeoutSec 30)) { throw 'Copilot message box did not appear after starting a new chat' }
+    $ready = Wait-CopilotReady $Bridge
+    Write-CCBLog verbose bridge "New chat ($how); page ready after $($sw.ElapsedMilliseconds) ms" $ready
+}
+
+function Wait-CopilotReady {
+    <# Waits until the page has finished its own start-up work: no requests in flight (telemetry
+       excluded) for a moment and every newly opened StreamHub/Chathub connection has answered.
+       Gives up after $MaxSec and sends anyway. Returns what it saw, for the log. #>
+    param([Parameter(Mandatory)]$Bridge, [double]$MinSec = 1.0, [double]$QuietSec = 0.7, [double]$MaxSec = 10)
+    $s = $Bridge.Session
+    $hubPattern = [regex]::Escape($Bridge.Selectors.chatHubUrlPattern)
+    $streamPattern = [regex]::Escape((Get-SelectorOrDefault $Bridge 'streamHubUrlPattern' '/StreamHub/'))
+    $noise = '(?i)browser\.events\.data\.microsoft|/OneCollector/|/events(\?|$)|/instrument/|/logclient|telemetry|/healthz'
+    $inflight = @{}; $waitingSockets = @{}; $requests = 0
+    $start = Get-Date; $lastChange = Get-Date
+    while (((Get-Date) - $start).TotalSeconds -lt $MaxSec) {
+        $m = Receive-CdpEvent $s 150
+        if ($m) {
+            $id = "$($m.params.requestId)"
+            switch ($m.method) {
+                'Network.requestWillBeSent' {
+                    if ($m.params.type -notmatch '^(WebSocket|EventSource|Ping|Other)$' -and "$($m.params.request.url)" -notmatch $noise) { $inflight[$id] = $true; $requests++; $lastChange = Get-Date }
+                }
+                'Network.loadingFinished' { if ($inflight.Remove($id)) { $lastChange = Get-Date } }
+                'Network.loadingFailed' { if ($inflight.Remove($id)) { $lastChange = Get-Date } }
+                'Network.webSocketCreated' {
+                    $kind = if ($m.params.url -match $streamPattern) { 'stream' } elseif ($m.params.url -match $hubPattern) { 'chat' } else { $null }
+                    if ($kind) { $Bridge.HubSockets[$id] = $kind; $waitingSockets[$id] = $kind; $lastChange = Get-Date }
+                }
+                'Network.webSocketFrameReceived' { if ($waitingSockets.Remove($id)) { $lastChange = Get-Date } }
+                'Network.webSocketClosed' { $null = $waitingSockets.Remove($id) }
+            }
+        }
+        $elapsed = ((Get-Date) - $start).TotalSeconds
+        if ($elapsed -ge $MinSec -and -not $inflight.Count -and -not $waitingSockets.Count -and ((Get-Date) - $lastChange).TotalSeconds -ge $QuietSec) {
+            return @{ ms = [int](((Get-Date) - $start).TotalMilliseconds); requests = $requests; timedOut = $false }
+        }
+    }
+    @{ ms = [int]($MaxSec * 1000); requests = $requests; timedOut = $true; stillLoading = $inflight.Count; socketsWaiting = @($waitingSockets.Values) }
 }
 
 function Set-CopilotWorkIq {
@@ -280,6 +342,10 @@ function New-StreamState {
     [pscustomobject]@{ Merger = (New-ReplyMerger); Items = 0; Done = $false; Why = ''; Result = $null; Throttling = $null
         Messages = $null; Keys = (New-Object 'System.Collections.Generic.HashSet[string]'); LastAt = $null }
 }
+
+# Banners that mean Copilot will not answer today, and progress texts that are not an answer.
+$script:LimitPattern = '(?i)daily limit|usage limit|reached (your|the) .{0,30}limit|out of credits|dagelijkse limiet|limiet bereikt'
+$script:PlaceholderPattern = '(?i)^(working on it|taking a look|thinking|searching|generating|one moment|bezig|even kijken)[^\n]{0,40}$'
 
 $script:StreamFinalFlags = '^(isFinal|isLast|final|isComplete|isCompleted|completed|done|isDone|endOfStream|isEnd|isLastChunk)$'
 $script:StreamStateFields = '^(state|status|messageState|streamState|phase|eventType|kind)$'
@@ -600,7 +666,8 @@ function Complete-StreamReply {
             $st = Get-PageReplyState $Bridge
             if ($st -and -not $st.stop -and (-not $PageBefore -or $st.replies -gt $PageBefore.replies)) {
                 $pt = Get-PageReplyText $Bridge
-                if ("$($pt.text)".Trim() -and ("$($pt.text)" -replace '\s', '') -ne ($SentPrompt -replace '\s', '')) { $text = "$($pt.text)"; $how = "page $($pt.how)"; break }
+                $isPlaceholder = $pt.how -ne 'state' -and ("$($pt.text)" -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
+                if (-not $isPlaceholder -and "$($pt.text)".Trim() -and ("$($pt.text)" -replace '\s', '') -ne ($SentPrompt -replace '\s', '')) { $text = "$($pt.text)"; $how = "page $($pt.how)"; break }
             }
             Start-Sleep -Milliseconds 150
         }
@@ -757,7 +824,15 @@ function Send-CopilotPromptUnlocked {
                 if ($sig -ne $Bridge.Timeline.LastPage) { $Bridge.Timeline.LastPage = $sig; Add-TimelineEvent $Bridge 'page' $sig $(if ($st.now) { [DateTimeOffset]::FromUnixTimeMilliseconds([long]$st.now).LocalDateTime } else { $null }) }
             }
             if ($st) {
-                if ($st.stop) { $sawStop = $true; $lastActivity = Get-Date }
+                if ($st.stop) { $sawStop = $true }   # a spinner that never ends must still count as a stall
+                if ($st.bar -and $st.bar -ne $pageBefore.bar -and $st.bar -match $script:LimitPattern) {
+                    Write-CCBLog info bridge 'Copilot shows a usage limit' @{ message = $st.bar; ms = $sendWatch.ElapsedMilliseconds }
+                    Add-TimelineEvent $Bridge 'returned' 'usage limit on the page'
+                    Stop-CopilotReply $Bridge -DrainSec 2
+                    return [pscustomobject]@{ Cancelled = $false; Text = ''; ServerText = $null; Uncertain = 0; SentText = $Text; SentMatches = $true
+                        Result = 'OutOfCredits'; ResultMessage = $st.bar; ConversationId = $null; Throttling = $null; Metering = $null
+                        References = @(); ProposedActions = @(); ActionClaims = @(); Source = 'page' }
+                }
                 if ($st.lastLen -ne $pageLastLen) { if ($pageLastLen -ge 0) { $lastActivity = Get-Date }; $pageLastLen = $st.lastLen; $pageDoneSince = $null }
                 $finished = -not $st.stop -and $st.replies -gt $pageBefore.replies -and $st.copies -gt $pageBefore.copies -and $st.lastLen -gt 0 -and
                     ($sawStop -or $sendWatch.Elapsed.TotalSeconds -ge 6)
@@ -769,7 +844,10 @@ function Send-CopilotPromptUnlocked {
                     # Finished on the page and stable, and no completion came over the socket.
                     $pt = Get-PageReplyText $Bridge
                     $ptext = "$($pt.text)"
-                    if ($ptext.Trim() -and ($ptext -replace '\s', '') -ne ($Text -replace '\s', '')) {
+                    # Copilot's own progress placeholders are not an answer.
+                    $placeholder = $pt.how -ne 'state' -and ($ptext -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
+                    if ($placeholder) { Write-CCBLog verbose bridge 'Page shows only a progress placeholder; still waiting' @{ chars = $ptext.Length } }
+                    if (-not $placeholder -and $ptext.Trim() -and ($ptext -replace '\s', '') -ne ($Text -replace '\s', '')) {
                         Write-CCBLog info bridge "Reply read from the page ($($pt.how)); no completion arrived over the Chathub socket" @{ chars = $ptext.Length; hubChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; ms = $sendWatch.ElapsedMilliseconds }
                         Write-NetTrace $net 'reply read from the page'
                         if ($stream.Items) { Write-CCBLog info bridge 'StreamHub carried the reply but its end was not recognised' @{ items = $stream.Items; fields = @($stream.Keys | Sort-Object) } }
@@ -897,6 +975,7 @@ function Get-PageReplyState {
     $copy = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'copyReplyButton' "button[aria-label='Copy Response' i]")
     $stop = ConvertTo-JsString $Bridge.Selectors.stopButton
     $withFlags = if ($Bridge.PSObject.Properties['Timeline'] -and $Bridge.Timeline) { 'true' } else { 'false' }
+    $bars = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'messageBar' "[data-testid^='message-bar'], [role='alert']")
     $js = @"
 (() => {
   const vis = e => e && e.offsetParent !== null;
@@ -907,6 +986,7 @@ function Get-PageReplyState {
     copies: [...document.querySelectorAll($copy)].filter(vis).length,
     stop: [...document.querySelectorAll($stop)].some(vis),
     lastLen: last ? (last.innerText || '').length : 0,
+    bar: [...document.querySelectorAll($bars)].filter(vis).map(e => (e.innerText || '').trim()).filter(Boolean).join(' | ').slice(0, 300),
     now: Date.now()
   };
   if ($withFlags && last) {

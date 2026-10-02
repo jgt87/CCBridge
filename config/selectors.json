@@ -5,6 +5,7 @@
   "stopButton": "button[aria-label*='Stop' i]",
   "chatHubUrlPattern": "/Chathub/",
   "streamHubUrlPattern": "/StreamHub/",
+  "newChatButton": "a[aria-label='New chat' i], button[aria-label='New chat' i]",
   "workIq": {
     "toggle": "",
     "stateAttribute": "aria-checked",
