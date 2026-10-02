@@ -114,9 +114,42 @@ export interface FileInfo {
   size: number;
 }
 
+// Whatever the server (and Copilot behind it) sends, the UI only ever renders strings here.
+const TEXT_FIELDS = ["text", "target", "summary", "output", "error", "warning", "status", "action", "id"] as const;
+
+function asText(v: unknown): string | undefined {
+  if (v === null || v === undefined) return undefined;
+  return typeof v === "string" ? v : typeof v === "object" ? JSON.stringify(v) : String(v);
+}
+
+export function normalizeEvent(raw: AgentEvent): AgentEvent {
+  const e = { ...raw } as AgentEvent & Record<string, unknown>;
+  for (const k of TEXT_FIELDS) if (k in e) (e as Record<string, unknown>)[k] = asText(e[k]);
+  if (e.references !== undefined) {
+    e.references = (Array.isArray(e.references) ? e.references : [])
+      .filter((r): r is Reference => !!r && typeof r === "object")
+      .map((r) => ({ title: asText(r.title) ?? null, url: asText(r.url) ?? null, kind: asText(r.kind) ?? null }));
+  }
+  if (e.items !== undefined && !Array.isArray(e.items)) e.items = [];
+  if (e.files !== undefined && !Array.isArray(e.files)) e.files = [];
+  return e;
+}
+
+/** Reports a page error to the CCBridge log (best effort). */
+export function reportClientError(message: string, detail: Record<string, unknown> = {}) {
+  fetch("/api/clientlog", {
+    method: "POST",
+    headers: { "X-CCB-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ message, ...detail }),
+  }).catch(() => {});
+}
+
 export const api = {
   poll: (after: number) =>
-    call<{ events: AgentEvent[]; state: AppState }>("GET", `/api/poll?after=${after}`),
+    call<{ events: AgentEvent[]; state: AppState }>("GET", `/api/poll?after=${after}`).then((r) => ({
+      ...r,
+      events: (Array.isArray(r.events) ? r.events : []).map(normalizeEvent),
+    })),
   projects: () => call<{ root: string; projects: ProjectInfo[] }>("GET", "/api/projects"),
   createProject: (name: string) => call<{ ok: boolean; path: string }>("POST", "/api/projects", { name }),
   openProject: (path: string) => call<{ ok: boolean }>("POST", "/api/project/open", { path }),

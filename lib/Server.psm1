@@ -129,6 +129,13 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ($b.path -and (Test-Path -LiteralPath $b.path)) { Start-Process explorer.exe "/select,`"$($b.path)`"" }
             return Send-Json $Ctx @{ ok = $true }
         }
+        '^POST /api/clientlog$' {
+            $b = Read-JsonBody $Ctx
+            $detail = @{}
+            foreach ($p in $b.PSObject.Properties) { if ($p.Name -ne 'message') { $detail[$p.Name] = $p.Value } }
+            Write-CCBLog info ui ([string]$b.message) $detail
+            return Send-Json $Ctx @{ ok = $true }
+        }
         '^POST /api/newchat$' {
             if ($State.Busy) { $State.Cancel = $true }   # stop the current step now; the new chat follows
             $State.Tasks.Enqueue(@{ kind = 'newchat' })

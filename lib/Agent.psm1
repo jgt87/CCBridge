@@ -41,6 +41,17 @@ function Add-AgentEvent {
     try {
         $State.Seq++
         $Data.seq = $State.Seq; $Data.type = $Type; $Data.time = (Get-Date).ToString('HH:mm:ss')
+        # The UI renders these as text; whatever Copilot returned, send strings (or nothing).
+        foreach ($k in 'text', 'target', 'summary', 'output', 'error', 'warning', 'status', 'action', 'id') {
+            if ($Data.ContainsKey($k) -and $null -ne $Data[$k] -and $Data[$k] -isnot [string]) {
+                $Data[$k] = if ($Data[$k] -is [ValueType]) { [string]$Data[$k] } else { ConvertTo-Json -InputObject $Data[$k] -Depth 5 -Compress }
+            }
+        }
+        if ($Data.ContainsKey('references')) {
+            $Data.references = @(@($Data.references) | Where-Object { $_ } | ForEach-Object {
+                @{ title = $(if ($null -ne $_.title) { [string]$_.title }); url = $(if ($null -ne $_.url) { [string]$_.url }); kind = $(if ($null -ne $_.kind) { [string]$_.kind }) }
+            })
+        }
         [void]$State.Events.Add($Data)
         switch ($Type) {
             'error'          { Write-CCBLog info agent "error event: $($Data.text)" }

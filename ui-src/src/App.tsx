@@ -18,6 +18,7 @@ import ActionSearchBar, { type Action } from "@/components/kokonutui/action-sear
 import AI_Prompt, { type PromptMode } from "@/components/kokonutui/ai-prompt";
 import CommandButton from "@/components/kokonutui/command-button";
 import Loader from "@/components/kokonutui/loader";
+import { ErrorBoundary } from "@/components/ccb/error-boundary";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
@@ -271,6 +272,11 @@ export default function App() {
           {/* Chat column */}
           <main className="flex min-w-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">
+              <ErrorBoundary
+                area="chat view"
+                context={() => ({ lastEvents: chatEvents.slice(-8).map((e) => ({ type: e.type, keys: Object.keys(e), refs: Array.isArray(e.references) ? e.references.length : undefined })) })}
+                key={chatEvents.length ? chatEvents[0].seq : 0}
+              >
               <Transcript
                 busy={state.busy}
                 stopping={stopping}
@@ -295,6 +301,7 @@ export default function App() {
                 items={transcript}
                 progress={state.progress}
               />
+              </ErrorBoundary>
             </div>
             <div className="shrink-0 px-4">
               <div className="mx-auto max-w-3xl">
