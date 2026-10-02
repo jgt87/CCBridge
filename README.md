@@ -73,6 +73,7 @@ Copilot works through fenced *action blocks* that CCBridge executes and answers 
 | `todo` | Updates the task checklist | automatic |
 | `done` | Ends the task with a summary | automatic |
 
+- Copilot's role follows your request: an expert software developer for coding tasks, a personal assistant for email, calendar, meetings and chats (without coding), a developer who may use Microsoft 365 data when a task has both, and a general assistant otherwise. The human-in-the-loop rules apply to every role.
 - Project instructions in `AGENTS.md` (created with each project) are sent to Copilot at the start of every chat, together with the file list.
 - Paths are confined to the project folder; existing line endings and byte-order marks are preserved.
 
@@ -136,10 +137,13 @@ or in any client's JSON config (with optional verbose logging):
   "env": { "CCBRIDGE_LOG": "verbose" } } } }
 ```
 
+The server is written for a calling model that may be small: its instructions and tool descriptions tell it, in plain words, to do only small and clear edits itself and to hand everything that needs reasoning to Copilot, preferably with the single-call `copilot_run_task`.
+
 | Tool | What it does |
 |---|---|
-| `copilot_ask` | One prompt to Copilot, returns the repaired reply and cited sources; `new_chat`, `work_iq`, `timeout_sec` |
-| `copilot_start_task` | Starts a coding task in `project_path` (created if missing) as a background job; `mode` `auto` / `plan` / `ask`, `allow_commands`, `new_chat`, `work_iq` |
+| `copilot_run_task` | **One call for a whole task**: Copilot does the task in `project_path` and the call returns the full report when it is done (waits up to `wait_sec`, default 600); same options as `copilot_start_task` |
+| `copilot_ask` | One prompt to Copilot for anything that needs reasoning (explain, root cause, review, plan, longer text); returns the repaired reply and cited sources; `new_chat`, `work_iq`, `timeout_sec` |
+| `copilot_start_task` | Same as `copilot_run_task` but returns at once with a job id, for callers that poll; `mode` `auto` / `plan` / `ask`, `allow_commands`, `new_chat`, `work_iq` |
 | `copilot_task_status` | Long-polls (up to `wait_sec`) progress, plan, actions, pending approvals with unified diffs, sources, human-required notices |
 | `copilot_approve` | Approves or rejects a pending action in `ask` mode, with an optional note for Copilot |
 | `copilot_task_result` | Full report: every action with its output, files changed, done summary, Copilot's last reply |
@@ -204,6 +208,7 @@ Settings live in `config\harness.json` and `config\selectors.json`. Put your own
 | `promptCharBudget` | 75000 | Maximum characters sent to Copilot per prompt |
 | `resultCharBudget` | 40000 | Maximum characters of action results per round |
 | `replyTimeoutSec` | 300 | Wait for one Copilot reply |
+| `stallSec` | 90 | Copilot sent nothing for this long: it hangs, so CCBridge presses Stop and reports "stopped without answering" |
 | `commandTimeoutSec` | 180 | Maximum run time of a command |
 | `rolloverMargin` | 2 | Start a fresh chat this many messages before Copilot's per-chat limit |
 | `autoApproveCommands` | `[]` | Regular expressions of commands that run without approval (never applies to risky commands) |

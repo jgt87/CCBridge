@@ -70,4 +70,5 @@ Import-Module (Join-Path $root 'lib\Log.psm1')
 Initialize-CCBLog -Level $LogLevel -Config $config
 $state = New-AgentState -Config $config -AppRoot $root
 $state.LogLevel = Get-CCBLogLevel
+$state.Version = Get-CCBridgeVersion $root
 Start-CCBridgeServer -State $state -NoBrowser:$NoBrowser

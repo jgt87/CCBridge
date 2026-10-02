@@ -40,6 +40,7 @@ function Get-StateSnapshot($State) {
         throttle = $State.Throttle; credits = $State.Credits; todos = @($State.Todos)
         promptLimit = $State.Config.promptCharBudget
         logLevel = (Get-CCBLogLevel)
+        version = [string]$State.Version
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
         workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
     }

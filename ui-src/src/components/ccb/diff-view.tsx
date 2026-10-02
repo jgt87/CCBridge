@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { countChanges, diffLines, toHunks } from "@/lib/diff";
 import type { Preview } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { ChangePill } from "./change-pill";
 
 export function DiffView({ preview }: { preview: Preview }) {
   const lines = useMemo(
@@ -24,10 +25,9 @@ export function DiffView({ preview }: { preview: Preview }) {
     <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
       <div className="flex items-center justify-between border-black/10 border-b bg-black/[0.03] px-3 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.03]">
         <span className="font-mono">{preview.path}</span>
-        <span>
+        <span className="flex items-center">
           {!preview.exists && <span className="mr-2 text-muted-foreground">new file</span>}
-          <span className="text-foreground">+{add}</span>{" "}
-          <span className="text-rose-500">-{del}</span>
+          <ChangePill added={add} removed={del} />
         </span>
       </div>
       <div className="max-h-[28rem] overflow-auto font-mono text-xs leading-5">

@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import FileUpload from "@/components/kokonutui/file-upload";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import { api } from "@/lib/api";
+import { ChangePill } from "./change-pill";
 import SmoothTab from "@/components/kokonutui/smooth-tab";
 import type { FileInfo, TodoItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -61,10 +62,7 @@ function ChangeBadge({ node }: { node: TreeNode }) {
   const { added, removed } = changeTotals(node);
   if (!added && !removed) return null;
   return (
-    <span className="ml-auto flex shrink-0 gap-1 pl-2 font-mono text-[11px] tabular-nums" title={`${added} line(s) added, ${removed} removed since the project was opened`}>
-      {added > 0 && <span className="text-foreground/70">+{added}</span>}
-      {removed > 0 && <span className="text-rose-500/80">-{removed}</span>}
-    </span>
+    <ChangePill added={added} className="ml-auto" removed={removed} title={`${added} line(s) added, ${removed} removed since the project was opened`} />
   );
 }
 

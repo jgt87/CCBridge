@@ -97,6 +97,8 @@ export interface AppState {
   workIqActual: string | null;
   workIqAvailable: boolean;
   logLevel: "off" | "info" | "verbose" | "trace";
+  /** Installed CCBridge version (version.txt), or git-<sha> for a development copy. */
+  version: string;
 }
 
 export interface Reference {

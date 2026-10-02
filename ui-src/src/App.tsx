@@ -33,7 +33,7 @@ const MODES: PromptMode[] = [
 const EMPTY_STATE: AppState = {
   project: null, mode: "ask", busy: false, progress: "", copilot: "idle", copilotMessage: "",
   throttle: { used: 0, max: 0 }, credits: null, todos: [], promptLimit: 0,
-  workIq: "leave", workIqActual: null, workIqAvailable: false, logLevel: "info",
+  workIq: "leave", workIqActual: null, workIqAvailable: false, logLevel: "info", version: "",
 };
 
 export default function App() {
@@ -265,8 +265,15 @@ export default function App() {
       ) : (
         <div className="flex min-h-0 flex-1">
           {/* Side panel (left) */}
-          <aside className="hidden w-80 shrink-0 border-black/10 border-r p-3 lg:block dark:border-white/10">
-            <SidePanel busy={state.busy} changes={changes} files={files} onOpenFile={openFile} onUndo={() => api.undo()} onUploaded={refreshFiles} todos={state.todos} />
+          <aside className="hidden w-80 shrink-0 flex-col border-black/10 border-r p-3 lg:flex dark:border-white/10">
+            <div className="min-h-0 flex-1">
+              <SidePanel busy={state.busy} changes={changes} files={files} onOpenFile={openFile} onUndo={() => api.undo()} onUploaded={refreshFiles} todos={state.todos} />
+            </div>
+            {state.version && (
+              <div className="shrink-0 px-1 pt-2 text-muted-foreground text-xs" title="Installed CCBridge version; updates install automatically at start (or run update.cmd)">
+                CCBridge {state.version}
+              </div>
+            )}
           </aside>
 
           {/* Chat column */}

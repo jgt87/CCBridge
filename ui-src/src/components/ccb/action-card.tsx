@@ -11,12 +11,14 @@ import {
   TerminalSquare,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import HoldButton from "@/components/kokonutui/hold-button";
 import { Input } from "@/components/ui/input";
 import { api, type Preview } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { countChanges, diffLines } from "@/lib/diff";
+import { ChangePill } from "./change-pill";
 import { DiffView } from "./diff-view";
 
 export interface ActionItem {
@@ -90,6 +92,11 @@ export function ActionCard({ item }: { item: ActionItem }) {
   };
 
   const hasDetails = Boolean(item.preview || item.output || item.error || item.action === "run");
+  const counts = useMemo(() => {
+    if (!item.preview) return null;
+    const lines = diffLines(item.preview.old ?? "", item.preview.new ?? "");
+    return lines ? countChanges(lines) : null;
+  }, [item.preview]);
 
   return (
     <div
@@ -107,6 +114,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
         {ICONS[item.action] ?? <Play className="h-4 w-4" />}
         <span className="font-medium">{VERBS[item.action] ?? item.action}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground text-xs">{item.target}</span>
+        {counts && <ChangePill added={counts.add} removed={counts.del} />}
         {item.decidedBy && item.decidedBy !== "user" && (
           <span className="text-[11px] text-muted-foreground" title="This action was approved or rejected by another program, not in this window">
             via {item.decidedBy === "mcp" ? "MCP" : "API"}
