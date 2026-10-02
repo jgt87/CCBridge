@@ -73,7 +73,7 @@ Copilot works through fenced *action blocks* that CCBridge executes and answers 
 | `todo` | Updates the task checklist | automatic |
 | `done` | Ends the task with a summary | automatic |
 
-- Copilot's role follows your request: an expert software developer for coding tasks, a personal assistant for email, calendar, meetings and chats (without coding), a developer who may use Microsoft 365 data when a task has both, and a general assistant otherwise. The human-in-the-loop rules apply to every role.
+- **Minimal prompts**: what CCBridge sends follows your request. A greeting or general question goes to Copilot exactly as typed. Email, calendar, meeting and chat questions get a short personal-assistant role, the read-only rule for Microsoft 365 data and how to save a file. Project and coding work gets a short role, a compact description of the actions (with placeholders, no example files) and the project context: its **OneDrive location** (as a web link for OneDrive for Business), so Copilot can open the files there, the file list and `AGENTS.md` if you filled it in. Later messages in the same chat only add what is still missing.
 - Project instructions in `AGENTS.md` (created with each project) are sent to Copilot at the start of every chat, together with the file list.
 - Paths are confined to the project folder; existing line endings and byte-order marks are preserved.
 
@@ -266,6 +266,20 @@ The zip contains:
 | `replies\` | Only with `diagnostics.cmd -IncludeReplies`: raw Copilot replies, **full text, may contain Microsoft 365 data** |
 
 ---
+
+### Finding Copilot's limits: `complexity-test.cmd`
+
+Double-click `complexity-test.cmd` to send 12 prompts, from simple to complex, each in a new Copilot chat, and see where (if anywhere) Copilot starts to fail or refuse. Each step costs one Copilot message; it stops by itself when the daily credits run out.
+
+| Steps | What they test |
+|---|---|
+| 1-4 | Plain prompts: one word, a short question, a small function, code with constraints |
+| 5-6 | CCBridge's full instructions (role, action blocks, rules) with a tiny and a medium task |
+| 7-9 | Instructions plus about 10,000, 30,000 and 60,000 characters of code |
+| 10 | A long answer: a design and several files |
+| 11-12 | Microsoft 365: a calendar/email question (assistant role) and a mixed task that writes a file |
+
+Per step the report records the result (`Success`, `NoAnswer`, `OutOfCredits`, `Error`, ...), the time, when the first text arrived, the reply length, the action blocks found, Copilot's message types and filter markers, and (not for the Microsoft 365 steps) the first words of the reply, so refusals stand out. It writes `CCBridge-complexity-<date>.txt` and `.json` to your desktop, masked like the logs. Run part of the ladder with `complexity-test.cmd -From 5 -To 9`.
 
 ## Troubleshooting
 

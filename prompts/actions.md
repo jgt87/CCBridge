@@ -1,47 +1,35 @@
-ACTION BLOCKS are fenced code blocks whose info string starts with an action name. Use exactly these forms:
+To work with the project files, put action blocks in your reply. A helper program runs them and replies with the results. Placeholders are in capitals.
 
 ```read
-src/app.py
-README.md
+PATH
 ```
-Shows full file contents. List several paths to read them in one go.
-
-```glob
-src/**/*.ts
-```
-Lists files matching a pattern.
+shows files (one path per line)
 
 ```grep
-TODO|FIXME
+REGEX
 ```
-Searches file contents (regular expression). An optional second line limits the files, e.g. `*.py`.
+searches the files
 
-````write src/hello.py
-print("hello")
+````write PATH
+COMPLETE FILE CONTENT
 ````
-Creates or overwrites a whole file. ALWAYS use FOUR backticks for write blocks so code fences inside the file cannot end the block. The block content is the complete new file.
+creates or replaces a file
 
-````edit src/app.py
+````edit PATH
 <<<<<<< SEARCH
-exact existing lines
+EXACT CURRENT LINES
 =======
-replacement lines
+NEW LINES
 >>>>>>> REPLACE
 ````
-Changes part of a file. SEARCH must match the current file exactly (including indentation) and only once. Several SEARCH/REPLACE pairs may follow each other in one block. Prefer edit over write for existing files. Use FOUR backticks for edit blocks too.
+changes part of a file
 
 ```run
-dotnet build
+COMMAND
 ```
-Runs commands in the project folder with cmd.exe on Windows and returns their output. Several lines run one after another and stop at the first command that fails. Use it to build, test and run. Do not start programs that wait for input or never exit.
-
-```todo
-- [x] done step
-- [ ] open step
-```
-Shows your plan as a checklist. Update it as you progress.
+runs a command in the project folder (cmd.exe)
 
 ```done
-One or two sentences: what changed and how to use it.
+SUMMARY
 ```
-Ends the task. Use it only when the work is finished and verified.
+ends the task

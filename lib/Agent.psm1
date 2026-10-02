@@ -17,7 +17,9 @@ function New-AgentState {
         # Headless (MCP): no person approves; 'auto' mode applies changes, commands only when AllowCommands.
         Headless = $false; AllowCommands = $false; Jobs = [hashtable]::Synchronized(@{})
         LogLevel = $null   # set by the front end; the worker applies changes on the fly
-        ChatKind = $null   # role Copilot has in the current chat: coding, assistant, mixed or general
+        ChatKind = $null   # kind of task the current chat is about (chat, assistant, project, coding, mixed)
+        SentParts = (New-Object 'System.Collections.Generic.HashSet[string]')   # prompt parts this chat already has
+        NextConnectAttempt = $null
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
         WorkIq = $(if ($Config.workIq) { [string]$Config.workIq } else { 'leave' }); WorkIqActual = $null; WorkIqWarned = $false
     })
@@ -90,6 +92,7 @@ function Get-Bridge($State) {
         $script:Bridge
     } catch {
         $State.Copilot = 'error'; $State.CopilotMessage = $_.Exception.Message
+        $State.NextConnectAttempt = (Get-Date).AddSeconds(30)   # the idle worker retries, so Copilot is ready before the first prompt
         throw
     }
 }
@@ -134,6 +137,7 @@ function Start-NewChat($State) {
     New-CopilotChat (Get-Bridge $State)
     $State.ChatStarted = $false
     $State.ChatKind = $null
+    $State.SentParts = New-Object 'System.Collections.Generic.HashSet[string]'
     $State.NeedNewChat = $false
     $State.Throttle = @{ used = 0; max = $State.Throttle.max }
 }
@@ -148,21 +152,31 @@ function Get-PinnedFiles {
     "`n`n# Attached files`n" + ((Invoke-ReadAction $ProjectRoot $paths) -join "`n`n")
 }
 
-function Get-FirstMessage {
-    param($State, [string]$Task, [string]$Kind)
+function Get-ProjectNotes([string]$ProjectRoot) {
+    <# AGENTS.md without its template lines; empty when the user has not filled it in. #>
+    $memo = Join-Path $ProjectRoot 'AGENTS.md'
+    if (-not (Test-Path $memo)) { return '' }
+    $lines = @([IO.File]::ReadAllText($memo).Replace("`r`n", "`n").Split("`n") | Where-Object {
+        $_ -notmatch '^(Instructions for coding (agents|assistants)|Project notes for CCBridge|Describe the goal, tech stack)' })
+    $meaningful = @($lines | Where-Object { $_.Trim() -and $_ -notmatch '^\s*#' })
+    if (-not $meaningful.Count) { return '' }
+    ($lines -join "`n").Trim()
+}
+
+function Get-ProjectContext($State) {
+    <# Location (in OneDrive when possible, so Copilot can open the files there), files and notes. #>
     $root = $State.ProjectRoot
-    if (-not $Kind) { $Kind = if ($State.ChatKind) { $State.ChatKind } else { Get-TaskKind $Task } }
-    $State.ChatKind = $Kind
-    $sb = New-Object Text.StringBuilder
-    [void]$sb.AppendLine((Get-Instructions $State.AppRoot $Kind)).AppendLine()
-    [void]$sb.AppendLine("# Project: $(Split-Path $root -Leaf)").AppendLine()
-    $memo = Join-Path $root 'AGENTS.md'
-    if (Test-Path $memo) { [void]$sb.AppendLine('## Project notes (AGENTS.md)').AppendLine(([IO.File]::ReadAllText($memo)).Trim()).AppendLine() }
-    $treeBudget = [Math]::Max(2000, [int]($State.Config.promptCharBudget * 0.25))
-    [void]$sb.AppendLine('## Files').AppendLine('```').AppendLine((Format-ProjectTree $root -MaxChars $treeBudget)).AppendLine('```').AppendLine()
-    if ($State.Summary) { [void]$sb.AppendLine('## Summary of the previous chat').AppendLine($State.Summary).AppendLine(); $State.Summary = $null }
-    [void]$sb.AppendLine('# Task').AppendLine($Task)
-    $sb.ToString()
+    $loc = Get-OneDriveLocation $root
+    $location = if ($loc) {
+        "Project folder: $($loc.Display)$(if ($loc.Url) { " ($($loc.Url))" }). It is in the user's OneDrive, so you can open its files there; the read action shows their exact current content."
+    } else {
+        "Project folder: $(Split-Path $root -Leaf) on the user's computer; use the read action to see its files."
+    }
+    $budget = [Math]::Max(2000, [int]($State.Config.promptCharBudget * 0.25))
+    $files = if (@(Get-ProjectFiles $root).Count) { "Files:`n" + (Format-ProjectTree $root -MaxChars $budget) } else { 'The folder is empty.' }
+    $notes = Get-ProjectNotes $root
+    $full = "$location`n$files" + $(if ($notes) { "`n`nProject notes (AGENTS.md):`n$notes" } else { '' })
+    @{ Location = $location; Full = $full }
 }
 
 function Limit-Text([string]$Text, [int]$Max) {
@@ -346,25 +360,25 @@ function Invoke-AgentTurn {
     try {
         if (Test-OtherSender) { $State.NeedNewChat = $true }
         if ($State.NeedNewChat) { Start-NewChat $State }
-        # Copilot's role follows the kind of task; a different kind later in the chat gets a role switch.
+        # As little as the request needs: plain chat goes as it is; other kinds add only the parts
+        # (role, actions, rules, project context) this chat has not had yet.
         $kind = Get-TaskKind $Text
-        if ($State.ChatStarted) {
-            $message = $Text
-            if ($kind -ne 'general' -and $kind -ne $State.ChatKind) {
-                Write-CCBLog verbose agent "Role switch: $($State.ChatKind) -> $kind"
-                $message = (Get-RoleSwitch $State.AppRoot $kind) + $Text
-                $State.ChatKind = $kind
-            }
-        } else {
-            $message = Get-FirstMessage $State $Text $kind
-        }
-        Write-CCBLog info agent "Task kind: $kind (role: $($State.ChatKind))"
+        $summary = $State.Summary; $State.Summary = $null
+        $partsBefore = $State.SentParts.Count
+        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $Text -Sent $State.SentParts -Context (Get-ProjectContext $State) -Summary $summary
+        if ($kind -ne 'chat') { $State.ChatKind = $kind }
+        Write-CCBLog info agent "Task kind: $kind" @{ partsAdded = $State.SentParts.Count - $partsBefore; chars = $message.Length }
         $message += Get-PinnedFiles $State.ProjectRoot $Text
 
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
             Invoke-RolloverIfNeeded $State
-            if (-not $State.ChatStarted -and $round -gt 1) { $message = (Get-FirstMessage $State 'Continue the task described in the summary above.') + "`n`n" + $message }
+            if (-not $State.ChatStarted -and $round -gt 1) {
+                # A rollover started a fresh chat: give it the parts again, with the summary.
+                $prefix = New-PromptMessage -AppRoot $State.AppRoot -Kind $(if ($State.ChatKind) { $State.ChatKind } else { 'chat' }) -Text '' -Sent $State.SentParts -Context (Get-ProjectContext $State) -Summary $State.Summary
+                $State.Summary = $null
+                if ($prefix) { $message = "$prefix`n`n$message" }
+            }
             $message = Limit-Text $message $State.Config.promptCharBudget
 
             Write-CCBLog verbose agent "Round ${round}: sending" @{ chars = $message.Length }
@@ -433,7 +447,15 @@ function Start-AgentWorker {
     while (-not $State.Stop) {
         if ($State.LogLevel -and $State.LogLevel -ne $appliedLevel) { Set-CCBLogLevel $State.LogLevel; $appliedLevel = $State.LogLevel; Write-CCBLog info agent "Log level now $appliedLevel" }
         $task = $null
-        if (-not $State.Tasks.TryDequeue([ref]$task)) { Start-Sleep -Milliseconds 150; continue }
+        if (-not $State.Tasks.TryDequeue([ref]$task)) {
+            # Keep Copilot staged: after a failed connect, try again while nothing else is happening.
+            if (-not $State.Headless -and $State.Copilot -eq 'error' -and $State.NextConnectAttempt -and (Get-Date) -gt $State.NextConnectAttempt) {
+                $State.NextConnectAttempt = $null
+                Write-CCBLog info agent 'Retrying the Copilot connection'
+                $State.Tasks.Enqueue(@{ kind = 'connect' })
+            }
+            Start-Sleep -Milliseconds 150; continue
+        }
         # Jobs (MCP) track a task from queue to result.
         $job = if ($task.jobId) { $State.Jobs[$task.jobId] } else { $null }
         if ($job) { $job.status = 'running'; $job.startSeq = $State.Seq; $job.started = (Get-Date).ToString('s') }

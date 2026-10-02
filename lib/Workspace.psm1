@@ -44,6 +44,33 @@ function New-CCBridgeProject {
     $path
 }
 
+function Get-OneDriveLocation {
+    <# Where a folder lives in the user's OneDrive: a display path ("OneDrive > CCBridge > name") and,
+       for OneDrive for Business, the web address (from the OneDrive client's account settings).
+       $null when the folder is not in a OneDrive folder. #>
+    param([Parameter(Mandatory)][string]$Path)
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $accounts = @(Get-ChildItem HKCU:\Software\Microsoft\OneDrive\Accounts -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.UserFolder })
+    foreach ($a in $accounts) {
+        $uf = ([string]$a.UserFolder).TrimEnd('\')
+        if (-not $full.StartsWith($uf + '\', [StringComparison]::OrdinalIgnoreCase) -and $full -ne $uf) { continue }
+        $rel = if ($full.Length -gt $uf.Length) { $full.Substring($uf.Length + 1) } else { '' }
+        $url = $null
+        if ($a.UserUrl) {
+            $url = ([string]$a.UserUrl).TrimEnd('/') + '/Documents' + $(if ($rel) { '/' + (($rel.Split('\') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/') } else { '' })
+        }
+        return [pscustomobject]@{ Display = (@('OneDrive') + @($rel.Split('\') | Where-Object { $_ })) -join ' > '; Url = $url }
+    }
+    foreach ($od in $env:OneDriveCommercial, $env:OneDrive, $env:OneDriveConsumer) {
+        if (-not $od) { continue }
+        $root = $od.TrimEnd('\')
+        if ($full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            return [pscustomobject]@{ Display = (@('OneDrive') + @($full.Substring($root.Length + 1).Split('\'))) -join ' > '; Url = $null }
+        }
+    }
+    $null
+}
+
 function Get-ProjectStateDir([string]$ProjectRoot) {
     <# Per-project state (backups, session) under %LOCALAPPDATA%, so OneDrive does not sync it. #>
     $sha = [Security.Cryptography.SHA1]::Create()
@@ -231,6 +258,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile

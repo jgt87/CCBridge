@@ -1,60 +1,82 @@
-# Copilot's role follows the kind of task.
+# The prompt sent to Copilot is as small as the request allows.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
+Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
+
+function New-Sent { New-Object 'System.Collections.Generic.HashSet[string]' }
+$ctx = @{ Location = 'Project folder: OneDrive > CCBridge > budget tracker.'; Full = "Project folder: OneDrive > CCBridge > budget tracker.`nThe folder is empty." }
 
 Describe 'Get-TaskKind' {
+    It 'treats greetings and general questions as plain chat' {
+        foreach ($t in @('hi', 'Hi', 'Thanks!', 'Explain the difference between a lease and a loan', '')) { Get-TaskKind $t | Should Be 'chat' }
+    }
     It 'recognises coding tasks' {
-        foreach ($t in @('Fix the bug in src/app.py', 'Add Pester tests and run the build', 'Create a PowerShell script that renames files',
-                         'Refactor the React component', 'Why does expenses.ps1 fail?', 'Maak een functie die de totalen berekent')) {
-            Get-TaskKind $t | Should Be 'coding'
-        }
+        foreach ($t in @('Fix the bug in src/app.py', 'Add Pester tests and run the build', 'Maak een functie die de totalen berekent')) { Get-TaskKind $t | Should Be 'coding' }
     }
-
-    It 'recognises Microsoft 365 work without coding as an assistant task' {
-        foreach ($t in @('Summarise my emails from today', 'What meetings do I have tomorrow?', 'Prepare an agenda for the Teams meeting with Anna',
-                         'List the follow-ups from my chats this week', 'Welke vergaderingen heb ik morgen?', 'Zet mijn afspraken van vandaag op een rij')) {
-            Get-TaskKind $t | Should Be 'assistant'
-        }
+    It 'recognises project work without code' {
+        foreach ($t in @('Summarise the notes in this project', 'What is in @budget.csv?', 'Maak een samenvatting van de bestanden')) { Get-TaskKind $t | Should Be 'project' }
     }
-
-    It 'recognises tasks that need both' {
-        Get-TaskKind 'Build a dashboard from the meetings in my calendar' | Should Be 'mixed'
+    It 'recognises Microsoft 365 work as an assistant task, also when the result goes into a file' {
+        foreach ($t in @('What meetings do I have tomorrow?', 'Summarise my emails from today into notes/today.md', 'Welke vergaderingen heb ik morgen?')) { Get-TaskKind $t | Should Be 'assistant' }
+    }
+    It 'recognises code that works with Microsoft 365 data as mixed' {
         Get-TaskKind 'Write a script that exports my Outlook emails to CSV' | Should Be 'mixed'
-    }
-
-    It 'falls back to general' {
-        Get-TaskKind 'Explain the difference between a lease and a loan' | Should Be 'general'
-        Get-TaskKind '' | Should Be 'general'
     }
 }
 
-Describe 'Get-Instructions' {
-    It 'gives each kind its role, with the human-in-the-loop rules always included' {
-        $coding = Get-Instructions $root 'coding'
-        $assistant = Get-Instructions $root 'assistant'
-        $mixed = Get-Instructions $root 'mixed'
-        $general = Get-Instructions $root 'general'
-        $coding | Should Match '^You are an expert software developer'
-        $assistant | Should Match '^You are the user''s personal assistant'
-        $mixed | Should Match '^You are an expert software developer.*Microsoft 365 data'
-        $general | Should Match '^You are a knowledgeable assistant'
-        foreach ($i in $coding, $assistant, $mixed, $general) {
-            $i | Should Match 'HUMAN IN THE LOOP'
-            $i | Should Match 'ACTION BLOCKS are fenced'
-            $i | Should Match 'RULES'
-            $i | Should Not Match 'CCBridge'
-        }
-        $assistant | Should MatchExactly 'MICROSOFT 365 DATA'
-        $mixed | Should MatchExactly 'MICROSOFT 365 DATA'
-        $coding | Should Not MatchExactly 'MICROSOFT 365 DATA'
-        $general | Should Not MatchExactly 'MICROSOFT 365 DATA'
+Describe 'New-PromptMessage' {
+    It 'sends a plain chat message exactly as typed' {
+        New-PromptMessage -AppRoot $root -Kind 'chat' -Text 'hi' -Sent (New-Sent) -Context $ctx | Should BeExactly 'hi'
     }
 
-    It 'builds a short role switch for a different kind later in the chat' {
-        $s = Get-RoleSwitch $root 'assistant'
-        $s | Should Match '^For this request: You are the user''s personal assistant'
-        $s | Should MatchExactly 'MICROSOFT 365 DATA'
-        $s | Should Match 'still apply'
-        $s | Should Not Match 'CCBridge'
+    It 'gives coding tasks a compact instruction set without example files' {
+        $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Fix the build' -Sent (New-Sent) -Context $ctx
+        $m | Should Match '^You are an expert software developer'
+        $m | Should Match 'PATH'
+        $m | Should Match 'OneDrive > CCBridge > budget tracker'
+        $m | Should Match 'Request: Fix the build$'
+        $m | Should Not Match 'app\.py|hello\.py|dotnet build|CCBridge sends'
+        $m.Length -lt 2200 | Should Be $true
+    }
+
+    It 'gives assistant tasks only the role, the read-only rule, saving and the location' {
+        $m = New-PromptMessage -AppRoot $root -Kind 'assistant' -Text 'What meetings do I have?' -Sent (New-Sent) -Context $ctx
+        $m | Should Match '^You are the user''s personal assistant'
+        $m | Should Match 'only to read it'
+        $m | Should Match 'write notes/NAME.md'
+        $m | Should Not Match 'SEARCH|```read'
+        $m.Length -lt 900 | Should Be $true
+    }
+
+    It 'adds only the missing parts later in the same chat' {
+        $sent = New-Sent
+        New-PromptMessage -AppRoot $root -Kind 'chat' -Text 'hi' -Sent $sent -Context $ctx | Should BeExactly 'hi'
+        $second = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Create hello.ps1' -Sent $sent -Context $ctx
+        $second | Should Match 'expert software developer'
+        $third = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Now add a test' -Sent $sent -Context $ctx
+        $third | Should BeExactly 'Now add a test'
+        $fourth = New-PromptMessage -AppRoot $root -Kind 'mixed' -Text 'Also read my emails about it' -Sent $sent -Context $ctx
+        $fourth | Should Match 'only to read it'
+        $fourth | Should Not Match 'expert software developer'
+    }
+
+    It 'never mentions the tool''s name' {
+        foreach ($k in 'assistant', 'project', 'coding', 'mixed') {
+            New-PromptMessage -AppRoot $root -Kind $k -Text 'x' -Sent (New-Sent) -Context $ctx | Should Not Match 'CCBridge sends|helper program called|CCBridge,'
+        }
+    }
+}
+
+Describe 'Project notes (AGENTS.md)' {
+    It 'leaves out an AGENTS.md that only has the template text' {
+        $dir = Join-Path $env:TEMP ('ccb-notes-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory $dir | Out-Null
+        [IO.File]::WriteAllText((Join-Path $dir 'AGENTS.md'), "# budget tracker`n`nInstructions for coding agents (CCBridge and others). CCBridge sends this file to Copilot at the start of each chat.`nDescribe the goal, tech stack, build/run commands and conventions here.`n")
+        (& (Get-Module Agent) { param($d) Get-ProjectNotes $d } $dir) | Should Be ''
+        [IO.File]::WriteAllText((Join-Path $dir 'AGENTS.md'), "# budget tracker`n`nInstructions for coding assistants. This file is sent to the assistant at the start of each chat.`nTrack monthly spending per category in CSV files.`n")
+        $notes = & (Get-Module Agent) { param($d) Get-ProjectNotes $d } $dir
+        $notes | Should Match 'Track monthly spending'
+        $notes | Should Not Match 'Instructions for coding'
+        Remove-Item $dir -Recurse -Force
     }
 }
