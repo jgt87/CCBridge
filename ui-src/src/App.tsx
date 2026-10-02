@@ -7,6 +7,8 @@ import {
   Menu as MenuIcon,
   ScrollText,
   MessageSquarePlus,
+  PanelLeftClose,
+  PanelLeftOpen,
   PencilRuler,
   RotateCcw,
   ShieldCheck,
@@ -19,6 +21,7 @@ import AI_Prompt, { type PromptMode } from "@/components/kokonutui/ai-prompt";
 import CommandButton from "@/components/kokonutui/command-button";
 import Loader from "@/components/kokonutui/loader";
 import { ErrorBoundary } from "@/components/ccb/error-boundary";
+import { CopilotStatus } from "@/components/ccb/copilot-status";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
@@ -50,6 +53,39 @@ export default function App() {
   const [newChatPending, setNewChatPending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const lastSeq = useRef(0);
+
+  // Side panel, as in Copilot: on a wide window it sits beside the chat and can be collapsed;
+  // on a narrow one it is hidden and opens over the chat from the same button.
+  const [wide, setWide] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
+  const [sideOpen, setSideOpen] = useState(() => {
+    try {
+      return localStorage.getItem("ccb-side") !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => {
+      setWide(mq.matches);
+      setDrawerOpen(false);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const sideVisible = wide ? sideOpen : drawerOpen;
+  const toggleSide = () => {
+    if (!wide) return setDrawerOpen((o) => !o);
+    setSideOpen((o) => {
+      try {
+        localStorage.setItem("ccb-side", o ? "closed" : "open");
+      } catch {
+        /* per-browser convenience only */
+      }
+      return !o;
+    });
+  };
 
   const refreshFiles = useCallback(() => {
     api.files().then((r) => setFiles(r.files), () => {});
@@ -94,6 +130,7 @@ export default function App() {
         e.preventDefault();
         setPalette((p) => (p ? null : "commands"));
       }
+      if (e.key === "Escape") setDrawerOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -147,6 +184,7 @@ export default function App() {
   };
 
   const openFile = async (path: string) => {
+    setDrawerOpen(false);
     try {
       setViewer(await api.file(path));
     } catch (e) {
@@ -205,6 +243,18 @@ export default function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center gap-3 border-black/10 border-b px-4 dark:border-white/10">
+        {state.project && !pickerOpen && (
+          <button
+            aria-expanded={sideVisible}
+            aria-label={sideVisible ? "Close side panel" : "Open side panel"}
+            className="-ml-1.5 grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+            onClick={toggleSide}
+            title={sideVisible ? "Close side panel" : "Open side panel"}
+            type="button"
+          >
+            {sideVisible ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+          </button>
+        )}
         <div className="flex items-center gap-2 font-semibold tracking-tight">
           <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background text-xs">CC</span>
           CCBridge
@@ -221,6 +271,7 @@ export default function App() {
           </button>
         )}
         <div className="flex-1" />
+        <CopilotStatus copilot={state.copilot} message={state.copilotMessage} />
         <CommandButton className="h-8" icon={MenuIcon} onClick={() => setPalette("commands")} title="Commands and files (Ctrl+K)">
           Menu
         </CommandButton>
@@ -265,7 +316,16 @@ export default function App() {
       ) : (
         <div className="flex min-h-0 flex-1">
           {/* Side panel (left) */}
-          <aside className="hidden w-80 shrink-0 flex-col border-black/10 border-r p-3 lg:flex dark:border-white/10">
+          {!wide && drawerOpen && (
+            <div aria-hidden className="fixed inset-0 top-14 z-30 bg-black/30" onClick={() => setDrawerOpen(false)} />
+          )}
+          <aside
+            className={
+              wide
+                ? `${sideOpen ? "flex" : "hidden"} w-80 shrink-0 flex-col border-black/10 border-r p-3 dark:border-white/10`
+                : `${drawerOpen ? "flex" : "hidden"} fixed top-14 bottom-0 left-0 z-40 w-80 max-w-[85vw] flex-col border-black/10 border-r bg-background p-3 shadow-lg dark:border-white/10`
+            }
+          >
             <div className="min-h-0 flex-1">
               <SidePanel busy={state.busy} changes={changes} files={files} onOpenFile={openFile} onUndo={() => api.undo()} onUploaded={refreshFiles} todos={state.todos} />
             </div>
@@ -332,11 +392,6 @@ export default function App() {
                         >
                           Work IQ {state.workIq === "on" ? "on" : state.workIq === "off" ? "off" : "(page setting)"}
                         </button>
-                      )}
-                      {state.copilot === "error" && (
-                        <span className="text-rose-500" title={state.copilotMessage}>
-                          Copilot unavailable
-                        </span>
                       )}
                       {state.credits && state.credits.remaining <= 10 && (
                         <span
