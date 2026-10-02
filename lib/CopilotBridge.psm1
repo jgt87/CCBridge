@@ -915,7 +915,7 @@ function Send-CopilotPromptUnlocked {
     $pageEveryMs = if ($Bridge.PSObject.Properties['PageCheckMs'] -and $Bridge.PageCheckMs) { [int]$Bridge.PageCheckMs } else { 500 }
     $pageStableSec = if ($Bridge.PSObject.Properties['PageStableSec'] -and $null -ne $Bridge.PageStableSec) { [double]$Bridge.PageStableSec } else { 1.0 }
     $nextPageCheck = (Get-Date).AddSeconds(2)
-    $pageDoneSince = $null; $pageLastLen = -1; $sawStop = $false
+    $pageDoneSince = $null; $pageLastLen = -1; $sawStop = $false; $pageQuietSince = $null
 
     $hubPattern = [regex]::Escape($Bridge.Selectors.chatHubUrlPattern)
     $streamPattern = [regex]::Escape($(if ($Bridge.Selectors.PSObject.Properties['streamHubUrlPattern'] -and $Bridge.Selectors.streamHubUrlPattern) { $Bridge.Selectors.streamHubUrlPattern } else { '/StreamHub/' }))
@@ -935,10 +935,21 @@ function Send-CopilotPromptUnlocked {
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
         if ($CancelCheck -and (& $CancelCheck)) {
-            Stop-CopilotReply $Bridge
-            Write-CCBLog info bridge 'Reply cancelled by the user' @{ partialChars = $merger.Text.Length; ms = $sendWatch.ElapsedMilliseconds }
-            return [pscustomobject]@{ Cancelled = $true; Text = $merger.Text; ServerText = $null; Uncertain = $merger.Uncertain; Result = 'Cancelled'
-                ResultMessage = 'Stopped by the user'; SentMatches = $true; References = @(); ProposedActions = @(); ActionClaims = @() }
+            $was = Stop-CopilotReply $Bridge
+            $keep = $merger.Text; $finished = $false
+            if ($was -eq 'idle' -and $pageBefore) {
+                # Copilot had already finished; only CCBridge was still waiting. Keep its reply.
+                try {
+                    $pt = Get-PageReplyText $Bridge -FromIndex $pageBefore.replies
+                    $ptext = "$($pt.text)"
+                    $placeholder = $pt.how -ne 'state' -and ($ptext -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
+                    if ($ptext.Trim() -and -not $placeholder -and ($ptext -replace '\s', '') -ne ($Text -replace '\s', '')) { $keep = $ptext; $finished = $true }
+                } catch { }
+            }
+            Write-CCBLog info bridge "Reply cancelled by the user ($(if ($finished) { 'Copilot had already finished' } else { $was }))" @{ chars = "$keep".Length; ms = $sendWatch.ElapsedMilliseconds }
+            return [pscustomobject]@{ Cancelled = $true; Text = $keep; ServerText = $null; Uncertain = $merger.Uncertain; Result = 'Cancelled'
+                ResultMessage = $(if ($finished) { 'Copilot had already finished' } else { 'Stopped by the user' }); CopilotFinished = $finished
+                SentMatches = $true; References = @(); ProposedActions = @(); ActionClaims = @() }
         }
         $m = Receive-CdpEvent $s 400
         if ($m) { Add-NetTrace $net $Bridge $m; Add-TimelineNet $Bridge $m }
@@ -955,13 +966,16 @@ function Send-CopilotPromptUnlocked {
                 if ($st.bar -and $st.bar -ne $pageBefore.bar -and $st.bar -match $script:LimitPattern) {
                     Write-CCBLog info bridge 'Copilot shows a usage limit' @{ message = $st.bar; ms = $sendWatch.ElapsedMilliseconds }
                     Add-TimelineEvent $Bridge 'returned' 'usage limit on the page'
-                    Stop-CopilotReply $Bridge -DrainSec 2
+                    $null = Stop-CopilotReply $Bridge -DrainSec 2
                     return [pscustomobject]@{ Cancelled = $false; Text = ''; ServerText = $null; Uncertain = 0; SentText = $Text; SentMatches = $true
                         Result = 'OutOfCredits'; ResultMessage = $st.bar; ConversationId = $null; Throttling = $null; Metering = $null
                         References = @(); ProposedActions = @(); ActionClaims = @(); Source = 'page' }
                 }
-                if ($st.lastLen -ne $pageLastLen) { if ($pageLastLen -ge 0) { $lastActivity = Get-Date }; $pageLastLen = $st.lastLen; $pageDoneSince = $null }
-                $finished = -not $st.stop -and $st.replies -gt $pageBefore.replies -and ($st.lastHasCopy -or $st.copies -gt $pageBefore.copies) -and $st.lastLen -gt 0 -and
+                if ($st.lastLen -ne $pageLastLen) { if ($pageLastLen -ge 0) { $lastActivity = Get-Date }; $pageLastLen = $st.lastLen; $pageDoneSince = $null; $pageQuietSince = $null }
+                # No Stop button and nothing changing: finished, even when the reply shows no Copy button.
+                if (-not $st.stop -and $st.replies -gt $pageBefore.replies -and $st.lastLen -gt 0) { if (-not $pageQuietSince) { $pageQuietSince = Get-Date } } else { $pageQuietSince = $null }
+                $quietDone = $pageQuietSince -and ((Get-Date) - $pageQuietSince).TotalSeconds -ge 8
+                $finished = -not $st.stop -and $st.replies -gt $pageBefore.replies -and ($st.lastHasCopy -or $st.copies -gt $pageBefore.copies -or $quietDone) -and $st.lastLen -gt 0 -and
                     ($sawStop -or $sendWatch.Elapsed.TotalSeconds -ge 6)
                 # When StreamHub carried this reply and has been quiet for a moment, the page need not settle.
                 $stableNeeded = if ($stream.Items -and $stream.LastAt -and ((Get-Date) - $stream.LastAt).TotalMilliseconds -ge 300) { 0 } else { $pageStableSec }
@@ -992,7 +1006,7 @@ function Send-CopilotPromptUnlocked {
         if ($LostSec -gt 0 -and $replyRecords -eq 0 -and $sendWatch.Elapsed.TotalSeconds -ge $LostSec -and $pageLastLen -le 40) {
             # Nothing of a reply arrived (at most a placeholder on the page): the request was lost.
             Write-CCBLog info bridge "No part of the reply arrived within $LostSec s" @{ frames = $frames.Count; pageChars = $pageLastLen; sent = @($sentTargets | Select-Object -Unique) }
-            Stop-CopilotReply $Bridge -DrainSec 3
+            $null = Stop-CopilotReply $Bridge -DrainSec 3
             Write-NetTrace $net 'request lost'
             Add-TimelineEvent $Bridge 'lost' "no reply records within $LostSec s"
             return [pscustomobject]@{ Cancelled = $false; Text = ''; ServerText = $null; Uncertain = 0; SentText = $Text; SentMatches = $true
@@ -1024,7 +1038,7 @@ function Send-CopilotPromptUnlocked {
                 }
             }
             $hangs = -not $gaveUp -and $StallSec -gt 0 -and $quiet -ge $StallSec
-            if ($hangs) { Stop-CopilotReply $Bridge -DrainSec 5 }
+            if ($hangs) { $null = Stop-CopilotReply $Bridge -DrainSec 5 }
             if ($gaveUp -or $hangs) {
                 Write-CCBLog info bridge "Copilot stopped without answering ($(if ($hangs) { "no data for $([int]$quiet) s" } else { 'page shows Regenerate' }))" @{ partialChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; sent = @($sentTargets | Select-Object -Unique) }
                 Write-NetTrace $net 'no answer'
@@ -1116,7 +1130,7 @@ function Send-CopilotPromptUnlocked {
     Write-CCBLog info bridge "No complete reply within $TimeoutSec s" @{ partialChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; sent = @($sentTargets | Select-Object -Unique) }
     Write-NetTrace $net 'timeout'
     if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
-    Stop-CopilotReply $Bridge
+    $null = Stop-CopilotReply $Bridge
     throw "No complete reply within $TimeoutSec s (partial: $($merger.Text.Length) chars)"
 }
 
@@ -1285,9 +1299,16 @@ function Test-CopilotGaveUp {
 }
 
 function Stop-CopilotReply {
-    <# Presses Copilot's Stop button, then reads the socket until the cancelled reply has ended,
-       so its late completion record cannot be taken for the answer to the next prompt. #>
+    <# Stops Copilot's current reply. Returns 'idle' when Copilot had already finished (its Stop button
+       is not shown: nothing is pressed), else 'stopped'. After pressing Stop it waits until the reply
+       has ended, by the hub's end record or by the page no longer showing Stop, whichever comes first,
+       so a late completion cannot be taken for the answer to the next prompt. #>
     param([Parameter(Mandatory)]$Bridge, [int]$DrainSec = 15)
+    $before = Get-PageReplyState $Bridge
+    if ($before -and -not $before.stop) {
+        Write-CCBLog verbose bridge 'Copilot had already finished; nothing to stop'
+        return 'idle'
+    }
     $stopSel = ConvertTo-JsString $Bridge.Selectors.stopButton
     $clicked = $false
     try {
@@ -1301,14 +1322,28 @@ function Stop-CopilotReply {
     } catch { }
     Write-CCBLog verbose bridge "Stop pressed in Copilot: $clicked"
     $deadline = (Get-Date).AddSeconds($DrainSec)
+    $nextPage = (Get-Date).AddMilliseconds(500)
     while ((Get-Date) -lt $deadline) {
-        $m = Receive-CdpEvent $Bridge.Session 400
-        if (-not $m -or $m.method -ne 'Network.webSocketFrameReceived') { continue }
-        foreach ($rec in Read-HubRecords $m.params.response.payloadData) {
-            if ($rec.type -eq 2 -or $rec.type -eq 3 -or $rec.type -eq 7) { Write-CCBLog verbose bridge 'Cancelled reply drained'; return }
+        $m = Receive-CdpEvent $Bridge.Session 250
+        if ($m -and $m.method -eq 'Network.webSocketFrameReceived') {
+            foreach ($rec in Read-HubRecords $m.params.response.payloadData) {
+                if ($rec.type -eq 2 -or $rec.type -eq 3 -or $rec.type -eq 7) { Write-CCBLog verbose bridge 'Cancelled reply drained'; return 'stopped' }
+            }
+        }
+        if ((Get-Date) -gt $nextPage) {
+            $nextPage = (Get-Date).AddMilliseconds(500)
+            $st = Get-PageReplyState $Bridge
+            if ($st -and -not $st.stop) {
+                # Give a last end record a moment to arrive, then stop waiting.
+                $until = (Get-Date).AddMilliseconds(700)
+                while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $Bridge.Session 100 }
+                Write-CCBLog verbose bridge 'Copilot shows it has stopped'
+                return 'stopped'
+            }
         }
     }
     Write-CCBLog verbose bridge 'Cancelled reply did not end within the drain time'
+    'stopped'
 }
 
 function Disconnect-Copilot {
