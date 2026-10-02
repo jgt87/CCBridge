@@ -52,8 +52,41 @@ Import-Module (Join-Path $root 'lib\Server.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 $config = Get-CCBridgeConfig harness $root
 if ($Port) { $config.port = $Port }
-# Already running? Then just open it instead of failing on the busy port.
 $url = "http://localhost:$($config.port)/"
+
+# A CCBridge that is still running would keep serving its old version (it holds the code in
+# memory), also right after an update. Stop it, so this start always serves the current files.
+# The web server runs through Windows' HTTP service, so the port belongs to "System": the
+# instance is found by the process id it recorded and by its command line instead.
+$pidFile = Join-Path $env:LOCALAPPDATA 'CCBridge\server.pid'
+$stopped = @()
+try {
+    if (Test-Path $pidFile) {
+        $rec = ([IO.File]::ReadAllText($pidFile)).Trim().Split('|')
+        $old = Get-Process -Id ([int]$rec[0]) -ErrorAction SilentlyContinue
+        if ($old -and $old.Id -ne $PID -and $old.ProcessName -match '^powershell' -and $old.StartTime.Ticks -eq [long]$rec[1]) {
+            Stop-Process -Id $old.Id -Force -ErrorAction SilentlyContinue; $stopped += $old.Id
+        }
+    }
+} catch { }
+try {
+    # Other web-app instances (not the MCP server, not one-off -Ping runs).
+    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction Stop |
+        Where-Object { $_.ProcessId -ne $PID -and $stopped -notcontains $_.ProcessId -and $_.CommandLine -match 'ccbridge\.ps1' -and $_.CommandLine -notmatch '-Ping\b' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $stopped += $_.ProcessId }
+} catch { }
+if ($stopped.Count) {
+    Write-Host "Stopped the CCBridge that was already running (process $($stopped -join ', ')), so this version starts."
+    # Wait until the port is free again.
+    $until = (Get-Date).AddSeconds(10)
+    do {
+        Start-Sleep -Milliseconds 300
+        $busy = $true
+        try { $null = Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 2 } catch { $busy = [bool]$_.Exception.Response }
+    } while ($busy -and (Get-Date) -lt $until)
+}
+
+# Still answering (for example another user's instance)? Then just open it instead of failing on the busy port.
 try {
     $page = Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 3
     if ($page.Content -match '<title>CCBridge</title>') {
@@ -72,4 +105,9 @@ $state = New-AgentState -Config $config -AppRoot $root
 $state.LogLevel = Get-CCBLogLevel
 $state.Version = Get-CCBridgeVersion $root
 $state.Build = Get-CCBridgeBuild $root
+# Recorded so the next start can stop this instance (see above).
+try {
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $pidFile)
+    [IO.File]::WriteAllText($pidFile, "$PID|$((Get-Process -Id $PID).StartTime.Ticks)")
+} catch { }
 Start-CCBridgeServer -State $state -NoBrowser:$NoBrowser
