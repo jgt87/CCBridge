@@ -215,6 +215,13 @@ $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
 # Each run gets its own folder under $OutRoot (default C:\temp).
 $outDir = Join-Path $OutRoot "CCBridge-test-$stamp"
 $null = New-Item -ItemType Directory -Force -Path $outDir
+# Screenshots CCBridge took when the page lost its message box go with the report.
+foreach ($r in $results) {
+    if ("$($r.resultMessage)" -match 'screenshot: (.+?\.png)') {
+        $shot = $Matches[1]
+        if (Test-Path -LiteralPath $shot) { Copy-Item -LiteralPath $shot -Destination (Join-Path $outDir ("step$($r.step)-" + (Split-Path $shot -Leaf))) }
+    }
+}
 $jsonFile = Join-Path $outDir "CCBridge-complexity-$stamp.json"
 $txtFile = Join-Path $outDir "CCBridge-complexity-$stamp.txt"
 $envInfo = Get-CCBridgeEnvironment $root

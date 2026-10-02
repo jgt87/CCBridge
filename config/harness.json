@@ -11,5 +11,11 @@
   "autoApproveCommands": [],
   "workIq": "leave",
   "saveReplyFrames": true,
-  "stallSec": 90
+  "stallSec": 90,
+  "pacing": {
+    "newChatSettleSec": 3,
+    "beforeSendSec": 1,
+    "betweenPromptsSec": 5,
+    "note": "Pauses that give Copilot's page time to finish its own work: after a new chat is ready, between typing the prompt and pressing Send, and the minimum gap after the previous reply. Completing tasks matters more than speed."
+  }
 }

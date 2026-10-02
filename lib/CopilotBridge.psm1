@@ -32,7 +32,8 @@ function Connect-Copilot {
             $null = Start-CdpEdge -Port $Port -Url $sel.chatUrl
             $target = Get-CdpPageTarget -Port $Port -UrlLike $hostLike
             $session = Connect-Cdp $target.webSocketDebuggerUrl
-            $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; SaveFrames = $SaveReplyFrames }
+            $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; SaveFrames = $SaveReplyFrames
+        Pacing = (Get-CopilotPacing); LastReplyAt = $null }
             if ($target.url -notlike $hostLike) { $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl } }
             $null = Invoke-Cdp $session 'Network.enable'
             # Edge throttles a page in a background or minimised window so hard that Copilot's reply
@@ -67,6 +68,25 @@ function Connect-Copilot {
     }
 }
 
+function Get-CopilotPacing {
+    <# Pauses from harness.json "pacing" (defaults when missing). #>
+    $p = @{ newChatSettleSec = 3.0; beforeSendSec = 1.0; betweenPromptsSec = 5.0 }
+    try {
+        $cfg = Get-CCBridgeConfig harness (Split-Path -Parent $script:ModuleDir)
+        if ($cfg.pacing) { foreach ($k in @($p.Keys)) { if ($null -ne $cfg.pacing.$k) { $p[$k] = [double]$cfg.pacing.$k } } }
+    } catch { }
+    $p
+}
+
+function Wait-Pacing($Bridge, [string]$Name, [string]$Why) {
+    $sec = if ($Bridge.PSObject.Properties['Pacing'] -and $Bridge.Pacing) { [double]$Bridge.Pacing[$Name] } else { 0 }
+    if ($sec -le 0) { return }
+    Write-CCBLog verbose bridge "Pause $sec s ($Why)"
+    # Keep reading the page's events meanwhile, so nothing backs up.
+    $until = (Get-Date).AddSeconds($sec)
+    while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $Bridge.Session 200 }
+}
+
 function Set-CopilotTabActive($Session) {
     try { $null = Invoke-Cdp $Session 'Emulation.setFocusEmulationEnabled' @{ enabled = $true } } catch { Write-CCBLog verbose bridge "focus emulation failed: $($_.Exception.Message)" }
     try { $null = Invoke-Cdp $Session 'Page.enable'; $null = Invoke-Cdp $Session 'Page.setWebLifecycleState' @{ state = 'active' } } catch { Write-CCBLog verbose bridge "lifecycle state failed: $($_.Exception.Message)" }
@@ -93,6 +113,43 @@ function Wait-CopilotEditor {
         $null = Receive-CdpEvent $Bridge.Session 500
     }
     $false
+}
+
+function Get-CopilotPageSnapshot {
+    <# What the Copilot tab shows when the message box is missing: address, title, a short excerpt of
+       the visible text, whether a human-verification check or sign-in page is showing, and a
+       screenshot in %LOCALAPPDATA%\CCBridge\screens (newest 20 kept). For diagnosis only. #>
+    param([Parameter(Mandatory)]$Bridge)
+    $snap = $null
+    $editorSel = ConvertTo-JsString $Bridge.Selectors.editor
+    try {
+        $snap = Invoke-CdpEval $Bridge.Session @"
+(() => JSON.stringify({
+  host: location.host, path: location.pathname.replace(/[0-9a-f-]{16,}/gi, '*'), title: document.title,
+  text: ((document.body && document.body.innerText) || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+  challenge: !!document.querySelector('iframe[src*="challenges.cloudflare.com"]'),
+  editor: !!document.querySelector($editorSel)
+}))()
+"@ | ConvertFrom-Json
+    } catch { $snap = [pscustomobject]@{ host = '?'; path = ''; title = ''; text = "page not readable: $($_.Exception.Message)"; challenge = $false; editor = $false } }
+    $file = $null
+    try {
+        $dir = Join-Path $env:LOCALAPPDATA 'CCBridge\screens'
+        if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir }
+        $shot = Invoke-Cdp $Bridge.Session 'Page.captureScreenshot' @{ format = 'png' } -TimeoutMs 15000
+        $file = Join-Path $dir ((Get-Date).ToString('yyyyMMdd-HHmmss-fff') + '.png')
+        [IO.File]::WriteAllBytes($file, [Convert]::FromBase64String($shot.data))
+        foreach ($old in @(Get-ChildItem $dir -Filter *.png | Sort-Object Name -Descending | Select-Object -Skip 20)) { [IO.File]::Delete($old.FullName) }
+    } catch { }
+    $snap | Add-Member -NotePropertyName screenshot -NotePropertyValue $file -Force
+    $snap | Add-Member -NotePropertyName signIn -NotePropertyValue ("$($snap.host)" -match 'login\.microsoftonline|login\.live|account\.microsoft') -Force
+    $snap
+}
+
+function Format-PageSnapshot($Snap) {
+    $what = if ($Snap.challenge) { 'a human-verification check' } elseif ($Snap.signIn) { 'a sign-in page' } else { "'$($Snap.title)'" }
+    $text = "$($Snap.text)"
+    Protect-LogText ("the page shows $what at $($Snap.host)$($Snap.path): $($text.Substring(0, [Math]::Min(160, $text.Length)))" + $(if ($Snap.screenshot) { " (screenshot: $($Snap.screenshot))" } else { '' }))
 }
 
 # The web app and the MCP server may run at the same time and drive the same Copilot tab;
@@ -143,8 +200,22 @@ function New-CopilotChatUnlocked {
         $null = Invoke-Cdp $Bridge.Session 'Page.navigate' @{ url = $Bridge.Selectors.chatUrl }
         Start-Sleep -Milliseconds 500
     }
-    if (-not (Wait-CopilotEditor $Bridge -TimeoutSec 30)) { throw 'Copilot message box did not appear after starting a new chat' }
+    $ok = Wait-CopilotEditor $Bridge -TimeoutSec $(if ($how -eq 'button') { 15 } else { 30 })
+    if (-not $ok -and $how -eq 'button') {
+        Write-CCBLog info bridge 'Message box missing after New chat; reloading the page'
+        $how = 'button, then reload'
+        $null = Invoke-Cdp $Bridge.Session 'Page.navigate' @{ url = $Bridge.Selectors.chatUrl }
+        Start-Sleep -Milliseconds 500
+        $ok = Wait-CopilotEditor $Bridge -TimeoutSec 30
+    }
+    if (-not $ok) {
+        $snap = Get-CopilotPageSnapshot $Bridge
+        $why = Format-PageSnapshot $snap
+        Write-CCBLog info bridge "Copilot message box did not appear; $why" @{ challenge = $snap.challenge; signIn = $snap.signIn; title = $snap.title }
+        throw "Copilot message box did not appear after starting a new chat; $why"
+    }
     $ready = Wait-CopilotReady $Bridge
+    Wait-Pacing $Bridge 'newChatSettleSec' 'new chat settles'
     Write-CCBLog verbose bridge "New chat ($how); page ready after $($sw.ElapsedMilliseconds) ms" $ready
 }
 
@@ -227,7 +298,11 @@ function Set-CopilotInput {
     $Text = $Text.Replace("`r`n", "`n")   # a CR would land in the editor as an extra character
     $s = $Bridge.Session
     $editorSel = ConvertTo-JsString $Bridge.Selectors.editor
-    $null = Invoke-CdpEval $s "(() => { const e = document.querySelector($editorSel); if (!e) throw new Error('message box not found'); e.focus(); return true; })()"
+    $found = Invoke-CdpEval $s "(() => { const e = document.querySelector($editorSel); if (!e) return false; e.focus(); return true; })()"
+    if (-not $found) {
+        if (-not (Wait-CopilotEditor $Bridge -TimeoutSec 15)) { throw "Copilot message box not found; $(Format-PageSnapshot (Get-CopilotPageSnapshot $Bridge))" }
+        $null = Invoke-CdpEval $s "(() => { const e = document.querySelector($editorSel); if (e) e.focus(); return !!e; })()"
+    }
     for ($try = 0; $try -lt 3 -and (Get-CopilotInputLength $Bridge) -gt 0; $try++) {
         Send-CdpKey $s 'a' 'KeyA' 65 2 @('selectAll')   # modifiers 2 = Ctrl
         Send-CdpKey $s 'Backspace' 'Backspace' 8
@@ -767,7 +842,20 @@ function Send-CopilotPrompt {
         [scriptblock]$CancelCheck,   # returns $true to stop now: Copilot's Stop is pressed and Cancelled = $true is returned
         [int]$StallSec = 90          # no data from Copilot this long: it hangs; press Stop and report NoAnswer
     )
-    Use-CopilotLock { Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec }
+    Use-CopilotLock {
+        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec
+        if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
+        if ($r.Result -eq 'Lost') {
+            # The request never reached Copilot's answer stream (seen when the page opens that
+            # connection only at the first send). The connection exists now: send it once more.
+            Write-CCBLog info bridge 'No part of the reply arrived; sending the prompt again'
+            Add-TimelineEvent $Bridge 'resent' $null
+            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -LostSec 0
+            if ($r.Result -eq 'Lost') { $r.Result = 'NoAnswer' }
+        }
+        if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
+        $r
+    }
 }
 
 function Send-CopilotPromptUnlocked {
@@ -777,9 +865,11 @@ function Send-CopilotPromptUnlocked {
         [int]$TimeoutSec = 300,
         [scriptblock]$OnProgress,
         [scriptblock]$CancelCheck,
-        [int]$StallSec = 90
+        [int]$StallSec = 90,
+        [int]$LostSec = 25     # no part of the reply this long after sending: the request was lost (0 = off)
     )
     $s = $Bridge.Session
+    $replyRecords = 0      # records that belong to a reply (not handshakes or keep-alive pings)
     while ($s.Events.Count) { $null = $s.Events.Dequeue() }   # drop stale events
     $sendWatch = [Diagnostics.Stopwatch]::StartNew()
     Write-CCBLog trace bridge 'Prompt text' @{ text = $Text }
@@ -787,9 +877,15 @@ function Send-CopilotPromptUnlocked {
     # The page itself is watched too: if the reply does not arrive over the Chathub socket (other
     # tenants may deliver it differently), it is read from the page once Copilot has finished.
     $pageBefore = Get-PageReplyState $Bridge
+    if ($Bridge.PSObject.Properties['LastReplyAt'] -and $Bridge.LastReplyAt -and $Bridge.Pacing) {
+        $left = [double]$Bridge.Pacing.betweenPromptsSec - ((Get-Date) - $Bridge.LastReplyAt).TotalSeconds
+        if ($left -gt 0) { Write-CCBLog verbose bridge "Pause $([Math]::Round($left, 1)) s (gap after the previous reply)"; $until = (Get-Date).AddSeconds($left); while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $s 200 } }
+    }
     Add-TimelineEvent $Bridge 'typing' $null
     Set-CopilotInput $Bridge $Text
+    Wait-Pacing $Bridge 'beforeSendSec' 'prompt typed, before Send'
     Invoke-CopilotSend $Bridge
+    $sendWatch.Restart()   # timings and the lost-request check count from Send
     Add-TimelineEvent $Bridge 'sent' $null
     $net = New-NetTrace
     # How often the page is checked, and how long it must look finished before it counts.
@@ -870,6 +966,16 @@ function Send-CopilotPromptUnlocked {
                 }
             }
         }
+        if ($LostSec -gt 0 -and $replyRecords -eq 0 -and $sendWatch.Elapsed.TotalSeconds -ge $LostSec -and $pageLastLen -le 40) {
+            # Nothing of a reply arrived (at most a placeholder on the page): the request was lost.
+            Write-CCBLog info bridge "No part of the reply arrived within $LostSec s" @{ frames = $frames.Count; pageChars = $pageLastLen; sent = @($sentTargets | Select-Object -Unique) }
+            Stop-CopilotReply $Bridge -DrainSec 3
+            Write-NetTrace $net 'request lost'
+            Add-TimelineEvent $Bridge 'lost' "no reply records within $LostSec s"
+            return [pscustomobject]@{ Cancelled = $false; Text = ''; ServerText = $null; Uncertain = 0; SentText = $Text; SentMatches = $true
+                Result = 'Lost'; ResultMessage = "No part of the reply arrived within $LostSec seconds"; ConversationId = $null; Throttling = $null
+                Metering = $null; References = @(); ProposedActions = @(); ActionClaims = @() }
+        }
         $quiet = ((Get-Date) - $lastActivity).TotalSeconds
         if ((Get-Date) -gt $nextStallCheck -and $quiet -ge 30) {
             $nextStallCheck = (Get-Date).AddSeconds(10)
@@ -916,9 +1022,10 @@ function Send-CopilotPromptUnlocked {
         if ($kind -eq 'stream') {
             # StreamHub (primary where the tenant uses it): its end-of-reply ends the wait at once.
             if ($frames.Count -eq 1 -or $stream.Items -eq 0) { Add-TimelineEvent $Bridge 'first StreamHub frame' $null $(if (Test-Timeline $Bridge) { Get-BrowserTime $Bridge.Timeline $m }) }
-            $lastActivity = Get-Date
             foreach ($rec in Read-HubRecords $payload) {
                 if ($myInvocation -and $null -ne $rec.invocationId -and [string]$rec.invocationId -ne $myInvocation) { continue }
+                # Handshakes ({}) and keep-alive pings (type 6) are not part of a reply.
+                if ($rec.type -ge 1 -and $rec.type -le 3) { $replyRecords++; $lastActivity = Get-Date }
                 Add-StreamRecord $stream $rec
             }
             if ($stream.Done) {
@@ -935,8 +1042,8 @@ function Send-CopilotPromptUnlocked {
             continue
         }
         if ($frames.Count -eq 1) { Add-TimelineEvent $Bridge 'first Chathub frame' $null $(if (Test-Timeline $Bridge) { Get-BrowserTime $Bridge.Timeline $m }) }
-        $lastActivity = Get-Date
         foreach ($rec in Read-HubRecords $payload) {
+            if ($rec.type -ge 1 -and $rec.type -le 3) { $replyRecords++; $lastActivity = Get-Date }
             $isEnd = $rec.type -eq 2 -or $rec.type -eq 3
             if ($isEnd -and $myInvocation -and $null -ne $rec.invocationId -and [string]$rec.invocationId -ne $myInvocation) {
                 Write-CCBLog verbose bridge "Ignored the completion of another request (invocation $($rec.invocationId))"

@@ -82,7 +82,12 @@ function Get-AgentEvents {
 $script:Bridge = $null
 
 function Get-Bridge($State) {
-    if ($script:Bridge) { return $script:Bridge }
+    if ($script:Bridge) {
+        $ws = $script:Bridge.Session.Ws
+        if (-not $script:Bridge.Session.Lost -and $ws -and $ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) { return $script:Bridge }
+        Write-CCBLog info agent 'The connection to the Copilot tab was lost; reconnecting'
+        Reset-Bridge $State
+    }
     $State.Copilot = 'connecting'
     $State.CopilotMessage = 'Opening Copilot in Edge. Sign in there if asked.'
     try {
@@ -117,8 +122,26 @@ function Send-ToCopilot {
     $cancel = { [bool]$State.Cancel }.GetNewClosure()
     try {
         $stall = if ($State.Config.PSObject.Properties['stallSec']) { [int]$State.Config.stallSec } else { 90 }
-        $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $State.Config.replyTimeoutSec -OnProgress $progress -CancelCheck $cancel -StallSec $stall
+        $r = $null
+        try {
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $State.Config.replyTimeoutSec -OnProgress $progress -CancelCheck $cancel -StallSec $stall
+        } catch {
+            if (-not (Test-ConnectionLost $_) -or $State.ChatStarted) { throw }
+            # First message of a chat: reconnect, start a fresh chat and send it once more.
+            Write-CCBLog info agent 'Connection lost while sending the first message of a chat; reconnecting and sending again' @{ error = $_.Exception.Message }
+            Add-AgentEvent $State 'status' @{ text = 'The connection to Copilot was lost; reconnecting and sending again.' }
+            Reset-Bridge $State
+            Start-NewChat $State
+            $bridge = Get-Bridge $State
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $State.Config.replyTimeoutSec -OnProgress $progress -CancelCheck $cancel -StallSec $stall
+        }
     } catch {
+        if (Test-ConnectionLost $_) {
+            # Later in a chat the conversation cannot be resumed: the next message starts a new chat.
+            $State.NeedNewChat = $true
+            Reset-Bridge $State
+            throw "The connection to the Copilot tab was lost ($($_.Exception.Message)). CCBridge reconnects; send your message again (it starts a new Copilot chat)."
+        }
         Reset-Bridge $State   # the next send reconnects
         throw
     } finally { $State.Progress = '' }
@@ -133,8 +156,19 @@ function Send-ToCopilot {
     $r
 }
 
+function Test-ConnectionLost($ErrorRecord) {
+    "$($ErrorRecord.Exception.Message)" -match 'Lost the connection to the Copilot tab|Could not connect to the Copilot tab'
+}
+
 function Start-NewChat($State) {
-    New-CopilotChat (Get-Bridge $State)
+    try { New-CopilotChat (Get-Bridge $State) }
+    catch {
+        if (-not (Test-ConnectionLost $_)) { throw }
+        # Nothing was sent yet: reconnect and try once more.
+        Write-CCBLog info agent 'Connection lost while starting a new chat; reconnecting' @{ error = $_.Exception.Message }
+        Reset-Bridge $State
+        New-CopilotChat (Get-Bridge $State)
+    }
     $State.ChatStarted = $false
     $State.ChatKind = $null
     $State.SentParts = New-Object 'System.Collections.Generic.HashSet[string]'

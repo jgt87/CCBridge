@@ -58,8 +58,14 @@ function Connect-Cdp {
     param([Parameter(Mandatory)][string]$WebSocketUrl)
     $ws = New-Object System.Net.WebSockets.ClientWebSocket
     $ws.Options.KeepAliveInterval = [TimeSpan]::FromSeconds(20)
-    if (-not $ws.ConnectAsync([uri]$WebSocketUrl, [Threading.CancellationToken]::None).Wait(10000)) {
-        throw "could not connect to $WebSocketUrl"
+    try {
+        if (-not $ws.ConnectAsync([uri]$WebSocketUrl, [Threading.CancellationToken]::None).Wait(10000)) {
+            throw "could not connect to $WebSocketUrl"
+        }
+    } catch {
+        $inner = $_.Exception
+        while ($inner.InnerException) { $inner = $inner.InnerException }
+        throw "Could not connect to the Copilot tab in Edge ($($inner.Message))"
     }
     $buffer = New-Object byte[] 65536
     [pscustomobject]@{
@@ -127,8 +133,21 @@ function Invoke-Cdp {
     $json = @{ id = $id; method = $Method; params = $Params } | ConvertTo-Json -Depth 20 -Compress
     $bytes = [Text.Encoding]::UTF8.GetBytes($json)
     $seg = New-Object ArraySegment[byte] -ArgumentList @(, $bytes)
-    if (-not $Session.Ws.SendAsync($seg, 'Text', $true, [Threading.CancellationToken]::None).Wait(10000)) {
-        throw "timed out sending $Method"
+    if ($Session.Ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
+        $Session.Lost = $true
+        throw "Lost the connection to the Copilot tab in Edge (connection $($Session.Ws.State))"
+    }
+    try {
+        if (-not $Session.Ws.SendAsync($seg, 'Text', $true, [Threading.CancellationToken]::None).Wait(10000)) {
+            throw "timed out sending $Method"
+        }
+    } catch {
+        if ("$($_.Exception.Message)" -like 'timed out sending*') { throw }
+        # The tab went away (closed, crashed, replaced during sign-in, Edge closed).
+        $Session.Lost = $true
+        $inner = $_.Exception
+        while ($inner.InnerException) { $inner = $inner.InnerException }
+        throw "Lost the connection to the Copilot tab in Edge ($($inner.Message))"
     }
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
     while ([DateTime]::UtcNow -lt $deadline) {
