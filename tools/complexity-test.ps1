@@ -6,19 +6,19 @@
   by (StreamHub, Chathub or the page) and how long CCBridge waited after Copilot had finished.
   Use it to find where (if anywhere) Copilot starts to fail or refuse, and where time is lost.
 .DESCRIPTION
-  Every step costs one Copilot message. The report (text + JSON on the desktop) contains no
+  Every step costs one Copilot message. The report (text + JSON in a new folder C:\temp\CCBridge-test-<date>, see -OutRoot) contains no
   Microsoft 365 data: for the Microsoft 365 steps only codes, sizes and timings are kept.
 .PARAMETER From
   First step to run (default 1).
 .PARAMETER To
-  Last step to run (default 12).
+  Last step to run (default 19, the last step).
 .PARAMETER StepTimeoutSec
   Longest wait for one reply (default 300).
 .EXAMPLE
   complexity-test.cmd
   complexity-test.cmd -From 5 -To 9
 #>
-param([int]$From = 1, [int]$To = 12, [int]$StepTimeoutSec = 300, [int]$PauseSec = 3, [int]$PageCheckMs = 200)
+param([int]$From = 1, [int]$To = 19, [int]$StepTimeoutSec = 300, [int]$PauseSec = 3, [int]$PageCheckMs = 200, [string]$OutRoot = 'C:\temp')
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -49,6 +49,31 @@ function Get-Item$i {
     $sb.ToString()
 }
 
+function New-MultiFileContext([int]$Files, [int]$CharsPerFile) {
+    <# Several attached modules that call each other, for coordinated edits across files. #>
+    $sb = New-Object Text.StringBuilder
+    for ($f = 1; $f -le $Files; $f++) {
+        $sb.AppendLine("### src/Part$f.psm1").AppendLine('````') | Out-Null
+        $start = $sb.Length; $i = 0
+        while ($sb.Length - $start -lt $CharsPerFile) {
+            $i++
+            $callee = if ($f -gt 1) { "Get-Item7 -Name `$Name" } else { "`$null" }
+            $sb.AppendLine(@"
+function Get-Part${f}Value$i {
+    param([string]`$Name, [int]`$Count = $i)
+    # Part $f, value ${i}: combines the inventory lookup with a local factor.
+    `$base = $callee
+    if (`$Count -lt 0) { throw "Count for part $f value $i must not be negative" }
+    [pscustomobject]@{ Part = $f; Id = $i; Name = `$Name; Total = `$Count * $f; Base = `$base }
+}
+"@) | Out-Null
+        }
+        if ($f -eq 1) { $sb.AppendLine("function Get-Item7 { param([string]`$Name) [pscustomobject]@{ Id = 7; Name = `$Name } }") | Out-Null }
+        $sb.AppendLine('````').AppendLine() | Out-Null
+    }
+    $sb.ToString()
+}
+
 function New-AgentPrompt([string]$Kind, [string]$Task, [string]$Context = '') {
     <# The same shape CCBridge sends as the first message of a chat (New-PromptMessage). #>
     $location = "Project folder: complexity-test on the user's computer; use the read action to see its files."
@@ -70,6 +95,19 @@ $steps = @(
     @{ n = 10; name = 'Long answer: design + several files'; m365 = $false; prompt = { New-AgentPrompt 'coding' 'Design and build a small PowerShell 5.1 to-do CLI: todo.ps1 (add, list, done, remove, export to CSV), src/Todo.psm1 with the logic and JSON storage in data/todos.json, tests/Todo.Tests.ps1 with at least eight Pester 3.4 tests, and README.md with usage. Start with a todo checklist, write all files, then done.' } }
     @{ n = 11; name = 'Microsoft 365: assistant question';   m365 = $true;  prompt = { New-AgentPrompt 'assistant' 'What meetings do I have tomorrow, and which emails from this week still need an answer from me? Keep it short. Do not use actions.' } }
     @{ n = 12; name = 'Microsoft 365 + files: mixed task';   m365 = $true;  prompt = { New-AgentPrompt 'mixed' 'Summarise the decisions and follow-ups from my Teams meetings of this week and write them to notes/weekly-summary.md as a markdown table (date, meeting, decision or follow-up, owner). Then done.' } }
+    # Harder: bigger input, longer output, coordinated edits, reasoning, a multi-turn agent loop.
+    @{ n = 13; name = 'Instructions + ~100k chars of code';  m365 = $false; prompt = { New-AgentPrompt 'coding' 'In the attached src/Inventory.psm1, make Get-Item42 reject an empty Name and a Quantity above 1000 with clear error messages. Use an edit block with SEARCH/REPLACE, then done.' (New-CodeContext 100000) } }
+    @{ n = 14; name = 'Instructions + ~125k chars (near max)'; m365 = $false; prompt = { New-AgentPrompt 'coding' 'In the attached src/Inventory.psm1, find the function whose price factor is 1.95 for the highest item number and add a comment above it saying "highest 1.95 item". Use an edit block, then done.' (New-CodeContext 124000) } }
+    @{ n = 15; name = 'Long output: one large file';         m365 = $false; prompt = { New-AgentPrompt 'coding' 'Write src/Geometry.psm1 for PowerShell 5.1 with 24 functions: area and perimeter (or surface area and volume for solids) for circle, square, rectangle, triangle, ellipse, trapezoid, parallelogram, regular hexagon, cube, sphere, cylinder and cone. Each function gets comment-based help (synopsis, parameters, an example) and parameter validation that rejects negative or zero sizes. One write block with the complete file, then done.' } }
+    @{ n = 16; name = 'Coordinated edits across 5 files';    m365 = $false; prompt = { New-AgentPrompt 'coding' 'Rename Get-Item7 to Get-InventoryItem7 everywhere in the attached files: its definition in src/Part1.psm1 and every call in the other files. Use edit blocks (one block per file, several SEARCH/REPLACE pairs where needed), then done.' (New-MultiFileContext 5 7000) } }
+    @{ n = 17; name = 'Reasoning: algorithm + tests';        m365 = $false; prompt = { New-AgentPrompt 'coding' 'Build an arithmetic expression evaluator in PowerShell 5.1 without Invoke-Expression: src/Calc.psm1 with Invoke-Calc that supports + - * / ^, parentheses, unary minus, decimals, right-associative ^, and clear errors for division by zero, unbalanced parentheses and unknown characters (with the position). Use a tokenizer and a recursive-descent parser. Add tests/Calc.Tests.ps1 with at least 15 Pester 3.4 tests (Should Be syntax) covering precedence, associativity and every error. Start with a todo checklist, write both files, then done.' } }
+    @{ n = 18; name = 'Agent loop: 4 turns in one chat';     m365 = $false; prompt = { New-AgentPrompt 'coding' 'Create src/Stats.psm1 with Get-Median (handles even and odd counts, rejects empty input) and tests/Stats.Tests.ps1 with four Pester 3.4 tests. Write both files and run the tests with: powershell -NoProfile -Command "Invoke-Pester tests"' }
+        followUps = @(
+            "Results:`n- wrote src/Stats.psm1 (18 lines)`n- wrote tests/Stats.Tests.ps1 (22 lines)`n- run: exit code 1`n  [-] returns the middle of an even count 41ms`n    Expected: {2.5}`n    But was:  {2}`n    at line: 9 in tests\Stats.Tests.ps1`nTests Passed: 3, Failed: 1",
+            "Results:`n- edit src/Stats.psm1: applied 1 change`n- run: exit code 0`nTests Passed: 4, Failed: 0`n`nNow also add Get-Mode (most frequent value; all values when tied, sorted) with two tests, and run the tests again.",
+            "Results:`n- edit src/Stats.psm1: applied 1 change`n- edit tests/Stats.Tests.ps1: applied 1 change`n- run: exit code 0`nTests Passed: 6, Failed: 0"
+        ) }
+    @{ n = 19; name = 'Microsoft 365: month-wide synthesis';  m365 = $true;  prompt = { New-AgentPrompt 'mixed' 'Go through my email, meetings and Teams chats of the past four weeks and write notes/month-overview.md with: the five main topics (each with the sources it is based on), the open action items for me with due dates, and the people waiting for an answer from me. Read-only: do not send or change anything. Then done.' } }
 )
 
 # --- Run ----------------------------------------------------------------------------------
@@ -106,6 +144,26 @@ try {
             $res.source = $(if ($r.Source) { $r.Source } else { 'socket' })
             $res.chat = "$($r.Throttling.numUserMessagesInConversation)/$($r.Throttling.maxNumUserMessagesInConversation)"
             if ($r.Metering) { $res.creditsLeft = $r.Metering.remainingAllowance }
+            # Timing of the first turn; follow-up turns (agent loop) go into the same chat.
+            if ($bridge.PSObject.Properties['Timeline'] -and $bridge.Timeline) {
+                $sum = Get-ReplyTimelineSummary $bridge.Timeline
+                foreach ($k in 'sentAt', 'route', 'firstTextOnPageMs', 'stopShownMs', 'stopGoneMs', 'firstHubFrameMs', 'lastHubFrameMs', 'returnedMs', 'waitAfterStopGoneMs', 'waitAfterLastHubFrameMs', 'timeline') { $res[$k] = $sum.$k }
+                $bridge.Timeline = $null
+            }
+            if ($step.followUps -and $res.result -eq 'Success') {
+                $turns = @([ordered]@{ turn = 1; result = $res.result; seconds = $res.seconds; replyChars = $res.replyChars; actions = (@($res.actions) -join ',') })
+                $t = 1
+                foreach ($fu in $step.followUps) {
+                    $t++
+                    $tw = [Diagnostics.Stopwatch]::StartNew()
+                    $r2 = Send-CopilotPrompt $bridge $fu -TimeoutSec $StepTimeoutSec -StallSec ([int]$config.stallSec)
+                    $turns += [ordered]@{ turn = $t; result = $(if ($r2.Result) { $r2.Result } else { 'Success' }); seconds = [Math]::Round($tw.Elapsed.TotalSeconds, 1); replyChars = "$($r2.Text)".Length; actions = ((@(Get-ActionBlocks "$($r2.Text)" | ForEach-Object { $_.type })) -join ',') }
+                    if ($turns[-1].result -ne 'Success' -or -not $turns[-1].replyChars) { $res.result = $turns[-1].result; if ($res.result -eq 'Success') { $res.result = 'EmptyReply' }; $res.resultMessage = "turn ${t}: $($r2.ResultMessage)"; break }
+                }
+                $res.turns = $turns
+                $res.seconds = [Math]::Round($watch.Elapsed.TotalSeconds, 1)
+                $res.actions = @($turns | ForEach-Object { "t$($_.turn):$($_.actions)" })
+            }
             # Refusals show up in the first words; never kept for Microsoft 365 steps.
             if (-not $step.m365) {
                 $flat = "$($r.Text)" -replace '\s+', ' '
@@ -154,9 +212,11 @@ try {
 # --- Report -------------------------------------------------------------------------------
 
 $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
-$desktop = [Environment]::GetFolderPath('Desktop')
-$jsonFile = Join-Path $desktop "CCBridge-complexity-$stamp.json"
-$txtFile = Join-Path $desktop "CCBridge-complexity-$stamp.txt"
+# Each run gets its own folder under $OutRoot (default C:\temp).
+$outDir = Join-Path $OutRoot "CCBridge-test-$stamp"
+$null = New-Item -ItemType Directory -Force -Path $outDir
+$jsonFile = Join-Path $outDir "CCBridge-complexity-$stamp.json"
+$txtFile = Join-Path $outDir "CCBridge-complexity-$stamp.txt"
 $envInfo = Get-CCBridgeEnvironment $root
 [IO.File]::WriteAllText($jsonFile, (Protect-LogText (@{ environment = $envInfo; steps = $results } | ConvertTo-Json -Depth 6)), (New-Object Text.UTF8Encoding($false)))
 $lines = New-Object System.Collections.Generic.List[string]
@@ -168,6 +228,7 @@ foreach ($r in $results) {
     $detail = if ($r.actions -and @($r.actions).Count) { (@($r.actions) -join ',') } elseif ($r.replyStart) { $r.replyStart } else { '' }
     $lines.Add(('{0,-4} {1,-38} {2,8} {3,-12} {4,7} {5,8} {6}' -f $r.step, $r.name, $r.promptChars, $r.result, $r.seconds, $r.replyChars, $detail))
     if ($r.result -ne 'Success' -and $r.resultMessage) { $lines.Add("     -> $($r.resultMessage)") }
+    foreach ($tn in @($r.turns)) { if ($tn) { $lines.Add(("     turn {0}: {1} in {2}s, reply {3} chars, actions {4}" -f $tn.turn, $tn.result, $tn.seconds, $tn.replyChars, $tn.actions)) } }
 }
 $firstFail = $results | Where-Object { $_.result -ne 'Success' -or $_.replyChars -eq 0 } | Select-Object -First 1
 $lines.Add('')
@@ -186,5 +247,6 @@ foreach ($r in $results) {
 }
 [IO.File]::WriteAllText($txtFile, (Protect-LogText ($lines -join "`r`n")), (New-Object Text.UTF8Encoding($false)))
 Write-Host ''
+Write-Host "Folder: $outDir" -ForegroundColor Green
 Write-Host "Report: $txtFile" -ForegroundColor Green
 Write-Host "Details: $jsonFile"

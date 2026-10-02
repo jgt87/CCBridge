@@ -269,7 +269,7 @@ The zip contains:
 
 ### Finding Copilot's limits and speed: `complexity-test.cmd`
 
-Double-click `complexity-test.cmd` to send 12 prompts, from simple to complex, each in a new Copilot chat, and see where (if anywhere) Copilot starts to fail or refuse. Each step costs one Copilot message; it stops by itself when the daily credits run out.
+Double-click `complexity-test.cmd` to send 19 prompts, from simple to complex, each in a new Copilot chat, and see where (if anywhere) Copilot starts to fail or refuse. Each step costs one Copilot message; it stops by itself when the daily credits run out.
 
 | Steps | What they test |
 |---|---|
@@ -278,8 +278,16 @@ Double-click `complexity-test.cmd` to send 12 prompts, from simple to complex, e
 | 7-9 | Instructions plus about 10,000, 30,000 and 60,000 characters of code |
 | 10 | A long answer: a design and several files |
 | 11-12 | Microsoft 365: a calendar/email question (assistant role) and a mixed task that writes a file |
+| 13-14 | Instructions plus about 100,000 and 125,000 characters of code (the page accepts at most 128,000) |
+| 15 | A long answer: one large file with 24 documented functions |
+| 16 | Coordinated edits across five attached files (a rename with 80+ call sites) |
+| 17 | Reasoning: an expression parser with precedence and error positions, plus 15 tests |
+| 18 | An agent loop of four turns in one chat (a failing test, a fix, a new feature); costs four messages |
+| 19 | Microsoft 365: a four-week synthesis of email, meetings and chats into a file |
 
-Per step the report records the result (`Success`, `NoAnswer`, `OutOfCredits`, `Error`, ...), the time, when the first text arrived, the reply length, the action blocks found, Copilot's message types and filter markers, and (not for the Microsoft 365 steps) the first words of the reply, so refusals stand out. It writes `CCBridge-complexity-<date>.txt` and `.json` to your desktop, masked like the logs. Run part of the ladder with `complexity-test.cmd -From 5 -To 9`.
+Run only the new steps with `complexity-test.cmd -From 13`.
+
+Per step the report records the result (`Success`, `NoAnswer`, `OutOfCredits`, `Error`, ...), the time, when the first text arrived, the reply length, the action blocks found, Copilot's message types and filter markers, and (not for the Microsoft 365 steps) the first words of the reply, so refusals stand out. Each run creates its own folder `C:\temp\CCBridge-test-<date>` with `CCBridge-complexity-<date>.txt` and `.json`, masked like the logs (`-OutRoot D:\somewhere` picks another parent folder). Run part of the ladder with `complexity-test.cmd -From 5 -To 9`.
 
 The same run measures speed. For every step it records the exact time (`HH:mm:ss.fff`, plus milliseconds after Send) of what the page shows (Stop button, reply text, Copy button), every connection and request the page uses (first and last data, record types such as the end of a reply), and when CCBridge had the reply and by which route (StreamHub, Chathub or the page). Network times are Edge's own. The TIMING table shows per step how long CCBridge waited after Copilot finished; the full timeline of each step follows below it. Only names, sizes and times are recorded, never prompt or reply text.
 

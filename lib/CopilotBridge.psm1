@@ -235,13 +235,21 @@ function Set-CopilotInput {
     }
     if ((Get-CopilotInputLength $Bridge) -gt 0) { Write-CCBLog info bridge 'Could not clear the message box' @{ chars = (Get-CopilotInputLength $Bridge) }; throw 'could not clear the Copilot message box' }
 
-    $null = Invoke-Cdp $s 'Input.insertText' @{ text = $Text }
     $expected = $Text.Replace("`r", '').Replace("`n", '').Length
-    $deadline = (Get-Date).AddSeconds(10)
-    do {
-        Start-Sleep -Milliseconds 200
-        $actual = Get-CopilotInputLength $Bridge
-    } while ($actual -lt $expected -and (Get-Date) -lt $deadline)
+    # The page can rebuild the message box just after it appeared (first prompt after connecting);
+    # text typed into the old box is then lost. An empty box after typing is retried.
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $null = Invoke-Cdp $s 'Input.insertText' @{ text = $Text }
+        $deadline = (Get-Date).AddSeconds($(if ($attempt -lt 3) { 3 } else { 10 }))
+        do {
+            Start-Sleep -Milliseconds 200
+            $actual = Get-CopilotInputLength $Bridge
+        } while ($actual -lt $expected -and (Get-Date) -lt $deadline)
+        if ($actual -gt 0) { break }
+        Write-CCBLog info bridge "Message box was empty after typing; typing again (attempt $attempt)"
+        $null = Wait-CopilotEditor $Bridge -TimeoutSec 10
+        $null = Invoke-CdpEval $s "(() => { const e = document.querySelector($editorSel); if (!e) return false; e.focus(); return true; })()"
+    }
     if ($actual -ne $expected) { Write-CCBLog info bridge 'Message box content does not match the prompt' @{ expected = $expected; actual = $actual }; throw "message box holds $actual characters, expected $expected" }
     Write-CCBLog verbose bridge 'Prompt typed into the message box' @{ chars = $expected }
 }
