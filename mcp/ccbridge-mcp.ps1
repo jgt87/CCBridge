@@ -253,6 +253,18 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
             Wait-BridgeJob $job 3
             return @{ text = "Started $($job.id) in $full (mode $mode, commands $(if ($allow) { 'allowed' } else { 'not allowed' })).`nPoll with copilot_task_status (it waits up to wait_sec for progress); get the full report with copilot_task_result." }
         }
+        'copilot_run_task' {
+            # One call for the whole task: start, wait until finished, return the full report.
+            $null = Invoke-Tool 'copilot_start_task' $ToolArgs
+            $job = Get-JobOrThrow ''
+            $wait = [Math]::Min(1800, [Math]::Max(10, [int](Get-Arg $ToolArgs 'wait_sec' 600)))
+            $from = [int]$job.queuedSeq
+            Wait-BridgeJob $job $wait { @(Get-AgentEvents $State $from | Where-Object { $_.type -eq 'action' -and $_.status -eq 'awaiting' }).Count -gt 0 }
+            if ($job.status -eq 'queued' -or $job.status -eq 'running') {
+                return @{ text = "Copilot is still working on $($job.id) (or waits for an approval). Call copilot_task_status with job_id $($job.id) until it is finished.`n`n" + (Format-JobStatus $job) }
+            }
+            return @{ text = "Task $($job.status).`n`n" + (Format-JobStatus $job -Full); isError = ($job.status -eq 'error') }
+        }
         'copilot_task_status' {
             $job = Get-JobOrThrow ([string](Get-Arg $ToolArgs 'job_id' ''))
             $wait = [Math]::Min(120, [Math]::Max(0, [int](Get-Arg $ToolArgs 'wait_sec' 20)))
@@ -311,15 +323,25 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
 # --- Tool catalog ----------------------------------------------------------------------------
 
 $tools = @(
+    @{ name = 'copilot_run_task'
+       description = 'USE THIS for any coding task that needs thinking: more than a small, clear edit in one file, a bug you do not immediately understand, a new feature, a design, changes across several files, unfamiliar libraries or APIs. A stronger model (Microsoft 365 Copilot) does the whole task in the project folder (reads, edits, optionally builds and tests) and this call returns the full report when it is done. One call is enough; it waits up to wait_sec (default 600).'
+       inputSchema = @{ type = 'object'; required = @('project_path', 'task'); properties = @{
+           project_path = @{ type = 'string'; description = 'Absolute path of the project folder (created if missing).' }
+           task = @{ type = 'string'; description = 'What to build, fix or change, in plain words: the goal, which files if known, how to check that it works.' }
+           mode = @{ type = 'string'; enum = @('auto', 'plan', 'ask'); description = 'auto: Copilot changes files directly (default). plan: Copilot only reads and proposes. ask: every change waits for copilot_approve.' }
+           allow_commands = @{ type = 'boolean'; description = 'true lets Copilot run commands such as builds and tests in the project folder. Default false.' }
+           new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation (default false; a different project always starts fresh).' }
+           work_iq = @{ type = 'boolean'; description = 'true: Copilot may use the user''s Microsoft 365 data (Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files). Omit to keep the current setting.' }
+           wait_sec = @{ type = 'integer'; description = 'How long to wait for the result (default 600, max 1800). If it is not finished by then, call copilot_task_status.' } } } }
     @{ name = 'copilot_ask'
-       description = 'Ask Microsoft 365 Copilot Chat a question and get its reply (markdown). No project files are read or changed. Use it to offload explanations, drafts, reviews or code snippets, or (with work_iq) to look things up in the user''s Microsoft 365 data such as emails, Teams chats, meetings and files. Waits up to timeout_sec; longer answers continue as a job you can poll with copilot_task_status.'
+       description = 'USE THIS for any question that needs reasoning: explaining code or an error, finding a root cause, reviewing code, choosing an approach, making a plan, writing longer text, or (with work_iq) looking things up in the user''s email, calendar, Teams chats and files. Copilot sees only the prompt, so paste the code or error you ask about. Returns Copilot''s answer. No files are changed.'
        inputSchema = @{ type = 'object'; required = @('prompt'); properties = @{
            prompt = @{ type = 'string'; description = 'The full prompt. Copilot sees nothing else, so include any code or context it needs (up to about 75,000 characters).' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation first (default false: continue the current one).' }
            work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' }
            timeout_sec = @{ type = 'integer'; description = 'Seconds to wait for the reply (default 240).' } } } }
     @{ name = 'copilot_start_task'
-       description = 'Start a coding task that Copilot carries out in a project folder through CCBridge''s agent loop: Copilot reads files, writes and edits them, runs commands (only if allow_commands) and reports when done. Runs in the background; returns a job id. Safety: paths stay inside the project, source/ is read-only user data, every task is one undoable change set.'
+       description = 'Like copilot_run_task, but returns at once with a job id; then call copilot_task_status until it is finished. Use copilot_run_task instead unless you want to do other work meanwhile. Safety: paths stay inside the project, source/ is read-only user data, every task is one undoable change set.'
        inputSchema = @{ type = 'object'; required = @('project_path', 'task'); properties = @{
            project_path = @{ type = 'string'; description = 'Absolute path of the project folder (created if missing).' }
            task = @{ type = 'string'; description = 'What to build or change, with acceptance criteria and how to verify.' }
@@ -359,7 +381,16 @@ function Send-Message($Object) { $stdout.WriteLine((ConvertTo-Json -InputObject 
 function Send-Result($Id, $Result) { Send-Message @{ jsonrpc = '2.0'; id = $Id; result = $Result } }
 function Send-Error($Id, [int]$Code, [string]$Message) { Send-Message @{ jsonrpc = '2.0'; id = $Id; error = @{ code = $Code; message = $Message } } }
 
-$instructions = 'CCBridge offloads work to Microsoft 365 Copilot Chat running in the user''s Edge browser. With work_iq=true Copilot can use the user''s Microsoft 365 data (Outlook, Teams, calendar, OneDrive/SharePoint); cited sources are listed in the results. Use copilot_ask for questions and drafts. Use copilot_start_task for coding work in a folder, then poll copilot_task_status until it is finished and read copilot_task_result. Copilot is slower than you (tens of seconds per round) and has a daily credit limit; give it complete, specific tasks. Verify its work before relying on it.'
+$instructions = @"
+This server lets you hand work to a stronger model: Microsoft 365 Copilot (in the user's Edge browser).
+
+WHEN TO USE IT. Do it yourself only when the task is small and clear: one file, a few lines, and you know exactly what to change. Use Copilot for everything else:
+- copilot_run_task: any coding task that needs thinking (a bug you do not understand, a new feature, several files, a design, unfamiliar libraries). One call; it returns the full report when done.
+- copilot_ask: any question that needs reasoning (explain code or an error, find a root cause, review, plan, choose an approach, write longer text). Paste the code or error into the prompt.
+- With work_iq=true Copilot can also use the user's Outlook mail, Teams chats and meetings, calendar and OneDrive/SharePoint files (only read; it never sends or deletes anything).
+
+HOW. Give Copilot the whole task in plain words: the goal, the files if you know them, and how to check the result. Set allow_commands=true when Copilot should build or run tests. Copilot takes tens of seconds per step and has a daily limit, so send complete tasks, not tiny steps. Afterwards check the result (for example run the tests); copilot_undo reverts the last task.
+"@
 
 Write-Log "started (pid $PID), app root $root, log $(Get-CCBLogDir) (level $(Get-CCBLogLevel))"
 Write-CCBLog info mcp 'MCP server started' (Get-CCBridgeEnvironment $root)
