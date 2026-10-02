@@ -64,6 +64,7 @@ function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
     status: e.status ?? existing.status,
     summary: e.summary ?? existing.summary,
     output: e.output ?? existing.output,
+    decidedBy: e.decidedBy ?? existing.decidedBy,
   });
 }
 

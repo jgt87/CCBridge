@@ -272,7 +272,7 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
             if (@('approve', 'reject') -notcontains $decision) { throw 'decision must be approve or reject' }
             $pending = @(Get-JobActions (Get-JobEvents $job) | Where-Object { $_.status -eq 'awaiting' } | ForEach-Object { $_.id })
             if ($pending -notcontains $actionId) { throw "Action '$actionId' is not waiting for approval. Pending: $(if ($pending) { $pending -join ', ' } else { 'none' })" }
-            $State.Approvals[$actionId] = @{ decision = $decision; note = [string](Get-Arg $ToolArgs 'note' '') }
+            $State.Approvals[$actionId] = @{ decision = $decision; note = [string](Get-Arg $ToolArgs 'note' ''); by = 'mcp' }
             return @{ text = "$decision sent for $actionId. Poll copilot_task_status for progress." }
         }
         'copilot_cancel_task' {

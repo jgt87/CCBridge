@@ -74,6 +74,8 @@ export interface AgentEvent {
   summary?: string;
   output?: string;
   changed?: boolean;
+  /** Who approved or rejected an action: "user" (web app), "api" or "mcp". */
+  decidedBy?: string;
   items?: TodoItem[];
   files?: string[];
   name?: string;
@@ -112,10 +114,13 @@ export interface ProjectInfo {
 export interface FileInfo {
   path: string;
   size: number;
+  /** Lines added / removed since the project was opened (only for changed files). */
+  added?: number;
+  removed?: number;
 }
 
 // Whatever the server (and Copilot behind it) sends, the UI only ever renders strings here.
-const TEXT_FIELDS = ["text", "target", "summary", "output", "error", "warning", "status", "action", "id"] as const;
+const TEXT_FIELDS = ["text", "target", "summary", "output", "error", "warning", "status", "action", "id", "decidedBy"] as const;
 
 function asText(v: unknown): string | undefined {
   if (v === null || v === undefined) return undefined;
@@ -158,7 +163,7 @@ export const api = {
     call<{ path: string; text: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),
   chat: (text: string) => call<{ ok: boolean }>("POST", "/api/chat", { text }),
   approve: (id: string, decision: "approve" | "reject", note = "") =>
-    call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note }),
+    call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user" }),
   setMode: (mode: Mode) => call<{ ok: boolean }>("POST", "/api/mode", { mode }),
   newChat: () => call<{ ok: boolean }>("POST", "/api/newchat"),
   undo: () => call<{ ok: boolean }>("POST", "/api/undo"),

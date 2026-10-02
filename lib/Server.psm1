@@ -72,7 +72,12 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^GET /api/files$' {
             if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ files = @() } }
-            return Send-Json $Ctx @{ files = @(Get-ProjectFiles $State.ProjectRoot) }
+            $stats = Get-SessionChangeStats $State.ProjectRoot ([string]$State.SessionSince)
+            $files = @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object {
+                $s = $stats[$_.path]
+                if ($s) { [pscustomobject]@{ path = $_.path; size = $_.size; added = $s.added; removed = $s.removed } } else { $_ }
+            })
+            return Send-Json $Ctx @{ files = $files }
         }
         '^GET /api/file$' {
             $full = Resolve-ProjectPath $State.ProjectRoot $req.QueryString['path']
@@ -89,7 +94,9 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^POST /api/approve$' {
             $b = Read-JsonBody $Ctx
-            $State.Approvals[[string]$b.id] = @{ decision = [string]$b.decision; note = [string]$b.note }
+            # Who decided: the web app sends "user"; anything else calling the API is recorded as "api".
+            $by = if ($b.PSObject.Properties['by'] -and $b.by -eq 'user') { 'user' } else { 'api' }
+            $State.Approvals[[string]$b.id] = @{ decision = [string]$b.decision; note = [string]$b.note; by = $by }
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/mode$' {
@@ -150,6 +157,7 @@ function Invoke-ApiRequest($Ctx, $State) {
 
 function Set-Project($State, [string]$Path) {
     $State.ProjectRoot = $Path.TrimEnd('\')
+    $State.SessionSince = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')   # line-change counts start here
     $State.Todos = @()
     $State.NeedNewChat = $State.NeedNewChat -or $State.ChatStarted   # a new project starts a fresh Copilot chat
     Add-AgentEvent $State 'project' @{ name = (Split-Path $Path -Leaf); path = $Path }

@@ -29,6 +29,8 @@ export interface ActionItem {
   error?: string;
   summary?: string;
   output?: string;
+  /** Who approved or rejected it: "user" (you, in the web app), "api" or "mcp". */
+  decidedBy?: string;
 }
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -105,6 +107,11 @@ export function ActionCard({ item }: { item: ActionItem }) {
         {ICONS[item.action] ?? <Play className="h-4 w-4" />}
         <span className="font-medium">{VERBS[item.action] ?? item.action}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground text-xs">{item.target}</span>
+        {item.decidedBy && item.decidedBy !== "user" && (
+          <span className="text-[11px] text-muted-foreground" title="This action was approved or rejected by another program, not in this window">
+            via {item.decidedBy === "mcp" ? "MCP" : "API"}
+          </span>
+        )}
         <StatusBadge status={sent && item.status === "awaiting" ? "running" : item.status} />
         {hasDetails && (
           <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />

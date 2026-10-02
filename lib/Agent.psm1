@@ -293,13 +293,13 @@ function Invoke-AgentAction {
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; preview = $preview; warning = $warn })
         $waitWatch = [Diagnostics.Stopwatch]::StartNew()
         $d = Wait-Approval $State $Id
-        Write-CCBLog verbose agent "approval ${Id}: $($d.decision) after $($waitWatch.ElapsedMilliseconds) ms"
+        Write-CCBLog verbose agent "approval ${Id}: $($d.decision) by $($d.by) after $($waitWatch.ElapsedMilliseconds) ms"
         if ($d.decision -ne 'approve') {
-            Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $false; status = 'rejected'; output = $d.note }
+            Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }
             $why = if ($d.note) { " The user said: $($d.note)" } else { '' }
             return @{ ok = $false; summary = "$($Action.type) rejected"; output = "rejected by the user.$why" ; reported = $true }
         }
-        Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $true; status = 'running' }
+        Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $true; status = 'running'; decidedBy = $d.by }
     } else {
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ preview = $preview })
     }

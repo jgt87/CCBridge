@@ -51,10 +51,10 @@ Requirements: Windows 10/11, Windows PowerShell 5.1 in FullLanguage mode, Micros
 ### Web app
 - Chat with Copilot about a project; replies render as markdown, with Copilot's actions shown as cards.
 - **Three modes** (chat box, bottom left): *Ask before changes* (approve every file change and command), *Auto-accept edits* (file changes apply directly, commands still need approval), *Plan only* (Copilot can read and discuss, nothing is changed or run).
-- **Approvals**: file changes show a diff with *Apply change* / *Reject* (optionally with a note for Copilot); commands need a press-and-hold on *Hold to run*.
+- **Approvals**: file changes show a diff with *Apply change* / *Reject* (optionally with a note for Copilot); commands need a press-and-hold on *Hold to run*. An action approved by another program (the local API or MCP) is marked *via API* / *via MCP* on its card and in the log, so you can always tell who approved what.
 - **Stop** (square button while Copilot works) acts immediately: it presses Copilot's own Stop while it is writing, kills a running command with everything it started, or rejects a pending approval. Changes made so far stay undoable.
 - **New chat** starts a fresh Copilot conversation and a clean chat view (stopping the current step first if needed); the Changes tab keeps the undo history.
-- **Side panel** (left): *Files* (project tree, upload of source data, click to view a file), *Tasks* (Copilot's checklist), *Changes* (every message is a change set; *Undo last change set*).
+- **Side panel** (left): *Files* (project tree, upload of source data, click to view a file; changed files show `+added -removed` line counts since the project was opened, folders show their totals), *Tasks* (Copilot's checklist), *Changes* (every message is a change set; *Undo last change set*).
 - **Menu** (top right, or Ctrl+K): new Copilot chat, undo, switch project, attach a file, change mode, open any file, verbose logging on/off, export diagnostics.
 - Attach files to a message with `@path` (or the @ button) so Copilot gets their full content.
 - Monochrome, flat interface built with [Kokonut UI](https://kokonutui.com) components; served from prebuilt files, so the target machine never needs Node.
