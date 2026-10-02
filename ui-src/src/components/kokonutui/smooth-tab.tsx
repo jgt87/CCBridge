@@ -176,6 +176,9 @@ export default function SmoothTab({
   const [selected, setSelected] = React.useState<string>(defaultTabId);
   const [direction, setDirection] = React.useState(0);
   const [dimensions, setDimensions] = React.useState({ width: 0, height: 0, left: 0, top: 0 });
+  // CCBridge: the first placement (page load) is instant and the highlight stays hidden until the
+  // selected tab is measured, so a refresh shows the tab already selected instead of sliding in.
+  const [placed, setPlaced] = React.useState(false);
   // CCBridge: tabs can wrap into a grid (e.g. 2 x 2), so the highlight follows both axes.
   const cols = Math.max(1, Math.min(columns ?? items.length, items.length));
 
@@ -199,6 +202,7 @@ export default function SmoothTab({
           left: rect.left - containerRect.left,
           top: rect.top - containerRect.top,
         });
+        if (rect.width > 0 && !placed) requestAnimationFrame(() => setPlaced(true));
       }
     };
 
@@ -261,18 +265,14 @@ export default function SmoothTab({
             height: dimensions.height,
             x: dimensions.left,
             y: dimensions.top,
-            opacity: 1,
+            opacity: dimensions.width > 0 ? 1 : 0,
           }}
           className={cn(
             "absolute top-0 left-0 z-[1] rounded-lg",
             selectedItem?.color || activeColor
           )}
           initial={false}
-          transition={{
-            type: "spring",
-            stiffness: 400,
-            damping: 30,
-          }}
+          transition={placed ? { type: "spring", stiffness: 400, damping: 30 } : { duration: 0 }}
         />
 
         <div

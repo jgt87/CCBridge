@@ -217,7 +217,7 @@ export default function App() {
   const commandActions: Action[] = [
     { id: "new-chat", label: "New Copilot chat", description: "Start fresh; the project stays open", icon: <MessageSquarePlus className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: startNewChat },
     { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: <RotateCcw className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => api.undo() },
-    { id: "project", label: "Switch project", description: "Open or create a OneDrive project", icon: <FolderOpen className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setShowPicker(true) },
+    { id: "project", label: "Switch worktree", description: "Open or create a OneDrive project folder", icon: <FolderOpen className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setShowPicker(true) },
     { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: <AtSign className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setPalette("attach"), 0) },
     {
       id: "logging",
@@ -271,11 +271,11 @@ export default function App() {
           <button
             className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-muted-foreground text-sm hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
             onClick={() => setShowPicker(true)}
-            title={state.project.path}
+            title={`${state.project.name}\n${state.project.path}\nClick to open or create another project`}
             type="button"
           >
             <FolderOpen className="h-4 w-4" />
-            <span className="truncate">{state.project.name}</span>
+            <span className="truncate">Switch worktree</span>
           </button>
         )}
         <div className="flex-1" />
@@ -441,7 +441,14 @@ export default function App() {
                           {state.throttle.used}/{state.throttle.max}
                         </span>
                       )}
-                      <button className="hover:underline disabled:opacity-50" disabled={newChatPending} onClick={startNewChat} type="button">
+                      <button
+                        className="inline-flex items-center gap-1 rounded-md border border-black/10 bg-black/5 px-2 py-0.5 text-foreground hover:bg-black/10 disabled:opacity-50 dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/15"
+                        disabled={newChatPending}
+                        onClick={startNewChat}
+                        title="Start a new Copilot conversation (the project stays open)"
+                        type="button"
+                      >
+                        <MessageSquarePlus className="h-3.5 w-3.5" />
                         {newChatPending ? "Starting..." : "New chat"}
                       </button>
                     </span>

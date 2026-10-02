@@ -36,31 +36,32 @@ const ANIMATION_VARIANTS = {
     show: {
       opacity: 1,
       height: "auto",
+      // CCBridge: quick, so the whole list is there in about a quarter of a second.
       transition: {
-        height: { duration: 0.4 },
-        staggerChildren: 0.1,
+        height: { duration: 0.15 },
+        staggerChildren: 0.015,
       },
     },
     exit: {
       opacity: 0,
       height: 0,
       transition: {
-        height: { duration: 0.3 },
-        opacity: { duration: 0.2 },
+        height: { duration: 0.12 },
+        opacity: { duration: 0.1 },
       },
     },
   },
   item: {
-    hidden: { opacity: 0, y: 20 },
+    hidden: { opacity: 0, y: 6 },
     show: {
       opacity: 1,
       y: 0,
-      transition: { duration: 0.3 },
+      transition: { duration: 0.12 },
     },
     exit: {
       opacity: 0,
-      y: -10,
-      transition: { duration: 0.2 },
+      y: -4,
+      transition: { duration: 0.08 },
     },
   },
 } as const;
