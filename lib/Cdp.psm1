@@ -30,7 +30,9 @@ function Start-CdpEdge {
     if (Test-CdpEndpoint $Port) { Write-CCBLog verbose cdp "Reusing Edge on debug port $Port"; return $null }
     $null = New-Item -ItemType Directory -Force -Path $ProfileDir
     $edgeArgs = @("--remote-debugging-port=$Port", "--user-data-dir=`"$ProfileDir`"",
-                  '--no-first-run', '--no-default-browser-check')
+                  '--no-first-run', '--no-default-browser-check',
+                  # Copilot's tab usually sits in the background; throttling it stalls reply streams.
+                  '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding')
     if ($Headless) { $edgeArgs += '--headless=new' }
     $edgeArgs += $Url
     $proc = Start-Process -FilePath (Get-EdgePath) -ArgumentList $edgeArgs -PassThru

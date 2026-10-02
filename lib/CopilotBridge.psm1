@@ -35,6 +35,9 @@ function Connect-Copilot {
             $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; SaveFrames = $SaveReplyFrames }
             if ($target.url -notlike $hostLike) { $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl } }
             $null = Invoke-Cdp $session 'Network.enable'
+            # Edge throttles a page in a background or minimised window so hard that Copilot's reply
+            # stream stalls halfway. Keep the Copilot tab "visible, focused and active" while attached.
+            Set-CopilotTabActive $session
             Write-CCBLog verbose bridge "Attached to page target (attempt $attempt)" @{ url = ($target.url -replace '\?.*', ''); port = $Port }
             $wait = if ($signInAnnounced) { [int][Math]::Max(1, ($deadline - (Get-Date)).TotalSeconds) } else { 20 }
             if (Wait-CopilotEditor $bridge -TimeoutSec $wait) {
@@ -62,6 +65,12 @@ function Connect-Copilot {
             Start-Sleep -Seconds 2
         }
     }
+}
+
+function Set-CopilotTabActive($Session) {
+    try { $null = Invoke-Cdp $Session 'Emulation.setFocusEmulationEnabled' @{ enabled = $true } } catch { Write-CCBLog verbose bridge "focus emulation failed: $($_.Exception.Message)" }
+    try { $null = Invoke-Cdp $Session 'Page.enable'; $null = Invoke-Cdp $Session 'Page.setWebLifecycleState' @{ state = 'active' } } catch { Write-CCBLog verbose bridge "lifecycle state failed: $($_.Exception.Message)" }
+    try { Write-CCBLog verbose bridge "Copilot tab state: $(Invoke-CdpEval $Session 'document.visibilityState')" } catch { }
 }
 
 function Wait-CopilotEditor {
@@ -332,7 +341,8 @@ function Complete-Reply {
         ServerText     = $final        # as filtered by Copilot; differs from Text when code was damaged
         Uncertain      = $M.Uncertain  # merges that needed a heuristic; 0 = exact
         SentText       = $userMsg.text
-        SentMatches    = (($userMsg.text -replace '\s', '') -eq ($SentPrompt -replace '\s', ''))
+        # Copilot's page sends < and > as &lt; and &gt;; that is not a difference.
+        SentMatches    = (([string]$userMsg.text -replace '&lt;', '<' -replace '&gt;', '>' -replace '\s', '') -eq ($SentPrompt -replace '\s', ''))
         Result         = $Item.result.value
         ResultMessage  = $Item.result.message
         ConversationId = $Item.conversationId
@@ -358,8 +368,12 @@ function Get-ReplyFromFrames {
 
 function Write-ReplyLog($Reply, $Item, $Frames, [long]$Ms) {
     <# One verbose line per reply: timings, repair, limits, and anything unusual in the traffic. #>
-    if (-not (Test-CCBLog verbose)) { return }
     $types = @($Item.messages | ForEach-Object { "$($_.author):$($_.messageType)" } | Select-Object -Unique)
+    if (-not "$($Reply.Text)".Trim() -or ($Reply.Result -and $Reply.Result -ne 'Success')) {
+        # Always worth knowing, also at the default level.
+        Write-CCBLog info bridge 'Reply without text or not successful' @{ result = $Reply.Result; message = $Reply.ResultMessage; messageTypes = $types; frames = $Frames.Count; ms = $Ms }
+    }
+    if (-not (Test-CCBLog verbose)) { return }
     $unknown = @($Item.messages | Where-Object { $_.author -eq 'bot' -and $_.messageType -and $script:BenignMessageTypes -notcontains $_.messageType } | ForEach-Object { $_.messageType } | Select-Object -Unique)
     Write-CCBLog verbose bridge 'Reply received' @{
         ms = $Ms; frames = $Frames.Count; chars = "$($Reply.Text)".Length; serverChars = "$($Reply.ServerText)".Length
@@ -395,9 +409,10 @@ function Send-CopilotPrompt {
         [Parameter(Mandatory)][string]$Text,
         [int]$TimeoutSec = 300,
         [scriptblock]$OnProgress,
-        [scriptblock]$CancelCheck   # returns $true to stop now: Copilot's Stop is pressed and Cancelled = $true is returned
+        [scriptblock]$CancelCheck,   # returns $true to stop now: Copilot's Stop is pressed and Cancelled = $true is returned
+        [int]$StallSec = 90          # no data from Copilot this long: it hangs; press Stop and report NoAnswer
     )
-    Use-CopilotLock { Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck }
+    Use-CopilotLock { Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec }
 }
 
 function Send-CopilotPromptUnlocked {
@@ -406,7 +421,8 @@ function Send-CopilotPromptUnlocked {
         [Parameter(Mandatory)][string]$Text,
         [int]$TimeoutSec = 300,
         [scriptblock]$OnProgress,
-        [scriptblock]$CancelCheck
+        [scriptblock]$CancelCheck,
+        [int]$StallSec = 90
     )
     $s = $Bridge.Session
     while ($s.Events.Count) { $null = $s.Events.Dequeue() }   # drop stale events
@@ -420,6 +436,15 @@ function Send-CopilotPromptUnlocked {
     $merger = New-ReplyMerger
     $frames = New-Object System.Collections.Generic.List[string]   # kept for diagnosis
     $reported = 0
+    # The page may run several requests over the same connection (titles, suggestions, ...).
+    # The id of the request carrying our prompt is taken from the outgoing frames, and only its
+    # completion ends the wait; completions of other requests are ignored.
+    $myInvocation = $null
+    $sentTargets = New-Object System.Collections.Generic.List[string]
+    # Copilot sometimes gives up silently (for example a source it cannot reach): the page shows
+    # "Regenerate" and nothing more arrives. Checked after a quiet spell instead of waiting the full timeout.
+    $lastActivity = Get-Date
+    $nextStallCheck = (Get-Date).AddSeconds(30)
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
         if ($CancelCheck -and (& $CancelCheck)) {
@@ -429,9 +454,37 @@ function Send-CopilotPromptUnlocked {
                 ResultMessage = 'Stopped by the user'; SentMatches = $true; References = @(); ProposedActions = @(); ActionClaims = @() }
         }
         $m = Receive-CdpEvent $s 400
+        $quiet = ((Get-Date) - $lastActivity).TotalSeconds
+        if ((Get-Date) -gt $nextStallCheck -and $quiet -ge 30) {
+            $nextStallCheck = (Get-Date).AddSeconds(10)
+            $gaveUp = Test-CopilotGaveUp $Bridge
+            $hangs = -not $gaveUp -and $StallSec -gt 0 -and $quiet -ge $StallSec
+            if ($hangs) { Stop-CopilotReply $Bridge -DrainSec 5 }
+            if ($gaveUp -or $hangs) {
+                Write-CCBLog info bridge "Copilot stopped without answering ($(if ($hangs) { "no data for $([int]$quiet) s" } else { 'page shows Regenerate' }))" @{ partialChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; sent = @($sentTargets | Select-Object -Unique) }
+                if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
+                return [pscustomobject]@{ Cancelled = $false; Text = $merger.Text; ServerText = $null; Uncertain = $merger.Uncertain; Result = 'NoAnswer'
+                    ResultMessage = "Copilot stopped without answering$(if ($hangs) { " (no data for $([int]$quiet) seconds)" }). Usually it could not reach a source it needed (for example email or calendar), or the request was blocked."
+                    SentMatches = $true; References = @(); ProposedActions = @(); ActionClaims = @() }
+            }
+        }
         if (-not $m) { continue }
         if ($m.method -eq 'Network.webSocketCreated') {
             if ($m.params.url -match $hubPattern) { $Bridge.HubSockets[$m.params.requestId] = $true }
+            continue
+        }
+        if ($m.method -eq 'Network.webSocketFrameSent') {
+            $sent = $m.params.response.payloadData
+            if (-not $Bridge.HubSockets.ContainsKey($m.params.requestId) -and $sent -notmatch '"invocationId"') { continue }
+            foreach ($rec in Read-HubRecords $sent) {
+                if ($rec.target) { $sentTargets.Add("$($rec.type):$($rec.target)") }
+                $isPrompt = $null -ne $rec.invocationId -and ($rec.type -eq 1 -or $rec.type -eq 4) -and
+                    ("$($rec.target)" -match '(?i)chat' -or ($rec.arguments -and $rec.arguments[0].PSObject.Properties['message']))
+                if (-not $myInvocation -and $isPrompt) {
+                    $myInvocation = [string]$rec.invocationId
+                    Write-CCBLog verbose bridge 'Request sent' @{ invocation = $myInvocation; target = "$($rec.target)"; type = $rec.type }
+                }
+            }
             continue
         }
         if ($m.method -ne 'Network.webSocketFrameReceived') { continue }
@@ -443,9 +496,21 @@ function Send-CopilotPromptUnlocked {
             $Bridge.HubSockets[$m.params.requestId] = $true
         }
         $frames.Add($payload)
+        $lastActivity = Get-Date
         foreach ($rec in Read-HubRecords $payload) {
+            $isEnd = $rec.type -eq 2 -or $rec.type -eq 3
+            if ($isEnd -and $myInvocation -and $null -ne $rec.invocationId -and [string]$rec.invocationId -ne $myInvocation) {
+                Write-CCBLog verbose bridge "Ignored the completion of another request (invocation $($rec.invocationId))"
+                continue
+            }
             $item = Add-HubRecord $merger $rec
             if ($item) {
+                if (-not $myInvocation -and -not $merger.Text -and -not (Get-BotReplyText $item.messages) -and
+                    (-not $item.result -or $item.result.value -eq 'Success')) {
+                    # Without a known request id: an empty "success" is not our reply; keep waiting.
+                    Write-CCBLog verbose bridge 'Ignored an empty completion' @{ invocation = "$($rec.invocationId)"; fields = @($item.PSObject.Properties.Name) }
+                    continue
+                }
                 if ($Bridge.SaveFrames) { Save-ReplyFrames $frames }
                 $reply = Complete-Reply $merger $item $Text
                 Write-ReplyLog $reply $item $frames $sendWatch.ElapsedMilliseconds
@@ -457,10 +522,26 @@ function Send-CopilotPromptUnlocked {
             & $OnProgress $merger.Text
         }
     }
-    Write-CCBLog info bridge "No complete reply within $TimeoutSec s" @{ partialChars = $merger.Text.Length; frames = $frames.Count }
+    Write-CCBLog info bridge "No complete reply within $TimeoutSec s" @{ partialChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; sent = @($sentTargets | Select-Object -Unique) }
     if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
     Stop-CopilotReply $Bridge
     throw "No complete reply within $TimeoutSec s (partial: $($merger.Text.Length) chars)"
+}
+
+function Test-CopilotGaveUp {
+    <# True when the page shows Copilot's Regenerate button and no Stop button: the turn is over without an answer. #>
+    param([Parameter(Mandatory)]$Bridge)
+    $regen = if ($Bridge.Selectors.PSObject.Properties['regenerateButton']) { $Bridge.Selectors.regenerateButton } else { "button[aria-label*='Regenerate' i]" }
+    $js = @"
+(() => {
+  const visible = (e) => e && e.offsetParent !== null;
+  const regen = [...document.querySelectorAll($(ConvertTo-JsString $regen))].some(visible)
+    || [...document.querySelectorAll('button')].some(b => visible(b) && /^\s*regenerate\s*$/i.test(b.innerText || ''));
+  const stop = [...document.querySelectorAll($(ConvertTo-JsString $Bridge.Selectors.stopButton))].some(visible);
+  return regen && !stop;
+})()
+"@
+    try { [bool](Invoke-CdpEval $Bridge.Session $js) } catch { if ($Bridge.Session.Lost) { throw }; $false }
 }
 
 function Stop-CopilotReply {

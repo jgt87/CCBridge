@@ -10,5 +10,6 @@
   "rolloverMargin": 2,
   "autoApproveCommands": [],
   "workIq": "leave",
-  "saveReplyFrames": true
+  "saveReplyFrames": true,
+  "stallSec": 90
 }
