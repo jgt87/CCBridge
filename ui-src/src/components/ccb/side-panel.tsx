@@ -6,8 +6,9 @@ import GradientButton from "@/components/kokonutui/gradient-button";
 import { api } from "@/lib/api";
 import { ChangePill } from "./change-pill";
 import SmoothTab from "@/components/kokonutui/smooth-tab";
-import type { FetchItem, FileInfo, TodoItem } from "@/lib/api";
+import type { FetchItem, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
 import { FetchPanel } from "./fetch-panel";
+import { RunbooksPanel } from "./runbooks-panel";
 import { cn } from "@/lib/utils";
 
 interface TreeNode {
@@ -192,6 +193,10 @@ export function SidePanel({
   onSaveFetch,
   onAttach,
   project,
+  runbooks,
+  runbookTemplates,
+  onCreateRunbook,
+  onRunRunbook,
 }: {
   files: FileInfo[];
   todos: TodoItem[];
@@ -205,6 +210,10 @@ export function SidePanel({
   onSaveFetch: (name: string, prompt: string) => Promise<void>;
   onAttach: (path: string) => void;
   project?: { name: string; path: string; location?: string[] } | null;
+  runbooks: RunbookItem[];
+  runbookTemplates: RunbookTemplate[];
+  onCreateRunbook: (template: string, name: string) => Promise<void>;
+  onRunRunbook: (name: string) => void;
 }) {
   const filesPanel = <FilesPanel files={files} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />;
 
@@ -273,7 +282,22 @@ export function SidePanel({
           title: "Fetch",
           icon: CloudDownload,
           color: "bg-zinc-700",
-          content: <FetchPanel busy={busy} items={fetchItems} onAttach={onAttach} onOpen={onOpenFile} onRun={onRunFetch} onSave={onSaveFetch} />,
+          content: (
+            <div>
+              <div className="border-black/10 border-b p-3 dark:border-white/10">
+                <RunbooksPanel
+                  busy={busy}
+                  onAttach={onAttach}
+                  onCreate={onCreateRunbook}
+                  onOpen={onOpenFile}
+                  onRun={onRunRunbook}
+                  runbooks={runbooks}
+                  templates={runbookTemplates}
+                />
+              </div>
+              <FetchPanel busy={busy} items={fetchItems} onAttach={onAttach} onOpen={onOpenFile} onRun={onRunFetch} onSave={onSaveFetch} />
+            </div>
+          ),
         },
       ]}
     />

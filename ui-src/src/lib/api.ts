@@ -62,6 +62,7 @@ export interface AgentEvent {
     | "human-required"
     | "newchat"
     | "fetch"
+    | "runbook"
     | "next-steps";
   time: string;
   text?: string;
@@ -134,6 +135,20 @@ export interface ProjectInfo {
   modified: string;
 }
 
+/** A project runbook (runbooks/<name>.runbook.md) and its output file. */
+export interface RunbookItem {
+  name: string;
+  title: string;
+  path: string;
+  output: string;
+  lastRun: string | null;
+}
+
+export interface RunbookTemplate {
+  id: string;
+  title: string;
+}
+
 /** An adjustable setting (config\harness.local.json). */
 export interface Setting {
   key: string;
@@ -200,6 +215,11 @@ export function reportClientError(message: string, detail: Record<string, unknow
   }).catch(() => {});
 }
 
+/** A list from the server; a single object (PowerShell can unroll a list of one) becomes a list. */
+function asList<T>(v: T[] | T | null | undefined): T[] {
+  return Array.isArray(v) ? v : v && typeof v === "object" ? [v] : [];
+}
+
 export const api = {
   poll: (after: number) =>
     call<{ events: AgentEvent[]; state: AppState }>("GET", `/api/poll?after=${after}`).then((r) => ({
@@ -216,6 +236,13 @@ export const api = {
   fetchList: () => call<{ items: FetchItem[] }>("GET", "/api/fetch").then((r) => (Array.isArray(r.items) ? r.items : [])),
   saveFetch: (name: string, prompt: string) => call<{ ok: boolean; item: FetchItem }>("POST", "/api/fetch", { name, prompt }),
   runFetch: (name: string) => call<{ ok: boolean }>("POST", "/api/fetch/run", { name }),
+  runbooks: () =>
+    call<{ runbooks: RunbookItem[]; templates: RunbookTemplate[] }>("GET", "/api/runbooks").then((r) => ({
+      runbooks: asList(r.runbooks),
+      templates: asList(r.templates),
+    })),
+  createRunbook: (template: string, name: string) => call<{ ok: boolean; item: RunbookItem }>("POST", "/api/runbooks", { template, name }),
+  runRunbook: (name: string) => call<{ ok: boolean }>("POST", "/api/runbooks/run", { name }),
   approve: (id: string, decision: "approve" | "reject", note = "") =>
     call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user" }),
   setMode: (mode: Mode) => call<{ ok: boolean }>("POST", "/api/mode", { mode }),

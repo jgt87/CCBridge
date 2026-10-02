@@ -27,7 +27,7 @@ import { SettingsPanel } from "@/components/ccb/settings-panel";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
-import { type AgentEvent, type AppState, api, type FetchItem, type FileInfo, type Mode } from "@/lib/api";
+import { type AgentEvent, type AppState, api, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
 
 const MODES: PromptMode[] = [
@@ -47,6 +47,8 @@ export default function App() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [fetchItems, setFetchItems] = useState<FetchItem[]>([]);
+  const [runbooks, setRunbooks] = useState<RunbookItem[]>([]);
+  const [runbookTemplates, setRunbookTemplates] = useState<RunbookTemplate[]>([]);
   const [draft, setDraft] = useState("");
   const [palette, setPalette] = useState<null | "commands" | "attach">(null);
   const [viewer, setViewer] = useState<{ path: string; text: string } | null>(null);
@@ -95,6 +97,10 @@ export default function App() {
   const refreshFiles = useCallback(() => {
     api.files().then((r) => setFiles(r.files), () => {});
     api.fetchList().then(setFetchItems, () => {});
+    api.runbooks().then((r) => {
+      setRunbooks(r.runbooks);
+      setRunbookTemplates(r.templates);
+    }, () => {});
   }, []);
 
   // Poll the server: new events plus a state snapshot.
@@ -109,7 +115,7 @@ export default function App() {
         if (r.events.length) {
           lastSeq.current = r.events[r.events.length - 1].seq;
           setEvents((prev) => [...prev, ...r.events]);
-          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || (e.type === "action-result" && e.changed))) refreshFiles();
+          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || e.type === "runbook" || (e.type === "action-result" && e.changed))) refreshFiles();
           if (r.events.some((e) => e.type === "newchat" || e.type === "error")) setNewChatPending(false);
         }
         setError("");
@@ -373,7 +379,14 @@ export default function App() {
                 }}
                 onUndo={() => api.undo()}
                 onUploaded={refreshFiles}
+                onCreateRunbook={async (template, name) => {
+                  await api.createRunbook(template, name);
+                  refreshFiles();
+                }}
+                onRunRunbook={(name) => api.runRunbook(name).catch((e) => setError((e as Error).message))}
                 project={state.project}
+                runbookTemplates={runbookTemplates}
+                runbooks={runbooks}
                 todos={state.todos}
               />
             </div>
