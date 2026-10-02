@@ -1,0 +1,1 @@
+- PowerShell: scripts must run in Windows PowerShell 5.1: no ?? or ?. operators, no ternary (a ? b : c), no && or || between commands, and keep .ps1 and .psm1 files to plain ASCII characters.

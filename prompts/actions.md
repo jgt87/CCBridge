@@ -30,11 +30,6 @@ NEW LINES
 ````
 changes part of a file (several SEARCH/REPLACE pairs may follow each other)
 
-```run
-COMMAND
-```
-runs a command in the project folder (cmd.exe)
-
 ```done
 SUMMARY
 ```

@@ -1,0 +1,1 @@
+- Web apps: one part per file, not one big file: styles in .css, data in .json or data modules, scripts and components in their own .js/.ts/.tsx files, joined with link and script tags, imports and fetch. New parts for an existing one-file page also go in new files. Paths in link, script, import and fetch are relative to the file that contains them.

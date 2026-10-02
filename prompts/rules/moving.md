@@ -1,0 +1,1 @@
+- Moving code to another file: first write the new file with all of the moved code, then edit the original file to remove it and add the link, script tag or import.

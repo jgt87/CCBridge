@@ -1,0 +1,1 @@
+- Python: indentation is part of the code. Copy SEARCH lines with their exact indentation, indent new lines to fit where they go, and indent the way the file does (never mix tabs and spaces).

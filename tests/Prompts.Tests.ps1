@@ -224,3 +224,35 @@ Describe 'Settings' {
     }
     Remove-Item $app -Recurse -Force
 }
+Describe 'Case-specific prompt modules' {
+    It 'picks modules from the project contents' {
+        (Get-ProjectTraits @('index.html', 'src/App.tsx', 'tools/build.ps1', 'source/data.csv')) -join ',' | Should Be 'web,powershell,source'
+        (Get-ProjectTraits @('main.py')) -join ',' | Should Be 'python'
+        @(Get-ProjectTraits @('notes.md')).Count | Should Be 0
+    }
+    It 'picks modules from the request when the project does not show it yet' {
+        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:web,rules:moving'
+        (Get-PromptModules 'Split the parser into two modules' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:moving'
+        (Get-PromptModules 'Write a pytest for the parser' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:python'
+        (Get-PromptModules 'Fix the bug' @{ Traits = @('nocommands') }).Count | Should Be 0
+    }
+    It 'sends the web rules with a web project, after the core rules' {
+        $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Fix the bug' -Sent (New-Sent) -Context @{ Location = 'L'; Full = 'F'; Traits = @('web') }
+        $m | Should Match '(?s)RULES.*Web apps: one part per file.*Moving code'
+        $m | Should Match '(?s)ACTION BLOCKS.*RUNNING COMMANDS.*RULES'
+        $m | Should Not Match 'Python|PowerShell:|source/'
+    }
+    It 'adds a newly needed module to a follow-up once, with the reminder' {
+        $sent = New-Sent
+        $ctx2 = @{ Location = 'L'; Full = 'F'; Traits = @() }
+        $null = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Fix the bug' -Sent $sent -Context $ctx2
+        $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Now add a python script' -Sent $sent -Context $ctx2
+        $m | Should Match '(?s)^- Python: indentation.*Request: Now add a python script.*How to answer'
+        $m | Should Not MatchExactly 'ACTION BLOCKS'
+        New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'And a second python script' -Sent $sent -Context $ctx2 | Should Not Match 'Python: indentation'
+    }
+    It 'leaves out the run action when commands are off' {
+        $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Fix the bug' -Sent (New-Sent) -Context @{ Location = 'L'; Full = 'F'; Traits = @('nocommands') }
+        $m | Should Not Match '```run'
+    }
+}

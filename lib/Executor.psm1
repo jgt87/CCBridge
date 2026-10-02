@@ -139,6 +139,36 @@ function Get-ChangeSetContents {
     }
 }
 
+function Resolve-ModuleImport([string]$Target) {
+    <# Whether an import path exists the way bundlers and TypeScript resolve it: as written, with an
+       extension added, as a folder with an index file, or a .js name that is a .ts/.tsx source. #>
+    $exts = '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '.json', '.vue', '.svelte', '.d.ts', '.css', '.scss'
+    if (Test-Path -LiteralPath $Target -PathType Leaf) { return $true }
+    foreach ($e in $exts) { if (Test-Path -LiteralPath ($Target + $e) -PathType Leaf) { return $true } }
+    if (Test-Path -LiteralPath $Target -PathType Container) {
+        foreach ($e in $exts) { if (Test-Path -LiteralPath (Join-Path $Target "index$e") -PathType Leaf) { return $true } }
+    }
+    if ($Target -match '(?i)\.(m|c)?jsx?$') {
+        $stem = $Target -replace '(?i)\.(m|c)?jsx?$', ''
+        foreach ($e in '.ts', '.tsx', '.mts', '.cts') { if (Test-Path -LiteralPath ($stem + $e) -PathType Leaf) { return $true } }
+    }
+    $false
+}
+
+function ConvertTo-CheckableScript([string]$Text) {
+    <# JavaScript module code as classic script for a syntax-only check, with the same line numbers:
+       static imports and re-exports become blank lines, export keywords are dropped, import.meta
+       becomes an object, and the whole is wrapped in an async function so top-level await parses. #>
+    $blank = [Text.RegularExpressions.MatchEvaluator] { param($m) "`n" * ([regex]::Matches($m.Value, "`n")).Count }
+    $t = $Text.Replace("`r`n", "`n")
+    $t = [regex]::Replace($t, '(?m)^[ \t]*import\s+(?:type\s+)?(?:[\w$*{}\s,]+?\s+from\s+)?["''][^"''\n]+["''][ \t]*;?', $blank)
+    $t = [regex]::Replace($t, '(?m)^[ \t]*export\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s*(?:from\s*["''][^"''\n]+["''])?[ \t]*;?', $blank)
+    $t = [regex]::Replace($t, '(?m)^([ \t]*)export\s+default\s+', '$1void ')
+    $t = [regex]::Replace($t, '(?m)^([ \t]*)export\s+(?=(?:async\s+)?function|class\b|const\b|let\b|var\b)', '$1')
+    $t = $t.Replace('import.meta', '({})')
+    '(async function(){' + $t + "`n})"
+}
+
 function Test-ProjectConsistency {
     <# Fixed checks on the given project files (no judgement of the code): JSON parses, PowerShell has
        no syntax errors, and local files referenced from HTML, JavaScript and CSS (href, src, fetch,
@@ -152,22 +182,49 @@ function Test-ProjectConsistency {
         if ($ext -eq '.json') {
             try { $null = $text | ConvertFrom-Json } catch { "${rel}: not valid JSON ($($_.Exception.Message.Split("`n")[0]))" }
         }
+        if ($ext -in '.py', '.pyw') {
+            $mixed = [regex]::Match($text, '(?m)^( +\t|\t+ )[ \t]*\S')
+            if ($mixed.Success) { "${rel}:$(([regex]::Matches($text.Substring(0, $mixed.Index), "`n")).Count + 1): indentation mixes tabs and spaces (Python stops with a TabError)" }
+            elseif ([regex]::IsMatch($text, '(?m)^\t+\S') -and [regex]::IsMatch($text, '(?m)^ +\S')) { "${rel}: some lines are indented with tabs and others with spaces (Python may stop with a TabError)" }
+        }
+        if ($ext -eq '.psd1') {
+            try { $null = Import-PowerShellDataFile -LiteralPath $full -ErrorAction Stop }
+            catch { "${rel}: not a valid data file ($(("$($_.Exception.Message)" -replace '\s+', ' ').Trim()))" }
+        }
         if ($ext -in '.ps1', '.psm1', '.psd1') {
             $tok = $null; $errs = $null
             $null = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$tok, [ref]$errs)
             foreach ($x in @($errs) | Select-Object -First 3) { "${rel}:$($x.Extent.StartLineNumber): $($x.Message)" }
         }
-        if ($ext -in '.html', '.htm', '.js', '.mjs', '.jsx', '.ts', '.tsx', '.css') {
-            $refs = New-Object System.Collections.Generic.List[string]
-            foreach ($re in @('(?i)\b(?:href|src)\s*=\s*["'']([^"''#?]+)', '(?i)\bfetch\(\s*["''`]([^"''`?#]+)', '(?i)\bimport\s[^;]*?from\s*["'']([^"'']+)', '(?i)\burl\(\s*["'']?([^"'')?#]+)')) {
-                foreach ($m in [regex]::Matches($text, $re)) { $refs.Add($m.Groups[1].Value.Trim()) }
+        if ($ext -in '.html', '.htm', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.mts', '.tsx', '.css', '.scss', '.vue', '.svelte') {
+            $refs = New-Object System.Collections.Generic.List[object]
+            $patterns = @(
+                @{ kind = 'ref'; re = '(?i)\b(?:href|src)\s*=\s*["'']([^"''#?]+)' },
+                @{ kind = 'ref'; re = '(?i)\bfetch\(\s*["''`]([^"''`?#]+)' },
+                @{ kind = 'import'; re = '(?i)\bimport\s[^;]*?from\s*["'']([^"''?#]+)' },
+                @{ kind = 'import'; re = '(?im)^\s*import\s*["'']([^"''?#]+)' },
+                @{ kind = 'import'; re = '(?i)\bimport\(\s*["'']([^"''?#]+)["'']\s*\)' },
+                @{ kind = 'import'; re = '(?i)\bexport\s[^;]*?from\s*["'']([^"''?#]+)' },
+                @{ kind = 'import'; re = '(?i)\brequire\(\s*["'']([^"''?#]+)["'']\s*\)' },
+                @{ kind = 'ref'; re = '(?i)\burl\(\s*["'']?([^"'')?#]+)' }
+            )
+            foreach ($p in $patterns) {
+                foreach ($m in [regex]::Matches($text, $p.re)) { $refs.Add(@{ kind = $p.kind; ref = $m.Groups[1].Value.Trim() }) }
             }
-            foreach ($ref in ($refs | Select-Object -Unique)) {
+            $seen = @{}
+            foreach ($r in $refs) {
+                $ref = $r.ref
+                if ($seen.ContainsKey($ref)) { continue }; $seen[$ref] = $true
                 if (-not $ref -or $ref -match '^(?i)([a-z][a-z0-9+.-]*:|//|#|\$|\{)' -or $ref.Contains('${')) { continue }
+                # Imports without ./ or / are packages or path aliases (react, @/lib/api): not files here.
+                if ($r.kind -eq 'import' -and $ref -notmatch '^\.{1,2}/|^/') { continue }
                 $target = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $full) ($ref.TrimStart('/').Replace('/', '\'))))
                 if ($ref.StartsWith('/')) { $target = [IO.Path]::GetFullPath((Join-Path $ProjectRoot ($ref.TrimStart('/').Replace('/', '\')))) }
                 if (-not $target.StartsWith([IO.Path]::GetFullPath($ProjectRoot), [StringComparison]::OrdinalIgnoreCase)) { continue }
-                if (-not (Test-Path -LiteralPath $target)) { "${rel}: refers to $ref, which does not exist" }
+                if (Test-Path -LiteralPath $target -PathType Leaf) { continue }
+                if ($r.kind -eq 'import' -and (Resolve-ModuleImport $target)) { continue }
+                if ($r.kind -ne 'import' -and (Test-Path -LiteralPath $target)) { continue }
+                "${rel}: refers to $ref, which does not exist"
             }
         }
     }
@@ -207,7 +264,8 @@ function Get-FileOutline {
     <# The structure of a file with line numbers, so Copilot can read just the part it needs:
        HTML (head/body, style and script blocks, elements with an id, headings), JavaScript /
        TypeScript (functions, classes, arrow functions), CSS (@media blocks, section comments,
-       selectors), PowerShell (functions), Markdown (headings). At most $Max entries. #>
+       selectors), PowerShell (functions), Markdown (headings), Python (classes, functions and
+       methods, the main block). At most $Max entries. #>
     param([string]$Text, [string]$Path, [int]$Max = 80)
     $ext = [IO.Path]::GetExtension($Path).ToLowerInvariant()
     $lines = $Text.Replace("`r`n", "`n").Split("`n")
@@ -248,6 +306,11 @@ function Get-FileOutline {
             }
             '^\.(md|markdown)$' {
                 if ($t -match '^(#{1,4})\s+(.+)$') { $out.Add("$n  $($Matches[1]) $($Matches[2])") }
+            }
+            '^\.pyw?$' {
+                if ($l -match '^([ \t]*)(async\s+)?def\s+(\w+)') { $out.Add("$n  $($Matches[1].Replace("`t", '    '))def $($Matches[3])") }
+                elseif ($l -match '^([ \t]*)class\s+(\w+)') { $out.Add("$n  $($Matches[1].Replace("`t", '    '))class $($Matches[2])") }
+                elseif ($l -match '^if\s+__name__\s*==') { $out.Add("$n  if __name__ == ""__main__""") }
             }
         }
     }
@@ -527,6 +590,45 @@ function Test-HalfBlock([string]$Old, [string]$New) {
     $null
 }
 
+function Get-IndentWidth([string]$Ws) {
+    <# Columns of leading whitespace (a tab moves to the next multiple of 4). #>
+    $w = 0
+    foreach ($ch in $Ws.ToCharArray()) { if ($ch -eq "`t") { $w += 4 - ($w % 4) } else { $w++ } }
+    $w
+}
+
+function Set-EditIndent {
+    <# After a SEARCH matched only when indentation is ignored: shift the REPLACE lines by as much as
+       the file differs from the SEARCH text, written in the file's indent style (tabs or spaces).
+       In Python indentation is part of the code, so a match whose lines are shifted unevenly, or a
+       new line that would end up left of column 0, is refused. Returns @{ text } or @{ error }. #>
+    param([string]$Search, [string]$Matched, [string]$Replace, [string]$Path)
+    $s = $Search.Split("`n"); $m = $Matched.Split("`n")
+    $delta = $null; $uneven = $false
+    for ($i = 0; $i -lt [Math]::Min($s.Length, $m.Length); $i++) {
+        if (-not $s[$i].Trim()) { continue }
+        $d = (Get-IndentWidth ([regex]::Match($m[$i], '^[ \t]*').Value)) - (Get-IndentWidth ([regex]::Match($s[$i], '^[ \t]*').Value))
+        if ($null -eq $delta) { $delta = $d } elseif ($d -ne $delta) { $uneven = $true }
+    }
+    if ($null -eq $delta) { $delta = 0 }
+    $isPy = $Path -match '(?i)\.pyw?$'
+    if ($uneven -and $isPy) { return @{ error = 'SEARCH text matches only when indentation is ignored, and its lines are indented differently from the file by different amounts. In Python indentation is part of the code: copy the current lines exactly, with their indentation' } }
+    $useTabs = ($Matched -match '(?m)^\t') -and ($Matched -notmatch '(?m)^ +\S')
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $Replace.Split("`n")) {
+        if (-not $l.Trim()) { $out.Add($l); continue }
+        $ws = [regex]::Match($l, '^[ \t]*').Value
+        $w = (Get-IndentWidth $ws) + $delta
+        if ($w -lt 0) {
+            if ($isPy) { return @{ error = 'the new lines are indented less than the place SEARCH matched (indentation was ignored to find it). In Python indentation is part of the code: copy the current lines exactly, with their indentation' } }
+            $w = 0
+        }
+        $ind = if ($useTabs) { ("`t" * [Math]::Floor($w / 4)) + (' ' * ($w % 4)) } else { ' ' * $w }
+        $out.Add($ind + $l.Substring($ws.Length))
+    }
+    @{ text = ($out -join "`n") }
+}
+
 function Find-EditTarget([string]$Text, [string]$Search, [int]$After = -1) {
     <# Where $Search is in $Text: one exact match (or, failing that, one match ignoring trailing
        whitespace per line). When it matches several places and $After is the end of the previous
@@ -593,6 +695,12 @@ function Get-EditResult {
         }
         if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed; send the whole edit block again." } }
 
+        if ($hit.note -eq 'matched ignoring indentation') {
+            $fix = Set-EditIndent $search $text.Substring($hit.start, $hit.length) $replace $full
+            if ($fix.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($fix.error). Nothing was changed; send the whole edit block again." } }
+            $replace = $fix.text
+            $hit.note = 'matched ignoring indentation; the new lines were re-indented to match the file'
+        }
         if ($hit.note) { $notes.Add("pair ${n}: $($hit.note)") }
         $text = $text.Substring(0, $hit.start) + $replace + $text.Substring($hit.start + $hit.length)
         $after = $hit.start + $replace.Length
@@ -705,5 +813,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

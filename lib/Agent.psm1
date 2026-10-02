@@ -356,7 +356,7 @@ function Get-TurnKind {
         $why = if ($State.LastTurnActed -eq $false) { 'the previous turn had no actions' } elseif ($State.FollowUps -ge 5) { "$($State.FollowUps) follow-ups since the instructions" } else { $null }
         if ($why) {
             Write-CCBLog info agent "Sending the full instructions again ($why)"
-            foreach ($p in 'actions', 'rules', 'role:coding', 'role:project') { [void]$State.SentParts.Remove($p) }
+            foreach ($p in @($State.SentParts)) { if ($p -in 'actions', 'rules', 'role:coding', 'role:project' -or $p -like 'rules:*' -or $p -like 'actions:*') { [void]$State.SentParts.Remove($p) } }
         }
     }
     $kind
@@ -384,12 +384,11 @@ function New-ActionRetryMessage {
     <# The task again with the instructions enforced: the full action instructions and rules, a note
        that nothing was changed and the task must be carried out, then the original request. #>
     param($State, [string]$Task)
-    $parts = @(
-        (Get-PromptPart $State.AppRoot 'actions'),
-        (Get-PromptPart $State.AppRoot 'rules'),
-        (Get-PromptPart $State.AppRoot 'retry')
-    )
-    foreach ($p in 'actions', 'rules') { [void]$State.SentParts.Add($p) }
+    $ctx = if ($State.ProjectRoot) { try { Get-ProjectContext $State } catch { @{ Traits = @() } } } else { @{ Traits = @() } }
+    $modules = @(Get-PromptModules $Task $ctx)
+    $ids = @('actions') + @($modules | Where-Object { $_ -like 'actions:*' }) + @('rules') + @($modules | Where-Object { $_ -like 'rules:*' })
+    $parts = @($ids | ForEach-Object { Get-PromptPart $State.AppRoot $_ }) + @(Get-PromptPart $State.AppRoot 'retry')
+    foreach ($p in $ids) { [void]$State.SentParts.Add($p) }
     ($parts -join "`n`n") + "`n`nTask: $Task"
 }
 
@@ -483,6 +482,41 @@ function Test-WebPage {
             if ($s) { try { Disconnect-Cdp $s } catch { } }
             if ($target) { try { $null = Invoke-RestMethod "http://127.0.0.1:$cdpPort/json/close/$($target.id)" } catch { } }
         }
+    }
+}
+
+function Test-ScriptSyntax {
+    <# Compiles changed JavaScript files in a spare Edge tab (compile only: nothing runs) and returns
+       one line per syntax error. Module syntax is turned into classic script first
+       (ConvertTo-CheckableScript); errors about import/export are left out, as the check cannot
+       tell those apart from what it changed. #>
+    param($State, [string[]]$Paths)
+    $files = @($Paths | Where-Object { $_ -match '(?i)\.(m?js|cjs)$' } | Select-Object -First 10)
+    if (-not $files.Count -or -not $State.Config.cdpPort) { return }
+    $cdpPort = $State.Config.cdpPort
+    $target = $null; $s = $null
+    try {
+        $target = Invoke-RestMethod -Method Put "http://127.0.0.1:$cdpPort/json/new?about:blank"
+        $s = Connect-Cdp $target.webSocketDebuggerUrl
+        $null = Invoke-Cdp $s 'Runtime.enable'
+        foreach ($rel in $files) {
+            $full = try { Resolve-ProjectPath $State.ProjectRoot $rel } catch { $null }
+            if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+            $src = (Read-TextFile $full).Text
+            if ($src.Length -gt 1000000) { continue }
+            $r = Invoke-Cdp $s 'Runtime.compileScript' @{ expression = (ConvertTo-CheckableScript $src); sourceURL = $rel; persistScript = $false }
+            $d = $r.exceptionDetails
+            if (-not $d) { continue }
+            $msg = if ($d.exception.description) { ($d.exception.description -split "`n")[0] } else { "$($d.text)" }
+            if ($msg -match '\b(import|export)\b') { continue }
+            "${rel}:$([int]$d.lineNumber + 1): JavaScript syntax error: $msg"
+        }
+        Write-CCBLog info agent 'Script syntax check' @{ files = $files.Count }
+    } catch {
+        Write-CCBLogError agent 'Script syntax check failed' $_
+    } finally {
+        if ($s) { try { Disconnect-Cdp $s } catch { } }
+        if ($target) { try { $null = Invoke-RestMethod "http://127.0.0.1:$cdpPort/json/close/$($target.id)" } catch { } }
     }
 }
 
@@ -580,10 +614,13 @@ function Get-ProjectContext($State) {
         "Project folder: $(Split-Path $root -Leaf) on the user's computer; use the read action to see its files."
     }
     $budget = [Math]::Max(2000, [int]($State.Config.promptCharBudget * 0.25))
-    $files = if (@(Get-ProjectFiles $root).Count) { "Files:`n" + (Format-ProjectTree $root -MaxChars $budget) } else { 'The folder is empty.' }
+    $paths = @(Get-ProjectFiles $root | ForEach-Object { $_.path })
+    $files = if ($paths.Count) { "Files:`n" + (Format-ProjectTree $root -MaxChars $budget) } else { 'The folder is empty.' }
     $notes = Get-ProjectNotes $root
     $full = "$location`n$files" + $(if ($notes) { "`n`nProject notes (AGENTS.md):`n$notes" } else { '' })
-    @{ Location = $location; Full = $full }
+    $traits = @(Get-ProjectTraits $paths)
+    if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { $traits += 'nocommands' }
+    @{ Location = $location; Full = $full; Traits = $traits }
 }
 
 function Format-ActionResults {
@@ -923,6 +960,12 @@ function Invoke-AgentTurn {
                             $pageIssues = @(Test-WebPage $State $pages)
                             if (-not $pageIssues.Count) { Add-AgentEvent $State 'status' @{ text = "Page check: $($pages -join ', ') loaded without errors." } }
                         }
+                    }
+                    # Changed JavaScript files: a syntax check in Edge (also files no page loads).
+                    $jsChanged = @($changes | Where-Object { ($_.added -or $_.removed) -and -not $_.deleted -and $_.path -match '(?i)\.(m?js|cjs)$' } | ForEach-Object { $_.path })
+                    if ($jsChanged.Count -and "$($State.Config.pageCheck)" -ne 'off' -and $State.Mode -ne 'plan') {
+                        $syntax = @(Test-ScriptSyntax $State $jsChanged)
+                        if ($syntax.Count) { $pageIssues = @($pageIssues) + $syntax }
                     }
                     if ($State.ReviewByCaller) {
                         # The calling model reviews the result itself; give it the local check results.
