@@ -1,7 +1,6 @@
 @echo off
-rem Measures where the time goes between sending a prompt to Copilot and CCBridge having the reply.
-rem Sends 3 short prompts (one Copilot message each). Options: -Count 1  (fewer prompts)
+rem Quick timing run: steps 1-3 of the complexity and timing test (three short prompts, one Copilot message each).
 cd /d "%~dp0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\reply-timing.ps1" %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\complexity-test.ps1" -From 1 -To 3 %*
 echo.
 pause

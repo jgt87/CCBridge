@@ -270,6 +270,76 @@ function Add-HubRecord {
     }
 }
 
+# --- StreamHub ---------------------------------------------------------------------------
+# Some tenants deliver the reply over substrate.svc.cloud.microsoft/m365Copilot/StreamHub: a SignalR
+# stream whose type-2 records each carry an item. The item layout is looked up by field name (chunks
+# in writeAtCursor, snapshots in messages[], the end in result / a final flag / a type-3 completion),
+# so small layout differences do not matter. The field names seen are logged (names only).
+
+function New-StreamState {
+    [pscustomobject]@{ Merger = (New-ReplyMerger); Items = 0; Done = $false; Why = ''; Result = $null; Throttling = $null
+        Messages = $null; Keys = (New-Object 'System.Collections.Generic.HashSet[string]'); LastAt = $null }
+}
+
+$script:StreamFinalFlags = '^(isFinal|isLast|final|isComplete|isCompleted|completed|done|isDone|endOfStream|isEnd|isLastChunk)$'
+$script:StreamStateFields = '^(state|status|messageState|streamState|phase|eventType|kind)$'
+$script:StreamFinalValues = '(?i)^(complete|completed|final|done|end|ended|finished|endofstream|streamend)$'
+
+function Find-StreamSignals($Node, $Sig, [int]$Depth = 0, [string]$Path = '') {
+    if ($null -eq $Node -or $Depth -gt 6) { return }
+    if ($Node -is [array]) { foreach ($el in ($Node | Select-Object -First 50)) { Find-StreamSignals $el $Sig ($Depth + 1) "$Path[]" }; return }
+    if ($Node -isnot [pscustomobject]) { return }
+    foreach ($p in $Node.PSObject.Properties) {
+        $name = $p.Name; $v = $p.Value
+        if ($Sig.keys.Count -lt 120) { [void]$Sig.keys.Add($(if ($Path) { "$Path.$name" } else { $name })) }
+        if ($name -eq 'writeAtCursor' -and $v -is [string]) { $Sig.chunks.Add($v); continue }
+        if ($name -eq 'messages' -and $v -is [array] -and $null -eq $Sig.messages) { $Sig.messages = $v }
+        if ($name -eq 'result' -and $v -is [pscustomobject] -and $v.PSObject.Properties['value'] -and $null -eq $Sig.result) { $Sig.result = $v }
+        if ($name -eq 'throttling' -and $v -is [pscustomobject]) { $Sig.throttling = $v }
+        if ($v -is [bool] -and $v -and $name -match $script:StreamFinalFlags) { $Sig.final = "$name=true" }
+        if ($v -is [string] -and $name -match $script:StreamStateFields -and $v -match $script:StreamFinalValues) { $Sig.final = "$name=$v" }
+        if ($v -is [pscustomobject] -or $v -is [array]) {
+            if ($name -ne 'messages') { Find-StreamSignals $v $Sig ($Depth + 1) $(if ($Path) { "$Path.$name" } else { $name }) }
+            else { foreach ($msg in ($v | Select-Object -First 20)) { if ($msg -is [pscustomobject]) { foreach ($q in $msg.PSObject.Properties) { if ($Sig.keys.Count -lt 120) { [void]$Sig.keys.Add("$Path.messages[].$($q.Name)") } } } } }
+        }
+    }
+}
+
+function Add-StreamRecord {
+    <# Feeds one StreamHub record into the stream state; sets Done when the reply has ended. #>
+    param($S, $Rec)
+    if ($Rec.type -eq 3) {
+        if ($Rec.error) { throw "Copilot stream error: $($Rec.error)" }
+        if ($S.Items) { $S.Done = $true; $S.Why = 'completion record' }
+        return
+    }
+    if ($Rec.type -ne 2 -or $null -eq $Rec.item) { return }
+    $S.Items++
+    $S.LastAt = Get-Date
+    $sig = @{ chunks = (New-Object System.Collections.Generic.List[string]); messages = $null; result = $null; throttling = $null; final = $null; keys = $S.Keys }
+    Find-StreamSignals $Rec.item $sig
+    foreach ($c in $sig.chunks) { Add-ReplyChunk $S.Merger $c }
+    if ($sig.messages) { $S.Messages = $sig.messages; Add-ReplySnapshot $S.Merger (Get-BotReplyText $sig.messages) }
+    if ($sig.throttling) { $S.Throttling = $sig.throttling }
+    if ($sig.result) {
+        $S.Result = $sig.result
+        if ($sig.result.value -and $sig.result.value -ne 'Success') { $S.Done = $true; $S.Why = "result $($sig.result.value)" }
+        elseif ($S.Merger.Text) { $S.Done = $true; $S.Why = 'result' }
+    }
+    if ($sig.final -and -not $S.Done) { $S.Done = $true; $S.Why = $sig.final }
+}
+
+function Get-SocketKind($Bridge, [string]$Id, [string]$Payload) {
+    <# chat (Chathub), stream (StreamHub) or $null, by the socket's address or, for a socket opened
+       before CCBridge connected, by the shape of its traffic. #>
+    if ($Bridge.HubSockets.ContainsKey($Id)) { return $Bridge.HubSockets[$Id] }
+    $kind = $null
+    if ($Payload -match '"target":"update"') { $kind = 'chat' }
+    elseif ($Payload -match '"type":2' -and $Payload -match '"item"') { $kind = 'stream' }
+    if ($kind) { $Bridge.HubSockets[$Id] = $kind }
+    $kind
+}
+
 function Get-ReplyReferences($BotMessage) {
     <# Sources Copilot cited (Work IQ: emails, files, Teams; or web pages). Copilot's link filter removes the
        citation markers from the text, so the list is taken from the message metadata. #>
@@ -517,6 +587,98 @@ function Add-TimelineNet($Bridge, $M) {
     }
 }
 
+function Complete-StreamReply {
+    <# The reply once StreamHub has signalled its end: the text from the stream, or, when the stream
+       carries no text CCBridge recognises, the exact reply text from the page (read straight away,
+       after the page confirms Copilot finished). $null when the page does not confirm the end. #>
+    param($Bridge, $S, $PageBefore, [string]$SentPrompt, [long]$Ms)
+    $text = $S.Merger.Text; $how = 'stream text'
+    if (-not "$text".Trim()) {
+        $text = $null
+        $until = (Get-Date).AddSeconds(3)
+        while ((Get-Date) -lt $until) {
+            $st = Get-PageReplyState $Bridge
+            if ($st -and -not $st.stop -and (-not $PageBefore -or $st.replies -gt $PageBefore.replies)) {
+                $pt = Get-PageReplyText $Bridge
+                if ("$($pt.text)".Trim() -and ("$($pt.text)" -replace '\s', '') -ne ($SentPrompt -replace '\s', '')) { $text = "$($pt.text)"; $how = "page $($pt.how)"; break }
+            }
+            Start-Sleep -Milliseconds 150
+        }
+        if ($null -eq $text) { return $null }
+    }
+    $bot = @($S.Messages | Where-Object { $_.author -eq 'bot' -and -not $_.messageType -and $_.text }) | Select-Object -Last 1
+    $item = [pscustomobject]@{ messages = $S.Messages; result = $S.Result }
+    $reply = [pscustomobject]@{
+        Text = $text; ServerText = $(if ($bot) { $bot.text } else { $text }); Uncertain = $(if ($how -eq 'page page') { 1 } else { $S.Merger.Uncertain })
+        SentText = $SentPrompt; SentMatches = $true
+        Result = $(if ($S.Result -and $S.Result.value) { "$($S.Result.value)" } else { 'Success' })
+        ResultMessage = $(if ($S.Result -and $S.Result.message) { "$($S.Result.message)" } else { "StreamHub, $how" })
+        ConversationId = $null; Throttling = $S.Throttling
+        Metering = $(if ($S.Result) { @($S.Result.meteringInformation)[0] } else { $null })
+        References = @(if ($bot) { Get-ReplyReferences $bot })
+        ProposedActions = @(try { Get-ProposedActions $item } catch { })
+        ActionClaims = @(Get-ActionClaims $text); Source = 'streamhub'
+    }
+    Write-CCBLog verbose bridge 'Reply received over StreamHub' @{ ms = $Ms; end = $S.Why; text = $how; items = $S.Items; chars = $text.Length; result = $reply.Result
+        chat = "$($S.Throttling.numUserMessagesInConversation)/$($S.Throttling.maxNumUserMessagesInConversation)"; fields = @($S.Keys | Sort-Object) }
+    $reply
+}
+
+function Get-ReplyTimelineSummary {
+    <# Milestones (ms after Send) and a chronological list (HH:mm:ss.fff +ms event) of one reply
+       timeline, for the timing and complexity tests. Names, sizes and times only. #>
+    param([Parameter(Mandatory)]$Timeline)
+    $tl = $Timeline
+    $sent = @($tl.Events | Where-Object what -eq 'sent' | Select-Object -First 1)
+    $t0 = if ($sent) { [datetime]$sent[0].at } else { Get-Date }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $add = { param($At, [string]$What) if ($At) { $rows.Add([pscustomobject]@{ at = [datetime]$At; text = $What }) } }
+    foreach ($e in $tl.Events) { & $add $e.at ($(if ($e.data) { "$($e.what): $($e.data)" } else { $e.what })) }
+    foreach ($s in $tl.Sockets.Values) {
+        if (-not $s.frames) { continue }
+        $u = Protect-LogText $s.url
+        & $add $s.created "socket opened $u"
+        & $add $s.first "socket first frame $u"
+        & $add $s.last "socket last frame $u ($($s.frames) frames, $($s.binary) binary)"
+        foreach ($k in $s.shapes.Keys) {
+            $x = $s.shapes[$k]
+            & $add $x.first "  record $k first (x$($x.n)) on $u"
+            if ($x.n -gt 1) { & $add $x.last "  record $k last on $u" }
+        }
+    }
+    foreach ($q in $tl.Requests.Values) {
+        $n = Protect-LogText $q.req
+        & $add $q.sent "request $n [$($q.type)]"
+        & $add $q.response "  response $n ($($q.mime))"
+        & $add $q.firstData "  first data $n"
+        if ($q.chunks -gt 1) { & $add $q.lastData "  last data $n ($($q.chunks) chunks, $($q.bytes) B)" }
+        & $add $q.done "  finished $n"
+    }
+    $ms = { param($At) if ($At) { [long](([datetime]$At) - $t0).TotalMilliseconds } else { $null } }
+    $pages = @($tl.Events | Where-Object what -eq 'page')
+    $stopOn = @($pages | Where-Object { "$($_.data)" -match 'stop=True' } | Select-Object -First 1)
+    $stopOff = if ($stopOn) { @($pages | Where-Object { $_.at -gt $stopOn[0].at -and "$($_.data)" -match 'stop=False' } | Select-Object -First 1) } else { @() }
+    $text1 = @($pages | Where-Object { "$($_.data)" -match 'len=[1-9]' } | Select-Object -First 1)
+    $ret = @($tl.Events | Where-Object what -eq 'returned' | Select-Object -First 1)
+    $hub = @($tl.Events | Where-Object { $_.what -match '^first (Chathub|StreamHub) frame$' } | Sort-Object at | Select-Object -First 1)
+    $lastHub = @($tl.Sockets.Values | Where-Object { $_.url -match '(?i)chathub|streamhub' -and $_.last } | ForEach-Object { $_.last } | Sort-Object | Select-Object -Last 1)
+    $o = [ordered]@{
+        sentAt = $t0.ToString('HH:mm:ss.fff')
+        route = $(if ($ret) { "$($ret[0].data)" } else { $null })
+        firstTextOnPageMs = & $ms $(if ($text1) { $text1[0].at })
+        stopShownMs = & $ms $(if ($stopOn) { $stopOn[0].at })
+        stopGoneMs = & $ms $(if ($stopOff) { $stopOff[0].at })
+        firstHubFrameMs = & $ms $(if ($hub) { $hub[0].at })
+        lastHubFrameMs = & $ms $(if ($lastHub) { $lastHub[0] })
+        returnedMs = & $ms $(if ($ret) { $ret[0].at })
+        waitAfterStopGoneMs = $null; waitAfterLastHubFrameMs = $null
+        timeline = @($rows | Sort-Object at | ForEach-Object { '{0}  {1,7}  {2}' -f $_.at.ToString('HH:mm:ss.fff'), ('+' + [long]($_.at - $t0).TotalMilliseconds), $_.text })
+    }
+    if ($null -ne $o.returnedMs -and $null -ne $o.stopGoneMs) { $o.waitAfterStopGoneMs = $o.returnedMs - $o.stopGoneMs }
+    if ($null -ne $o.returnedMs -and $null -ne $o.lastHubFrameMs) { $o.waitAfterLastHubFrameMs = $o.returnedMs - $o.lastHubFrameMs }
+    [pscustomobject]$o
+}
+
 function Send-CopilotPrompt {
     <#
     .SYNOPSIS Sends a prompt and returns the complete markdown reply.
@@ -562,6 +724,8 @@ function Send-CopilotPromptUnlocked {
     $pageDoneSince = $null; $pageLastLen = -1; $sawStop = $false
 
     $hubPattern = [regex]::Escape($Bridge.Selectors.chatHubUrlPattern)
+    $streamPattern = [regex]::Escape($(if ($Bridge.Selectors.PSObject.Properties['streamHubUrlPattern'] -and $Bridge.Selectors.streamHubUrlPattern) { $Bridge.Selectors.streamHubUrlPattern } else { '/StreamHub/' }))
+    $stream = New-StreamState
     $merger = New-ReplyMerger
     $frames = New-Object System.Collections.Generic.List[string]   # kept for diagnosis
     $reported = 0
@@ -597,15 +761,18 @@ function Send-CopilotPromptUnlocked {
                 if ($st.lastLen -ne $pageLastLen) { if ($pageLastLen -ge 0) { $lastActivity = Get-Date }; $pageLastLen = $st.lastLen; $pageDoneSince = $null }
                 $finished = -not $st.stop -and $st.replies -gt $pageBefore.replies -and $st.copies -gt $pageBefore.copies -and $st.lastLen -gt 0 -and
                     ($sawStop -or $sendWatch.Elapsed.TotalSeconds -ge 6)
+                # When StreamHub carried this reply and has been quiet for a moment, the page need not settle.
+                $stableNeeded = if ($stream.Items -and $stream.LastAt -and ((Get-Date) - $stream.LastAt).TotalMilliseconds -ge 300) { 0 } else { $pageStableSec }
                 if (-not $finished) { $pageDoneSince = $null }
                 elseif (-not $pageDoneSince) { $pageDoneSince = Get-Date }
-                elseif (((Get-Date) - $pageDoneSince).TotalSeconds -ge $pageStableSec) {
+                if ($finished -and ((Get-Date) - $pageDoneSince).TotalSeconds -ge $stableNeeded) {
                     # Finished on the page and stable, and no completion came over the socket.
                     $pt = Get-PageReplyText $Bridge
                     $ptext = "$($pt.text)"
                     if ($ptext.Trim() -and ($ptext -replace '\s', '') -ne ($Text -replace '\s', '')) {
                         Write-CCBLog info bridge "Reply read from the page ($($pt.how)); no completion arrived over the Chathub socket" @{ chars = $ptext.Length; hubChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; ms = $sendWatch.ElapsedMilliseconds }
                         Write-NetTrace $net 'reply read from the page'
+                        if ($stream.Items) { Write-CCBLog info bridge 'StreamHub carried the reply but its end was not recognised' @{ items = $stream.Items; fields = @($stream.Keys | Sort-Object) } }
                         Add-TimelineEvent $Bridge 'returned' "page ($($pt.how))"
                         if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
                         return [pscustomobject]@{ Cancelled = $false; Text = $ptext; ServerText = $ptext; Uncertain = $(if ($pt.how -eq 'state') { 0 } else { 1 })
@@ -634,7 +801,8 @@ function Send-CopilotPromptUnlocked {
         }
         if (-not $m) { continue }
         if ($m.method -eq 'Network.webSocketCreated') {
-            if ($m.params.url -match $hubPattern) { $Bridge.HubSockets[$m.params.requestId] = $true }
+            if ($m.params.url -match $streamPattern) { $Bridge.HubSockets[$m.params.requestId] = 'stream' }
+            elseif ($m.params.url -match $hubPattern) { $Bridge.HubSockets[$m.params.requestId] = 'chat' }
             continue
         }
         if ($m.method -eq 'Network.webSocketFrameSent') {
@@ -653,14 +821,33 @@ function Send-CopilotPromptUnlocked {
         }
         if ($m.method -ne 'Network.webSocketFrameReceived') { continue }
         if ($env:CCBRIDGE_TEST_IGNORE_HUB -eq '1') { continue }   # test switch: rely on the page only
-        # Frames from a socket opened before Network.enable have no webSocketCreated; accept them
-        # when they look like Chathub traffic.
+        # Frames from a socket opened before Network.enable have no webSocketCreated; they are
+        # classified by the shape of their traffic.
         $payload = $m.params.response.payloadData
-        if (-not $Bridge.HubSockets.ContainsKey($m.params.requestId)) {
-            if ($payload -notmatch '"target":"update"|"invocationId"') { continue }
-            $Bridge.HubSockets[$m.params.requestId] = $true
-        }
+        $kind = Get-SocketKind $Bridge $m.params.requestId $payload
+        if (-not $kind) { continue }
         $frames.Add($payload)
+        if ($kind -eq 'stream') {
+            # StreamHub (primary where the tenant uses it): its end-of-reply ends the wait at once.
+            if ($frames.Count -eq 1 -or $stream.Items -eq 0) { Add-TimelineEvent $Bridge 'first StreamHub frame' $null $(if (Test-Timeline $Bridge) { Get-BrowserTime $Bridge.Timeline $m }) }
+            $lastActivity = Get-Date
+            foreach ($rec in Read-HubRecords $payload) {
+                if ($myInvocation -and $null -ne $rec.invocationId -and [string]$rec.invocationId -ne $myInvocation) { continue }
+                Add-StreamRecord $stream $rec
+            }
+            if ($stream.Done) {
+                $reply = Complete-StreamReply $Bridge $stream $pageBefore $Text $sendWatch.ElapsedMilliseconds
+                if ($reply) {
+                    if ($Bridge.SaveFrames) { Save-ReplyFrames $frames }
+                    Write-NetTrace $net 'reply over StreamHub'
+                    Add-TimelineEvent $Bridge 'returned' "StreamHub ($($reply.ResultMessage))"
+                    return $reply
+                }
+                Write-CCBLog verbose bridge 'StreamHub signalled an end that the page does not confirm; waiting' @{ why = $stream.Why; items = $stream.Items }
+                $stream.Done = $false
+            }
+            continue
+        }
         if ($frames.Count -eq 1) { Add-TimelineEvent $Bridge 'first Chathub frame' $null $(if (Test-Timeline $Bridge) { Get-BrowserTime $Bridge.Timeline $m }) }
         $lastActivity = Get-Date
         foreach ($rec in Read-HubRecords $payload) {
@@ -836,4 +1023,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

@@ -4,6 +4,7 @@
   "sendButton": "button[aria-label='Send'], button.fai-SendButton",
   "stopButton": "button[aria-label*='Stop' i]",
   "chatHubUrlPattern": "/Chathub/",
+  "streamHubUrlPattern": "/StreamHub/",
   "workIq": {
     "toggle": "",
     "stateAttribute": "aria-checked",

@@ -1,8 +1,10 @@
 <#
 .SYNOPSIS
   Sends a ladder of prompts, from simple to complex, to Microsoft 365 Copilot (each in a fresh chat)
-  and reports per step how Copilot responded: answered, blocked, no answer, out of credits, timings.
-  Use it to find where (if anywhere) Copilot starts to fail or refuse.
+  and reports per step how Copilot responded (answered, blocked, no answer, out of credits) and how
+  fast: the exact time (HH:mm:ss.fff, +ms after Send) of each step of the reply, the route it came
+  by (StreamHub, Chathub or the page) and how long CCBridge waited after Copilot had finished.
+  Use it to find where (if anywhere) Copilot starts to fail or refuse, and where time is lost.
 .DESCRIPTION
   Every step costs one Copilot message. The report (text + JSON on the desktop) contains no
   Microsoft 365 data: for the Microsoft 365 steps only codes, sizes and timings are kept.
@@ -16,7 +18,7 @@
   complexity-test.cmd
   complexity-test.cmd -From 5 -To 9
 #>
-param([int]$From = 1, [int]$To = 12, [int]$StepTimeoutSec = 300, [int]$PauseSec = 3)
+param([int]$From = 1, [int]$To = 12, [int]$StepTimeoutSec = 300, [int]$PauseSec = 3, [int]$PageCheckMs = 200)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -48,11 +50,11 @@ function Get-Item$i {
 }
 
 function New-AgentPrompt([string]$Kind, [string]$Task, [string]$Context = '') {
-    <# The same shape CCBridge sends as the first message of a chat. #>
-    $fence = '```'
-    $p = (Get-Instructions $root $Kind) + "`n`n# Project: complexity-test`n`n## Files`n$fence`n(empty project)`n$fence`n"
-    if ($Context) { $p += "`n# Attached files`n$Context`n" }
-    $p + "`n# Task`n$Task"
+    <# The same shape CCBridge sends as the first message of a chat (New-PromptMessage). #>
+    $location = "Project folder: complexity-test on the user's computer; use the read action to see its files."
+    $ctx = @{ Location = $location; Full = "$location`nThe folder is empty." }
+    $text = if ($Context) { "$Task`n`nAttached files:`n$Context" } else { $Task }
+    New-PromptMessage -AppRoot $root -Kind $Kind -Text $text -Sent (New-Object 'System.Collections.Generic.HashSet[string]') -Context $ctx
 }
 
 $steps = @(
@@ -72,8 +74,9 @@ $steps = @(
 
 # --- Run ----------------------------------------------------------------------------------
 
-Write-Host 'Copilot complexity test: each step sends one prompt in a new Copilot chat (one message each).' -ForegroundColor White
+Write-Host 'Copilot complexity and timing test: each step sends one prompt in a new Copilot chat (one message each).' -ForegroundColor White
 $bridge = Connect-Copilot -Port $config.cdpPort -SaveReplyFrames $true
+$bridge | Add-Member -NotePropertyName PageCheckMs -NotePropertyValue $PageCheckMs -Force
 $results = New-Object System.Collections.Generic.List[object]
 $repliesDir = Join-Path $env:LOCALAPPDATA 'CCBridge\replies'
 try {
@@ -86,6 +89,7 @@ try {
         $watch = [Diagnostics.Stopwatch]::StartNew()
         try {
             New-CopilotChat $bridge
+            $bridge | Add-Member -NotePropertyName Timeline -NotePropertyValue (New-ReplyTimeline) -Force
             # The callback runs inside the bridge module, so it keeps its state in a captured hashtable.
             $first = @{ ms = $null }
             $onProgress = { param($t) if (-not $first.ms -and $t) { $first.ms = $watch.ElapsedMilliseconds } }.GetNewClosure()
@@ -112,6 +116,12 @@ try {
             $res.resultMessage = Protect-LogText $_.Exception.Message
             $res.seconds = [Math]::Round($watch.Elapsed.TotalSeconds, 1)
         }
+        # Exact timings of this reply (names, sizes and times only).
+        if ($bridge.PSObject.Properties['Timeline'] -and $bridge.Timeline) {
+            $sum = Get-ReplyTimelineSummary $bridge.Timeline
+            foreach ($k in 'sentAt', 'route', 'firstTextOnPageMs', 'stopShownMs', 'stopGoneMs', 'firstHubFrameMs', 'lastHubFrameMs', 'returnedMs', 'waitAfterStopGoneMs', 'waitAfterLastHubFrameMs', 'timeline') { $res[$k] = $sum.$k }
+            $bridge.Timeline = $null
+        }
         # Message types and filter markers from the raw frames of this step.
         $file = Get-ChildItem $repliesDir -Filter *.jsonl -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $before } | Sort-Object Name | Select-Object -Last 1
         if ($file) {
@@ -119,7 +129,7 @@ try {
             $offense = New-Object System.Collections.Generic.HashSet[string]
             foreach ($line in [IO.File]::ReadAllLines($file.FullName)) {
                 foreach ($rec in Read-HubRecords $line) {
-                    $msgs = @(); if ($rec.arguments) { $msgs += @($rec.arguments[0].messages) }; if ($rec.item) { $msgs += @($rec.item.messages) }
+                    $msgs = @(); if ($rec.arguments) { $msgs += @($rec.arguments[0].messages) }; if ($rec.item -and $rec.item.PSObject.Properties['messages']) { $msgs += @($rec.item.messages) }
                     foreach ($mm in $msgs | Where-Object { $_ }) {
                         [void]$types.Add("$($mm.author):$($mm.messageType):$($mm.contentOrigin)")
                         if ($mm.offense) { [void]$offense.Add([string]$mm.offense) }
@@ -132,7 +142,7 @@ try {
         }
         $results.Add([pscustomobject]$res)
         $color = if ($res.result -eq 'Success' -and $res.replyChars -gt 0) { 'Green' } else { 'Yellow' }
-        Write-Host ("{0} in {1}s, reply {2} chars" -f $res.result, $res.seconds, $res.replyChars) -ForegroundColor $color
+        Write-Host ("{0} in {1}s, reply {2} chars, via {3}, waited {4} ms after Copilot finished" -f $res.result, $res.seconds, $res.replyChars, $res.route, $res.waitAfterStopGoneMs) -ForegroundColor $color
         Write-CCBLog info complexity "step $($step.n) $($step.name): $($res.result)" $res
         if ($res.result -eq 'OutOfCredits') { Write-Host 'Out of Copilot credits: stopping.' -ForegroundColor Yellow; break }
         Start-Sleep -Seconds $PauseSec
@@ -143,14 +153,15 @@ try {
 
 # --- Report -------------------------------------------------------------------------------
 
-$stamp = (Get-Date).ToString('yyyyMMdd-HHmm')
+$stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
 $desktop = [Environment]::GetFolderPath('Desktop')
 $jsonFile = Join-Path $desktop "CCBridge-complexity-$stamp.json"
 $txtFile = Join-Path $desktop "CCBridge-complexity-$stamp.txt"
 $envInfo = Get-CCBridgeEnvironment $root
 [IO.File]::WriteAllText($jsonFile, (Protect-LogText (@{ environment = $envInfo; steps = $results } | ConvertTo-Json -Depth 6)), (New-Object Text.UTF8Encoding($false)))
 $lines = New-Object System.Collections.Generic.List[string]
-$lines.Add("CCBridge complexity test $stamp (CCBridge $($envInfo.ccbridge))")
+$lines.Add("CCBridge complexity and timing test $stamp (CCBridge $($envInfo.ccbridge)), page checked every $PageCheckMs ms")
+$lines.Add('Times: ms after Send was clicked; network times are Edge''s own. Names, sizes and times only.')
 $lines.Add('')
 $lines.Add(('{0,-4} {1,-38} {2,8} {3,-12} {4,7} {5,8} {6}' -f 'Step', 'Name', 'Prompt', 'Result', 'Seconds', 'Reply', 'Actions / first words'))
 foreach ($r in $results) {
@@ -161,6 +172,18 @@ foreach ($r in $results) {
 $firstFail = $results | Where-Object { $_.result -ne 'Success' -or $_.replyChars -eq 0 } | Select-Object -First 1
 $lines.Add('')
 $lines.Add($(if ($firstFail) { "First problem at step $($firstFail.step) ($($firstFail.name)): $($firstFail.result). Send this file and the .json to whoever helps you." } else { 'All steps answered.' }))
+$lines.Add('')
+$lines.Add('TIMING (ms after Send)')
+$lines.Add(('{0,-4} {1,-36} {2,-13} {3,9} {4,9} {5,9} {6,9} {7,9} {8,9}' -f 'Step', 'Route', 'Sent at', 'FirstText', 'StopGone', 'LastHub', 'Returned', 'WaitStop', 'WaitHub'))
+foreach ($r in $results) {
+    $lines.Add(('{0,-4} {1,-36} {2,-13} {3,9} {4,9} {5,9} {6,9} {7,9} {8,9}' -f $r.step, $r.route, $r.sentAt, $r.firstTextOnPageMs, $r.stopGoneMs, $r.lastHubFrameMs, $r.returnedMs, $r.waitAfterStopGoneMs, $r.waitAfterLastHubFrameMs))
+}
+foreach ($r in $results) {
+    if (-not $r.timeline) { continue }
+    $lines.Add('')
+    $lines.Add("=== [$($r.step)] $($r.name): $($r.result) via $($r.route)")
+    foreach ($t in $r.timeline) { $lines.Add("    $t") }
+}
 [IO.File]::WriteAllText($txtFile, (Protect-LogText ($lines -join "`r`n")), (New-Object Text.UTF8Encoding($false)))
 Write-Host ''
 Write-Host "Report: $txtFile" -ForegroundColor Green

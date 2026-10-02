@@ -20,3 +20,6 @@ dist/
 
 # Local code-index cache (repowise)
 .repowise/
+
+# Local scratch folder (reports copied from other machines)
+temp/
