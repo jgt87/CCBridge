@@ -437,6 +437,86 @@ function Write-NetTrace($Trace, [string]$Why) {
     Write-CCBLog verbose bridge "Network after sending ($Why)" @{ requests = $requests; sockets = $sockets; eventSourceMessages = $Trace.EventSource }
 }
 
+function New-ReplyTimeline {
+    <# For the timing test: exact time of each step of one reply. Network events use the browser's own
+       timestamps (when the data arrived in Edge), page checks the page clock, the rest this computer's clock. #>
+    @{ Events = (New-Object System.Collections.Generic.List[object]); Sockets = @{}; Requests = @{}; LastPage = $null; ClockOffset = $null }
+}
+
+function Test-Timeline($Bridge) { [bool]($Bridge.PSObject.Properties['Timeline'] -and $Bridge.Timeline) }
+
+function Add-TimelineEvent($Bridge, [string]$What, $Data, $At) {
+    if (-not (Test-Timeline $Bridge)) { return }
+    if (-not $At) { $At = Get-Date }
+    $Bridge.Timeline.Events.Add([pscustomobject]@{ at = $At; what = $What; data = $Data })
+}
+
+function Get-RecordShape([string]$Payload) {
+    <# Names only: SignalR record types/targets, or the top-level keys of a JSON frame. #>
+    $shapes = @()
+    foreach ($part in ($Payload -split [char]0x1e)) {
+        if (-not $part.Trim()) { continue }
+        try { $o = $part | ConvertFrom-Json } catch { $shapes += 'non-json'; continue }
+        if ($null -ne $o.type) {
+            $shape = "type$($o.type)"
+            if ($o.target) { $shape += ":$($o.target)" }
+            if ($o.type -eq 2 -or $o.type -eq 3) { $shape += ' (end)' }
+            $shapes += $shape
+        } else { $shapes += '{' + ((@($o.PSObject.Properties.Name) | Select-Object -First 6) -join ',') + '}' }
+    }
+    $shapes
+}
+
+function Get-BrowserTime($Timeline, $M) {
+    <# Wall-clock time of a Network event from Edge's monotonic timestamp (offset learnt from
+       requestWillBeSent, which carries both); this computer's clock until the offset is known. #>
+    if ($M.params.wallTime -and $M.params.timestamp) { $Timeline.ClockOffset = [double]$M.params.wallTime - [double]$M.params.timestamp }
+    if ($null -ne $Timeline.ClockOffset -and $M.params.timestamp) {
+        return [DateTimeOffset]::FromUnixTimeMilliseconds([long](([double]$M.params.timestamp + $Timeline.ClockOffset) * 1000)).LocalDateTime
+    }
+    Get-Date
+}
+
+function Add-TimelineNet($Bridge, $M) {
+    if (-not (Test-Timeline $Bridge)) { return }
+    $tl = $Bridge.Timeline
+    if ($M.method -notlike 'Network.*') { return }
+    $at = Get-BrowserTime $tl $M
+    $id = "$($M.params.requestId)"
+    switch ($M.method) {
+        'Network.webSocketCreated' { $tl.Sockets[$id] = @{ url = (Get-UrlShape $M.params.url); created = $at; first = $null; last = $null; frames = 0; binary = 0; shapes = @{} } }
+        'Network.webSocketFrameReceived' {
+            if (-not $tl.Sockets.ContainsKey($id)) { $tl.Sockets[$id] = @{ url = $(if ($Bridge.HubSockets.ContainsKey($id)) { '(Chathub, opened earlier)' } else { '(opened earlier)' }); created = $null; first = $null; last = $null; frames = 0; binary = 0; shapes = @{} } }
+            $s = $tl.Sockets[$id]
+            if ($null -eq $s.first) { $s.first = $at }
+            $s.last = $at; $s.frames++
+            if ($M.params.response.opcode -eq 2) { $s.binary++ }
+            else {
+                foreach ($sh in Get-RecordShape "$($M.params.response.payloadData)") {
+                    if (-not $s.shapes.ContainsKey($sh)) { $s.shapes[$sh] = @{ n = 0; first = $at; last = $at } }
+                    $s.shapes[$sh].n++; $s.shapes[$sh].last = $at
+                }
+            }
+        }
+        'Network.requestWillBeSent' {
+            $u = "$($M.params.request.url)"
+            # Telemetry, configuration and static files say nothing about how the reply travels.
+            $noise = $u -match '(?i)\.(js|css|woff2?|png|svg|ico|jpe?g|gif|webp)(\?|$)|browser\.events\.data\.microsoft|/OneCollector/|/events(\?|$)|challenges\.cloudflare|ecs\.office\.com/config|/manifest[^/]*\.json|/uxversion'
+            if ($M.params.type -notmatch '^(Script|Stylesheet|Image|Font|Media|Manifest)$' -and $u -match '^https?:' -and -not $noise) {
+                $tl.Requests[$id] = @{ req = "$($M.params.request.method) $(Get-UrlShape $u)"; type = "$($M.params.type)"; sent = $at; mime = $null; response = $null; firstData = $null; lastData = $null; chunks = 0; bytes = 0; done = $null }
+            }
+        }
+        'Network.responseReceived' { if ($tl.Requests.ContainsKey($id)) { $r = $tl.Requests[$id]; $r.response = $at; $r.mime = "$($M.params.response.mimeType)" } }
+        'Network.dataReceived' {
+            if ($tl.Requests.ContainsKey($id)) { $r = $tl.Requests[$id]; if ($null -eq $r.firstData) { $r.firstData = $at }; $r.lastData = $at; $r.chunks++; $r.bytes += [int]$M.params.dataLength }
+        }
+        'Network.eventSourceMessageReceived' {
+            if ($tl.Requests.ContainsKey($id)) { $r = $tl.Requests[$id]; if ($null -eq $r.firstData) { $r.firstData = $at }; $r.lastData = $at; $r.chunks++ }
+        }
+        'Network.loadingFinished' { if ($tl.Requests.ContainsKey($id)) { $tl.Requests[$id].done = $at } }
+    }
+}
+
 function Send-CopilotPrompt {
     <#
     .SYNOPSIS Sends a prompt and returns the complete markdown reply.
@@ -470,9 +550,14 @@ function Send-CopilotPromptUnlocked {
     # The page itself is watched too: if the reply does not arrive over the Chathub socket (other
     # tenants may deliver it differently), it is read from the page once Copilot has finished.
     $pageBefore = Get-PageReplyState $Bridge
+    Add-TimelineEvent $Bridge 'typing' $null
     Set-CopilotInput $Bridge $Text
     Invoke-CopilotSend $Bridge
+    Add-TimelineEvent $Bridge 'sent' $null
     $net = New-NetTrace
+    # How often the page is checked, and how long it must look finished before it counts.
+    $pageEveryMs = if ($Bridge.PSObject.Properties['PageCheckMs'] -and $Bridge.PageCheckMs) { [int]$Bridge.PageCheckMs } else { 500 }
+    $pageStableSec = if ($Bridge.PSObject.Properties['PageStableSec'] -and $null -ne $Bridge.PageStableSec) { [double]$Bridge.PageStableSec } else { 1.0 }
     $nextPageCheck = (Get-Date).AddSeconds(2)
     $pageDoneSince = $null; $pageLastLen = -1; $sawStop = $false
 
@@ -498,10 +583,15 @@ function Send-CopilotPromptUnlocked {
                 ResultMessage = 'Stopped by the user'; SentMatches = $true; References = @(); ProposedActions = @(); ActionClaims = @() }
         }
         $m = Receive-CdpEvent $s 400
-        if ($m) { Add-NetTrace $net $Bridge $m }
+        if ($m) { Add-NetTrace $net $Bridge $m; Add-TimelineNet $Bridge $m }
         if ($pageBefore -and (Get-Date) -gt $nextPageCheck) {
-            $nextPageCheck = (Get-Date).AddMilliseconds(1500)
+            $nextPageCheck = (Get-Date).AddMilliseconds($pageEveryMs)
             $st = Get-PageReplyState $Bridge
+            if ($st -and (Test-Timeline $Bridge)) {
+                # Record each change of what the page shows.
+                $sig = "stop=$($st.stop) replies=$($st.replies) copies=$($st.copies) len=$($st.lastLen) stateLen=$($st.stateLen) flags=$(($st.flags | ConvertTo-Json -Compress))"
+                if ($sig -ne $Bridge.Timeline.LastPage) { $Bridge.Timeline.LastPage = $sig; Add-TimelineEvent $Bridge 'page' $sig $(if ($st.now) { [DateTimeOffset]::FromUnixTimeMilliseconds([long]$st.now).LocalDateTime } else { $null }) }
+            }
             if ($st) {
                 if ($st.stop) { $sawStop = $true; $lastActivity = Get-Date }
                 if ($st.lastLen -ne $pageLastLen) { if ($pageLastLen -ge 0) { $lastActivity = Get-Date }; $pageLastLen = $st.lastLen; $pageDoneSince = $null }
@@ -509,13 +599,14 @@ function Send-CopilotPromptUnlocked {
                     ($sawStop -or $sendWatch.Elapsed.TotalSeconds -ge 6)
                 if (-not $finished) { $pageDoneSince = $null }
                 elseif (-not $pageDoneSince) { $pageDoneSince = Get-Date }
-                elseif (((Get-Date) - $pageDoneSince).TotalSeconds -ge 2.5) {
+                elseif (((Get-Date) - $pageDoneSince).TotalSeconds -ge $pageStableSec) {
                     # Finished on the page and stable, and no completion came over the socket.
                     $pt = Get-PageReplyText $Bridge
                     $ptext = "$($pt.text)"
                     if ($ptext.Trim() -and ($ptext -replace '\s', '') -ne ($Text -replace '\s', '')) {
                         Write-CCBLog info bridge "Reply read from the page ($($pt.how)); no completion arrived over the Chathub socket" @{ chars = $ptext.Length; hubChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; ms = $sendWatch.ElapsedMilliseconds }
                         Write-NetTrace $net 'reply read from the page'
+                        Add-TimelineEvent $Bridge 'returned' "page ($($pt.how))"
                         if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
                         return [pscustomobject]@{ Cancelled = $false; Text = $ptext; ServerText = $ptext; Uncertain = $(if ($pt.how -eq 'state') { 0 } else { 1 })
                             SentText = $Text; SentMatches = $true; Result = 'Success'; ResultMessage = "read from the page ($($pt.how))"
@@ -570,6 +661,7 @@ function Send-CopilotPromptUnlocked {
             $Bridge.HubSockets[$m.params.requestId] = $true
         }
         $frames.Add($payload)
+        if ($frames.Count -eq 1) { Add-TimelineEvent $Bridge 'first Chathub frame' $null $(if (Test-Timeline $Bridge) { Get-BrowserTime $Bridge.Timeline $m }) }
         $lastActivity = Get-Date
         foreach ($rec in Read-HubRecords $payload) {
             $isEnd = $rec.type -eq 2 -or $rec.type -eq 3
@@ -589,6 +681,7 @@ function Send-CopilotPromptUnlocked {
                 $reply = Complete-Reply $merger $item $Text
                 Write-ReplyLog $reply $item $frames $sendWatch.ElapsedMilliseconds
                 Write-NetTrace $net 'reply over the Chathub socket'
+                Add-TimelineEvent $Bridge 'returned' 'Chathub socket'
                 return $reply
             }
         }
@@ -616,17 +709,42 @@ function Get-PageReplyState {
     $reply = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'replyContainer' "[data-testid='copilot-message-reply-div']")
     $copy = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'copyReplyButton' "button[aria-label='Copy Response' i]")
     $stop = ConvertTo-JsString $Bridge.Selectors.stopButton
+    $withFlags = if ($Bridge.PSObject.Properties['Timeline'] -and $Bridge.Timeline) { 'true' } else { 'false' }
     $js = @"
 (() => {
   const vis = e => e && e.offsetParent !== null;
   const replies = [...document.querySelectorAll($reply)];
   const last = replies[replies.length - 1];
-  return JSON.stringify({
+  const out = {
     replies: replies.length,
     copies: [...document.querySelectorAll($copy)].filter(vis).length,
     stop: [...document.querySelectorAll($stop)].some(vis),
-    lastLen: last ? (last.innerText || '').length : 0
-  });
+    lastLen: last ? (last.innerText || '').length : 0,
+    now: Date.now()
+  };
+  if ($withFlags && last) {
+    // Timing test only: state flags of the last reply (names and short values, never text).
+    const flags = {}; let stateLen = -1;
+    let e = last;
+    for (let i = 0; i < 6 && e; i++, e = e.parentElement) {
+      const fk = Object.keys(e).find(k => k.startsWith('__reactFiber$'));
+      if (!fk) continue;
+      let f = e[fk];
+      for (let j = 0; j < 30 && f; j++, f = f.return) {
+        const p = f.memoizedProps;
+        if (!p || typeof p !== 'object') continue;
+        for (const k of Object.keys(p)) {
+          if (!/stream|final|complete|done|state|status|loading|progress|typing|pending|finish|busy|end/i.test(k)) continue;
+          const v = p[k];
+          if (typeof v === 'boolean' || typeof v === 'number' || (typeof v === 'string' && v.length <= 24 && !/\s/.test(v))) flags[k] = v;
+        }
+        if (stateLen < 0 && p.response && typeof p.response.text === 'string') stateLen = p.response.text.length;
+      }
+      break;
+    }
+    out.flags = flags; out.stateLen = stateLen;
+  }
+  return JSON.stringify(out);
 })()
 "@
     try { Invoke-CdpEval $Bridge.Session $js | ConvertFrom-Json } catch { if ($Bridge.Session.Lost) { throw }; $null }
@@ -718,4 +836,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

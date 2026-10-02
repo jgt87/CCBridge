@@ -281,6 +281,10 @@ Double-click `complexity-test.cmd` to send 12 prompts, from simple to complex, e
 
 Per step the report records the result (`Success`, `NoAnswer`, `OutOfCredits`, `Error`, ...), the time, when the first text arrived, the reply length, the action blocks found, Copilot's message types and filter markers, and (not for the Microsoft 365 steps) the first words of the reply, so refusals stand out. It writes `CCBridge-complexity-<date>.txt` and `.json` to your desktop, masked like the logs. Run part of the ladder with `complexity-test.cmd -From 5 -To 9`.
 
+### Measuring reply speed: `reply-timing.cmd`
+
+Double-click `reply-timing.cmd` to send three short prompts (one Copilot message each) and record the exact time (`HH:mm:ss.fff`, plus milliseconds after Send) of every step: what the page shows (Stop button, reply text, Copy button), every connection and request the page uses (first and last data, record types such as the end of a reply), and when CCBridge had the reply and by which route. Network times are Edge's own. Only names, sizes and times are recorded, never prompt or reply text. The report goes to your desktop as `CCBridge-timing-<date>.txt` and `.json`; `-Count 1` sends a single prompt.
+
 ## Troubleshooting
 
 **Copilot answers in the browser but CCBridge keeps waiting.** CCBridge normally reads replies from the page's Chathub connection. If a tenant delivers them differently, CCBridge notices on the page itself that Copilot has finished (Stop gone, a new reply with its Copy button) and reads the reply's markdown from the page; the log then says "Reply read from the page". With verbose logging, the line "Network after sending" lists which addresses the page used (no content), which shows how replies travel on that tenant.
