@@ -10,7 +10,8 @@ import type { FetchItem, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from
 import { FetchPanel } from "./fetch-panel";
 import { RunbooksPanel } from "./runbooks-panel";
 import { QueuePanel } from "./queue-panel";
-import { SchedulesPanel } from "./schedules-panel";
+import { SchedulesSummary } from "./schedules-modal";
+import { ReviewPanel } from "./review-panel";
 import type { QueueEntry, ScheduleItem } from "@/lib/api";
 import type { ScheduleTarget } from "./schedule-form";
 import { cn } from "@/lib/utils";
@@ -205,10 +206,13 @@ export function SidePanel({
   schedules,
   pausedUntil,
   onSchedule,
+  reviewTick,
 }: {
+  reviewTick: number;
   schedules: ScheduleItem[];
   pausedUntil?: string | null;
-  onSchedule: (target: ScheduleTarget) => void;
+  /** Opens the schedules modal: with a target to schedule it, or null for the list. */
+  onSchedule: (target: ScheduleTarget | null) => void;
   files: FileInfo[];
   todos: TodoItem[];
   changes: { seq: number; time: string; files: string[] }[];
@@ -253,7 +257,7 @@ export function SidePanel({
         <QueuePanel onOpen={onOpenFile} pausedUntil={pausedUntil} queue={queue} />
       </div>
       <div className="border-black/10 border-t pt-3 dark:border-white/10">
-        <SchedulesPanel onNew={() => onSchedule({ kind: runbooks.length ? "runbook" : "chat", name: runbooks[0]?.name })} schedules={schedules} />
+        <SchedulesSummary onOpen={() => onSchedule(null)} schedules={schedules} />
       </div>
     </div>
   );
@@ -267,6 +271,9 @@ export function SidePanel({
         onClick={onUndo}
         variant="subtle"
       />
+      <div className="border-black/10 border-b pb-3 dark:border-white/10">
+        <ReviewPanel onOpen={onOpenFile} tick={reviewTick} />
+      </div>
       {changes.length ? (
         [...changes].reverse().map((c) => (
           <div className="rounded-lg border border-black/10 p-2 dark:border-white/10" key={c.seq}>

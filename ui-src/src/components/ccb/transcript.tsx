@@ -11,7 +11,7 @@ import { ActionCard, type ActionItem } from "./action-card";
 type NoteTone = "info" | "error" | "done" | "undo" | "human";
 
 export type TranscriptItem =
-  | { kind: "user"; seq: number; text: string }
+  | { kind: "user"; seq: number; text: string; taskKind?: string }
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[] }
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string }
@@ -34,6 +34,7 @@ const NOTE_EVENTS: Partial<Record<AgentEvent["type"], { tone: NoteTone; fallback
   newchat: { tone: "info", fallback: "New Copilot chat started." },
   fetch: { tone: "done", fallback: "Fetched." },
   runbook: { tone: "done", fallback: "Runbook finished." },
+  review: { tone: "done", fallback: "Code review finished." },
   "human-required": { tone: "human", fallback: "" },
 };
 
@@ -77,6 +78,16 @@ function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
 
 const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildContext) => void>> = {
   user: (e, ctx) => ctx.items.push({ kind: "user", seq: e.seq, text: e.text ?? "" }),
+  // How the last message was sent (chat, project, coding, ...): shown under it.
+  kind: (e, ctx) => {
+    for (let i = ctx.items.length - 1; i >= 0; i--) {
+      const it = ctx.items[i];
+      if (it.kind === "user") {
+        ctx.items[i] = { ...it, taskKind: (e as { taskKind?: string }).taskKind };
+        break;
+      }
+    }
+  },
   error: (e, ctx) =>
     ctx.items.push({ kind: "error", seq: e.seq, text: e.text ?? "", time: e.time, errId: e.errId, code: e.code, hint: e.hint, detail: e.detail, version: e.version }),
   "next-steps": (e, ctx) => {
@@ -140,13 +151,24 @@ const NOTE_STYLE = {
   },
 };
 
-function UserMessage({ text }: { text: string }) {
+const KIND_LABEL: Record<string, string> = { chat: "sent as plain chat", project: "sent as project work (no code instructions)", assistant: "sent as a Microsoft 365 question" };
+
+function UserMessage({ text, taskKind, onResendAsCoding }: { text: string; taskKind?: string; onResendAsCoding?: (text: string) => void }) {
+  const label = taskKind ? KIND_LABEL[taskKind] : undefined;
   return (
-    <div className="flex justify-end">
+    <div className="flex flex-col items-end gap-1">
       <div className="flex max-w-[85%] items-start gap-2 rounded-2xl rounded-tr-sm bg-black/5 px-4 py-2.5 text-sm dark:bg-white/10">
         <span className="whitespace-pre-wrap">{text}</span>
         <User className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-50" />
       </div>
+      {label && onResendAsCoding && (
+        <div className="flex items-center gap-2 text-muted-foreground text-xs">
+          <span>{label}</span>
+          <button className="rounded-md px-1.5 py-0.5 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5" onClick={() => onResendAsCoding(text)} title="Send it again with the coding instructions and the project's files" type="button">
+            Send again as a coding task
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -231,10 +253,18 @@ function NextSteps({ steps, onUse }: { steps: string[]; onUse?: (text: string) =
   );
 }
 
-function TranscriptRow({ item, onUsePrompt }: { item: TranscriptItem; onUsePrompt?: (text: string) => void }) {
+function TranscriptRow({
+  item,
+  onUsePrompt,
+  onResendAsCoding,
+}: {
+  item: TranscriptItem;
+  onUsePrompt?: (text: string) => void;
+  onResendAsCoding?: (text: string) => void;
+}) {
   switch (item.kind) {
     case "user":
-      return <UserMessage text={item.text} />;
+      return <UserMessage onResendAsCoding={onResendAsCoding} taskKind={item.taskKind} text={item.text} />;
     case "assistant":
       return <AssistantMessage references={item.references} text={item.text} />;
     case "action":
@@ -281,6 +311,7 @@ export function Transcript({
   empty,
   stopping = false,
   onUsePrompt,
+  onResendAsCoding,
 }: {
   items: TranscriptItem[];
   busy: boolean;
@@ -289,6 +320,8 @@ export function Transcript({
   stopping?: boolean;
   /** Puts a suggested next step in the message box. */
   onUsePrompt?: (text: string) => void;
+  /** Sends a message again as a coding task (when it went as plain chat or project work). */
+  onResendAsCoding?: (text: string) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const awaiting = items.some((i) => i.kind === "action" && i.item.status === "awaiting");
@@ -303,7 +336,7 @@ export function Transcript({
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-6">
       {items.map((it) => (
-        <TranscriptRow item={it} key={rowKey(it)} onUsePrompt={onUsePrompt} />
+        <TranscriptRow item={it} key={rowKey(it)} onResendAsCoding={onResendAsCoding} onUsePrompt={onUsePrompt} />
       ))}
       {busy && !awaiting && <ThinkingIndicator progress={progress} stopping={stopping} />}
       <div ref={endRef} />

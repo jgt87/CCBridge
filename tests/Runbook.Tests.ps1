@@ -85,3 +85,42 @@ Describe 'Runbooks in a project' {
     }
     Remove-Item $p -Recurse -Force
 }
+
+Describe 'Test-RunbookFile (runbooks Copilot writes)' {
+    $good = "---`ntitle: Meetings next week`noutput: exports/meetings-next-week.json`nitemsKey: items`n---`n# Purpose`nX`n# Output`n``````json`n{ ""items"": [] }`n``````"
+    It 'accepts a runbook in runbooks/ with a proper name and header' {
+        @(Test-RunbookFile 'runbooks/meetings-next-week.runbook.md' $good $true).Count | Should Be 0
+    }
+    It 'refuses RUNBOOK.md at the project root when the request is about runbooks, and names the right path' {
+        $p = @(Test-RunbookFile 'RUNBOOK.md' $good $true)
+        $p.Count | Should Be 1
+        $p[0] | Should Match 'runbooks/meetings-next-week\.runbook\.md'
+        @(Test-RunbookFile 'docs/my-runbook.md' 'notes' $true)[0] | Should Match 'runbooks/my\.runbook\.md'
+    }
+    It 'leaves other Markdown alone, and RUNBOOK.md when the request is not about runbooks' {
+        @(Test-RunbookFile 'README.md' 'hello' $true).Count | Should Be 0
+        @(Test-RunbookFile 'RUNBOOK.md' $good $false).Count | Should Be 0
+    }
+    It 'checks the name and header of a runbook in runbooks/' {
+        (Test-RunbookFile 'runbooks/Meetings Next.runbook.md' $good $true) -join ';' | Should Match 'lowercase words'
+        (Test-RunbookFile 'runbooks/x.runbook.md' "# Purpose`nno header" $true) -join ';' | Should Match 'header block'
+        (Test-RunbookFile 'runbooks/x.runbook.md' "---`ntitle: X`noutput: exports/x.csv`n---`nbody ``````json`n{}`n``````" $true) -join ';' | Should Match '\.json file'
+        (Test-RunbookFile 'runbooks/x.runbook.md' "---`ntitle: X`noutput: ../x.json`n---`nbody ``````json`n{}`n``````" $true) -join ';' | Should Match 'inside the project'
+        (Test-RunbookFile 'runbooks/x.runbook.md' "---`ntitle: X`noutput: exports/x.json`n---`njust words" $true) -join ';' | Should Match 'json block'
+    }
+    It 'turns a title into a file name' {
+        Get-RunbookSlug 'Meetings: next week!' | Should Be 'meetings-next-week'
+        Get-RunbookSlug 'RUNBOOK.md' | Should Be ''
+    }
+}
+
+Describe 'The runbook instructions for Copilot' {
+    It 'go with a request about runbooks, with the blank template' {
+        (Get-PromptModules 'Create a runbook for my meetings' @{ Traits = @() }) -contains 'rules:runbook' | Should Be $true
+        (Get-PromptModules 'Fix the button' @{ Traits = @() }) -contains 'rules:runbook' | Should Be $false
+        $m = Get-PromptPart $root 'rules:runbook' @{}
+        $m | Should Match 'runbooks/NAME\.runbook\.md'
+        $m | Should Match '(?s)RUNBOOK TEMPLATE\n````\n---\ntitle:'
+        $m | Should Not Match 'CCBridge'
+    }
+}

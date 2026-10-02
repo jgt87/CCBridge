@@ -29,6 +29,50 @@ function Read-Runbook {
     @{ meta = $meta; body = $body }
 }
 
+function Get-RunbookSlug([string]$Text) {
+    <# "Meetings next week" -> "meetings-next-week"; empty when nothing usable is left. #>
+    $s = ("$Text".ToLowerInvariant() -replace '\.runbook\.md$|\.md$', '' -replace '[^a-z0-9]+', '-').Trim('-')
+    $s = ($s -replace '(^|-)runbook(-|$)', '$1$2' -replace '-{2,}', '-').Trim('-')
+    if ($s.Length -gt 50) { $s = $s.Substring(0, 50).Trim('-') }
+    $s
+}
+
+function Test-RunbookFile {
+    <# Rules for a runbook file Copilot writes; returns the problems (none = fine).
+       - In runbooks/: the name is runbooks/NAME.runbook.md with NAME lowercase words joined by -,
+         the header has title and output (a .json path inside the project), and there are
+         instructions with the JSON shape in a ```json block.
+       - Elsewhere: when the request is about runbooks ($AboutRunbooks) and the file looks like a
+         runbook (a .md file with "runbook" in its name, or a header with output:), it is in the
+         wrong place; the problem names the right path. #>
+    param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text, [bool]$AboutRunbooks = $false)
+    $p = $Path.Trim().Replace('\', '/') -replace '^\./', ''
+    $name = ($p -split '/')[-1]
+    $rb = Read-Runbook "$Text"
+    $slug = Get-RunbookSlug $(if ($rb.meta.title) { $rb.meta.title } else { $name })
+    if (-not $slug) { $slug = 'NAME' }
+    $isMd = $name -match '(?i)\.md$'
+    if ($p -notmatch '^runbooks/[^/]+$' -or $name -notmatch '\.runbook\.md$') {
+        $looks = $isMd -and (($name -match '(?i)runbook') -or ($Text -match '(?s)^\s*---\s*\n.*?\boutput\s*:'))
+        if ($AboutRunbooks -and $looks) { return @("runbooks are saved as runbooks/NAME.runbook.md (NAME: lowercase words joined with -), not as $p; write it to runbooks/$slug.runbook.md") }
+        return @()
+    }
+    $problems = New-Object System.Collections.Generic.List[string]
+    $stem = $name.Substring(0, $name.Length - '.runbook.md'.Length)
+    if ($stem -cnotmatch '^[a-z0-9]+(-[a-z0-9]+)*$') { $problems.Add("the name must be lowercase words joined with -, for example runbooks/$slug.runbook.md") }
+    if (-not $rb.meta.Count) { $problems.Add('the file must start with the header block between --- lines (title, output, itemsKey, required, requiredItemFields) as in the template') }
+    else {
+        if (-not "$($rb.meta.title)".Trim()) { $problems.Add('the header needs a title: line') }
+        $out = "$($rb.meta.output)".Trim()
+        if (-not $out) { $problems.Add("the header needs an output: line, for example output: exports/$stem.json") }
+        elseif ($out -notmatch '(?i)\.json$') { $problems.Add("output must be a .json file, for example exports/$stem.json") }
+        elseif ([IO.Path]::IsPathRooted($out) -or $out -match '(^|[\\/])\.\.([\\/]|$)') { $problems.Add("output must be a path inside the project, for example exports/$stem.json") }
+    }
+    if (-not $rb.body) { $problems.Add('the runbook has no instructions below the header') }
+    elseif ($rb.body -notmatch '```+\s*json') { $problems.Add('the Output section must show the JSON shape in a ```json block') }
+    $problems.ToArray()
+}
+
 function Get-TimeZoneText {
     $tz = [TimeZoneInfo]::Local
     $off = $tz.GetUtcOffset((Get-Date))
@@ -151,4 +195,4 @@ function Save-RunbookOutput {
     @{ output = $Output; history = $hist }
 }
 
-Export-ModuleMember -Function Read-Runbook, Resolve-RunbookText, Get-RunbookTemplates, Get-Runbooks, New-RunbookFromTemplate, Get-JsonFromReply, Test-RunbookOutput, Save-RunbookOutput
+Export-ModuleMember -Function Get-RunbookSlug, Test-RunbookFile, Read-Runbook, Resolve-RunbookText, Get-RunbookTemplates, Get-Runbooks, New-RunbookFromTemplate, Get-JsonFromReply, Test-RunbookOutput, Save-RunbookOutput

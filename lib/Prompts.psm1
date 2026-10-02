@@ -20,11 +20,38 @@ $script:WebPattern = '(?i)\b(html|css|scss|website|web ?app|web ?page|landing pa
 $script:MovePattern = '(?i)\b(move|moving|split|extract|separate|refactor|offload|reorgani[sz]e|restructure|verplaats|splits|scheid|herstructureer)\b'
 $script:PythonPattern = '(?i)\b(python|pip|django|flask|pandas|pytest)\b|\.pyw?\b'
 $script:PowerShellPattern = '(?i)\b(powershell|pester|cmdlets?)\b|\.ps[md]?1\b'
+$script:RunbookPattern = '(?i)\b(runbooks?|draaiboek(en)?)\b'
+
+# In a project with code, these make a request work on the code even without a coding word
+# (English and Dutch): asking for a change, naming a part of an app, reporting an error, or asking
+# how or why the code does something.
+$script:ChangePattern = '(?i)\b(add|change|make|fix|update|remove|delete|rename|move|create|build|improve|implement|replace|refactor|rewrite|convert|split|extract|clean ?up|tidy|restyle|style|center|centre|align|resize|hide|show|enable|disable|translate|optimi[sz]e|speed up|set up|configure|connect|integrate|support|allow|prevent|validate|sort|filter|redesign|polish|voeg|maak|verander|wijzig|pas .{0,20} aan|verwijder|hernoem|verplaats|bouw|verbeter|vervang|zet|toon|verberg|repareer|herstel)\b'
+$script:AppPartPattern = '(?i)\b(button|buttons|page|pages|header|footer|menu|navbar|nav ?bar|sidebar|side ?panel|layout|styles?|styling|colou?rs?|fonts?|forms?|input|inputs|fields?|table|tables|chart|charts|graph|modal|popup|dialog|toggle|dark mode|light mode|theme|icons?|images?|logo|links?|scroll|responsive|mobile|screen|view|tabs?|cards?|grid|columns?|rows?|animation|hover|click|clicks|clicking|clicked|login|search bar|dropdown|knop|knoppen|kleur|lettertype|pagina|scherm|tabel|grafiek|formulier|menu)\b'
+$script:ProblemPattern = '(?i)\b(error|errors|exception|crash|crashes|crashing|broken|bug|doesn.?t work|does not work|not working|isn.?t working|fails|failing|stack ?trace|undefined|null|NaN|404|500|wrong|incorrect|slow|freezes|does nothing|nothing happens|doet niets|gebeurt niets|werkt niet|kapot|foutmelding|fout)\b'
+$script:CodeQuestionPattern = '(?i)\b(why|how does|how do|how is|what does|where is|where are|which file|explain|waarom|hoe werkt|wat doet|waar staat|leg uit)\b'
+$script:CodeFileExt = '(?i)\.(ps1|psm1|psd1|py|pyw|js|mjs|cjs|jsx|ts|mts|tsx|vue|svelte|html?|css|scss|less|cs|java|kt|go|rs|rb|php|sh|cmd|bat|sql|c|cpp|h|hpp|swift|dart|lua)$'
+
+function Test-NamesProjectFile {
+    <# Whether the text names one of the project's files (as name.ext or its name without the
+       extension, at least 4 characters, e.g. "the navbar" for components/Navbar.tsx). #>
+    param([string]$Text, [string[]]$Paths)
+    if (-not $Text -or -not $Paths) { return $false }
+    $words = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($m in [regex]::Matches($Text, '[\w.-]{4,}')) { [void]$words.Add($m.Value.Trim('.', '-')) }
+    foreach ($p in $Paths) {
+        $name = ($p -split '/')[-1]
+        $stem = [IO.Path]::GetFileNameWithoutExtension($name)
+        if ($words.Contains($name) -or ($stem.Length -ge 4 -and $stem -notmatch '^(index|main|readme|agents|package|config|style|styles|utils?|app|test|tests)$' -and $words.Contains($stem))) { return $true }
+    }
+    $false
+}
 
 function Get-ProjectTraits {
-    <# What a project contains, from its file paths: web, python, powershell, source. #>
+    <# What a project contains, from its file paths: code (any source file), web, python,
+       powershell, source. #>
     param([string[]]$Paths)
     $t = New-Object System.Collections.Generic.List[string]
+    if (@($Paths | Where-Object { $_ -match $script:CodeFileExt -and $_ -notmatch '(?i)^source/' }).Count) { $t.Add('code') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.(html?|css|scss|less|jsx?|mjs|tsx?|vue|svelte)$|(^|/)package\.json$' }).Count) { $t.Add('web') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.pyw?$|(^|/)requirements\.txt$|(^|/)pyproject\.toml$' }).Count) { $t.Add('python') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.ps[md]?1$' }).Count) { $t.Add('powershell') }
@@ -45,15 +72,22 @@ function Get-PromptModules {
     if (($traits -contains 'python') -or ($Text -match $script:PythonPattern)) { $ids.Add('rules:python') }
     if (($traits -contains 'powershell') -or ($Text -match $script:PowerShellPattern)) { $ids.Add('rules:powershell') }
     if ($traits -contains 'source') { $ids.Add('rules:source') }
+    if ($Text -match $script:RunbookPattern) { $ids.Add('rules:runbook') }
     $ids.ToArray()
 }
 
 function Get-TaskKind {
-    <# 'chat', 'assistant', 'project', 'coding' or 'mixed'. #>
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+    <# 'chat', 'assistant', 'project', 'coding' or 'mixed'. With the project's traits and file paths,
+       a request in a project with code also counts as coding when it asks for a change, names a
+       part of an app, reports a problem, asks how or why something works, or names a project file;
+       a request naming a project file is at least project work. #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text, [string[]]$Traits = @(), [string[]]$Paths = @())
     $coding = $Text -match $script:CodingPattern
     $m365 = $Text -match $script:M365Pattern
-    $project = $Text -match $script:ProjectPattern
+    $project = ($Text -match $script:ProjectPattern) -or (Test-NamesProjectFile $Text $Paths)
+    if (-not $coding -and -not $m365 -and $Traits -contains 'code' -and $Text.Trim()) {
+        $coding = ($Text -match $script:ChangePattern) -or ($Text -match $script:AppPartPattern) -or ($Text -match $script:ProblemPattern) -or ($Text -match $script:CodeQuestionPattern) -or (Test-NamesProjectFile $Text $Paths)
+    }
     if ($coding -and $m365) { return 'mixed' }
     if ($coding) { return 'coding' }
     if ($m365) { return 'assistant' }   # also when the result goes into a file: the assistant can save one
@@ -86,6 +120,14 @@ function Get-PromptPart {
         '^role:(.+)$' { return Read-PromptPart $AppRoot "roles\$($Matches[1]).md" }
         '^actions$'   { return Read-PromptPart $AppRoot 'actions.md' }
         '^rules$'     { return Read-PromptPart $AppRoot 'rules.md' }
+        '^rules:runbook$' {
+            # With the blank template, in a four-backtick fence (the template has ```json blocks).
+            $tpl = Join-Path $AppRoot 'templates\runbooks\blank.runbook.md'
+            $part = Read-PromptPart $AppRoot 'rules\runbook.md'
+            $fence = '````'
+            if (Test-Path -LiteralPath $tpl) { $part += "`n`nRUNBOOK TEMPLATE`n$fence`n" + ([IO.File]::ReadAllText($tpl).Replace("`r`n", "`n").Trim()) + "`n$fence" }
+            return $part
+        }
         '^rules:(.+)$' { return Read-PromptPart $AppRoot "rules\$($Matches[1]).md" }
         '^actions:run$' { return Read-PromptPart $AppRoot 'actions-run.md' }
         '^m365$'      { return Read-PromptPart $AppRoot 'm365.md' }
@@ -93,6 +135,7 @@ function Get-PromptPart {
         '^fetch$'     { return Read-PromptPart $AppRoot 'fetch.md' }
         '^retry$'     { return Read-PromptPart $AppRoot 'retry.md' }
         '^review$'    { return Read-PromptPart $AppRoot 'review.md' }
+        '^review-(code|cross)$' { return Read-PromptPart $AppRoot "review-$($Matches[1]).md" }
         '^runbook$'   { return Read-PromptPart $AppRoot 'runbook.md' }
         '^location$'  { return [string]$Context.Location }
         '^project$'   { return [string]$Context.Full }
@@ -149,4 +192,4 @@ function New-PromptMessage {
     $body
 }
 
-Export-ModuleMember -Function Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage
+Export-ModuleMember -Function Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage

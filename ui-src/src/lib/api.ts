@@ -63,6 +63,8 @@ export interface AgentEvent {
     | "newchat"
     | "fetch"
     | "runbook"
+    | "review"
+    | "kind"
     | "next-steps";
   time: string;
   text?: string;
@@ -139,6 +141,46 @@ export interface ProjectInfo {
   name: string;
   path: string;
   modified: string;
+}
+
+/** A saved code review (reviews/<id>.json) in the list. */
+export interface ReviewSummary {
+  id: string;
+  created: string;
+  scopeText: string;
+  files: number;
+  messages: number;
+  high: number;
+  medium: number;
+  low: number;
+  unverified: number;
+  report: string;
+}
+
+/** One finding: verified = its quoted lines are in the file; general = about the whole project. */
+export interface ReviewFinding {
+  id: string;
+  file: string;
+  line: number;
+  severity: "high" | "medium" | "low";
+  category: string;
+  title: string;
+  detail: string;
+  quote: string;
+  suggestion: string;
+  status: "verified" | "unverified" | "general";
+  reason?: string;
+  fixQueueId?: string;
+}
+
+export interface ReviewDetail {
+  id: string;
+  created: string;
+  scopeText: string;
+  files: string[];
+  messages: number;
+  overall: string | null;
+  findings: ReviewFinding[];
 }
 
 /** A schedule: what runs (message, fetch or runbook) and when. */
@@ -289,7 +331,7 @@ export const api = {
   files: () => call<{ files: FileInfo[] }>("GET", "/api/files"),
   file: (path: string) =>
     call<{ path: string; text: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),
-  chat: (text: string) => call<{ ok: boolean }>("POST", "/api/chat", { text }),
+  chat: (text: string, asCoding = false) => call<{ ok: boolean }>("POST", "/api/chat", { text, asCoding }),
   fetchList: () => call<{ items: FetchItem[] }>("GET", "/api/fetch").then((r) => (Array.isArray(r.items) ? r.items : [])),
   saveFetch: (name: string, prompt: string) => call<{ ok: boolean; item: FetchItem }>("POST", "/api/fetch", { name, prompt }),
   runFetch: (name: string) => call<{ ok: boolean }>("POST", "/api/fetch/run", { name }),
@@ -309,6 +351,17 @@ export const api = {
   connect: () => call<{ ok: boolean }>("POST", "/api/connect"),
   cancelQueued: (id: string) => call<{ ok: boolean }>("POST", "/api/queue/cancel", { id }),
   resumeQueue: () => call<{ ok: boolean }>("POST", "/api/queue/resume"),
+  reviewEstimate: (scope: string, paths: string[]) =>
+    call<{ files: number; skipped: number; batches: number; messages: number; scopeText: string }>("POST", "/api/reviews/estimate", { scope, paths }),
+  runReview: (scope: string, paths: string[], focus: string[]) => call<{ ok: boolean; id: string }>("POST", "/api/reviews/run", { scope, paths, focus }),
+  reviews: () => call<{ reviews: ReviewSummary[] }>("GET", "/api/reviews").then((r) => (Array.isArray(r.reviews) ? r.reviews : r.reviews ? [r.reviews as unknown as ReviewSummary] : [])),
+  getReview: (id: string) =>
+    call<{ review: ReviewDetail }>("POST", "/api/reviews/get", { id }).then((r) => ({
+      ...r.review,
+      files: asList(r.review.files),
+      findings: asList(r.review.findings),
+    })),
+  fixFindings: (id: string, ids: string[]) => call<{ ok: boolean; tasks: number }>("POST", "/api/reviews/fix", { id, ids }),
   createSchedule: (spec: ScheduleSpec) => call<{ ok: boolean; id: string }>("POST", "/api/schedules", spec),
   updateSchedule: (id: string, change: { enabled?: boolean }) => call<{ ok: boolean }>("POST", "/api/schedules/update", { id, ...change }),
   deleteSchedule: (id: string) => call<{ ok: boolean }>("POST", "/api/schedules/delete", { id }),

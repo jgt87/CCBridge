@@ -1,4 +1,5 @@
 import { RotateCcw, X } from "lucide-react";
+import { ModalBackdrop } from "./modal-backdrop";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Setting } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -88,12 +89,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, [settings]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 p-4 pt-16" onClick={onClose}>
+    <ModalBackdrop onClose={onClose}>
       <div
-        className="max-h-[80vh] w-full max-w-xl overflow-y-auto rounded-xl border border-black/10 bg-background p-4 shadow-xl dark:border-white/10"
+        className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-black/10 bg-background shadow-xl dark:border-white/10"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-2 flex items-center justify-between">
+        {/* Header stays in place; only the settings below it scroll. */}
+        <div className="flex shrink-0 items-center justify-between border-black/10 border-b px-4 py-3 dark:border-white/10">
           <div>
             <div className="font-semibold">Settings</div>
             <div className="text-muted-foreground text-xs">For this computer; changes apply right away and are kept across updates.</div>
@@ -102,16 +104,18 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <X className="h-4 w-4" />
           </button>
         </div>
-        {error && <div className="text-rose-500 text-sm">{error}</div>}
-        {groups.map(([group, list]) => (
-          <div className="border-black/10 border-t pt-2 dark:border-white/10" key={group}>
-            <div className="mt-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">{group}</div>
-            {list.map((s) => (
-              <SettingRow key={s.key} onSaved={setSettings} s={s} />
-            ))}
-          </div>
-        ))}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+          {error && <div className="pt-2 text-rose-500 text-sm">{error}</div>}
+          {groups.map(([group, list], i) => (
+            <div className={cn("pt-2", i > 0 && "border-black/10 border-t dark:border-white/10")} key={group}>
+              <div className="mt-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">{group}</div>
+              {list.map((s) => (
+                <SettingRow key={s.key} onSaved={setSettings} s={s} />
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

@@ -74,7 +74,7 @@ $script:SettingDefs = @(
     @{ key = 'pacing.betweenPromptsSec'; group = 'Pacing'; label = 'Gap after a reply (s)'; help = 'Minimum time between Copilot''s last reply and the next prompt.'; type = 'number'; min = 0; max = 60 }
     @{ key = 'stallSec'; group = 'Waiting for Copilot'; label = 'Hang after (s)'; help = 'No sign of a reply for this long: stop it and report no answer.'; type = 'number'; min = 30; max = 600 }
     @{ key = 'replyTimeoutSec'; group = 'Waiting for Copilot'; label = 'Reply timeout (s)'; help = 'Longest wait for one reply.'; type = 'number'; min = 60; max = 1800 }
-    @{ key = 'messagesPerChat'; group = 'Waiting for Copilot'; label = 'Messages per chat'; help = 'Copilot''s limit per chat when it does not report one; CCBridge continues in a new chat before it.'; type = 'number'; min = 5; max = 300 }
+    @{ key = 'messagesPerChat'; group = 'Waiting for Copilot'; label = 'Messages per chat'; help = 'Copilot''s limit per chat when it does not report one; StreamHub continues in a new chat before it.'; type = 'number'; min = 5; max = 300 }
     @{ key = 'actionRetries'; group = 'Getting changes made'; label = 'Retries when Copilot only explains'; help = 'How often a task is sent again when Copilot describes the change instead of writing action blocks.'; type = 'number'; min = 0; max = 5 }
     @{ key = 'maxRounds'; group = 'Getting changes made'; label = 'Rounds per message'; help = 'Most back-and-forth rounds (read, edit, run) for one message.'; type = 'number'; min = 1; max = 50 }
     @{ key = 'commandTimeoutSec'; group = 'Getting changes made'; label = 'Command timeout (s)'; help = 'Longest time a run command may take.'; type = 'number'; min = 10; max = 3600 }

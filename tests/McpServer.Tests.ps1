@@ -40,16 +40,17 @@ Describe 'CCBridge MCP server (stdio JSON-RPC)' {
         $null -ne $r.result.capabilities.tools | Should Be $true
     }
 
-    It 'does not answer notifications, and lists nine tools with schemas, run_task first' {
+    It 'does not answer notifications, and lists ten tools with schemas, run_task first' {
         Send-Rpc $proc '{"jsonrpc":"2.0","method":"notifications/initialized"}'
         Send-Rpc $proc '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
         $r = (Read-Rpc $proc) | ConvertFrom-Json
         $r.id | Should Be 2   # the notification produced no line before this one
         $names = @($r.result.tools | ForEach-Object name)
-        $names.Count | Should Be 9
+        $names.Count | Should Be 10
         $names[0] | Should Be 'copilot_run_task'
         @($r.result.tools | Where-Object name -eq 'copilot_run_task')[0].inputSchema.required -join ',' | Should Be 'project_path,task'
         ($names -join ',') | Should Match 'copilot_ask'
+        ($names -join ',') | Should Match 'copilot_review'
         ($names -join ',') | Should Match 'copilot_start_task'
         @($r.result.tools | Where-Object { -not $_.inputSchema -or $_.inputSchema.type -ne 'object' }).Count | Should Be 0
         @($r.result.tools | Where-Object name -eq 'copilot_start_task')[0].inputSchema.required -join ',' | Should Be 'project_path,task'

@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -220,7 +220,7 @@ function Submit-AgentTask {
     $id = 'q-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     if (-not $Title) {
         $Title = switch ($Task.kind) {
-            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Fetch: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" }
+            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Fetch: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'review' { 'Code review' }
             'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } default { "$($Task.kind)" }
         }
     }
@@ -447,7 +447,7 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     <# Status and result of a finished task, from the events it produced. #>
     $events = @(Get-AgentEvents $State $FromSeq)
     $err = @($events | Where-Object { $_.type -eq 'error' } | Select-Object -Last 1)
-    $done = @($events | Where-Object { $_.type -in 'done', 'fetch', 'runbook', 'undo', 'newchat' } | Select-Object -Last 1)
+    $done = @($events | Where-Object { $_.type -in 'done', 'fetch', 'runbook', 'review', 'undo', 'newchat' } | Select-Object -Last 1)
     $last = @($events | Where-Object { $_.type -eq 'assistant' } | Select-Object -Last 1)
     $Entry.messages = [int]$State.MessagesSent - $MessagesBefore
     $Entry.finished = (Get-Date).ToString('s')
@@ -459,6 +459,148 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     if ($done.Count -and $done[0].path) { $Entry.resultPath = "$($done[0].path)" }
     $changed = @($events | Where-Object { $_.type -eq 'checkpoint' } | ForEach-Object { $_.files }) | Select-Object -Unique
     if ($changed) { $Entry.changed = @($changed) }
+}
+
+function Get-ReviewScope {
+    <# The files a review covers: the whole project, the changes since the project was opened, or
+       chosen files and folders. Returns @{ files; skipped; text }. #>
+    param($State, [string]$Scope, [string[]]$Paths)
+    switch ($Scope) {
+        'changes' {
+            $changed = @((Get-SessionChangeStats $State.ProjectRoot ([string]$State.SessionSince)).Keys)
+            if (-not $changed.Count) { return @{ files = @(); skipped = @(); text = 'changes since the project was opened' } }
+            $sel = Get-ReviewFiles $State.ProjectRoot -Paths $changed
+            return @{ files = @($sel.files); skipped = @($sel.skipped); text = 'changes since the project was opened' }
+        }
+        'paths' {
+            $p = @($Paths | Where-Object { "$_".Trim() })
+            if (-not $p.Count) { throw 'Name the files or folders to review' }
+            $sel = Get-ReviewFiles $State.ProjectRoot -Paths $p
+            return @{ files = @($sel.files); skipped = @($sel.skipped); text = ($p -join ', ') }
+        }
+        default {
+            $sel = Get-ReviewFiles $State.ProjectRoot
+            return @{ files = @($sel.files); skipped = @($sel.skipped); text = 'whole project' }
+        }
+    }
+}
+
+function Get-ReviewPlan {
+    <# What a review would take: files, message batches and Copilot messages (one per batch plus the
+       whole-project pass when there is more than one batch). #>
+    param($State, [string]$Scope, [string[]]$Paths)
+    if (-not $State.ProjectRoot) { throw 'Open or create a project first.' }
+    $sc = Get-ReviewScope $State $Scope $Paths
+    $budget = if ($State.Config.reviewBatchChars) { [int]$State.Config.reviewBatchChars } else { 40000 }
+    $batches = @(if ($sc.files.Count) { New-ReviewBatches $State.ProjectRoot $sc.files $budget })
+    @{ files = @($sc.files); skipped = @($sc.skipped); scopeText = $sc.text; batches = $batches.Count; messages = $batches.Count + $(if ($batches.Count -gt 1) { 1 } else { 0 }) }
+}
+
+function Invoke-ReviewJob {
+    <# A code review in Copilot, read-only: the files go in batches with line numbers, Copilot answers
+       each with findings as JSON (one correction round), every finding is checked against the file
+       (Test-ReviewQuote), then one whole-project pass. Progress is kept after every batch, so a
+       review stopped by Copilot's daily limit (the queue pauses and runs it again) or a restart
+       continues where it was. Saves reviews/review-<stamp>.md and .json. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
+    $State.Busy = $true; $State.Cancel = $false
+    $id = if ($Task.reviewId) { $Task.reviewId } else { 'review-' + (Get-Date).ToString('yyyyMMdd-HHmm') }
+    $partial = Join-Path (Get-ProjectStateDir $State.ProjectRoot) "$id.partial.json"
+    $enc = New-Object Text.UTF8Encoding($false)
+    $focusList = @($Task.focus | Where-Object { $_ })
+    $focus = if ($focusList.Count) { $focusList -join ', ' } else { 'bugs, security, performance, structure' }
+    try {
+        $rv = $null
+        if (Test-Path -LiteralPath $partial) {
+            $p = [IO.File]::ReadAllText($partial) | ConvertFrom-Json
+            $rv = @{ id = $p.id; created = $p.created; scope = $p.scope; scopeText = $p.scopeText; focus = @($p.focus); files = @($p.files); skipped = @($p.skipped)
+                messages = [int]$p.messages; done = @($p.done | ForEach-Object { [int]$_ }); summaries = @($p.summaries | ForEach-Object { ConvertTo-PlainHash $_ })
+                findings = @($p.findings | ForEach-Object { ConvertTo-PlainHash $_ }); overall = $p.overall }
+            Add-AgentEvent $State 'status' @{ text = "Continuing the code review where it stopped ($($rv.done.Count) part(s) done)." }
+        } else {
+            $sc = Get-ReviewScope $State ([string]$Task.scope) @($Task.paths)
+            if (-not $sc.files.Count) { Add-AgentEvent $State 'error' @{ text = "Nothing to review in $($sc.text): no code files found."; code = 'REVIEW'; hint = 'Pick another scope; build output, lock files, data and source/ are never reviewed.' }; return }
+            $rv = @{ id = $id; created = (Get-Date).ToString('s'); scope = "$($Task.scope)"; scopeText = $sc.text; focus = @($focus.Split(',') | ForEach-Object { $_.Trim() }); files = @($sc.files); skipped = @($sc.skipped)
+                messages = 0; done = @(); summaries = @(); findings = @(); overall = $null }
+        }
+        $budget = if ($State.Config.reviewBatchChars) { [int]$State.Config.reviewBatchChars } else { 40000 }
+        $batches = @(New-ReviewBatches $State.ProjectRoot $rv.files $budget)
+        $total = $batches.Count
+        $save = { [IO.File]::WriteAllText($partial, (ConvertTo-Json -InputObject $rv -Depth 6 -Compress), $enc) }
+        Write-CCBLog info agent "Code review $id" @{ files = $rv.files.Count; batches = $total; done = $rv.done.Count }
+        Start-NewChat $State
+        $instructions = (Get-PromptPart $State.AppRoot 'review-code').Replace('FOCUS', $focus).Replace('TOTAL', "$total")
+        $send = {
+            param([string]$Message)
+            $r = Send-ToCopilot $State $Message
+            $rv.messages = [int]$rv.messages + 1
+            if ($r.Cancelled) { return @{ stop = 'cancelled' } }
+            if ($r.Result -and $r.Result -ne 'Success') { Add-AgentEvent $State 'error' @{ text = "Copilot answered with '$($r.Result)': $($r.ResultMessage)" }; return @{ stop = 'error' } }
+            if (-not "$($r.Text)".Trim()) { Add-AgentEvent $State 'error' @{ text = 'Copilot finished without a reply during the code review.' }; return @{ stop = 'error' } }
+            @{ text = $r.Text }
+        }
+        $ask = {
+            # One batch or the whole-project pass: the JSON, with one correction round.
+            param([string]$Message)
+            $res = & $send $Message
+            if ($res.stop) { return $res }
+            $out = Test-ReviewOutput (Get-JsonFromReply $res.text)
+            if (-not $out.ok) {
+                Write-CCBLog info agent 'Review answer is not valid JSON; asking again' @{ errors = $out.errors }
+                $res = & $send ("Your reply was not the review JSON: " + ($out.errors -join '; ') + ". Send the findings again as one ``````json code block in the shape described, and nothing else.")
+                if ($res.stop) { return $res }
+                $out = Test-ReviewOutput (Get-JsonFromReply $res.text)
+            }
+            @{ out = $out }
+        }
+        foreach ($b in $batches) {
+            if ($rv.done -contains $b.index) { continue }
+            if ($State.Cancel) { & $save; Add-AgentEvent $State 'status' @{ text = 'Code review stopped; run it again to continue where it stopped.' }; return }
+            if ($State.Throttle.max -and $State.Throttle.used -ge ($State.Throttle.max - 2)) { Start-NewChat $State }
+            $names = ($b.files | Select-Object -First 4) -join ', '
+            Add-AgentEvent $State 'status' @{ text = "Code review: part $($b.index) of $total ($names$(if (@($b.files).Count -gt 4) { ', ...' }))." }
+            $res = & $ask ($instructions.Replace('BATCH', "$($b.index)") + "`n" + $b.text)
+            if ($res.stop) { & $save; return }
+            if (-not $res.out.ok) {
+                $rv.summaries += @{ index = $b.index; files = @($b.files); summary = "(no valid answer from Copilot for this part: $($res.out.errors -join '; '))" }
+            } else {
+                foreach ($f in $res.out.findings) { $f.part = $b.index; $rv.findings += (Test-ReviewQuote $State.ProjectRoot $f) }
+                $rv.summaries += @{ index = $b.index; files = @($b.files); summary = $res.out.summary }
+                if ($res.out.dropped) { Write-CCBLog info agent "Review part $($b.index): $($res.out.dropped) finding(s) without a title dropped" }
+            }
+            $rv.done += $b.index
+            & $save
+        }
+        if ($total -gt 1 -and -not $rv.overall) {
+            Add-AgentEvent $State 'status' @{ text = 'Code review: looking across the whole project.' }
+            $list = ($rv.summaries | Sort-Object { [int]$_.index } | ForEach-Object { "- Part $($_.index) ($((@($_.files) | Select-Object -First 6) -join ', ')): $($_.summary)" }) -join "`n"
+            $res = & $ask ((Get-PromptPart $State.AppRoot 'review-cross') + "Files:`n" + ((@($rv.files) | ForEach-Object { "- $_" }) -join "`n") + "`n`nSummaries:`n$list")
+            if ($res.stop) { & $save; return }
+            if ($res.out.ok) {
+                foreach ($f in $res.out.findings) { $f.part = 0; $rv.findings += (Test-ReviewQuote $State.ProjectRoot $f -AllowGeneral) }
+                $rv.overall = $res.out.summary
+            }
+        } elseif (-not $rv.overall) { $rv.overall = (@($rv.summaries) | Select-Object -First 1).summary }
+        # The same finding reported twice (same file, line and title) counts once.
+        $seen = @{}
+        $unique = foreach ($f in $rv.findings) { $k = "$($f.file)|$($f.line)|$("$($f.title)".ToLowerInvariant())"; if (-not $seen.ContainsKey($k)) { $seen[$k] = $true; $f } }
+        $rv.findings = @(Get-SortedFindings @($unique))
+        $rv.Remove('done')
+        $paths = Save-Review $State.ProjectRoot $rv
+        [IO.File]::Delete($partial)
+        $ok = @($rv.findings | Where-Object { $_.status -ne 'unverified' })
+        $counts = "$(@($ok | Where-Object severity -eq 'high').Count) high, $(@($ok | Where-Object severity -eq 'medium').Count) medium, $(@($ok | Where-Object severity -eq 'low').Count) low"
+        $unv = @($rv.findings).Count - $ok.Count
+        Add-AgentEvent $State 'review' @{ id = $rv.id; path = $paths.md; json = $paths.json; text = "Code review done: $($ok.Count) finding(s) ($counts)$(if ($unv) { "; $unv unverified" }) in $(@($rv.files).Count) file(s), $($rv.messages) Copilot message(s). Report: $($paths.md). Pick findings to fix in the Changes tab." }
+        if ($Task.jobId -and $State.Jobs[$Task.jobId]) { $State.Jobs[$Task.jobId].reviewPath = (Resolve-ProjectPath $State.ProjectRoot $paths.json); $State.Jobs[$Task.jobId].reviewReport = $paths.md }
+    } catch {
+        Write-CCBLogError agent "Code review $id failed" $_
+        Add-AgentEvent $State 'error' @{ text = "Code review failed: $($_.Exception.Message)"; record = $_ }
+    } finally {
+        $State.NeedNewChat = $true
+        $State.Busy = $false; $State.Cancel = $false
+    }
 }
 
 function Invoke-RunbookJob {
@@ -554,8 +696,11 @@ function Get-TurnKind {
        - the full instructions are sent again when the previous turn ended without any action
          (Copilot drifted into explaining) or after every 5 follow-ups;
        - other follow-ups get the short recap (prompts/reminder.md, added by New-PromptMessage). #>
-    param($State, [string]$Text)
-    $kind = Get-TaskKind $Text
+    param($State, [string]$Text, $Context = @{ Traits = @(); Paths = @() }, [string]$Force = '')
+    $kind = Get-TaskKind $Text -Traits @($Context.Traits) -Paths @($Context.Paths)
+    # Forced: "Send again as a coding task" (coding), or a task from another program (work: never plain chat).
+    if ($Force -eq 'coding') { $kind = $(if ($kind -eq 'mixed' -or $kind -eq 'assistant') { 'mixed' } else { 'coding' }) }
+    elseif ($Force -eq 'work' -and $kind -in 'chat', 'project') { $kind = 'coding' }
     if ($kind -eq 'chat' -and $State.ChatKind) { $kind = $State.ChatKind }
     if ($kind -in 'coding', 'project', 'mixed' -and $State.SentParts.Contains('actions')) {
         $State.FollowUps = [int]$State.FollowUps + 1
@@ -826,7 +971,7 @@ function Get-ProjectContext($State) {
     $full = "$location`n$files" + $(if ($notes) { "`n`nProject notes (AGENTS.md):`n$notes" } else { '' })
     $traits = @(Get-ProjectTraits $paths)
     if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { $traits += 'nocommands' }
-    @{ Location = $location; Full = $full; Traits = $traits }
+    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths }
 }
 
 function Format-ActionResults {
@@ -967,6 +1112,15 @@ function Invoke-AgentAction {
             }
             $preview = @{ path = $Action.arg; exists = $true; old = (Get-PreviewText $er.old); new = (Get-PreviewText $er.new) }
         }
+        # Runbooks have a fixed place, name and header: refuse a file that breaks them.
+        $newText = if ($Action.type -eq 'write') { $content } else { $er.new }
+        $rbProblems = @(Test-RunbookFile $Action.arg $newText ("$($State.TurnText)" -match '(?i)\b(runbooks?|draaiboek(en)?)\b'))
+        if ($rbProblems.Count) {
+            $why = $rbProblems -join '; '
+            Write-CCBLog info agent "Runbook file refused: $($Action.arg)" @{ problems = $rbProblems }
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "runbook: $why" })
+            return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (runbook rules)"; output = "error: not written: $why. A runbook is one file runbooks/NAME.runbook.md that starts with the template's header block; send the complete file again with a write block." }
+        }
         $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0)
     } elseif ($Action.type -eq 'run') {
         $evt.target = $Action.body.Trim()
@@ -1052,13 +1206,14 @@ function Invoke-AgentAction {
 # --- One user turn -------------------------------------------------------------------
 
 function Invoke-AgentTurn {
-    param($State, [string]$Text)
+    param($State, [string]$Text, [string]$ForceKind = '')
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; $State.Busy = $false; return }
     $State.Busy = $true; $State.Cancel = $false
     $turnWatch = [Diagnostics.Stopwatch]::StartNew()
     Write-CCBLog info agent "Turn started" @{ chars = $Text.Length; mode = $State.Mode; headless = [bool]$State.Headless; allowCommands = [bool]$State.AllowCommands; workIq = $State.WorkIq; chatStarted = [bool]$State.ChatStarted }
     Write-CCBLog trace agent 'User message' @{ text = $Text }
     Add-AgentEvent $State 'user' @{ text = $Text }
+    $State.TurnText = $Text
     $checkpoint = New-Checkpoint $State.ProjectRoot $Text
     try { Sync-SourceVault $State.ProjectRoot } catch { Add-AgentEvent $State 'error' @{ text = "Could not back up source data: $($_.Exception.Message)" } }
     try {
@@ -1066,10 +1221,13 @@ function Invoke-AgentTurn {
         if ($State.NeedNewChat) { Start-NewChat $State }
         # As little as the request needs: plain chat goes as it is; other kinds add only the parts
         # (role, actions, rules, project context) this chat has not had yet.
-        $kind = Get-TurnKind $State $Text
+        $ctx = Get-ProjectContext $State
+        $kind = Get-TurnKind $State $Text $ctx $ForceKind
+        # The app shows how a message was sent, with "Send again as a coding task" for plain chat.
+        Add-AgentEvent $State 'kind' @{ taskKind = $kind }
         $summary = $State.Summary; $State.Summary = $null
         $partsBefore = $State.SentParts.Count
-        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $Text -Sent $State.SentParts -Context (Get-ProjectContext $State) -Summary $summary
+        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $Text -Sent $State.SentParts -Context $ctx -Summary $summary
         if ($State.SentParts.Count -gt $partsBefore -and $State.SentParts.Contains('actions')) { $State.FollowUps = 0 }
         if ($kind -ne 'chat') { $State.ChatKind = $kind }
         Write-CCBLog info agent "Task kind: $kind" @{ partsAdded = $State.SentParts.Count - $partsBefore; chars = $message.Length }
@@ -1276,7 +1434,7 @@ function Start-AgentWorker {
         $State.ReviewByCaller = [bool]$task.reviewByCaller
         $foreign = $task.source -and $task.source -ne 'user'
         if ($task.mode) { $State.Mode = $task.mode }
-        if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook' -and $task.projectRoot -ne $State.ProjectRoot) {
+        if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook', 'review' -and $task.projectRoot -ne $State.ProjectRoot) {
             if (-not (Test-Path -LiteralPath $task.projectRoot -PathType Container)) { $task.missingProject = $true }
             else { $State.ProjectRoot = $task.projectRoot }
         }
@@ -1290,10 +1448,12 @@ function Start-AgentWorker {
                         $State.ProjectRoot = $task.projectRoot; $State.Todos = @(); $State.NeedNewChat = $true
                     }
                     if ($task.newChat) { $State.NeedNewChat = $true }
-                    Invoke-AgentTurn $State $task.text
+                    $force = if ($task.forceKind) { "$($task.forceKind)" } elseif ($task.source -eq 'mcp' -or $task.source -eq 'api') { 'work' } else { '' }
+                    Invoke-AgentTurn $State $task.text $force
                 }
                 'fetch' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-FetchJob $State $task.name }
                 'runbook' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-RunbookJob $State $task.name }
+                'review' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ReviewJob $State $task }
                 'ask' {
                     # A plain question to Copilot, without project context or actions.
                     if ($task.newChat -or (Test-OtherSender)) { Start-NewChat $State }
@@ -1357,4 +1517,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

@@ -1,4 +1,4 @@
-import { CalendarClock, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, Pause, Play, Trash2 } from "lucide-react";
 import type { ScheduleItem } from "@/lib/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -24,16 +24,10 @@ export function formatWhen(iso: string | null): string {
 }
 
 /** Scheduled messages, fetches and runbooks, with the next run and pause, run-now and delete. */
-export function SchedulesPanel({ schedules, onNew }: { schedules: ScheduleItem[]; onNew: () => void }) {
+export function SchedulesList({ schedules }: { schedules: ScheduleItem[] }) {
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center">
-        <div className="font-medium text-sm">Scheduled</div>
-        <button className={cn(flatButton, "ml-auto")} onClick={onNew} title="Schedule a message, fetch or runbook" type="button">
-          <Plus className="h-3 w-3" /> New
-        </button>
-      </div>
-      {schedules.length === 0 && <p className="text-muted-foreground text-sm">Messages, fetches and runbooks can run on set days and times.</p>}
+      {schedules.length === 0 && <p className="text-muted-foreground text-sm">Nothing scheduled yet. Use New schedule, or the calendar button in the message box.</p>}
       {schedules.map((s) => {
         const finished = !s.enabled && s.repeat === "once" && s.lastRun;
         return (

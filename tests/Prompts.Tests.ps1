@@ -226,8 +226,8 @@ Describe 'Settings' {
 }
 Describe 'Case-specific prompt modules' {
     It 'picks modules from the project contents' {
-        (Get-ProjectTraits @('index.html', 'src/App.tsx', 'tools/build.ps1', 'source/data.csv')) -join ',' | Should Be 'web,powershell,source'
-        (Get-ProjectTraits @('main.py')) -join ',' | Should Be 'python'
+        (Get-ProjectTraits @('index.html', 'src/App.tsx', 'tools/build.ps1', 'source/data.csv')) -join ',' | Should Be 'code,web,powershell,source'
+        (Get-ProjectTraits @('main.py')) -join ',' | Should Be 'code,python'
         @(Get-ProjectTraits @('notes.md')).Count | Should Be 0
     }
     It 'picks modules from the request when the project does not show it yet' {
@@ -254,5 +254,54 @@ Describe 'Case-specific prompt modules' {
     It 'leaves out the run action when commands are off' {
         $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Fix the bug' -Sent (New-Sent) -Context @{ Location = 'L'; Full = 'F'; Traits = @('nocommands') }
         $m | Should Not Match '```run'
+    }
+}
+Describe 'Get-TaskKind in a project with code' {
+    $code = @('code', 'web')
+    $paths = @('index.html', 'css/styles.css', 'js/app.js', 'components/Navbar.tsx', 'data/budget.json')
+    It 'treats change requests, app parts, problems and code questions as coding' {
+        foreach ($t in @(
+            'make the header sticky',
+            'the save knop moet groter',
+            'the total is wrong when I add two items',
+            'clicking it does nothing',
+            'why is the sidebar empty on small screens?',
+            'add dark mode',
+            'center the title',
+            'the Navbar overlaps the content',
+            'Verander de kleur van de titel',
+            'it crashes when the list is empty',
+            'nothing happens when I press save'
+        )) { Get-TaskKind $t -Traits $code -Paths $paths | Should Be 'coding' }
+    }
+    It 'keeps greetings and thanks as chat, and Microsoft 365 work as assistant work' {
+        foreach ($t in @('hi', 'thanks!', 'ok', '')) { Get-TaskKind $t -Traits $code -Paths $paths | Should Be 'chat' }
+        Get-TaskKind 'add a meeting with Sam tomorrow at 10' -Traits $code -Paths $paths | Should Be 'assistant'
+        Get-TaskKind 'what meetings do I have today?' -Traits $code -Paths $paths | Should Be 'assistant'
+    }
+    It 'does not guess coding without code in the project' {
+        Get-TaskKind 'make the header sticky' | Should Be 'chat'
+        Get-TaskKind 'make the header sticky' -Traits @('source') -Paths @('notes.md') | Should Be 'chat'
+    }
+    It 'counts a named project file as project work, and as coding with code' {
+        Get-TaskKind 'what is in budget' -Paths @('data/budget.xlsx') | Should Be 'project'
+        Get-TaskKind 'look at navbar please' -Traits $code -Paths $paths | Should Be 'coding'
+    }
+    It 'treats project traits from the files' {
+        (Get-ProjectTraits @('js/app.js')) -contains 'code' | Should Be $true
+        (Get-ProjectTraits @('notes.md', 'source/data.py')) -contains 'code' | Should Be $false
+    }
+}
+
+Describe 'Get-TurnKind forced kinds' {
+    $config = Get-CCBridgeConfig harness $root
+    $s = New-AgentState -Config $config -AppRoot $root
+    It 'sends again as coding, and keeps Microsoft 365 rules as mixed' {
+        & (Get-Module Agent) { param($a, $b, $f) Get-TurnKind $a $b @{ Traits = @(); Paths = @() } $f } $s 'hello there' 'coding' | Should Be 'coding'
+        & (Get-Module Agent) { param($a, $b, $f) Get-TurnKind $a $b @{ Traits = @(); Paths = @() } $f } $s 'summarise my emails' 'coding' | Should Be 'mixed'
+    }
+    It 'never sends a task from another program as plain chat' {
+        & (Get-Module Agent) { param($a, $b, $f) Get-TurnKind $a $b @{ Traits = @(); Paths = @() } $f } $s 'tidy this up' 'work' | Should Be 'coding'
+        & (Get-Module Agent) { param($a, $b, $f) Get-TurnKind $a $b @{ Traits = @(); Paths = @() } $f } $s 'what meetings do I have' 'work' | Should Be 'assistant'
     }
 }

@@ -26,7 +26,9 @@ import { CopilotStatus } from "@/components/ccb/copilot-status";
 import { SettingsPanel } from "@/components/ccb/settings-panel";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
-import { ScheduleForm, type ScheduleTarget } from "@/components/ccb/schedule-form";
+import type { ScheduleTarget } from "@/components/ccb/schedule-form";
+import { SchedulesModal } from "@/components/ccb/schedules-modal";
+import { BACKDROP, ModalBackdrop } from "@/components/ccb/modal-backdrop";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
 import { type AgentEvent, type AppState, api, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
@@ -51,7 +53,9 @@ export default function App() {
   const [runbooks, setRunbooks] = useState<RunbookItem[]>([]);
   const [runbookTemplates, setRunbookTemplates] = useState<RunbookTemplate[]>([]);
   const [draft, setDraft] = useState("");
-  const [scheduling, setScheduling] = useState<ScheduleTarget | null>(null);
+  // Schedules modal: closed (null), the list ({ target: null }) or a form for a target.
+  const [scheduling, setScheduling] = useState<{ target: ScheduleTarget | null } | null>(null);
+  const [reviewTick, setReviewTick] = useState(0);
   const [palette, setPalette] = useState<null | "commands" | "attach">(null);
   const [viewer, setViewer] = useState<{ path: string; text: string } | null>(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -117,7 +121,8 @@ export default function App() {
         if (r.events.length) {
           lastSeq.current = r.events[r.events.length - 1].seq;
           setEvents((prev) => [...prev, ...r.events]);
-          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || e.type === "runbook" || (e.type === "action-result" && e.changed))) refreshFiles();
+          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || e.type === "runbook" || e.type === "review" || (e.type === "action-result" && e.changed))) refreshFiles();
+          if (r.events.some((e) => e.type === "review" || e.type === "project" || (e.type === "action-result" && e.changed))) setReviewTick((t) => t + 1);
           if (r.events.some((e) => e.type === "newchat" || e.type === "error")) setNewChatPending(false);
         }
         setError("");
@@ -357,7 +362,7 @@ export default function App() {
         <div className="flex min-h-0 flex-1">
           {/* Side panel (left) */}
           {!wide && drawerOpen && (
-            <div aria-hidden className="fixed inset-0 top-14 z-30 bg-black/30" onClick={() => setDrawerOpen(false)} />
+            <div aria-hidden className={`fixed inset-0 top-14 z-30 ${BACKDROP}`} onClick={() => setDrawerOpen(false)} />
           )}
           <aside
             className={
@@ -389,9 +394,10 @@ export default function App() {
                 project={state.project}
                 queue={state.queue ?? []}
                 schedules={state.schedules ?? []}
+                reviewTick={reviewTick}
                 pausedUntil={state.pausedUntil}
                 onSchedule={(target) => {
-                  setScheduling(target);
+                  setScheduling({ target });
                   setDrawerOpen(false);
                 }}
                 runbookTemplates={runbookTemplates}
@@ -445,6 +451,7 @@ export default function App() {
                   </div>
                 }
                 items={transcript}
+                onResendAsCoding={(text) => api.chat(text, true).catch((e) => setError((e as Error).message))}
                 onUsePrompt={(text) => {
                   setDraft(text);
                   setFocusKey((k) => k + 1);
@@ -456,20 +463,18 @@ export default function App() {
             <div className="shrink-0 px-4">
               <div className="mx-auto max-w-3xl">
                 {scheduling && (
-                  <div className="mb-2 bg-background">
-                    <ScheduleForm
-                      fetchItems={fetchItems}
-                      initial={scheduling}
-                      key={JSON.stringify(scheduling)}
-                      onCancel={() => setScheduling(null)}
-                      onSave={async (spec) => {
-                        await api.createSchedule(spec);
-                        if (spec.kind === "chat" && spec.text === draft) setDraft("");
-                        setScheduling(null);
-                      }}
-                      runbooks={runbooks}
-                    />
-                  </div>
+                  <SchedulesModal
+                    fetchItems={fetchItems}
+                    files={files}
+                    initial={scheduling.target}
+                    onClose={() => setScheduling(null)}
+                    onCreate={async (spec) => {
+                      await api.createSchedule(spec);
+                      if (spec.kind === "chat" && spec.text === draft) setDraft("");
+                    }}
+                    runbooks={runbooks}
+                    schedules={state.schedules ?? []}
+                  />
                 )}
                 <AI_Prompt
                   busy={state.busy}
@@ -523,7 +528,7 @@ export default function App() {
                   mode={state.mode}
                   modes={MODES}
                   onAttach={() => setPalette("attach")}
-                  onSchedule={(text) => setScheduling({ kind: "chat", text })}
+                  onSchedule={(text) => setScheduling({ target: { kind: "chat", text } })}
                   onModeChange={(m) => api.setMode(m as Mode)}
                   onStop={stop}
                   onSubmit={send}
@@ -539,8 +544,8 @@ export default function App() {
 
       {/* Command palette */}
       {palette && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-24 backdrop-blur-sm" onMouseDown={() => setPalette(null)}>
-          <div className="w-full max-w-xl rounded-2xl bg-background px-4 pb-4 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+        <ModalBackdrop className="pt-24" onClose={() => setPalette(null)}>
+          <div className="w-full max-w-xl rounded-2xl bg-background px-4 pb-4 shadow-2xl">
             <ActionSearchBar
               actions={palette === "attach" ? fileActions : commandActions}
               key={palette}
@@ -549,13 +554,13 @@ export default function App() {
               placeholder={palette === "attach" ? "File name..." : "Type a command or file name..."}
             />
           </div>
-        </div>
+        </ModalBackdrop>
       )}
 
       {/* File viewer */}
       {viewer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6 backdrop-blur-sm" onMouseDown={() => setViewer(null)}>
-          <div className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-background shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+        <ModalBackdrop center onClose={() => setViewer(null)}>
+          <div className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-background shadow-2xl">
             <div className="flex items-center justify-between border-black/10 border-b px-4 py-2 dark:border-white/10">
               <span className="font-mono text-sm">{viewer.path}</span>
               <button onClick={() => setViewer(null)} type="button">
@@ -564,7 +569,7 @@ export default function App() {
             </div>
             <pre className="min-h-0 flex-1 overflow-auto p-4 font-mono text-xs leading-5">{viewer.text}</pre>
           </div>
-        </div>
+        </ModalBackdrop>
       )}
     </div>
   );

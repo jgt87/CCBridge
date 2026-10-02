@@ -289,6 +289,26 @@ function Format-AppJob($R, [switch]$Full) {
     (Format-JobStatus $R.job -Full:$Full -Events @($R.events) -Info $R.info) + "`n$note"
 }
 
+function Format-ReviewResult([string]$JsonPath, [string]$Report) {
+    <# The checked findings for the calling model: verified and general ones in full, unverified
+       ones counted. #>
+    if (-not $JsonPath -or -not (Test-Path -LiteralPath $JsonPath)) { return 'The review finished without a report.' }
+    $rv = [IO.File]::ReadAllText($JsonPath) | ConvertFrom-Json
+    $ok = @($rv.findings | Where-Object { $_.status -ne 'unverified' })
+    $sb = New-Object Text.StringBuilder
+    [void]$sb.AppendLine("Code review of $(@($rv.files).Count) file(s) ($($rv.scopeText)), $($rv.messages) Copilot message(s). Report: $Report")
+    if ($rv.overall) { [void]$sb.AppendLine("Overall: $($rv.overall)") }
+    [void]$sb.AppendLine("$($ok.Count) finding(s); each quotes code that StreamHub found in the file ('general' ones are about the whole project). Check them before acting on them.")
+    foreach ($f in $ok) {
+        [void]$sb.AppendLine("[$($f.id)] $($f.severity) $($f.category) $(if ($f.file) { "$($f.file):$($f.line)" } else { '(project)' }) - $($f.title)")
+        if ($f.detail) { [void]$sb.AppendLine("    $($f.detail)") }
+        if ($f.suggestion) { [void]$sb.AppendLine("    fix: $($f.suggestion)") }
+    }
+    $bad = @($rv.findings).Count - $ok.Count
+    if ($bad) { [void]$sb.AppendLine("$bad more finding(s) quoted code that is not in the file and were left out.") }
+    Limit $sb.ToString().TrimEnd() 30000
+}
+
 function Invoke-RemoteTool([string]$Name, $ToolArgs, $App) {
     $wiq = Get-Arg $ToolArgs 'work_iq' $null
     switch ($Name) {
@@ -335,7 +355,11 @@ function Invoke-RemoteTool([string]$Name, $ToolArgs, $App) {
             $r = Wait-AppJob $App $id $wait -UntilApproval
             return @{ text = (Format-AppJob $r) }
         }
-        'copilot_task_result' { return @{ text = (Format-AppJob (Get-AppJob $App ([string](Get-Arg $ToolArgs 'job_id' ''))) -Full) } }
+        'copilot_task_result' {
+            $r = Get-AppJob $App ([string](Get-Arg $ToolArgs 'job_id' ''))
+            if ($r.job.reviewPath) { return @{ text = (Format-ReviewResult $r.job.reviewPath $r.job.reviewReport) } }
+            return @{ text = (Format-AppJob $r -Full) }
+        }
         'copilot_approve' {
             $r = Get-AppJob $App ([string](Get-Arg $ToolArgs 'job_id' ''))
             $actionId = [string](Get-Arg $ToolArgs 'action_id' '')
@@ -352,6 +376,15 @@ function Invoke-RemoteTool([string]$Name, $ToolArgs, $App) {
             $null = Invoke-App $App POST '/api/queue/cancel' @{ id = $r.job.id }
             $r = Wait-AppJob $App $r.job.id 60
             return @{ text = "Cancel requested; $($r.job.id) is now $($r.job.status). Files already changed stay changed (copilot_undo reverts them)." }
+        }
+        'copilot_review' {
+            $path = [string](Get-Arg $ToolArgs 'project_path' '')
+            $s = Invoke-App $App POST '/api/jobs' @{ kind = 'review'; projectPath = $path; paths = @(Get-Arg $ToolArgs 'paths' @()); focus = @(Get-Arg $ToolArgs 'focus' @()); source = 'mcp' }
+            $script:LastJobId = $s.job.id
+            $r = Wait-AppJob $App $s.job.id ([Math]::Min(3600, [Math]::Max(30, [int](Get-Arg $ToolArgs 'wait_sec' 1200))))
+            if ($r.job.status -in 'queued', 'running') { return @{ text = "The review is still running as $($r.job.id) in the StreamHub app's queue (a large review takes many Copilot messages and may wait for the daily limit). Call copilot_task_result with job_id $($r.job.id) later." } }
+            if ($r.job.reviewPath) { return @{ text = (Format-ReviewResult $r.job.reviewPath $r.job.reviewReport) } }
+            return @{ text = "Review $($r.job.status).`n`n" + (Format-AppJob $r); isError = $true }
         }
         'copilot_new_chat' {
             $s = Invoke-App $App POST '/api/jobs' @{ kind = 'newchat'; source = 'mcp' }
@@ -411,7 +444,7 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
             $State.Busy = $true
             $job = New-BridgeJob 'task' @{ project = $full; mode = $mode; allowCommands = $allow; task = $task }
             $job.queuedSeq = $State.Seq
-            $State.Tasks.Enqueue(@{ kind = 'chat'; jobId = $job.id; text = $task; projectRoot = $full; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); reviewByCaller = (-not [bool](Get-Arg $ToolArgs 'copilot_review' $false)) })
+            $State.Tasks.Enqueue(@{ kind = 'chat'; forceKind = 'work'; jobId = $job.id; text = $task; projectRoot = $full; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); reviewByCaller = (-not [bool](Get-Arg $ToolArgs 'copilot_review' $false)) })
             Wait-BridgeJob $job 3
             return @{ text = "Started $($job.id) in $full (mode $mode, commands $(if ($allow) { 'allowed' } else { 'not allowed' })).`nPoll with copilot_task_status (it waits up to wait_sec for progress); get the full report with copilot_task_result." }
         }
@@ -437,6 +470,7 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
         }
         'copilot_task_result' {
             $job = Get-JobOrThrow ([string](Get-Arg $ToolArgs 'job_id' ''))
+            if ($job.reviewPath) { return @{ text = (Format-ReviewResult $job.reviewPath $job.reviewReport) } }
             return @{ text = (Format-JobStatus $job -Full) }
         }
         'copilot_approve' {
@@ -456,6 +490,21 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
             $State.Cancel = $true
             Wait-BridgeJob $job 60
             return @{ text = "Cancel requested; $($job.id) is now $($job.status). Copilot finishes its current reply first; files already changed stay changed (copilot_undo reverts them)." }
+        }
+        'copilot_review' {
+            $path = [string](Get-Arg $ToolArgs 'project_path' '')
+            if (-not $path -or -not (Test-Path -LiteralPath $path -PathType Container)) { throw 'project_path must be an existing folder' }
+            $active = Test-JobActive
+            if ($active) { throw "Copilot is busy with $($active.id); wait for it or cancel it first." }
+            $full = [IO.Path]::GetFullPath($path).TrimEnd('\')
+            $paths = @(Get-Arg $ToolArgs 'paths' @() | Where-Object { $_ })
+            $job = New-BridgeJob 'review' @{ project = $full }
+            $job.queuedSeq = $State.Seq
+            $State.Tasks.Enqueue(@{ kind = 'review'; jobId = $job.id; projectRoot = $full; scope = $(if ($paths.Count) { 'paths' } else { 'all' }); paths = $paths; focus = @(Get-Arg $ToolArgs 'focus' @()); reviewId = 'review-' + (Get-Date).ToString('yyyyMMdd-HHmmss'); source = 'mcp' })
+            Wait-BridgeJob $job ([Math]::Min(3600, [Math]::Max(30, [int](Get-Arg $ToolArgs 'wait_sec' 1200))))
+            if ($job.status -in 'queued', 'running') { return @{ text = "The review is still running as $($job.id). Call copilot_task_result with job_id $($job.id) later." } }
+            if ($job.reviewPath) { return @{ text = (Format-ReviewResult $job.reviewPath $job.reviewReport) } }
+            return @{ text = "Review $($job.status).`n`n" + (Format-JobStatus $job -Full); isError = $true }
         }
         'copilot_new_chat' {
             $active = Test-JobActive
@@ -513,6 +562,13 @@ $tools = @(
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation (default false; a different project always starts fresh).' }
            copilot_review = @{ type = 'boolean'; description = 'true: after big changes Copilot also reviews its own work (costs extra Copilot messages). Default false: you review the diffs in the report yourself.' }
            work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' } } } }
+    @{ name = 'copilot_review'
+       description = 'Full code review by Copilot of a project folder (or chosen files/folders), read-only: the code goes to Copilot in batches, every finding must quote real lines from the file (findings that do not are left out), plus one pass across the whole project. Returns the checked findings with severity, file:line, problem and suggested fix; also saved as reviews/review-<date>.md in the project. Large projects take many Copilot messages. Review the findings yourself before fixing them.'
+       inputSchema = @{ type = 'object'; required = @('project_path'); properties = @{
+           project_path = @{ type = 'string'; description = 'Absolute path of the project folder.' }
+           paths = @{ type = 'array'; items = @{ type = 'string' }; description = 'Only these files or folders (relative to the project). Default: the whole project.' }
+           focus = @{ type = 'array'; items = @{ type = 'string' }; description = 'What to look for, e.g. bugs, security, performance, structure, readability, tests. Default: bugs, security, performance, structure.' }
+           wait_sec = @{ type = 'integer'; description = 'How long to wait for the review (default 1200, max 3600). If it is not finished, call copilot_task_result later.' } } } }
     @{ name = 'copilot_task_status'
        description = 'Progress of a job: status, Copilot''s plan, actions so far, pending approvals with diffs, errors. Waits up to wait_sec for the job to finish or to need an approval, so you can poll without busy-looping.'
        inputSchema = @{ type = 'object'; properties = @{

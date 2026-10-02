@@ -1,6 +1,6 @@
-import { Plus, X } from "lucide-react";
-import { useState } from "react";
-import type { FetchItem, RunbookItem, ScheduleSpec } from "@/lib/api";
+import { AtSign, FileText, Plus, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import type { FetchItem, FileInfo, RunbookItem, ScheduleSpec } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const flatButton =
@@ -50,12 +50,15 @@ export function ScheduleForm({
   initial,
   fetchItems,
   runbooks,
+  files = [],
   onSave,
   onCancel,
 }: {
   initial: ScheduleTarget;
   fetchItems: FetchItem[];
   runbooks: RunbookItem[];
+  /** Project files for the @ picker: a runbook from runbooks/ runs as a runbook, any other file is attached to the message. */
+  files?: FileInfo[];
   onSave: (spec: ScheduleSpec) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -69,6 +72,31 @@ export function ScheduleForm({
   const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [picking, setPicking] = useState(false);
+  const [filter, setFilter] = useState("");
+
+  // Markdown files (runbooks and instructions) first, then the rest; at most 50.
+  const pickable = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    return files
+      .filter((f) => !q || f.path.toLowerCase().includes(q))
+      .sort((a, b) => Number(!/\.md$/i.test(a.path)) - Number(!/\.md$/i.test(b.path)) || a.path.localeCompare(b.path))
+      .slice(0, 50);
+  }, [files, filter]);
+
+  const pick = (path: string) => {
+    const rb = path.match(/^runbooks\/([^/]+)\.runbook\.md$/i);
+    if (rb) setTarget(`runbook:${rb[1]}`);
+    else if (/\s/.test(path)) {
+      setError(`${path} has a space in its path, so it cannot be attached with @. Rename it (for example with - instead of spaces) and pick it again.`);
+      return;
+    } else {
+      setTarget("chat");
+      setText((t) => (t.trim() ? `${t.trimEnd()} @${path}` : `Follow the instructions in @${path}`));
+    }
+    setPicking(false);
+    setFilter("");
+  };
 
   const toggleDay = (d: number) => setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
   const addTime = () => {
@@ -103,10 +131,15 @@ export function ScheduleForm({
   return (
     <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
       <div className="font-medium text-sm">Schedule</div>
-      <label className="block space-y-1">
+      <div className="space-y-1">
         <span className="text-muted-foreground text-xs">What runs</span>
+        <div className="flex gap-1">
         <select className={field} onChange={(e) => setTarget(e.target.value)} value={target}>
           <option value="chat">A message to Copilot</option>
+          {/* A runbook picked with @ that the list does not have (yet) still shows. */}
+          {target.startsWith("runbook:") && !runbooks.some((r) => `runbook:${r.name}` === target) && (
+            <option value={target}>Runbook: {target.slice(8)}</option>
+          )}
           {runbooks.length > 0 && (
             <optgroup label="Runbooks (runbooks/*.runbook.md)">
               {runbooks.map((r) => (
@@ -126,7 +159,50 @@ export function ScheduleForm({
             </optgroup>
           )}
         </select>
-      </label>
+          <button
+            aria-label="Pick a project file"
+            className={cn("shrink-0 rounded-md border border-black/10 px-2 hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5", picking && "bg-black/10 dark:bg-white/15")}
+            onClick={() => setPicking(!picking)}
+            title="Pick a project file: a runbook (runbooks/*.runbook.md) runs as a runbook; any other file, such as a Markdown file with instructions, is attached to the message"
+            type="button"
+          >
+            <AtSign className="h-4 w-4" />
+          </button>
+        </div>
+        {picking && (
+          <div className="rounded-md border border-black/10 dark:border-white/10">
+            <input
+              autoFocus
+              className="w-full border-black/10 border-b bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
+              onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && pickable[0]) pick(pickable[0].path);
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setPicking(false);
+                }
+              }}
+              placeholder="Type to filter, e.g. runbook or .md"
+              value={filter}
+            />
+            <div className="max-h-48 overflow-y-auto py-1">
+              {pickable.map((f) => (
+                <button
+                  className="flex w-full items-center gap-1.5 px-2 py-0.5 text-left font-mono text-xs hover:bg-black/5 dark:hover:bg-white/5"
+                  key={f.path}
+                  onClick={() => pick(f.path)}
+                  type="button"
+                >
+                  <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{f.path}</span>
+                  {/^runbooks\/[^/]+\.runbook\.md$/i.test(f.path) && <span className="ml-auto shrink-0 font-sans text-muted-foreground">runbook</span>}
+                </button>
+              ))}
+              {!pickable.length && <p className="px-2 py-1 text-muted-foreground text-xs">No matching files.</p>}
+            </div>
+          </div>
+        )}
+      </div>
       {target === "chat" && (
         <textarea className={cn(field, "min-h-16 resize-y")} onChange={(e) => setText(e.target.value)} placeholder="The message to send, e.g. Update the weekly report" value={text} />
       )}

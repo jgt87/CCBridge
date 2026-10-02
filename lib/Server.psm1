@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Agent', 'Fetch', 'Runbook', 'Schedule') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -30,6 +30,12 @@ function Get-ScheduleView($State) {
             project = $(if ($s.projectRoot) { Split-Path $s.projectRoot -Leaf } else { $null }) }
     }
     @($list | Sort-Object @{ Expression = { if ($_.enabled -and $_.nextRun) { 0 } else { 1 } } }, @{ Expression = { "$($_.nextRun)" } })
+}
+
+function ConvertTo-PlainHashtable($Object) {
+    $h = @{}
+    foreach ($p in $Object.PSObject.Properties) { $h[$p.Name] = $p.Value }
+    $h
 }
 
 function Get-JobView($State, $Job) {
@@ -129,6 +135,47 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^GET /api/queue$' { return Send-Json $Ctx @{ queue = @(Get-QueueView $State 100); pausedUntil = $State.PausedUntil } }
         '^POST /api/queue/resume$' { Resume-AgentQueue $State 'resumed by you'; return Send-Json $Ctx @{ ok = $true } }
+        '^POST /api/reviews/estimate$' {
+            $b = Read-JsonBody $Ctx
+            $plan = Get-ReviewPlan $State ([string]$b.scope) @($b.paths)
+            return Send-Json $Ctx @{ files = @($plan.files).Count; skipped = @($plan.skipped).Count; batches = $plan.batches; messages = $plan.messages; scopeText = $plan.scopeText }
+        }
+        '^POST /api/reviews/run$' {
+            $b = Read-JsonBody $Ctx
+            $plan = Get-ReviewPlan $State ([string]$b.scope) @($b.paths)
+            if (-not @($plan.files).Count) { throw "Nothing to review in $($plan.scopeText): no code files found." }
+            $rid = 'review-' + (Get-Date).ToString('yyyyMMdd-HHmmss')
+            $task = @{ kind = 'review'; scope = [string]$b.scope; paths = @($b.paths | Where-Object { $_ }); focus = @($b.focus | Where-Object { $_ }); reviewId = $rid; projectRoot = $State.ProjectRoot }
+            $entry = Submit-AgentTask $State $task 'user' "Code review ($($plan.scopeText), $(@($plan.files).Count) files, about $($plan.messages) Copilot messages)"
+            return Send-Json $Ctx @{ ok = $true; id = $rid; queued = $entry.id }
+        }
+        '^GET /api/reviews$' {
+            # An empty if-expression would become {} in JSON: assign the list explicitly.
+            $list = @()
+            if ($State.ProjectRoot) { $list = @(Get-Reviews $State.ProjectRoot) }
+            return Send-Json $Ctx @{ reviews = $list }
+        }
+        '^POST /api/reviews/(get|fix)$' {
+            $op = $Matches[1]
+            $b = Read-JsonBody $Ctx
+            if ("$($b.id)" -notmatch '^review-[\d-]+$') { throw "Unknown review '$($b.id)'" }
+            $jsonPath = Resolve-ProjectPath $State.ProjectRoot "reviews/$($b.id).json"
+            if (-not (Test-Path -LiteralPath $jsonPath)) { throw "Unknown review '$($b.id)'" }
+            $rv = [IO.File]::ReadAllText($jsonPath) | ConvertFrom-Json
+            if ($op -eq 'get') { return Send-Json $Ctx @{ review = $rv } }
+            $ids = @($b.ids | ForEach-Object { "$_" })
+            $picked = @($rv.findings | Where-Object { $ids -contains $_.id } | ForEach-Object { ConvertTo-PlainHashtable $_ })
+            if (-not $picked.Count) { throw 'Pick at least one finding to fix' }
+            $queued = 0
+            foreach ($t in @(New-ReviewFixTasks $picked)) {
+                $e = Submit-AgentTask $State @{ kind = 'chat'; text = $t.text } 'user' $t.title
+                foreach ($f in @($rv.findings | Where-Object { $t.ids -contains $_.id })) { $f | Add-Member -NotePropertyName fixQueueId -NotePropertyValue $e.id -Force }
+                $queued++
+            }
+            [IO.File]::WriteAllText($jsonPath, (ConvertTo-Json -InputObject $rv -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            Write-CCBLog info server "Review $($b.id): $($picked.Count) finding(s) queued for fixing in $queued task(s)"
+            return Send-Json $Ctx @{ ok = $true; tasks = $queued }
+        }
         '^GET /api/schedules$' { return Send-Json $Ctx @{ schedules = @(Get-ScheduleView $State) } }
         '^POST /api/schedules$' {
             $b = Read-JsonBody $Ctx
@@ -195,6 +242,13 @@ function Invoke-ApiRequest($Ctx, $State) {
                     @{ kind = 'undo'; jobId = $id; projectRoot = [IO.Path]::GetFullPath($p).TrimEnd('\'); source = $source }
                 }
                 'newchat' { @{ kind = 'newchat'; jobId = $id; source = $source } }
+                'review' {
+                    $p = [string]$b.projectPath
+                    if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Container)) { throw 'projectPath must be an existing folder' }
+                    $full = [IO.Path]::GetFullPath($p).TrimEnd('\')
+                    $job.project = $full
+                    @{ kind = 'review'; jobId = $id; projectRoot = $full; scope = $(if (@($b.paths | Where-Object { $_ }).Count) { 'paths' } else { 'all' }); paths = @($b.paths | Where-Object { $_ }); focus = @($b.focus | Where-Object { $_ }); reviewId = 'review-' + (Get-Date).ToString('yyyyMMdd-HHmmss'); source = $source }
+                }
                 default { throw "Unknown job kind '$($b.kind)'" }
             }
             $State.Jobs[$id] = $job
@@ -249,7 +303,9 @@ function Invoke-ApiRequest($Ctx, $State) {
             $b = Read-JsonBody $Ctx
             if (-not $b.text -or -not $b.text.Trim()) { throw 'Empty message' }
             # While Copilot is busy the message waits in the queue.
-            $entry = Submit-AgentTask $State @{ kind = 'chat'; text = [string]$b.text } 'user'
+            $task = @{ kind = 'chat'; text = [string]$b.text }
+            if ($b.asCoding) { $task.forceKind = 'coding' }
+            $entry = Submit-AgentTask $State $task 'user'
             return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
         }
         '^POST /api/approve$' {
