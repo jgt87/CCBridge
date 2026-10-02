@@ -26,6 +26,7 @@ import { CopilotStatus } from "@/components/ccb/copilot-status";
 import { SettingsPanel } from "@/components/ccb/settings-panel";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
+import { ScheduleForm, type ScheduleTarget } from "@/components/ccb/schedule-form";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
 import { type AgentEvent, type AppState, api, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
@@ -50,6 +51,7 @@ export default function App() {
   const [runbooks, setRunbooks] = useState<RunbookItem[]>([]);
   const [runbookTemplates, setRunbookTemplates] = useState<RunbookTemplate[]>([]);
   const [draft, setDraft] = useState("");
+  const [scheduling, setScheduling] = useState<ScheduleTarget | null>(null);
   const [palette, setPalette] = useState<null | "commands" | "attach">(null);
   const [viewer, setViewer] = useState<{ path: string; text: string } | null>(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -386,6 +388,12 @@ export default function App() {
                 onRunRunbook={(name) => api.runRunbook(name).catch((e) => setError((e as Error).message))}
                 project={state.project}
                 queue={state.queue ?? []}
+                schedules={state.schedules ?? []}
+                pausedUntil={state.pausedUntil}
+                onSchedule={(target) => {
+                  setScheduling(target);
+                  setDrawerOpen(false);
+                }}
                 runbookTemplates={runbookTemplates}
                 runbooks={runbooks}
                 todos={state.todos}
@@ -447,6 +455,22 @@ export default function App() {
             </div>
             <div className="shrink-0 px-4">
               <div className="mx-auto max-w-3xl">
+                {scheduling && (
+                  <div className="mb-2 bg-background">
+                    <ScheduleForm
+                      fetchItems={fetchItems}
+                      initial={scheduling}
+                      key={JSON.stringify(scheduling)}
+                      onCancel={() => setScheduling(null)}
+                      onSave={async (spec) => {
+                        await api.createSchedule(spec);
+                        if (spec.kind === "chat" && spec.text === draft) setDraft("");
+                        setScheduling(null);
+                      }}
+                      runbooks={runbooks}
+                    />
+                  </div>
+                )}
                 <AI_Prompt
                   busy={state.busy}
                   disabled={!state.project}
@@ -499,6 +523,7 @@ export default function App() {
                   mode={state.mode}
                   modes={MODES}
                   onAttach={() => setPalette("attach")}
+                  onSchedule={(text) => setScheduling({ kind: "chat", text })}
                   onModeChange={(m) => api.setMode(m as Mode)}
                   onStop={stop}
                   onSubmit={send}

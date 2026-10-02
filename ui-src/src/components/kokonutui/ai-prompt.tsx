@@ -13,7 +13,7 @@
  * the paperclip attaches a project file as @path, and the value is controlled by the parent.
  */
 
-import { ArrowRight, AtSign, Check, ChevronDown, Square } from "lucide-react";
+import { ArrowRight, AtSign, CalendarClock, Check, ChevronDown, Square } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,8 @@ interface AIPromptProps {
   onValueChange: (value: string) => void;
   onSubmit: (value: string) => void;
   onAttach?: () => void;
+  /** CCBridge: schedule the typed message instead of sending it now. */
+  onSchedule?: (value: string) => void;
   onStop?: () => void;
   busy?: boolean;
   disabled?: boolean;
@@ -62,6 +64,7 @@ export default function AI_Prompt({
   onValueChange,
   onSubmit,
   onAttach,
+  onSchedule,
   onStop,
   busy = false,
   disabled = false,
@@ -225,6 +228,21 @@ export default function AI_Prompt({
                   >
                     <AtSign className="h-4 w-4 transition-colors" />
                   </button>
+                  {onSchedule && (
+                    <button
+                      aria-label="Schedule this message"
+                      className={cn(
+                        "cursor-pointer rounded-lg bg-black/5 p-2 dark:bg-white/5",
+                        "hover:bg-black/10 focus-visible:ring-1 focus-visible:ring-zinc-400 focus-visible:ring-offset-0 dark:hover:bg-white/10",
+                        "text-black/40 hover:text-black dark:text-white/40 dark:hover:text-white"
+                      )}
+                      onClick={() => onSchedule(value)}
+                      title="Schedule: send this message (or run a runbook or fetch) on set days and times"
+                      type="button"
+                    >
+                      <CalendarClock className="h-4 w-4 transition-colors" />
+                    </button>
+                  )}
                 </div>
                 {busy && canSend && (
                   <button

@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -23,6 +23,9 @@ function New-AgentState {
         Queue = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList))   # every task, whatever started it (Submit-AgentTask)
         CurrentQueueId = $null; MessagesSent = 0; NoCommands = $false
         QueueFile = $null   # set by the web app: the queue survives restarts (Save-AgentQueue / Restore-AgentQueue)
+        Schedules = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList)); ScheduleFile = $null; NextScheduleCheck = $null
+        Held = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList))   # tasks put back after the daily limit: they run first
+        PausedUntil = $null; PauseReason = $null; LastLimitAt = $null; PauseFile = $null   # the web app saves the pause (Save-QueuePause)
         ReviewByCaller = $false   # MCP tasks: the calling model checks the result, so no Copilot review round
         NextConnectAttempt = $null
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
@@ -302,6 +305,137 @@ function Restore-AgentQueue {
     Write-CCBLog info agent "Queue restored" @{ entries = $State.Queue.Count; requeued = $requeued }
     if ($requeued) { Add-AgentEvent $State 'status' @{ text = "Picked up $requeued waiting task(s) from before the restart; they run in order (remove one in the Queue with its x)." } }
     $requeued
+}
+
+function Save-QueuePause {
+    <# Keeps the daily-limit pause across a restart, so a restart does not spend another attempt. #>
+    param($State)
+    if (-not $State.PauseFile) { return }
+    try {
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path $State.PauseFile)
+        [IO.File]::WriteAllText($State.PauseFile, (@{ pausedUntil = $State.PausedUntil; reason = $State.PauseReason; lastLimitAt = $State.LastLimitAt } | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+    } catch { Write-CCBLogError agent 'Could not save the pause' $_ }
+}
+
+function Restore-QueuePause {
+    param($State)
+    if (-not $State.PauseFile -or -not (Test-Path -LiteralPath $State.PauseFile)) { return }
+    try {
+        $p = [IO.File]::ReadAllText($State.PauseFile) | ConvertFrom-Json
+        $State.LastLimitAt = $p.lastLimitAt
+        $until = ConvertTo-LocalTime "$($p.pausedUntil)"
+        if ($until -and $until -gt (Get-Date)) {
+            $State.PausedUntil = $until.ToString('s'); $State.PauseReason = $p.reason
+            Write-CCBLog info agent 'Queue still paused after the restart' @{ until = $State.PausedUntil }
+        }
+    } catch { Write-CCBLogError agent 'Could not read the pause' $_ }
+}
+
+function Set-QueuePause {
+    <# Copilot's daily limit was reached: the queue waits until it resets, then continues. #>
+    param($State, [datetime]$Until, [string]$Reason)
+    $State.PausedUntil = $Until.ToString('s'); $State.PauseReason = $Reason; $State.LastLimitAt = (Get-Date).ToString('s')
+    Save-QueuePause $State
+    Write-CCBLog info agent 'Queue paused: Copilot daily limit' @{ until = $State.PausedUntil; reason = $Reason }
+    Add-AgentEvent $State 'status' @{ text = "Copilot's daily limit is reached. The queue waits until $($Until.ToString('HH:mm')) and then continues; nothing is lost." }
+}
+
+function Resume-AgentQueue {
+    param($State, [string]$Why = 'the limit has reset')
+    if (-not $State.PausedUntil) { return }
+    $State.PausedUntil = $null; $State.PauseReason = $null
+    Save-QueuePause $State
+    Write-CCBLog info agent "Queue continues ($Why)"
+    Add-AgentEvent $State 'status' @{ text = "The queue continues ($Why)." }
+}
+
+function Save-Schedules {
+    param($State)
+    if (-not $State.ScheduleFile) { return }
+    [Threading.Monitor]::Enter($State.Schedules.SyncRoot)
+    try {
+        $list = foreach ($s in @($State.Schedules)) { $copy = @{}; foreach ($k in @($s.Keys)) { $copy[$k] = $s[$k] }; $copy }
+        $tmp = "$($State.ScheduleFile).tmp"
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path $State.ScheduleFile)
+        [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject @($list) -Depth 5 -Compress), (New-Object Text.UTF8Encoding($false)))
+        if (Test-Path -LiteralPath $State.ScheduleFile) { [IO.File]::Replace($tmp, $State.ScheduleFile, [NullString]::Value) } else { [IO.File]::Move($tmp, $State.ScheduleFile) }
+    } catch { Write-CCBLogError agent 'Could not save the schedules' $_ }
+    finally { [Threading.Monitor]::Exit($State.Schedules.SyncRoot) }
+}
+
+function Restore-Schedules {
+    param($State)
+    if (-not $State.ScheduleFile -or -not (Test-Path -LiteralPath $State.ScheduleFile)) { return 0 }
+    $saved = try { @(([IO.File]::ReadAllText($State.ScheduleFile)) | ConvertFrom-Json) } catch { Write-CCBLogError agent 'Could not read the schedules' $_; @() }
+    foreach ($s in $saved) {
+        if (-not $s -or -not $s.id) { continue }
+        $h = [hashtable]::Synchronized((ConvertTo-PlainHash $s))
+        $h.days = @($s.days | Where-Object { $null -ne $_ } | ForEach-Object { [int]$_ })
+        $h.times = @(Get-ScheduleTimes $h)
+        [void]$State.Schedules.Add($h)
+    }
+    Write-CCBLog info agent 'Schedules restored' @{ count = $State.Schedules.Count }
+    $State.Schedules.Count
+}
+
+function New-AgentSchedule {
+    <# Adds a schedule from the app: a message, fetch or runbook, once or repeating. #>
+    param($State, [hashtable]$Spec)
+    Test-ScheduleSpec $Spec
+    if (-not $State.ProjectRoot) { throw 'Open a project first' }
+    $title = if ("$($Spec.title)".Trim()) { "$($Spec.title)".Trim() } elseif ($Spec.kind -eq 'chat') { ("$($Spec.text)" -replace '\s+', ' ').Trim() } else { "$($Spec.kind): $($Spec.name)" }
+    if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
+    $s = [hashtable]::Synchronized(@{
+        id = 's-' + [guid]::NewGuid().ToString('N').Substring(0, 8); title = $title; kind = $Spec.kind
+        text = "$($Spec.text)"; name = "$($Spec.name)"; projectRoot = $State.ProjectRoot
+        repeat = $Spec.repeat; times = @(Get-ScheduleTimes $Spec); at = "$($Spec.at)"; days = @($Spec.days | ForEach-Object { [int]$_ })
+        enabled = $true; created = (Get-Date).ToString('s'); lastRun = $null; lastQueueId = $null; nextRun = $null })
+    $next = Get-NextRun $s (Get-Date)
+    $s.nextRun = if ($next) { $next.ToString('s') } else { $null }
+    [void]$State.Schedules.Add($s)
+    Save-Schedules $State
+    Write-CCBLog info agent "Schedule $($s.id) added" @{ kind = $s.kind; repeat = $s.repeat; next = $s.nextRun }
+    $s
+}
+
+function Start-ScheduledItem {
+    <# Puts a schedule's task in the queue now. #>
+    param($State, $Schedule, [string]$Note = '')
+    $task = switch ($Schedule.kind) {
+        'chat' { @{ kind = 'chat'; text = $Schedule.text; projectRoot = $Schedule.projectRoot; source = 'schedule' } }
+        default { @{ kind = $Schedule.kind; name = $Schedule.name; projectRoot = $Schedule.projectRoot; source = 'schedule' } }
+    }
+    $entry = Submit-AgentTask $State $task 'schedule' $Schedule.title
+    if ($Note) { $entry.note = $Note }
+    $entry
+}
+
+function Invoke-DueSchedules {
+    <# Puts due schedules in the queue (checked at most every 15 seconds). A run that was missed while
+       StreamHub was closed runs once, with a note; repeats then continue from now. #>
+    param($State, [datetime]$Now = (Get-Date), [switch]$Force)
+    if (-not $State.Schedules.Count) { return 0 }
+    if (-not $Force -and $State.NextScheduleCheck -and $Now -lt [datetime]$State.NextScheduleCheck) { return 0 }
+    $State.NextScheduleCheck = $Now.AddSeconds(15).ToString('s')
+    $fired = 0
+    foreach ($s in @($State.Schedules)) {
+        if (-not $s.enabled -or -not $s.nextRun) { continue }
+        $due = ConvertTo-LocalTime "$($s.nextRun)"
+        if (-not $due -or $due -gt $Now) { continue }
+        $note = if (($Now - $due).TotalMinutes -gt 5) { "Was due at $($due.ToString('yyyy-MM-dd HH:mm')) while StreamHub was closed; runs now." } else { '' }
+        try {
+            $entry = Start-ScheduledItem $State $s $note
+            $s.lastQueueId = $entry.id
+            if ($note) { Add-AgentEvent $State 'status' @{ text = "Scheduled '$($s.title)': $note" } }
+        } catch { Write-CCBLogError agent "Schedule $($s.id) could not start" $_ }
+        $s.lastRun = $Now.ToString('s')
+        $next = Get-NextRun $s $Now
+        $s.nextRun = if ($next) { $next.ToString('s') } else { $null }
+        if ($s.repeat -eq 'once') { $s.enabled = $false }
+        $fired++
+    }
+    if ($fired) { Save-Schedules $State }
+    $fired
 }
 
 function Get-QueueEntry($State, [string]$Id) {
@@ -1105,8 +1239,19 @@ function Start-AgentWorker {
     Write-CCBLog verbose agent "Worker started" @{ level = (Get-CCBLogLevel) }
     while (-not $State.Stop) {
         if ($State.LogLevel -and $State.LogLevel -ne $appliedLevel) { Set-CCBLogLevel $State.LogLevel; $appliedLevel = $State.LogLevel; Write-CCBLog info agent "Log level now $appliedLevel" }
+        try { $null = Invoke-DueSchedules $State } catch { Write-CCBLogError agent 'schedules' $_ }
+        if ($State.PausedUntil) {
+            if ((Get-Date) -lt [datetime]$State.PausedUntil) {
+                # Paused at Copilot's daily limit: only undo (no Copilot needed) goes ahead.
+                $peek = $null
+                if ($State.Tasks.TryPeek([ref]$peek) -and $peek.kind -eq 'undo') { $null = $State.Tasks.TryDequeue([ref]$peek); $State.Held.Insert(0, $peek) }
+                elseif (-not ($State.Held.Count -and $State.Held[0].kind -eq 'undo')) { Start-Sleep -Milliseconds 500; continue }
+            } else { Resume-AgentQueue $State 'Copilot''s daily limit has reset' }
+        }
         $task = $null
-        if (-not $State.Tasks.TryDequeue([ref]$task)) {
+        $got = $false
+        if ($State.Held.Count) { $task = $State.Held[0]; $State.Held.RemoveAt(0); $got = $true } else { $got = $State.Tasks.TryDequeue([ref]$task) }
+        if (-not $got) {
             # Keep Copilot staged: after a failed connect, try again while nothing else is happening.
             if (-not $State.Headless -and $State.Copilot -eq 'error' -and $State.NextConnectAttempt -and (Get-Date) -gt $State.NextConnectAttempt) {
                 $State.NextConnectAttempt = $null
@@ -1131,6 +1276,10 @@ function Start-AgentWorker {
         $State.ReviewByCaller = [bool]$task.reviewByCaller
         $foreign = $task.source -and $task.source -ne 'user'
         if ($task.mode) { $State.Mode = $task.mode }
+        if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook' -and $task.projectRoot -ne $State.ProjectRoot) {
+            if (-not (Test-Path -LiteralPath $task.projectRoot -PathType Container)) { $task.missingProject = $true }
+            else { $State.ProjectRoot = $task.projectRoot }
+        }
         $State.NoCommands = [bool]$task.noCommands
         try {
             switch ($task.kind) {
@@ -1143,8 +1292,8 @@ function Start-AgentWorker {
                     if ($task.newChat) { $State.NeedNewChat = $true }
                     Invoke-AgentTurn $State $task.text
                 }
-                'fetch' { Invoke-FetchJob $State $task.name }
-                'runbook' { Invoke-RunbookJob $State $task.name }
+                'fetch' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-FetchJob $State $task.name }
+                'runbook' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-RunbookJob $State $task.name }
                 'ask' {
                     # A plain question to Copilot, without project context or actions.
                     if ($task.newChat -or (Test-OtherSender)) { Start-NewChat $State }
@@ -1179,6 +1328,21 @@ function Start-AgentWorker {
             if ($entry) {
                 try { Complete-QueueEntry $State $entry $fromSeq $msgsBefore ([bool]($job.cancelled -or $entry.cancelRequested)) } catch { Write-CCBLogError agent 'queue entry' $_ }
                 if ($job -and $job.status -eq 'error' -and $entry.status -ne 'failed') { $entry.status = 'failed'; $entry.error = $job.error }
+                if ($entry.status -eq 'failed' -and (Test-LimitText $entry.error $State.LastLimitAt)) {
+                    $until = Get-LimitResetTime $entry.error (Get-Date) "$($State.Credits.resetAt)"
+                    Set-QueuePause $State $until 'daily limit'
+                    $worked = @(Get-AgentEvents $State $fromSeq | Where-Object { $_.type -eq 'checkpoint' -or ($_.type -eq 'action' -and $_.status -eq 'done') }).Count
+                    if (-not $worked) {
+                        # Nothing was done yet: the task waits and runs first after the reset.
+                        $entry.status = 'queued'; $entry.error = $null; $entry.summary = $null; $entry.started = $null; $entry.finished = $null
+                        $entry.note = "Waits for Copilot's daily limit to reset ($($until.ToString('HH:mm')))."
+                        if ($job) { $job.status = 'queued'; $job.error = $null; $job.endSeq = $null; $job.finished = $null }
+                        $task.Remove('missingProject')
+                        [void]$State.Held.Add($task)
+                    } else {
+                        $entry.error = "Stopped at Copilot's daily limit (it resets at $($until.ToString('HH:mm'))). Changes made so far stay; send a follow-up after the reset to finish."
+                    }
+                } elseif ($entry.status -in 'done', 'failed' -and $entry.note -like 'Waits for*') { $entry.note = $null }
                 Write-CCBLog info agent "Queue $($entry.id) $($entry.status)" @{ messages = $entry.messages }
                 Save-AgentQueue $State
             }
@@ -1193,4 +1357,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

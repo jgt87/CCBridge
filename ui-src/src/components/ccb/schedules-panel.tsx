@@ -1,0 +1,77 @@
+import { CalendarClock, Pause, Play, Plus, Trash2 } from "lucide-react";
+import type { ScheduleItem } from "@/lib/api";
+import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+const flatButton =
+  "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+
+const KIND: Record<ScheduleItem["kind"], string> = { chat: "Message", fetch: "Fetch", runbook: "Runbook" };
+
+/** "today 08:00", "tomorrow 13:00", "Mon 6 Oct 08:00". */
+export function formatWhen(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const day = new Date(d);
+  day.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((day.getTime() - today.getTime()) / 86400000);
+  if (diff === 0) return `today ${time}`;
+  if (diff === 1) return `tomorrow ${time}`;
+  return `${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${time}`;
+}
+
+/** Scheduled messages, fetches and runbooks, with the next run and pause, run-now and delete. */
+export function SchedulesPanel({ schedules, onNew }: { schedules: ScheduleItem[]; onNew: () => void }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center">
+        <div className="font-medium text-sm">Scheduled</div>
+        <button className={cn(flatButton, "ml-auto")} onClick={onNew} title="Schedule a message, fetch or runbook" type="button">
+          <Plus className="h-3 w-3" /> New
+        </button>
+      </div>
+      {schedules.length === 0 && <p className="text-muted-foreground text-sm">Messages, fetches and runbooks can run on set days and times.</p>}
+      {schedules.map((s) => {
+        const finished = !s.enabled && s.repeat === "once" && s.lastRun;
+        return (
+          <div className={cn("rounded-lg border border-black/10 p-2 dark:border-white/10", !s.enabled && "opacity-60")} key={s.id}>
+            <div className="flex items-start gap-2">
+              <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="line-clamp-2 min-w-0 flex-1 text-sm" title={s.title}>
+                {s.title}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 pl-5 text-muted-foreground text-xs">
+              <span>{KIND[s.kind]}</span>
+              <span>{s.when}</span>
+              {s.project && <span className="truncate">{s.project}</span>}
+            </div>
+            <div className="mt-0.5 pl-5 text-muted-foreground text-xs">
+              {finished
+                ? `ran ${formatWhen(s.lastRun)}`
+                : s.enabled
+                  ? `next ${formatWhen(s.nextRun)}`
+                  : "paused"}
+            </div>
+            <div className="mt-1 flex flex-wrap gap-0.5 pl-4">
+              <button className={flatButton} onClick={() => api.runSchedule(s.id)} title="Add it to the queue now (the schedule stays as it is)" type="button">
+                <Play className="h-3 w-3" /> Run now
+              </button>
+              {!finished && (
+                <button className={flatButton} onClick={() => api.updateSchedule(s.id, { enabled: !s.enabled })} type="button">
+                  <Pause className="h-3 w-3" /> {s.enabled ? "Pause" : "Resume"}
+                </button>
+              )}
+              <button className={flatButton} onClick={() => api.deleteSchedule(s.id)} title="Delete this schedule" type="button">
+                <Trash2 className="h-3 w-3" /> Delete
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

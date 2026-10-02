@@ -10,7 +10,9 @@ import type { FetchItem, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from
 import { FetchPanel } from "./fetch-panel";
 import { RunbooksPanel } from "./runbooks-panel";
 import { QueuePanel } from "./queue-panel";
-import type { QueueEntry } from "@/lib/api";
+import { SchedulesPanel } from "./schedules-panel";
+import type { QueueEntry, ScheduleItem } from "@/lib/api";
+import type { ScheduleTarget } from "./schedule-form";
 import { cn } from "@/lib/utils";
 
 interface TreeNode {
@@ -200,7 +202,13 @@ export function SidePanel({
   onCreateRunbook,
   onRunRunbook,
   queue,
+  schedules,
+  pausedUntil,
+  onSchedule,
 }: {
+  schedules: ScheduleItem[];
+  pausedUntil?: string | null;
+  onSchedule: (target: ScheduleTarget) => void;
   files: FileInfo[];
   todos: TodoItem[];
   changes: { seq: number; time: string; files: string[] }[];
@@ -242,7 +250,10 @@ export function SidePanel({
       </div>
       <div className="space-y-1.5 border-black/10 border-t pt-3 dark:border-white/10">
         <div className="font-medium text-sm">Queue</div>
-        <QueuePanel onOpen={onOpenFile} queue={queue} />
+        <QueuePanel onOpen={onOpenFile} pausedUntil={pausedUntil} queue={queue} />
+      </div>
+      <div className="border-black/10 border-t pt-3 dark:border-white/10">
+        <SchedulesPanel onNew={() => onSchedule({ kind: runbooks.length ? "runbook" : "chat", name: runbooks[0]?.name })} schedules={schedules} />
       </div>
     </div>
   );
@@ -302,11 +313,12 @@ export function SidePanel({
                   onCreate={onCreateRunbook}
                   onOpen={onOpenFile}
                   onRun={onRunRunbook}
+                  onSchedule={(name) => onSchedule({ kind: "runbook", name })}
                   runbooks={runbooks}
                   templates={runbookTemplates}
                 />
               </div>
-              <FetchPanel busy={busy} items={fetchItems} onAttach={onAttach} onOpen={onOpenFile} onRun={onRunFetch} onSave={onSaveFetch} />
+              <FetchPanel busy={busy} items={fetchItems} onAttach={onAttach} onOpen={onOpenFile} onRun={onRunFetch} onSave={onSaveFetch} onSchedule={(name) => onSchedule({ kind: "fetch", name })} />
             </div>
           ),
         },

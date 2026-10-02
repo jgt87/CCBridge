@@ -1,4 +1,4 @@
-import { AtSign, FileCode2, FileText, Plus, Play } from "lucide-react";
+import { AtSign, CalendarClock, FileCode2, FileText, Plus, Play } from "lucide-react";
 import { useState } from "react";
 import type { RunbookItem, RunbookTemplate } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,9 @@ export function RunbooksPanel({
   onRun,
   onOpen,
   onAttach,
+  onSchedule,
 }: {
+  onSchedule?: (name: string) => void;
   runbooks: RunbookItem[];
   templates: RunbookTemplate[];
   busy: boolean;
@@ -96,9 +98,14 @@ export function RunbooksPanel({
             {rb.output}
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1">
-            <button className={flatButton} disabled={busy} onClick={() => onRun(rb.name)} title="Run it now (read-only) and save the checked JSON" type="button">
+            <button className={flatButton} onClick={() => onRun(rb.name)} title={busy ? "Add it to the queue (read-only run, saves the checked JSON)" : "Run it now (read-only) and save the checked JSON"} type="button">
               <Play className="h-3 w-3" /> Run
             </button>
+            {onSchedule && (
+              <button className={flatButton} onClick={() => onSchedule(rb.name)} title="Run it on set days and times" type="button">
+                <CalendarClock className="h-3 w-3" /> Schedule
+              </button>
+            )}
             <button className={flatButton} onClick={() => onOpen(rb.path)} title={`View the runbook (${rb.path}); edit it in the project folder`} type="button">
               <FileCode2 className="h-3 w-3" /> Runbook
             </button>

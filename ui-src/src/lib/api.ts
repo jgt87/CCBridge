@@ -120,6 +120,10 @@ export interface AppState {
   version: string;
   /** Every task, newest first, whatever started it (you, an MCP client, ...). */
   queue?: QueueEntry[];
+  /** Scheduled messages, fetches and runbooks. */
+  schedules?: ScheduleItem[];
+  /** Set while the queue waits for Copilot's daily limit to reset (local time). */
+  pausedUntil?: string | null;
   /** Release tag (v0.1.12) and the commit it was built from (short hash). */
   release?: string;
   commit?: string;
@@ -135,6 +139,35 @@ export interface ProjectInfo {
   name: string;
   path: string;
   modified: string;
+}
+
+/** A schedule: what runs (message, fetch or runbook) and when. */
+export interface ScheduleItem {
+  id: string;
+  title: string;
+  kind: "chat" | "fetch" | "runbook";
+  name: string;
+  repeat: "once" | "daily" | "weekdays" | "weekly";
+  times: string[];
+  at: string;
+  days: number[];
+  when: string;
+  enabled: boolean;
+  nextRun: string | null;
+  lastRun: string | null;
+  lastQueueId: string | null;
+  project: string | null;
+}
+
+export interface ScheduleSpec {
+  kind: "chat" | "fetch" | "runbook";
+  text?: string;
+  name?: string;
+  title?: string;
+  repeat: "once" | "daily" | "weekdays" | "weekly";
+  at?: string;
+  days?: number[];
+  times?: string[];
 }
 
 /** A task in the queue. */
@@ -153,6 +186,8 @@ export interface QueueEntry {
   error: string | null;
   errId?: string | null;
   resultPath: string | null;
+  /** E.g. why it waits, or that a schedule was missed while StreamHub was closed. */
+  note?: string | null;
   changed?: string[];
   jobId?: string | null;
 }
@@ -273,6 +308,11 @@ export const api = {
   stop: () => call<{ ok: boolean }>("POST", "/api/stop"),
   connect: () => call<{ ok: boolean }>("POST", "/api/connect"),
   cancelQueued: (id: string) => call<{ ok: boolean }>("POST", "/api/queue/cancel", { id }),
+  resumeQueue: () => call<{ ok: boolean }>("POST", "/api/queue/resume"),
+  createSchedule: (spec: ScheduleSpec) => call<{ ok: boolean; id: string }>("POST", "/api/schedules", spec),
+  updateSchedule: (id: string, change: { enabled?: boolean }) => call<{ ok: boolean }>("POST", "/api/schedules/update", { id, ...change }),
+  deleteSchedule: (id: string) => call<{ ok: boolean }>("POST", "/api/schedules/delete", { id }),
+  runSchedule: (id: string) => call<{ ok: boolean }>("POST", "/api/schedules/run", { id }),
   showProject: () => call<{ ok: boolean }>("POST", "/api/project/show"),
   settings: () => call<{ settings: Setting[] }>("GET", "/api/settings").then((r) => (Array.isArray(r.settings) ? r.settings : [])),
   setSetting: (key: string, value: string | number | null) =>

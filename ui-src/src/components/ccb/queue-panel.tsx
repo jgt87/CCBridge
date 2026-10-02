@@ -1,4 +1,4 @@
-import { Bot, CircleCheck, CircleDashed, CircleX, Clock, FileText, Hand, LoaderCircle, User, X } from "lucide-react";
+import { Bot, CalendarClock, CircleCheck, CircleDashed, CircleX, Clock, FileText, Hand, LoaderCircle, PauseCircle, User, X } from "lucide-react";
 import type { QueueEntry } from "@/lib/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -22,10 +22,28 @@ function when(e: QueueEntry): string {
 }
 
 /** The queue: every task, whatever started it, with its status and result. */
-export function QueuePanel({ queue, onOpen }: { queue: QueueEntry[]; onOpen: (path: string) => void }) {
-  if (!queue.length) return <p className="text-muted-foreground text-sm">Tasks you send, fetches, runbooks and tasks from MCP clients appear here.</p>;
+export function QueuePanel({ queue, onOpen, pausedUntil }: { queue: QueueEntry[]; onOpen: (path: string) => void; pausedUntil?: string | null }) {
+  const paused = pausedUntil ? (
+    <div className="flex items-start gap-2 rounded-lg border border-black/20 p-2 text-xs dark:border-white/20">
+      <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span className="flex-1">
+        Paused until {new Date(pausedUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: Copilot's daily limit is reached. Tasks wait and continue then.
+      </span>
+      <button className="shrink-0 rounded-md px-1.5 py-0.5 hover:bg-black/5 dark:hover:bg-white/5" onClick={() => api.resumeQueue()} title="Try again now" type="button">
+        Resume now
+      </button>
+    </div>
+  ) : null;
+  if (!queue.length)
+    return (
+      <div className="space-y-1.5">
+        {paused}
+        <p className="text-muted-foreground text-sm">Tasks you send, fetches, runbooks, scheduled tasks and tasks from MCP clients appear here.</p>
+      </div>
+    );
   return (
     <div className="space-y-1.5">
+      {paused}
       {queue.map((e) => {
         const st = STATUS[e.status] ?? STATUS.queued;
         const active = e.status === "queued" || e.status === "running" || e.status === "awaiting";
@@ -51,14 +69,15 @@ export function QueuePanel({ queue, onOpen }: { queue: QueueEntry[]; onOpen: (pa
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 text-muted-foreground text-xs">
               <span className="inline-flex items-center gap-1" title={`Started by ${e.source}`}>
-                {e.source === "user" ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
-                {e.source === "user" ? "you" : e.source.toUpperCase()}
+                {e.source === "user" ? <User className="h-3 w-3" /> : e.source === "schedule" ? <CalendarClock className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+                {e.source === "user" ? "you" : e.source === "schedule" ? "scheduled" : e.source.toUpperCase()}
               </span>
               <span>{st.label}</span>
               {when(e) && <span>{when(e)}</span>}
               {e.messages > 0 && <span title="Copilot messages used">{e.messages} msg</span>}
               {e.project && <span className="truncate">{e.project}</span>}
             </div>
+            {e.note && <div className="mt-1 pl-5 text-muted-foreground text-xs italic">{e.note}</div>}
             {e.error ? (
               <div className="mt-1 line-clamp-3 pl-5 text-rose-600 text-xs dark:text-rose-400" title={e.error}>
                 {e.error}

@@ -93,7 +93,7 @@ $script:ErrorHelp = @(
     @{ re = 'message box (did not appear|not found|never appeared)'; code = 'PAGE'; hint = 'Copilot''s page did not show its message box. Look at the Copilot window in Edge (the message names a screenshot). If Copilot''s page changed, run capture.cmd and send the result.' }
     @{ re = 'could not clear the Copilot message box|message box holds'; code = 'TYPING'; hint = 'Typing into Copilot failed. Click once into the Copilot window and send again; if it repeats, export diagnostics.' }
     @{ re = 'Send button never became clickable'; code = 'SEND'; hint = 'Copilot''s Send button did not respond. Check the Copilot window: a dialog or sign-in may be in the way.' }
-    @{ re = '(?i)OutOfCredits|daily limit|usage limit'; code = 'CREDITS'; hint = 'Copilot''s daily limit is reached. It resets at the time Copilot shows; try again then.' }
+    @{ re = '(?i)OutOfCredits|daily limit|usage limit'; code = 'CREDITS'; hint = 'Copilot''s daily limit is reached. The queue waits until it resets and then continues by itself; Resume now in the Queue tries earlier.' }
     @{ re = '(?i)throttl'; code = 'THROTTLED'; hint = 'Copilot is limiting requests. Wait a minute and try again.' }
     @{ re = 'No complete reply within'; code = 'TIMEOUT'; hint = 'Copilot took longer than replyTimeoutSec. Raise it in config\harness.local.json, or split the task into smaller steps.' }
     @{ re = '(?i)NoAnswer|stopped without answering|finished without a reply|no usable answer'; code = 'NO-ANSWER'; hint = 'Copilot did not answer. Usually a source it needed was unavailable or the request was blocked. Try again, rephrase, or start a New chat.' }
@@ -102,6 +102,7 @@ $script:ErrorHelp = @(
     @{ re = 'Open or create a project'; code = 'NO-PROJECT'; hint = 'Open or create a project first (Switch worktree).' }
     @{ re = 'still working on the previous message'; code = 'BUSY'; hint = 'Wait until the current task has finished, or press Stop.' }
     @{ re = '(?i)fetch prompt|Fetch '''; code = 'FETCH'; hint = 'The fetch did not complete; the previous answer file was kept. Try Refresh again later.' }
+    @{ re = 'Pick (at least one|the date)|is not a time|message to schedule is empty|Which (fetch|runbook) should run|repeat must be|Unknown schedule'; code = 'SCHEDULE'; hint = 'Complete the schedule: what runs, the days and at least one time, or a date and time for a one-time run.' }
 )
 
 function Get-CCBErrorHelp([string]$Text) {

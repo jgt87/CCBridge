@@ -1,4 +1,4 @@
-import { AtSign, FileText, Plus, RefreshCw } from "lucide-react";
+import { AtSign, CalendarClock, FileText, Plus, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type { FetchItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -25,7 +25,9 @@ export function FetchPanel({
   onSave,
   onAttach,
   onOpen,
+  onSchedule,
 }: {
+  onSchedule?: (name: string) => void;
   items: FetchItem[];
   busy: boolean;
   onRun: (name: string) => void;
@@ -106,9 +108,14 @@ export function FetchPanel({
             {it.prompt}
           </p>
           <div className="mt-1.5 flex gap-1">
-            <button className={flatButton} disabled={busy} onClick={() => onRun(it.name)} title="Ask Copilot now and save the answer" type="button">
+            <button className={flatButton} onClick={() => onRun(it.name)} title={busy ? "Add it to the queue; the answer is saved when it runs" : "Ask Copilot now and save the answer"} type="button">
               <RefreshCw className="h-3 w-3" /> {it.fetchedAt ? "Refresh" : "Run"}
             </button>
+            {onSchedule && (
+              <button className={flatButton} onClick={() => onSchedule(it.name)} title="Fetch it on set days and times" type="button">
+                <CalendarClock className="h-3 w-3" /> Schedule
+              </button>
+            )}
             <button className={flatButton} disabled={!it.fetchedAt} onClick={() => onAttach(it.output)} title={`Attach @${it.output} to your message`} type="button">
               <AtSign className="h-3 w-3" /> Attach
             </button>

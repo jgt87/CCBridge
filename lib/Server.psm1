@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Agent', 'Fetch', 'Runbook') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Agent', 'Fetch', 'Runbook', 'Schedule') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -18,8 +18,18 @@ function Get-QueueView($State, [int]$Max = 40) {
     foreach ($e in ($list | Select-Object -First $Max)) {
         [pscustomobject]@{ id = $e.id; kind = $e.kind; title = $e.title; source = $e.source; status = $e.status; project = $e.project
             created = $e.created; started = $e.started; finished = $e.finished; messages = [int]$e.messages; summary = $e.summary; error = $e.error
-            errId = $e.errId; resultPath = $e.resultPath; changed = @($e.changed | Where-Object { $_ }); jobId = $e.jobId }
+            errId = $e.errId; resultPath = $e.resultPath; changed = @($e.changed | Where-Object { $_ }); jobId = $e.jobId; note = $e.note }
     }
+}
+
+function Get-ScheduleView($State) {
+    <# Schedules for the app, soonest first; finished one-time schedules last. #>
+    $list = foreach ($s in @($State.Schedules)) {
+        [pscustomobject]@{ id = $s.id; title = $s.title; kind = $s.kind; name = $s.name; repeat = $s.repeat; times = @(Get-ScheduleTimes $s); at = $s.at; days = @($s.days)
+            when = (Format-ScheduleWhen $s); enabled = [bool]$s.enabled; nextRun = $s.nextRun; lastRun = $s.lastRun; lastQueueId = $s.lastQueueId
+            project = $(if ($s.projectRoot) { Split-Path $s.projectRoot -Leaf } else { $null }) }
+    }
+    @($list | Sort-Object @{ Expression = { if ($_.enabled -and $_.nextRun) { 0 } else { 1 } } }, @{ Expression = { "$($_.nextRun)" } })
 }
 
 function Get-JobView($State, $Job) {
@@ -69,6 +79,8 @@ function Get-StateSnapshot($State) {
         logLevel = (Get-CCBLogLevel)
         version = [string]$State.Version
         queue = @(Get-QueueView $State 40)
+        schedules = @(Get-ScheduleView $State)
+        pausedUntil = $State.PausedUntil
         release = $(if ($State.Build) { [string]$State.Build.version } else { [string]$State.Version })
         commit = $(if ($State.Build) { [string]$State.Build.commit } else { '' })
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
@@ -115,7 +127,35 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ((Get-Item -LiteralPath $full).Length -gt 2MB) { throw 'File is larger than 2 MB' }
             return Send-Json $Ctx @{ path = $req.QueryString['path']; text = (Read-TextFile $full).Text }
         }
-        '^GET /api/queue$' { return Send-Json $Ctx @{ queue = @(Get-QueueView $State 100) } }
+        '^GET /api/queue$' { return Send-Json $Ctx @{ queue = @(Get-QueueView $State 100); pausedUntil = $State.PausedUntil } }
+        '^POST /api/queue/resume$' { Resume-AgentQueue $State 'resumed by you'; return Send-Json $Ctx @{ ok = $true } }
+        '^GET /api/schedules$' { return Send-Json $Ctx @{ schedules = @(Get-ScheduleView $State) } }
+        '^POST /api/schedules$' {
+            $b = Read-JsonBody $Ctx
+            $spec = @{ kind = [string]$b.kind; text = [string]$b.text; name = [string]$b.name; title = [string]$b.title; repeat = [string]$b.repeat; times = @($b.times | Where-Object { $_ }); at = [string]$b.at; days = @($b.days) }
+            $sch = New-AgentSchedule $State $spec
+            return Send-Json $Ctx @{ ok = $true; id = $sch.id }
+        }
+        '^POST /api/schedules/(update|delete|run)$' {
+            $op = $Matches[1]
+            $b = Read-JsonBody $Ctx
+            $sch = @($State.Schedules) | Where-Object { $_.id -eq [string]$b.id } | Select-Object -First 1
+            if (-not $sch) { throw "Unknown schedule '$($b.id)'" }
+            switch ($op) {
+                'update' {
+                    if ($null -ne $b.enabled) {
+                        $sch.enabled = [bool]$b.enabled
+                        # Turned back on: the next run counts from now (no catch-up of the paused time).
+                        if ($sch.enabled) { $n = Get-NextRun $sch (Get-Date); $sch.nextRun = if ($n) { $n.ToString('s') } else { $null } }
+                    }
+                }
+                'delete' { $State.Schedules.Remove($sch) }
+                'run' { $e = Start-ScheduledItem $State $sch; $sch.lastQueueId = $e.id }
+            }
+            Save-Schedules $State
+            Write-CCBLog info server "Schedule $($b.id) $op"
+            return Send-Json $Ctx @{ ok = $true }
+        }
         '^POST /api/queue/cancel$' {
             $b = Read-JsonBody $Ctx
             $e = Get-QueueEntry $State ([string]$b.id)

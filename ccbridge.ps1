@@ -108,6 +108,10 @@ $state.Build = Get-CCBridgeBuild $root
 # The queue survives restarts and updates (the MCP server's own engine does not save one).
 $state.QueueFile = Join-Path $env:LOCALAPPDATA 'CCBridge\queue.json'
 $null = Restore-AgentQueue $state
+$state.ScheduleFile = Join-Path $env:LOCALAPPDATA 'CCBridge\schedules.json'
+$null = Restore-Schedules $state
+$state.PauseFile = Join-Path $env:LOCALAPPDATA 'CCBridge\queue-pause.json'
+Restore-QueuePause $state
 # Recorded so the next start can stop this instance (see above).
 try {
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $pidFile)
