@@ -1,5 +1,6 @@
 {
-  "chatUrl": "https://m365.cloud.microsoft/chat",
+  "chatUrl": "https://www.microsoft365.com/chat",
+  "chatHosts": ["microsoft365.com", "m365.cloud.microsoft"],
   "editor": "#m365-chat-editor-target-element, [role='textbox'][contenteditable='true']",
   "sendButton": "button[aria-label='Send'], button.fai-SendButton",
   "stopButton": "button[aria-label*='Stop' i]",

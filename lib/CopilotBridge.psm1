@@ -11,6 +11,30 @@ $script:ModuleDir = $PSScriptRoot
 
 function ConvertTo-JsString([string]$s) { $s | ConvertTo-Json -Compress }
 
+function Get-CopilotHosts($Selectors) {
+    <# Hosts on which the Copilot tab can be: chatHosts from selectors.json plus the host of chatUrl
+       (microsoft365.com/chat may redirect to m365.cloud.microsoft/chat). #>
+    $hosts = @()
+    if ($Selectors.PSObject.Properties['chatHosts'] -and $Selectors.chatHosts) { $hosts += @($Selectors.chatHosts) }
+    $hosts += ([uri]$Selectors.chatUrl).Host -replace '^www\.', ''
+    @($hosts | Where-Object { $_ } | ForEach-Object { "$_".ToLowerInvariant() } | Select-Object -Unique)
+}
+
+function Test-CopilotUrl([string]$Url, $Selectors) {
+    try { $h = ([uri]$Url).Host.ToLowerInvariant() } catch { return $false }
+    foreach ($x in Get-CopilotHosts $Selectors) { if ($h -eq $x -or $h.EndsWith(".$x")) { return $true } }
+    $false
+}
+
+function Get-CopilotTarget {
+    <# The Edge tab with Copilot (on any of its hosts), else the first tab. #>
+    param([int]$Port = 9333, [Parameter(Mandatory)]$Selectors)
+    $pages = @((Invoke-RestMethod "http://127.0.0.1:$Port/json/list") | Where-Object { $_.type -eq 'page' })
+    if (-not $pages) { throw "no page targets on port $Port" }
+    $match = $pages | Where-Object { Test-CopilotUrl $_.url $Selectors } | Select-Object -First 1
+    if ($match) { $match } else { $pages[0] }
+}
+
 function Connect-Copilot {
     <# Starts (or reuses) Edge on the Copilot page and returns a bridge object. #>
     param(
@@ -20,8 +44,7 @@ function Connect-Copilot {
         [bool]$SaveReplyFrames = $true
     )
     $sel = if ($SelectorsPath) { Get-Content $SelectorsPath -Raw | ConvertFrom-Json } else { Get-CCBridgeConfig selectors (Split-Path -Parent $script:ModuleDir) }
-    # The Copilot tab is recognised by the host of chatUrl (selectors.json), the one place to change the address.
-    $hostLike = '*' + ([uri]$sel.chatUrl).Host + '*'
+    # The Copilot tab is recognised by its host (chatUrl and chatHosts in selectors.json).
     $deadline = (Get-Date).AddSeconds($SignInTimeoutSec + 30)
     $signInAnnounced = $false
     for ($attempt = 1; ; $attempt++) {
@@ -30,11 +53,11 @@ function Connect-Copilot {
             # Edge may still be starting, or may replace the tab (first start, sign-in redirects):
             # every attempt looks for the current Copilot tab again.
             $null = Start-CdpEdge -Port $Port -Url $sel.chatUrl
-            $target = Get-CdpPageTarget -Port $Port -UrlLike $hostLike
+            $target = Get-CopilotTarget -Port $Port -Selectors $sel
             $session = Connect-Cdp $target.webSocketDebuggerUrl
             $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; SaveFrames = $SaveReplyFrames
         Pacing = (Get-CopilotPacing); LastReplyAt = $null }
-            if ($target.url -notlike $hostLike) { $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl } }
+            if (-not (Test-CopilotUrl $target.url $sel)) { $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl } }
             $null = Invoke-Cdp $session 'Network.enable'
             # Edge throttles a page in a background or minimised window so hard that Copilot's reply
             # stream stalls halfway. Keep the Copilot tab "visible, focused and active" while attached.
@@ -1178,7 +1201,7 @@ function Get-PageReplyText {
   // Letters and digits only, lowercase: compares raw markdown with rendered text.
   const alnum = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
   // Copilot's code viewer adds labels to the visible text; they are never part of the answer.
-  const chrome = /^(copilot said:|copy code|copy|go to line.*|.*isn't fully supported\. syntax highlighting is based on .*|.*wordt niet volledig ondersteund.*)$/i;
+  const chrome = /^(copilot said:|copy code|copy|go to line.*|.*isn.t fully supported\. syntax highlighting is based on .*|.*wordt niet volledig ondersteund.*)$/i;
   const visibleText = (el) => {
     const md = el.querySelector('[data-testid="markdown-reply"]') || el;
     return (md.innerText || '').split('\n').filter(l => !chrome.test(l.trim())).join('\n');
@@ -1293,4 +1316,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

@@ -14,6 +14,7 @@ param([int]$Days = 2, [switch]$IncludeReplies, [switch]$NoOpen)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
+Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
 Import-Module (Join-Path $root 'lib\Log.psm1')
 Import-Module (Join-Path $root 'lib\Cdp.psm1')
 
@@ -36,7 +37,7 @@ if ($envInfo.edgeDebugPortOpen) {
     try {
         $port = [int](Get-CCBridgeConfig harness $root).cdpPort
         $sel = Get-CCBridgeConfig selectors $root
-        $target = Get-CdpPageTarget -Port $port -UrlLike ('*' + ([uri]$sel.chatUrl).Host + '*')
+        $target = Get-CopilotTarget -Port $port -Selectors $sel
         $s = Connect-Cdp $target.webSocketDebuggerUrl
         $checks = [ordered]@{ chatUrl = $sel.chatUrl; pageHost = ([uri]$target.url).Host }
         foreach ($name in 'editor', 'sendButton', 'stopButton') {

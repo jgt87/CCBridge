@@ -65,3 +65,15 @@ Describe 'Page texts that are not an answer' {
         (& $m { $args[0] -match $script:PlaceholderPattern } 'Searching the web gives 42') | Should Be $false
     }
 }
+Describe 'Copilot tab hosts' {
+    $sel = [pscustomobject]@{ chatUrl = 'https://www.microsoft365.com/chat'; chatHosts = @('microsoft365.com', 'm365.cloud.microsoft') }
+    It 'recognises the Copilot tab on both hosts' {
+        Test-CopilotUrl 'https://www.microsoft365.com/chat' $sel | Should Be $true
+        Test-CopilotUrl 'https://m365.cloud.microsoft/chat/conversation/x' $sel | Should Be $true
+        Test-CopilotUrl 'https://login.microsoftonline.com/x' $sel | Should Be $false
+        Test-CopilotUrl 'https://evilmicrosoft365.com/chat' $sel | Should Be $false
+    }
+    It 'falls back to the host of chatUrl when chatHosts is missing' {
+        Test-CopilotUrl 'https://m365.cloud.microsoft/chat' ([pscustomobject]@{ chatUrl = 'https://m365.cloud.microsoft/chat' }) | Should Be $true
+    }
+}

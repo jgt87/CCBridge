@@ -11,6 +11,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Cdp.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
+Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
 $sel = Get-CCBridgeConfig selectors $root
 $port = 9333
 $report = [ordered]@{ captured = (Get-Date).ToString('s'); edge = $null; snapshots = [ordered]@{}; request = $null; reply = $null }
@@ -18,7 +19,7 @@ $report = [ordered]@{ captured = (Get-Date).ToString('s'); edge = $null; snapsho
 function Pause-ForUser([string]$Text) { Write-Host ''; Write-Host $Text -ForegroundColor Cyan; [void](Read-Host 'Press Enter to continue') }
 
 $null = Start-CdpEdge -Port $port -Url $sel.chatUrl
-$target = Get-CdpPageTarget -Port $port -UrlLike ('*' + ([uri]$sel.chatUrl).Host + '*')
+$target = Get-CopilotTarget -Port $port -Selectors $sel
 $s = Connect-Cdp $target.webSocketDebuggerUrl
 $report.edge = (Invoke-RestMethod "http://127.0.0.1:$port/json/version").Browser
 $null = Invoke-Cdp $s 'Network.enable'
