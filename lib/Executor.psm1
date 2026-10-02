@@ -429,14 +429,15 @@ function Get-BlockBalance([string]$Text) {
     }
 }
 
-function Test-HalfBlock([string]$Search, [string]$Replace) {
-    <# An edit that would leave a block half open or half closed: SEARCH and REPLACE differ in the
-       balance of braces or <style>/<script> tags. Returns the reason, or $null. #>
-    $s = Get-BlockBalance $Search; $r = Get-BlockBalance $Replace
+function Test-HalfBlock([string]$Old, [string]$New) {
+    <# Whether an edit leaves the file more unbalanced than it was: more unclosed (or unopened)
+       { } blocks or <style>/<script> blocks after the edit than before. A file that is already
+       broken may be repaired, or edited without making it worse. Returns the reason, or $null. #>
+    $o = Get-BlockBalance $Old; $n = Get-BlockBalance $New
     foreach ($k in 'style', 'script') {
-        if ($s[$k] -ne $r[$k]) { return "SEARCH and REPLACE do not open and close the same <$k> blocks, so part of a block would be left behind. Include the whole block through its closing </$k> line (you may shorten its middle with a line containing only ...)" }
+        if ([Math]::Abs($n[$k]) -gt [Math]::Abs($o[$k])) { return "this edit would leave a <$k> block half open or half closed in the file, so part of that block would be left behind. Include the whole block through its closing </$k> line (you may shorten its middle with a line containing only ...)" }
     }
-    if ($s.braces -ne $r.braces) { return "SEARCH and REPLACE do not open and close the same number of { } blocks, so part of a block would be left behind. Include the whole block through its closing brace (you may shorten its middle with a line containing only ...)" }
+    if ([Math]::Abs($n.braces) -gt [Math]::Abs($o.braces)) { return "this edit would leave a { } block half open or half closed in the file, so part of that block would be left behind. Include the whole block through its closing brace (you may shorten its middle with a line containing only ...)" }
     $null
 }
 
@@ -505,13 +506,13 @@ function Get-EditResult {
             if ($done.applied) { $applied.Add("pair ${n}: already applied - $($done.evidence)"); continue }
         }
         if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed; send the whole edit block again." } }
-        $matched = $text.Substring($hit.start, $hit.length)
-        $half = Test-HalfBlock $matched $replace
-        if ($half) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $half. Nothing was changed; send the whole edit block again." } }
+
         if ($hit.note) { $notes.Add("pair ${n}: $($hit.note)") }
         $text = $text.Substring(0, $hit.start) + $replace + $text.Substring($hit.start + $hit.length)
         $after = $hit.start + $replace.Length
     }
+    $half = Test-HalfBlock $info.Text $text
+    if ($half) { return [pscustomobject]@{ ok = $false; error = "$half. Nothing was changed; send the whole edit block again." } }
     $moveProblem = Test-MoveOrder $ProjectRoot $full $info.Text $text
     if ($moveProblem) { return [pscustomobject]@{ ok = $false; error = $moveProblem } }
     [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; pairs = $n; notes = @($notes)
