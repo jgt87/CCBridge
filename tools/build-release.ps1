@@ -14,7 +14,7 @@ $app = Join-Path $stage 'CCBridge'
 $null = New-Item -ItemType Directory -Force -Path $app, $dist
 
 $include = @('ccbridge.ps1', 'start.cmd', 'install.ps1', 'probe.ps1', 'probe.cmd', 'capture.cmd', 'diagnostics.cmd', 'update.cmd', 'complexity-test.cmd', 'reply-timing.cmd', 'stream-shape.cmd', 'README.md', 'AGENTS.md',
-             'config', 'lib', 'mcp', 'prompts', 'tools', 'ui')
+             'config', 'lib', 'mcp', 'prompts', 'templates', 'tools', 'ui')
 foreach ($item in $include) {
     $src = Join-Path $root $item
     if (-not (Test-Path $src)) { throw "missing $item" }

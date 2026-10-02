@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -85,6 +85,7 @@ function Add-AgentEvent {
             'checkpoint'     { Write-CCBLog verbose agent "change set saved" @{ files = $Data.files } }
             'undo'           { Write-CCBLog info agent "undo: $($Data.text)" }
             'fetch'          { Write-CCBLog info agent "fetched $($Data.name) -> $($Data.path)" }
+            'runbook'        { Write-CCBLog info agent "runbook $($Data.name) -> $($Data.path)" }
         }
         # Keep memory bounded; the UI only needs recent history after a reload.
         if ($State.Events.Count -gt 2000) { $State.Events.RemoveRange(0, 500) }
@@ -201,6 +202,56 @@ function Send-ToCopilot {
 
 function Test-ConnectionLost($ErrorRecord) {
     "$($ErrorRecord.Exception.Message)" -match 'Lost the connection to the Copilot tab|Could not connect to the Copilot tab'
+}
+
+function Invoke-RunbookJob {
+    <# Runs a project runbook in a fresh Copilot chat (read-only), takes the JSON from the reply,
+       checks it against the runbook header, asks Copilot once to correct it when it does not match,
+       and saves a valid result to the runbook's output file (plus a dated copy in exports/history).
+       An existing output file is kept when the run fails. #>
+    param($State, [string]$Name)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
+    $item = Get-Runbooks $State.ProjectRoot | Where-Object name -eq $Name | Select-Object -First 1
+    if (-not $item) { Add-AgentEvent $State 'error' @{ text = "There is no runbook named '$Name'." }; return }
+    $State.Busy = $true; $State.Cancel = $false
+    try {
+        $rb = Read-Runbook ([IO.File]::ReadAllText((Resolve-ProjectPath $State.ProjectRoot $item.path)))
+        $body = Resolve-RunbookText $rb.body $rb.meta
+        Add-AgentEvent $State 'status' @{ text = "Running runbook '$($item.title)' (read-only) ..." }
+        Write-CCBLog info agent "Runbook $Name" @{ chars = $body.Length; output = $item.output }
+        Start-NewChat $State   # a runbook never mixes with the conversation
+        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind 'runbook' -Text $body -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
+        $check = $null
+        for ($attempt = 1; $attempt -le 2; $attempt++) {
+            $r = Send-ToCopilot $State $message
+            if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "Runbook '$($item.title)' stopped; $($item.output) was left unchanged." }; return }
+            if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
+                Add-AgentEvent $State 'error' @{ text = "Runbook '$($item.title)' got no usable answer ($($r.Result): $($r.ResultMessage)); $($item.output) was left unchanged." }
+                return
+            }
+            $json = Get-JsonFromReply $r.Text
+            $check = Test-RunbookOutput $json $rb.meta
+            if ($check.ok) { break }
+            Write-CCBLog info agent "Runbook $Name output does not match (attempt $attempt)" @{ errors = $check.errors }
+            if ($attempt -eq 1) {
+                Add-AgentEvent $State 'status' @{ text = "The JSON did not match the runbook ($(@($check.errors).Count) problem(s)); asking Copilot to correct it." }
+                $message = "The JSON does not match the runbook:`n- " + (@($check.errors) -join "`n- ") + "`nSend the complete corrected JSON again, in exactly the shape the runbook describes, as one ```json code block and nothing else."
+            }
+        }
+        if (-not $check.ok) {
+            Add-AgentEvent $State 'error' @{ text = "Runbook '$($item.title)': Copilot's JSON still does not match the runbook ($(@($check.errors) -join '; ')). $($item.output) was left unchanged."; code = 'RUNBOOK'; hint = 'Make the runbook''s output section and example clearer, or loosen required / requiredItemFields in its header, then run it again.' }
+            return
+        }
+        $saved = Save-RunbookOutput $State.ProjectRoot $Name $item.output $json
+        $note = if ($check.truncated) { ' Copilot marked it as truncated: not every item fitted. Narrow the period or the sources.' } else { '' }
+        Add-AgentEvent $State 'runbook' @{ name = $Name; path = $saved.output; text = "Runbook '$($item.title)': saved $($check.count) item(s) to $($saved.output) (copy in $($saved.history)).$note Attach it with @$($saved.output)." }
+    } catch {
+        Write-CCBLogError agent "Runbook $Name failed" $_
+        Add-AgentEvent $State 'error' @{ text = "Runbook '$Name' failed: $($_.Exception.Message)"; record = $_ }
+    } finally {
+        $State.NeedNewChat = $true
+        $State.Busy = $false; $State.Cancel = $false
+    }
 }
 
 function Invoke-FetchJob {
@@ -873,6 +924,7 @@ function Start-AgentWorker {
                     Invoke-AgentTurn $State $task.text
                 }
                 'fetch' { Invoke-FetchJob $State $task.name }
+                'runbook' { Invoke-RunbookJob $State $task.name }
                 'ask' {
                     # A plain question to Copilot, without project context or actions.
                     if ($task.newChat -or (Test-OtherSender)) { Start-NewChat $State }

@@ -36,6 +36,7 @@ function Get-PromptParts {
         'mixed'     { @('role:coding', 'actions', 'rules', 'm365', 'project') }
         'fetch'     { @('fetch') }                                  # saved fetch prompt: the answer becomes a file
         'fetch-m365' { @('role:assistant', 'm365', 'fetch') }
+        'runbook'   { @('role:assistant', 'm365', 'runbook') }   # data runbook: JSON export, read-only
         default     { @() }
     }
 }
@@ -55,6 +56,7 @@ function Get-PromptPart {
         '^fetch$'     { return Read-PromptPart $AppRoot 'fetch.md' }
         '^retry$'     { return Read-PromptPart $AppRoot 'retry.md' }
         '^review$'    { return Read-PromptPart $AppRoot 'review.md' }
+        '^runbook$'   { return Read-PromptPart $AppRoot 'runbook.md' }
         '^location$'  { return [string]$Context.Location }
         '^project$'   { return [string]$Context.Full }
     }

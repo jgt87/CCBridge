@@ -17,6 +17,7 @@ Target machines have only what ships with Windows: **Windows PowerShell 5.1 + Ed
 | `lib/Workspace.psm1` | OneDrive projects, path confinement, file listing, read-only `source/` + vault |
 | `lib/Protocol.psm1` | Parses action blocks (`read glob grep write edit run todo done`) from replies |
 | `lib/Fetch.psm1` | Saved fetch prompts (`fetch/<name>.prompt.md`) and their answer files (`fetch/<name>.md`); the agent job `Invoke-FetchJob` runs one in a fresh chat with kind `fetch` / `fetch-m365` and writes the answer itself (no actions) |
+| `lib/Runbook.psm1` | Runbooks (`runbooks/<name>.runbook.md`, templates in `templates/runbooks/`): header parsing, placeholders, JSON extraction and validation against `required` / `itemsKey` / `requiredItemFields`, saving to the output and `exports/history`; the agent job `Invoke-RunbookJob` runs one read-only in a fresh chat with one correction round. Every template's own example must pass its header (tested). |
 | `lib/Executor.psm1` | Carries out actions, checkpoints/undo, `&lt;`/`&gt;` repair |
 | `lib/Agent.psm1` | Agent loop + worker runspace; talks to front ends via a synchronized `$State` |
 | `lib/Server.psm1` | HTTP server + JSON API for the web UI (token in `%LOCALAPPDATA%\CCBridge\session-token.txt`) |

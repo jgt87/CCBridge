@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Agent', 'Fetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Agent', 'Fetch', 'Runbook') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -96,6 +96,26 @@ function Invoke-ApiRequest($Ctx, $State) {
             $full = Resolve-ProjectPath $State.ProjectRoot $req.QueryString['path']
             if ((Get-Item -LiteralPath $full).Length -gt 2MB) { throw 'File is larger than 2 MB' }
             return Send-Json $Ctx @{ path = $req.QueryString['path']; text = (Read-TextFile $full).Text }
+        }
+        '^GET /api/runbooks$' {
+            # @(if ...): an if expression would unroll a list of one into a single object.
+            $list = @(if ($State.ProjectRoot) { Get-Runbooks $State.ProjectRoot })
+            return Send-Json $Ctx @{ runbooks = $list; templates = @(Get-RunbookTemplates $State.AppRoot) }
+        }
+        '^POST /api/runbooks$' {
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            $item = New-RunbookFromTemplate $State.AppRoot $State.ProjectRoot ([string]$b.template) ([string]$b.name)
+            Write-CCBLog info server "Runbook created: $($item.name) from $($b.template)"
+            return Send-Json $Ctx @{ ok = $true; item = $item }
+        }
+        '^POST /api/runbooks/run$' {
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            if ($State.Busy) { throw 'StreamHub is still working on the previous message' }
+            $State.Busy = $true
+            $State.Tasks.Enqueue(@{ kind = 'runbook'; name = [string]$b.name })
+            return Send-Json $Ctx @{ ok = $true }
         }
         '^GET /api/fetch$' {
             if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ items = @() } }
