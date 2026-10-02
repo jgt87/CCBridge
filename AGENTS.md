@@ -62,6 +62,7 @@ The running web server holds `lib/*.psm1` in memory: restart it after backend ch
 - Replies arrive on `substrate.office.com/m365Copilot/Chathub` (SignalR, records separated by `0x1e`); a `type:2` record ends the reply and carries throttling (messages per chat) and metering (daily credits, `OutOfCredits`).
 - Copilot's **link/citation filter damages code** in snapshots and the final text (`[name]:`, `[guid]::`, `[x](...)` vanish). The reply is rebuilt from raw `writeAtCursor` chunks (`Add-ReplySnapshot`). Never use the server's final text for code.
 - The page escapes `<` and `>` in prompts to `&lt;`/`&gt;`, so Copilot may copy entities into SEARCH text or code; Executor repairs this except in markup files.
+- Some tenants do not deliver the reply over Chathub. `Send-CopilotPromptUnlocked` also watches the page (`Get-PageReplyState`: Stop gone, new reply with a Copy button) and then reads the raw markdown from the page's React state (`Get-PageReplyText`: `response.text` / `legacyReplyMessage`); such replies carry `Source = 'page'` and no throttling/metering. The Copy button gives plain text only. `CCBRIDGE_TEST_IGNORE_HUB=1` forces this route for testing.
 - Raw frames of the last 30 replies are kept in `%LOCALAPPDATA%\CCBridge\replies` for replay with `Get-ReplyFromFrames`.
 
 ## Product rules

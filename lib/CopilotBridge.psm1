@@ -399,6 +399,44 @@ function Save-ReplyFrames($Frames) {
     } catch { }
 }
 
+function Get-UrlShape([string]$Url) {
+    <# Host and path of a URL without query, fragment or id-like segments, for the log. #>
+    try { $u = [Uri]$Url } catch { return '?' }
+    $path = ($u.AbsolutePath -split '/' | ForEach-Object { if ($_ -match '^[0-9a-fA-F-]{16,}$|^\d{5,}$|[^\w.-]|^.{41,}$') { '*' } else { $_ } }) -join '/'
+    "$($u.Scheme)://$($u.Host)$path"
+}
+
+function New-NetTrace { @{ Requests = (New-Object System.Collections.Generic.List[string]); Sockets = @{}; EventSource = 0 } }
+
+function Add-NetTrace($Trace, $Bridge, $M) {
+    <# Records what the page does on the network after a prompt is sent (method and address only). #>
+    switch ($M.method) {
+        'Network.requestWillBeSent' {
+            $u = "$($M.params.request.url)"
+            # Static files and telemetry say nothing about how the reply travels.
+            $noise = $M.params.type -match '^(Script|Stylesheet|Image|Font|Media|Manifest)$' -or
+                $u -match '(?i)\.(js|css|woff2?|png|svg|ico|jpe?g|gif|webp)(\?|$)|browser\.events\.data\.microsoft|/OneCollector/|/events(\?|$)|challenges\.cloudflare'
+            if (-not $noise -and $Trace.Requests.Count -lt 80 -and $u -match '^https?:') { $Trace.Requests.Add("$($M.params.request.method) $(Get-UrlShape $M.params.request.url)") }
+        }
+        'Network.webSocketCreated' { $Trace.Sockets[$M.params.requestId] = @{ url = (Get-UrlShape $M.params.url); text = 0; binary = 0; bytes = 0 } }
+        'Network.webSocketFrameReceived' {
+            $k = $M.params.requestId
+            if (-not $Trace.Sockets.ContainsKey($k)) { $Trace.Sockets[$k] = @{ url = $(if ($Bridge.HubSockets.ContainsKey($k)) { '(hub, opened earlier)' } else { '(opened earlier)' }); text = 0; binary = 0; bytes = 0 } }
+            $s = $Trace.Sockets[$k]
+            if ($M.params.response.opcode -eq 2) { $s.binary++ } else { $s.text++ }
+            $s.bytes += "$($M.params.response.payloadData)".Length
+        }
+        'Network.eventSourceMessageReceived' { $Trace.EventSource++ }
+    }
+}
+
+function Write-NetTrace($Trace, [string]$Why) {
+    if (-not (Test-CCBLog verbose)) { return }
+    $sockets = @($Trace.Sockets.Values | ForEach-Object { "$($_.url) text=$($_.text) binary=$($_.binary) bytes=$($_.bytes)" })
+    $requests = @($Trace.Requests | Group-Object | ForEach-Object { if ($_.Count -gt 1) { "$($_.Name) x$($_.Count)" } else { $_.Name } })
+    Write-CCBLog verbose bridge "Network after sending ($Why)" @{ requests = $requests; sockets = $sockets; eventSourceMessages = $Trace.EventSource }
+}
+
 function Send-CopilotPrompt {
     <#
     .SYNOPSIS Sends a prompt and returns the complete markdown reply.
@@ -429,8 +467,14 @@ function Send-CopilotPromptUnlocked {
     $sendWatch = [Diagnostics.Stopwatch]::StartNew()
     Write-CCBLog trace bridge 'Prompt text' @{ text = $Text }
 
+    # The page itself is watched too: if the reply does not arrive over the Chathub socket (other
+    # tenants may deliver it differently), it is read from the page once Copilot has finished.
+    $pageBefore = Get-PageReplyState $Bridge
     Set-CopilotInput $Bridge $Text
     Invoke-CopilotSend $Bridge
+    $net = New-NetTrace
+    $nextPageCheck = (Get-Date).AddSeconds(2)
+    $pageDoneSince = $null; $pageLastLen = -1; $sawStop = $false
 
     $hubPattern = [regex]::Escape($Bridge.Selectors.chatHubUrlPattern)
     $merger = New-ReplyMerger
@@ -454,6 +498,34 @@ function Send-CopilotPromptUnlocked {
                 ResultMessage = 'Stopped by the user'; SentMatches = $true; References = @(); ProposedActions = @(); ActionClaims = @() }
         }
         $m = Receive-CdpEvent $s 400
+        if ($m) { Add-NetTrace $net $Bridge $m }
+        if ($pageBefore -and (Get-Date) -gt $nextPageCheck) {
+            $nextPageCheck = (Get-Date).AddMilliseconds(1500)
+            $st = Get-PageReplyState $Bridge
+            if ($st) {
+                if ($st.stop) { $sawStop = $true; $lastActivity = Get-Date }
+                if ($st.lastLen -ne $pageLastLen) { if ($pageLastLen -ge 0) { $lastActivity = Get-Date }; $pageLastLen = $st.lastLen; $pageDoneSince = $null }
+                $finished = -not $st.stop -and $st.replies -gt $pageBefore.replies -and $st.copies -gt $pageBefore.copies -and $st.lastLen -gt 0 -and
+                    ($sawStop -or $sendWatch.Elapsed.TotalSeconds -ge 6)
+                if (-not $finished) { $pageDoneSince = $null }
+                elseif (-not $pageDoneSince) { $pageDoneSince = Get-Date }
+                elseif (((Get-Date) - $pageDoneSince).TotalSeconds -ge 2.5) {
+                    # Finished on the page and stable, and no completion came over the socket.
+                    $pt = Get-PageReplyText $Bridge
+                    $ptext = "$($pt.text)"
+                    if ($ptext.Trim() -and ($ptext -replace '\s', '') -ne ($Text -replace '\s', '')) {
+                        Write-CCBLog info bridge "Reply read from the page ($($pt.how)); no completion arrived over the Chathub socket" @{ chars = $ptext.Length; hubChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; ms = $sendWatch.ElapsedMilliseconds }
+                        Write-NetTrace $net 'reply read from the page'
+                        if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
+                        return [pscustomobject]@{ Cancelled = $false; Text = $ptext; ServerText = $ptext; Uncertain = $(if ($pt.how -eq 'state') { 0 } else { 1 })
+                            SentText = $Text; SentMatches = $true; Result = 'Success'; ResultMessage = "read from the page ($($pt.how))"
+                            ConversationId = $null; Throttling = $null; Metering = $null; References = @(); ProposedActions = @()
+                            ActionClaims = @(Get-ActionClaims $ptext); Source = 'page' }
+                    }
+                    $pageDoneSince = $null
+                }
+            }
+        }
         $quiet = ((Get-Date) - $lastActivity).TotalSeconds
         if ((Get-Date) -gt $nextStallCheck -and $quiet -ge 30) {
             $nextStallCheck = (Get-Date).AddSeconds(10)
@@ -462,6 +534,7 @@ function Send-CopilotPromptUnlocked {
             if ($hangs) { Stop-CopilotReply $Bridge -DrainSec 5 }
             if ($gaveUp -or $hangs) {
                 Write-CCBLog info bridge "Copilot stopped without answering ($(if ($hangs) { "no data for $([int]$quiet) s" } else { 'page shows Regenerate' }))" @{ partialChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; sent = @($sentTargets | Select-Object -Unique) }
+                Write-NetTrace $net 'no answer'
                 if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
                 return [pscustomobject]@{ Cancelled = $false; Text = $merger.Text; ServerText = $null; Uncertain = $merger.Uncertain; Result = 'NoAnswer'
                     ResultMessage = "Copilot stopped without answering$(if ($hangs) { " (no data for $([int]$quiet) seconds)" }). Usually it could not reach a source it needed (for example email or calendar), or the request was blocked."
@@ -488,6 +561,7 @@ function Send-CopilotPromptUnlocked {
             continue
         }
         if ($m.method -ne 'Network.webSocketFrameReceived') { continue }
+        if ($env:CCBRIDGE_TEST_IGNORE_HUB -eq '1') { continue }   # test switch: rely on the page only
         # Frames from a socket opened before Network.enable have no webSocketCreated; accept them
         # when they look like Chathub traffic.
         $payload = $m.params.response.payloadData
@@ -514,6 +588,7 @@ function Send-CopilotPromptUnlocked {
                 if ($Bridge.SaveFrames) { Save-ReplyFrames $frames }
                 $reply = Complete-Reply $merger $item $Text
                 Write-ReplyLog $reply $item $frames $sendWatch.ElapsedMilliseconds
+                Write-NetTrace $net 'reply over the Chathub socket'
                 return $reply
             }
         }
@@ -523,9 +598,76 @@ function Send-CopilotPromptUnlocked {
         }
     }
     Write-CCBLog info bridge "No complete reply within $TimeoutSec s" @{ partialChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; sent = @($sentTargets | Select-Object -Unique) }
+    Write-NetTrace $net 'timeout'
     if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
     Stop-CopilotReply $Bridge
     throw "No complete reply within $TimeoutSec s (partial: $($merger.Text.Length) chars)"
+}
+
+function Get-SelectorOrDefault($Bridge, [string]$Name, [string]$Default) {
+    if ($Bridge.Selectors.PSObject.Properties[$Name] -and $Bridge.Selectors.$Name) { $Bridge.Selectors.$Name } else { $Default }
+}
+
+function Get-PageReplyState {
+    <# What the page shows: number of finished replies (with a copy button), whether Copilot is still
+       answering (Stop visible), and the length of the last reply text. Used when the answer does not
+       arrive over the Chathub socket (other tenants may deliver replies differently). #>
+    param([Parameter(Mandatory)]$Bridge)
+    $reply = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'replyContainer' "[data-testid='copilot-message-reply-div']")
+    $copy = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'copyReplyButton' "button[aria-label='Copy Response' i]")
+    $stop = ConvertTo-JsString $Bridge.Selectors.stopButton
+    $js = @"
+(() => {
+  const vis = e => e && e.offsetParent !== null;
+  const replies = [...document.querySelectorAll($reply)];
+  const last = replies[replies.length - 1];
+  return JSON.stringify({
+    replies: replies.length,
+    copies: [...document.querySelectorAll($copy)].filter(vis).length,
+    stop: [...document.querySelectorAll($stop)].some(vis),
+    lastLen: last ? (last.innerText || '').length : 0
+  });
+})()
+"@
+    try { Invoke-CdpEval $Bridge.Session $js | ConvertFrom-Json } catch { if ($Bridge.Session.Lost) { throw }; $null }
+}
+
+function Get-PageReplyText {
+    <# Text of the last reply from the page. First the raw markdown the page keeps in its React state
+       (exact, code intact); otherwise the reply's visible text (formatting lost, marked uncertain). #>
+    param([Parameter(Mandatory)]$Bridge)
+    $reply = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'replyContainer' "[data-testid='copilot-message-reply-div']")
+    $js = @"
+(() => {
+  const replies = [...document.querySelectorAll($reply)];
+  const last = replies[replies.length - 1];
+  if (!last) return JSON.stringify({ how: 'none', text: '' });
+  const pick = (p) => {
+    if (!p || typeof p !== 'object') return null;
+    const r = p.response;
+    if (r && typeof r === 'object' && typeof r.text === 'string' && r.text) return r.text;
+    if (typeof p.legacyReplyMessage === 'string' && p.legacyReplyMessage) return p.legacyReplyMessage;
+    if (Array.isArray(p.responses) && p.responses.length) {
+      const t = p.responses[p.responses.length - 1];
+      if (t && typeof t.text === 'string' && t.text) return t.text;
+    }
+    return null;
+  };
+  let e = last.querySelector('[data-testid="markdown-reply"]') || last;
+  for (let i = 0; i < 8 && e; i++, e = e.parentElement) {
+    const fk = Object.keys(e).find(k => k.startsWith('__reactFiber$'));
+    if (!fk) continue;
+    let f = e[fk];
+    for (let j = 0; j < 30 && f; j++, f = f.return) {
+      let t = null; try { t = pick(f.memoizedProps); } catch (x) { }
+      if (t) return JSON.stringify({ how: 'state', text: t });
+    }
+  }
+  const md = last.querySelector('[data-testid="markdown-reply"]') || last;
+  return JSON.stringify({ how: 'page', text: md.innerText || '' });
+})()
+"@
+    Invoke-CdpEval $Bridge.Session $js | ConvertFrom-Json
 }
 
 function Test-CopilotGaveUp {

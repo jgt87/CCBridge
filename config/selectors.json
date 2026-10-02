@@ -10,5 +10,7 @@
     "onValue": "true",
     "note": "Fill in from capture-report.json (capture.cmd on a Microsoft 365 Copilot licence). Empty toggle = Work IQ control unavailable."
   },
-  "regenerateButton": "button[aria-label*='Regenerate' i]"
+  "regenerateButton": "button[aria-label*='Regenerate' i]",
+  "replyContainer": "[data-testid='copilot-message-reply-div']",
+  "copyReplyButton": "[data-testid='CopyButtonTestId'], button[aria-label='Copy Response' i], button[aria-label='Copy' i]"
 }

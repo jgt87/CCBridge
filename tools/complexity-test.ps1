@@ -99,6 +99,7 @@ try {
             $res.actions = @(Get-ActionBlocks "$($r.Text)" | ForEach-Object { $_.type })
             $res.references = @($r.References).Count
             $res.proposedActions = @($r.ProposedActions).Count
+            $res.source = $(if ($r.Source) { $r.Source } else { 'socket' })
             $res.chat = "$($r.Throttling.numUserMessagesInConversation)/$($r.Throttling.maxNumUserMessagesInConversation)"
             if ($r.Metering) { $res.creditsLeft = $r.Metering.remainingAllowance }
             # Refusals show up in the first words; never kept for Microsoft 365 steps.

@@ -283,6 +283,9 @@ Per step the report records the result (`Success`, `NoAnswer`, `OutOfCredits`, `
 
 ## Troubleshooting
 
+**Copilot answers in the browser but CCBridge keeps waiting.** CCBridge normally reads replies from the page's Chathub connection. If a tenant delivers them differently, CCBridge notices on the page itself that Copilot has finished (Stop gone, a new reply with its Copy button) and reads the reply's markdown from the page; the log then says "Reply read from the page". With verbose logging, the line "Network after sending" lists which addresses the page used (no content), which shows how replies travel on that tenant.
+
+
 | Symptom | What to do |
 |---|---|
 | `start.cmd` says the port is used by another program | Start with `start.cmd -Port 8766` |
