@@ -15,7 +15,7 @@
 
 import { ArrowRight, AtSign, Check, ChevronDown, Square } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -50,6 +50,8 @@ interface AIPromptProps {
   headerRight?: React.ReactNode;
   className?: string;
   focusKey?: number;
+  /** Earlier messages, oldest first: Arrow Up / Down in the box steps through them. */
+  history?: string[];
 }
 
 export default function AI_Prompt({
@@ -68,6 +70,7 @@ export default function AI_Prompt({
   headerRight,
   className,
   focusKey,
+  history = [],
 }: AIPromptProps) {
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({
     minHeight: 72,
@@ -90,10 +93,41 @@ export default function AI_Prompt({
     adjustHeight(true);
   };
 
+  // CCBridge: message history like a terminal. -1 = the text being typed (kept in `draftRef`);
+  // 0 = the newest earlier message, 1 = the one before, and so on.
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const draftRef = useRef("");
+  const recall = (index: number) => {
+    setHistoryIndex(index);
+    const text = index < 0 ? draftRef.current : history[history.length - 1 - index];
+    onValueChange(text);
+    // Cursor to the end, after React has put the text in the box.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) el.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      setHistoryIndex(-1);
       submit();
+      return;
+    }
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && history.length) {
+      const el = e.currentTarget;
+      const before = el.value.slice(0, el.selectionStart);
+      const after = el.value.slice(el.selectionEnd);
+      // Only on the first line (Up) or the last line (Down): elsewhere the arrows move the cursor.
+      if (e.key === "ArrowUp" && !before.includes("\n") && historyIndex < history.length - 1) {
+        e.preventDefault();
+        if (historyIndex < 0) draftRef.current = el.value;
+        recall(historyIndex + 1);
+      } else if (e.key === "ArrowDown" && !after.includes("\n") && historyIndex >= 0) {
+        e.preventDefault();
+        recall(historyIndex - 1);
+      }
     }
   };
 
@@ -118,7 +152,10 @@ export default function AI_Prompt({
                 )}
                 disabled={disabled}
                 id="ccb-prompt"
-                onChange={(e) => onValueChange(e.target.value)}
+                onChange={(e) => {
+            setHistoryIndex(-1);
+            onValueChange(e.target.value);
+          }}
                 onKeyDown={handleKeyDown}
                 placeholder={placeholder}
                 ref={textareaRef}

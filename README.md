@@ -101,7 +101,7 @@ The same bridge and agent loop for MCP clients (Claude Code, VS Code, ...), in a
 ## Using the web app
 
 1. **Projects**: on first start choose or create a project. Projects are folders in `OneDrive\CCBridge`; CCBridge reopens the last one next time. Switch with *Switch worktree* in the header or in Menu.
-2. **Ask**: type in the chat box and press Enter. Add files with `@path`, or only some lines with `@path:120-180`. Pick the mode in the chat box. All reading happens locally in PowerShell; Copilot gets the contents in the prompt. It reads parts of large files itself (`read index.html:181-420`, usually after a `grep` that returns `PATH:LINE` hits), and a file that does not fit is cut at a whole line with a note on how to read the rest.
+2. **Ask**: type in the chat box and press Enter. Add files with `@path`, or only some lines with `@path:120-180`. Pick the mode in the chat box. Arrow Up in the box brings back your previous messages (Arrow Down goes forward again, back to what you were typing). All reading happens locally in PowerShell; Copilot gets the contents in the prompt. It reads parts of large files itself (`read index.html:181-420`, usually after a `grep` that returns `PATH:LINE` hits), and a file that does not fit is cut at a whole line with a note on how to read the rest.
 3. **Watch and approve**: while Copilot works you see its text, its actions as cards and its checklist under *Tasks*. Approve or reject changes; hold to run commands.
 4. **Review**: the *Changes* tab lists change sets; *Undo last change set* reverts the newest one. Click any file to view it.
 5. **Source data**: drop files on *Add source data* (Files tab). They are read-only for Copilot; ask it to produce outputs from them (it writes to other folders).

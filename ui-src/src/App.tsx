@@ -157,6 +157,15 @@ export default function App() {
     return idx >= 0 ? projectEvents.slice(idx) : projectEvents;
   }, [projectEvents]);
   const transcript = useMemo(() => buildTranscript(chatEvents), [chatEvents]);
+  // The user's own messages in this project, oldest first, consecutive repeats once (Arrow Up history).
+  const promptHistory = useMemo(() => {
+    const out: string[] = [];
+    for (const e of projectEvents) {
+      const t = e.type === "user" ? (e.text ?? "").trim() : "";
+      if (t && out[out.length - 1] !== t) out.push(t);
+    }
+    return out;
+  }, [projectEvents]);
 
   const startNewChat = () => {
     setNewChatPending(true);
@@ -409,6 +418,7 @@ export default function App() {
                   busy={state.busy}
                   disabled={!state.project}
                   focusKey={focusKey}
+                  history={promptHistory}
                   headerLeft={
                     <span className="truncate">
                       {state.project?.name} · {MODES.find((m) => m.id === state.mode)?.description}
