@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -17,6 +17,7 @@ function New-AgentState {
         # Headless (MCP): no person approves; 'auto' mode applies changes, commands only when AllowCommands.
         Headless = $false; AllowCommands = $false; Jobs = [hashtable]::Synchronized(@{})
         LogLevel = $null   # set by the front end; the worker applies changes on the fly
+        ChatKind = $null   # role Copilot has in the current chat: coding, assistant, mixed or general
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
         WorkIq = $(if ($Config.workIq) { [string]$Config.workIq } else { 'leave' }); WorkIqActual = $null; WorkIqWarned = $false
     })
@@ -112,7 +113,8 @@ function Send-ToCopilot {
     $progress = { param($t) $State.Progress = $t }.GetNewClosure()
     $cancel = { [bool]$State.Cancel }.GetNewClosure()
     try {
-        $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $State.Config.replyTimeoutSec -OnProgress $progress -CancelCheck $cancel
+        $stall = if ($State.Config.PSObject.Properties['stallSec']) { [int]$State.Config.stallSec } else { 90 }
+        $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $State.Config.replyTimeoutSec -OnProgress $progress -CancelCheck $cancel -StallSec $stall
     } catch {
         Reset-Bridge $State   # the next send reconnects
         throw
@@ -131,6 +133,7 @@ function Send-ToCopilot {
 function Start-NewChat($State) {
     New-CopilotChat (Get-Bridge $State)
     $State.ChatStarted = $false
+    $State.ChatKind = $null
     $State.NeedNewChat = $false
     $State.Throttle = @{ used = 0; max = $State.Throttle.max }
 }
@@ -146,11 +149,12 @@ function Get-PinnedFiles {
 }
 
 function Get-FirstMessage {
-    param($State, [string]$Task)
+    param($State, [string]$Task, [string]$Kind)
     $root = $State.ProjectRoot
-    $system = [IO.File]::ReadAllText((Join-Path $State.AppRoot 'prompts\system.md'))
+    if (-not $Kind) { $Kind = if ($State.ChatKind) { $State.ChatKind } else { Get-TaskKind $Task } }
+    $State.ChatKind = $Kind
     $sb = New-Object Text.StringBuilder
-    [void]$sb.AppendLine($system.Trim()).AppendLine()
+    [void]$sb.AppendLine((Get-Instructions $State.AppRoot $Kind)).AppendLine()
     [void]$sb.AppendLine("# Project: $(Split-Path $root -Leaf)").AppendLine()
     $memo = Join-Path $root 'AGENTS.md'
     if (Test-Path $memo) { [void]$sb.AppendLine('## Project notes (AGENTS.md)').AppendLine(([IO.File]::ReadAllText($memo)).Trim()).AppendLine() }
@@ -163,7 +167,7 @@ function Get-FirstMessage {
 
 function Limit-Text([string]$Text, [int]$Max) {
     if ($Text.Length -le $Max) { return $Text }
-    $Text.Substring(0, $Max) + "`n(truncated by CCBridge: $($Text.Length - $Max) more characters)"
+    $Text.Substring(0, $Max) + "`n(truncated: $($Text.Length - $Max) more characters)"
 }
 
 function Invoke-RolloverIfNeeded($State) {
@@ -173,7 +177,9 @@ function Invoke-RolloverIfNeeded($State) {
     Add-AgentEvent $State 'status' @{ text = "This Copilot chat is nearly full ($($t.used)/$($t.max) messages). Summarizing and continuing in a new chat." }
     $r = Send-ToCopilot $State 'Summarize this conversation so it can continue in a fresh chat: the task, decisions made, files created or changed, the current state and the next steps. At most 2500 characters. Do not use action blocks.'
     $State.Summary = Limit-Text $r.Text 4000
+    $kind = $State.ChatKind
     Start-NewChat $State
+    $State.ChatKind = $kind   # the new chat continues the same kind of task
 }
 
 # --- Actions -------------------------------------------------------------------------
@@ -282,7 +288,7 @@ function Invoke-AgentAction {
 
     if ($mode -eq 'plan') {
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; preview = $preview })
-        return @{ ok = $false; summary = "$($Action.type) skipped (plan mode)"; output = 'not executed: CCBridge is in plan mode (read-only). Describe the plan instead of changing files or running commands.' }
+        return @{ ok = $false; summary = "$($Action.type) skipped (plan mode)"; output = 'not executed: plan mode is on (read-only). Describe the plan instead of changing files or running commands.' }
     }
 
     if ($needsApproval) {
@@ -315,7 +321,7 @@ function Invoke-AgentAction {
                 $fixed = @(Restore-SourceData $root)
                 if ($fixed.Count) {
                     Add-AgentEvent $State 'status' @{ text = "Source data is read-only; CCBridge undid what the command did to it: " + ($fixed -join '; ') }
-                    $out += "`nCCBridge: source/ is the user's read-only source data. This command changed it, so CCBridge " + ($fixed -join '; ') + '. Work on copies outside source/.'
+                    $out += "`nNote: source/ is the user's read-only source data. This command changed it, so it was put back: " + ($fixed -join '; ') + '. Work on copies outside source/.'
                 }
                 return @{ ok = (-not $r.timedOut -and -not $r.cancelled -and $r.exitCode -eq 0); summary = "ran: $status"; output = $out }
             }
@@ -340,7 +346,19 @@ function Invoke-AgentTurn {
     try {
         if (Test-OtherSender) { $State.NeedNewChat = $true }
         if ($State.NeedNewChat) { Start-NewChat $State }
-        $message = if ($State.ChatStarted) { $Text } else { Get-FirstMessage $State $Text }
+        # Copilot's role follows the kind of task; a different kind later in the chat gets a role switch.
+        $kind = Get-TaskKind $Text
+        if ($State.ChatStarted) {
+            $message = $Text
+            if ($kind -ne 'general' -and $kind -ne $State.ChatKind) {
+                Write-CCBLog verbose agent "Role switch: $($State.ChatKind) -> $kind"
+                $message = (Get-RoleSwitch $State.AppRoot $kind) + $Text
+                $State.ChatKind = $kind
+            }
+        } else {
+            $message = Get-FirstMessage $State $Text $kind
+        }
+        Write-CCBLog info agent "Task kind: $kind (role: $($State.ChatKind))"
         $message += Get-PinnedFiles $State.ProjectRoot $Text
 
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
@@ -359,6 +377,10 @@ function Invoke-AgentTurn {
             Write-CCBLog verbose agent "Round ${round}: reply parsed" @{ actions = @($actions | ForEach-Object { "$($_.type) $($_.arg)".Trim() }) }
             Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @($r.References) }
             if ($r.Result -and $r.Result -ne 'Success') { Add-AgentEvent $State 'error' @{ text = "Copilot answered with '$($r.Result)': $($r.ResultMessage)" }; break }
+            if (-not "$($r.Text)".Trim()) {
+                Add-AgentEvent $State 'error' @{ text = 'Copilot finished without a reply. Check the Copilot window in Edge; if it shows an answer there, turn on verbose logging, try again and export diagnostics.' }
+                break
+            }
             if (@($r.ProposedActions).Count) {
                 $what = (@($r.ProposedActions) | ForEach-Object { $_.title } | Where-Object { $_ } | Select-Object -Unique) -join '; '
                 Add-AgentEvent $State 'human-required' @{ text = "Copilot proposed an action in Microsoft 365 ($what). CCBridge never confirms Microsoft 365 actions. Look at it in the Copilot window in Edge and confirm or cancel it yourself; the task has stopped here." }
@@ -385,7 +407,7 @@ function Invoke-AgentTurn {
             if ($round -eq $State.Config.maxRounds) { Add-AgentEvent $State 'status' @{ text = "Stopped after $($State.Config.maxRounds) rounds. Send a message to continue." }; break }
 
             $perResult = [Math]::Max(1500, [int]($State.Config.resultCharBudget / [Math]::Max(1, $results.Count)))
-            $message = "CCBridge results:`n`n" + (($results | ForEach-Object { Limit-Text $_ $perResult }) -join "`n`n") + "`n`nContinue. Use done when the task is finished."
+            $message = "Results:`n`n" + (($results | ForEach-Object { Limit-Text $_ $perResult }) -join "`n`n") + "`n`nContinue. Use done when the task is finished."
         }
     } catch {
         Write-CCBLogError agent 'turn failed' $_
@@ -433,6 +455,7 @@ function Start-AgentWorker {
                     $job.reply = $r.Text; $job.result = $r.Result; $job.resultMessage = $r.ResultMessage; $job.uncertain = $r.Uncertain; $job.references = @($r.References)
                     $job.proposedActions = @($r.ProposedActions); $job.actionClaims = @($r.ActionClaims)
                     if ($r.Result -and $r.Result -ne 'Success') { $job.status = 'error'; $job.error = "Copilot answered with '$($r.Result)': $($r.ResultMessage)" }
+                    elseif (-not $r.Cancelled -and -not "$($r.Text)".Trim()) { $job.status = 'error'; $job.error = 'Copilot finished without a reply' }
                 }
                 'newchat' {
                     Start-NewChat $State

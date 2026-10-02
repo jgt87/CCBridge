@@ -303,7 +303,7 @@ function Invoke-RunAction {
     $lines = @($Command.Replace("`r`n", "`n").Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $batch = $null
     if ($lines.Count -gt 1) {
-        $batch = Join-Path $env:TEMP ('ccbridge-run-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.cmd')
+        $batch = Join-Path $env:TEMP ('run-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.cmd')
         $body = New-Object Text.StringBuilder
         [void]$body.AppendLine('@echo off')
         foreach ($l in $lines) {

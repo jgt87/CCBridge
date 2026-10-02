@@ -18,7 +18,7 @@ Target machines have only what ships with Windows: **Windows PowerShell 5.1 + Ed
 | `lib/Agent.psm1` | Agent loop + worker runspace; talks to front ends via a synchronized `$State` |
 | `lib/Server.psm1` | HTTP server + JSON API for the web UI (token in `%LOCALAPPDATA%\CCBridge\session-token.txt`) |
 | `mcp/ccbridge-mcp.ps1` | MCP stdio server reusing `Agent.psm1` with `$State.Headless` |
-| `prompts/system.md` | The action-block contract sent to Copilot at the start of each chat |
+| `prompts/` | Instructions sent to Copilot at the start of each chat, assembled by `lib/Prompts.psm1`: a role from `roles/` (coding, assistant, general) chosen by `Get-TaskKind`, then `actions.md`, `m365-data.md` (assistant/mixed tasks), `human-in-the-loop.md` (always) and `rules.md` |
 | `config/` | `harness.json` (ports, budgets), `selectors.json` (Copilot page selectors) |
 | `ui-src/` | React + Vite + Tailwind + Kokonut UI source; builds into `ui/` (committed) |
 | `tests/` | Pester 3.4 tests; `tests/fixtures` = recorded Copilot traffic |
@@ -69,6 +69,8 @@ The running web server holds `lib/*.psm1` in memory: restart it after backend ch
 - **Human in the loop for Microsoft 365 (non-negotiable)**: CCBridge never confirms a Microsoft 365 action (sending/forwarding mail, creating/changing/cancelling meetings, posting in Teams, sharing or deleting data). The bridge only ever clicks the composer's Send button. Proposed actions (`Get-ProposedActions`) stop the turn with a `human-required` event; risky commands (`Get-CommandRisk`: Microsoft 365 access or deletion) always need a person in the web app and are refused when `$State.Headless` (MCP). Do not add an auto-approve path around this.
 - **Work IQ**: the toggle selector lives in `config\selectors.local.json` (from `capture.cmd`); `harness.json` `workIq` = on/off/leave. Saved reply frames may contain Microsoft 365 data: they stay in `%LOCALAPPDATA%` and must never become test fixtures without scrubbing (`"saveReplyFrames": false` turns them off).
 - **User source data is read-only**: files in a project's `source/` must never be edited, moved or deleted. Write working copies elsewhere (`work/`, `output/`). The executor refuses writes there and restores `source/` after every command.
+- Copilot's role follows the kind of task (`Get-TaskKind`): coding -> expert developer, email/calendar/meetings/chats without coding -> personal assistant, both -> developer with Microsoft 365 data, otherwise general assistant. A different kind later in a chat gets a role switch. The human-in-the-loop section is part of every role.
+- Text sent to Copilot (prompts/, results, notes, the AGENTS.md template) never mentions the name CCBridge; refer to "the helper program" instead. The UI, logs and docs may use the name.
 - Project instruction files are named `AGENTS.md` (sent to Copilot at the start of each chat).
 - UI: monochrome white/grey, flat buttons, no blue/green accents; side panel on the left. Kokonut components are adapted in place in `ui-src/src/components/kokonutui`.
 - Every agent turn is one checkpoint (backups under `%LOCALAPPDATA%\CCBridge\projects\...`, never in OneDrive).

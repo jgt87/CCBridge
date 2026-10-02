@@ -39,7 +39,7 @@ function New-CCBridgeProject {
     $path = Join-Path (Get-ProjectsRoot $FolderName) $Name.Trim()
     if (Test-Path $path) { throw "A project named '$Name' already exists" }
     $null = New-Item -ItemType Directory -Path $path
-    $memo = "# $Name`n`nInstructions for coding agents (CCBridge and others). CCBridge sends this file to Copilot at the start of each chat.`nDescribe the goal, tech stack, build/run commands and conventions here.`n"
+    $memo = "# $Name`n`nInstructions for coding assistants. This file is sent to the assistant at the start of each chat.`nDescribe the goal, tech stack, build/run commands and conventions here.`n"
     [IO.File]::WriteAllText((Join-Path $path 'AGENTS.md'), $memo, (New-Object Text.UTF8Encoding($false)))
     $path
 }

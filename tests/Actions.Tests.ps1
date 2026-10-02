@@ -194,7 +194,7 @@ Describe 'Executor' {
         $r.output | Should Match 'same-line'
         $r.output | Should Not Match '(?m)^never'
         $r.exitCode | Should Be 4
-        @(Get-ChildItem $env:TEMP -Filter 'ccbridge-run-*.cmd' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-1) }).Count | Should Be 0
+        @(Get-ChildItem $env:TEMP -Filter 'run-*.cmd' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-1) }).Count | Should Be 0
     }
 
     It 'stops a running command at once when cancelled, including its child processes' {
