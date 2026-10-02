@@ -104,6 +104,10 @@ export function ScheduleForm({
     setNewTime("");
   };
 
+  // A time typed in the field counts too, also without pressing "+ Time".
+  const pendingTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(newTime) ? newTime : "";
+  const allTimes = pendingTime && !times.includes(pendingTime) ? [...times, pendingTime].sort() : times;
+
   const save = async () => {
     setSaving(true);
     setError("");
@@ -113,7 +117,7 @@ export function ScheduleForm({
       text: kind === "chat" ? text : undefined,
       name: kind === "chat" ? undefined : rest.join(":"),
       title: title.trim() || undefined,
-      ...(mode === "once" ? { repeat: "once", at } : { repeat: repeatFor(days), days, times }),
+      ...(mode === "once" ? { repeat: "once", at } : { repeat: repeatFor(days), days, times: allTimes }),
     };
     try {
       await onSave(spec);
@@ -124,9 +128,16 @@ export function ScheduleForm({
     }
   };
 
-  const valid =
-    (target === "chat" ? text.trim().length > 0 : target.split(":")[1]?.length > 0) &&
-    (mode === "once" ? Boolean(at) : days.length > 0 && times.length > 0);
+  // What is still missing; shown next to the button instead of only greying it out.
+  const missing: string[] = [];
+  if (target === "chat" ? !text.trim() : !target.split(":")[1]) missing.push(target === "chat" ? "write the message" : "pick what runs");
+  if (mode === "once") {
+    if (!at) missing.push("pick the date and time");
+  } else {
+    if (!days.length) missing.push("pick at least one day");
+    if (!allTimes.length) missing.push("add a time");
+  }
+  const valid = missing.length === 0;
 
   return (
     <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
@@ -266,11 +277,12 @@ export function ScheduleForm({
       <input className={field} onChange={(e) => setTitle(e.target.value)} placeholder="Name (optional)" value={title} />
       <p className="text-muted-foreground text-xs">Runs in this project while StreamHub is open; a run missed while it was closed runs once at the next start.</p>
       {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
-      <div className="flex justify-end gap-1">
+      <div className="flex items-center justify-end gap-1">
+        {!valid && <span className="mr-auto text-muted-foreground text-xs">To schedule it: {missing.join(", ")}.</span>}
         <button className={flatButton} onClick={onCancel} type="button">
           Cancel
         </button>
-        <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={saving || !valid} onClick={save} type="button">
+        <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={saving || !valid} onClick={save} title={valid ? undefined : `Still needed: ${missing.join(", ")}`} type="button">
           {saving ? "Saving..." : "Schedule"}
         </button>
       </div>
