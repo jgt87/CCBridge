@@ -218,16 +218,35 @@ function Get-TurnKind {
     $kind
 }
 
+# Phrases of a reply that tells the user how to do the task by hand, or asks for the files
+# (English and Dutch). CCBridge has no language model: this is a fixed list, kept in tests.
+$script:ManualPhrases = '(?i)\b(open (the|your) file|in your (editor|file)|replace (it|this|the following|that) with|add the following|copy (this|the)|paste (this|it|the)|you (can|could|should|need to|will need to)|you''ll need|save the file|upload (the|your)|provide (the|me|your)|share (the|your) (file|code)|i (can''t|cannot|can not|don''t have) (access|see|read|open|make)|i do not have access|once you (provide|share|upload|paste)|open het bestand|vervang|plak|kopieer|je kunt|upload)\b'
+
 function Test-NeedsActionNudge {
-    <# True when a project or coding task got an explanation (steps or code) instead of action blocks,
-       in a chat that has the action instructions, outside plan mode, and not asked before this turn. #>
-    param($State, [string]$Kind, [string]$Text, [bool]$AlreadyNudged)
-    if ($AlreadyNudged -or $State.Mode -eq 'plan') { return $false }
+    <# True when a work task (coding / project / mixed) got instructions for doing it by hand instead
+       of action blocks: code, a list of steps, or phrases such as "open the file", "replace ... with",
+       "you can", "upload the files" or "I can't access". Not in plan mode, and at most $Max times per
+       message. #>
+    param($State, [string]$Kind, [string]$Text, [int]$Attempts = 0, [int]$Max = 2)
+    if ($Attempts -ge $Max -or $State.Mode -eq 'plan') { return $false }
     if ($Kind -notin 'coding', 'project', 'mixed') { return $false }
-    if (-not $State.SentParts.Contains('actions')) { return $false }
     $hasCode = $Text -match '(?m)^\s{0,3}(`{3,}|~{3,})'
     $hasSteps = ([regex]::Matches($Text, '(?m)^\s{0,3}(\d+[.)]|[-*])\s+\S')).Count -ge 2
-    $hasCode -or $hasSteps
+    $hasManual = $Text -match $script:ManualPhrases
+    $hasCode -or $hasSteps -or $hasManual
+}
+
+function New-ActionRetryMessage {
+    <# The task again with the instructions enforced: the full action instructions and rules, a note
+       that nothing was changed and the task must be carried out, then the original request. #>
+    param($State, [string]$Task)
+    $parts = @(
+        (Get-PromptPart $State.AppRoot 'actions'),
+        (Get-PromptPart $State.AppRoot 'rules'),
+        (Get-PromptPart $State.AppRoot 'retry')
+    )
+    foreach ($p in 'actions', 'rules') { [void]$State.SentParts.Add($p) }
+    ($parts -join "`n`n") + "`n`nTask: $Task"
 }
 
 function Start-NewChat($State) {
@@ -503,7 +522,7 @@ function Invoke-AgentTurn {
         $State.LastTurnActed = $null
         $message += Get-PinnedFiles $State.ProjectRoot $Text
 
-        $nudged = $false
+        $nudges = 0   # times this message was sent again because Copilot explained instead of acting
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
             Invoke-RolloverIfNeeded $State
@@ -545,13 +564,18 @@ function Invoke-AgentTurn {
             if (-not $actions.Count) {
                 if ($State.LastTurnActed -ne $true) { $State.LastTurnActed = $false }
                 $effectiveKind = if ($kind -eq 'chat' -and $State.ChatKind) { $State.ChatKind } else { $kind }
-                if (Test-NeedsActionNudge $State $effectiveKind $r.Text $nudged) {
-                    # Copilot explained the change instead of making it: ask once to do it itself.
-                    $nudged = $true
-                    Write-CCBLog info agent 'Reply described the change without action blocks; asking Copilot to make it'
-                    Add-AgentEvent $State 'status' @{ text = 'Copilot described the change instead of making it; asking it to make the change itself.' }
-                    $message = 'Please make these changes yourself instead of describing them. You do not need me to provide files: the helper program carries out your action blocks and sends you the results. Reply with read blocks for the files you need now; after that use edit or write blocks for the changes, and a done block when the task is finished.'
+                $maxRetries = if ($null -ne $State.Config.actionRetries) { [int]$State.Config.actionRetries } else { 2 }
+                if (Test-NeedsActionNudge $State $effectiveKind $r.Text $nudges $maxRetries) {
+                    # Copilot told how to do the task instead of doing it: send the same task again,
+                    # with the action instructions in full and a note that it must carry it out.
+                    $nudges++
+                    Write-CCBLog info agent "Reply gave instructions instead of actions; sending the task again with the instructions enforced (attempt $nudges of $maxRetries)"
+                    Add-AgentEvent $State 'status' @{ text = "Copilot explained how to do it instead of doing it. Sending the task again with the instructions for changing files (attempt $nudges of $maxRetries)." }
+                    $message = New-ActionRetryMessage $State $Text
                     continue
+                }
+                if ($nudges -ge $maxRetries -and $effectiveKind -in 'coding', 'project', 'mixed' -and $State.Mode -ne 'plan') {
+                    Add-AgentEvent $State 'status' @{ text = "Copilot still explained instead of changing the files after $nudges attempts, so CCBridge stopped asking. Try a New chat, or phrase the request as a direct instruction (for example: ""Edit index.html so that ..."")." }
                 }
                 break
             }

@@ -54,7 +54,7 @@ Describe 'New-PromptMessage' {
         $second = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Create hello.ps1' -Sent $sent -Context $ctx
         $second | Should Match 'expert software developer'
         $third = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Now add a test' -Sent $sent -Context $ctx
-        $third | Should Match '^Now add a test\n\n\(How to answer: you work on the user''s project through the helper program'
+        $third | Should Match '^Now add a test\n\n\(How to answer: you cannot open or change the files, but the helper program applies the action blocks you write'
         $third | Should Match '````edit PATH````'
         $third | Should Not Match 'expert software developer'
         New-PromptMessage -AppRoot $root -Kind 'chat' -Text 'thanks' -Sent $sent -Context $ctx | Should BeExactly 'thanks'
@@ -86,22 +86,36 @@ Describe 'Project notes (AGENTS.md)' {
 
 Describe 'Test-NeedsActionNudge' {
     $m = Get-Module Agent
-    function St([string]$Mode = 'ask', [string[]]$Parts = @('actions')) {
-        $set = New-Object 'System.Collections.Generic.HashSet[string]'; foreach ($p in $Parts) { [void]$set.Add($p) }
-        @{ Mode = $Mode; SentParts = $set }
-    }
+    $st = @{ Mode = 'ask' }
     $steps = "To move the CSS:`n1. Create style.css`n2. Cut the style block`n3. Add a link tag"
     $code = "Put this in style.css:`n``````css`nbody { margin: 0; }`n```````n"
-    It 'asks once when a coding task got steps or code instead of actions' {
-        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St) $steps) | Should Be $true
-        (& $m { param($s, $t) Test-NeedsActionNudge $s 'project' $t $false } (St) $code) | Should Be $true
-        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $true } (St) $steps) | Should Be $false
+    It 'spots instructions for doing it by hand' {
+        foreach ($t in @($steps, $code, 'You can open the file and replace the style tag with a link.', 'I can''t access your project files. Once you provide them I will edit them.', 'Please upload the files first.')) {
+            (& $m { param($s, $x) Test-NeedsActionNudge $s 'coding' $x 0 2 } $st $t) | Should Be $true
+        }
     }
-    It 'leaves plain answers, plain chat, plan mode and chats without the action instructions alone' {
-        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St) 'Done, nothing else to change.') | Should Be $false
-        (& $m { param($s, $t) Test-NeedsActionNudge $s 'chat' $t $false } (St) $steps) | Should Be $false
-        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St 'plan') $steps) | Should Be $false
-        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St 'ask' @()) $steps) | Should Be $false
+    It 'stops after the maximum number of retries' {
+        (& $m { param($s, $x) Test-NeedsActionNudge $s 'coding' $x 2 2 } $st $steps) | Should Be $false
+        (& $m { param($s, $x) Test-NeedsActionNudge $s 'coding' $x 1 2 } $st $steps) | Should Be $true
+    }
+    It 'leaves plain answers, plain chat and plan mode alone' {
+        (& $m { param($s, $x) Test-NeedsActionNudge $s 'coding' $x 0 2 } $st 'Done, nothing else to change.') | Should Be $false
+        (& $m { param($s, $x) Test-NeedsActionNudge $s 'chat' $x 0 2 } $st $steps) | Should Be $false
+        (& $m { param($s, $x) Test-NeedsActionNudge $s 'coding' $x 0 2 } @{ Mode = 'plan' } $steps) | Should Be $false
+    }
+}
+
+Describe 'New-ActionRetryMessage' {
+    It 'sends the instructions in full, the note and the original task' {
+        $set = New-Object 'System.Collections.Generic.HashSet[string]'
+        $s = @{ AppRoot = $root; SentParts = $set }
+        $msg = & (Get-Module Agent) { param($st) New-ActionRetryMessage $st 'Update index.html to use styles.css' } $s
+        $msg | Should Match '^HOW THIS WORKS'
+        $msg | Should Match 'RULES'
+        $msg | Should Match 'nothing has been changed yet'
+        $msg | Should Match 'Task: Update index\.html to use styles\.css$'
+        $msg | Should Not Match 'CCBridge'
+        $set.Contains('actions') | Should Be $true
     }
 }
 Describe 'Follow-ups in a work chat (Get-TurnKind)' {

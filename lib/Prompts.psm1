@@ -53,6 +53,7 @@ function Get-PromptPart {
         '^m365$'      { return Read-PromptPart $AppRoot 'm365.md' }
         '^save$'      { return Read-PromptPart $AppRoot 'save.md' }
         '^fetch$'     { return Read-PromptPart $AppRoot 'fetch.md' }
+        '^retry$'     { return Read-PromptPart $AppRoot 'retry.md' }
         '^location$'  { return [string]$Context.Location }
         '^project$'   { return [string]$Context.Full }
     }
