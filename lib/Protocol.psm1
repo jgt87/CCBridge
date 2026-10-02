@@ -30,10 +30,21 @@ function Get-ActionBlocks {
         while ($j -lt $lines.Length) {
             $line = $lines[$j]
             if ($type -eq 'edit') {
-                if ($line -match '^<{5,9} ?SEARCH') { $inPair = $true }
-                elseif ($line -match '^>{5,9} ?REPLACE') { $inPair = $false }
+                $marker = Get-EditMarker $line
+                if ($marker -eq 'search') { $inPair = $true }
+                elseif ($marker -eq 'replace') { $inPair = $false }
             }
-            if (-not $inPair -and $line -match $closeRe) { break }
+            if ($line -match $closeRe) {
+                if (-not $inPair) { break }
+                # Inside a pair a fence is file content, unless no REPLACE marker follows before the
+                # next action block (Copilot left out the last one): then it closes the block.
+                $replaceAhead = $false
+                for ($k = $j + 1; $k -lt $lines.Length; $k++) {
+                    if ((Get-EditMarker $lines[$k]) -eq 'replace') { $replaceAhead = $true; break }
+                    if ($lines[$k] -match '^\s{0,3}(`{3,}|~{3,})\s*[A-Za-z]+') { break }
+                }
+                if (-not $replaceAhead) { break }
+            }
             $body.Add($line); $j++
         }
         $closed = $j -lt $lines.Length
@@ -48,11 +59,35 @@ function Get-ActionBlocks {
     $actions.ToArray()
 }
 
+function Get-EditMarker([string]$Line) {
+    <# 'search', 'divider', 'replace' or $null. Tolerates what Copilot sometimes sends: indented
+       markers, and markers written as &lt; / &gt; (the page shows our < and > to Copilot that way). #>
+    $t = $Line.Trim()
+    if ($t -match '^(?:<|&lt;){5,9} ?SEARCH\b') { return 'search' }
+    if ($t -match '^(?:>|&gt;){5,9} ?REPLACE\b') { return 'replace' }
+    if ($t -match '^={5,9}$') { return 'divider' }
+    $null
+}
+
 function Get-EditPairs([string]$Body) {
-    $re = '(?s)<{5,9} ?SEARCH[^\n]*\n(.*?)\n?={5,9}[^\n]*\n(.*?)\n?>{5,9} ?REPLACE'
-    foreach ($m in [regex]::Matches($Body, $re)) {
-        @{ search = $m.Groups[1].Value; replace = $m.Groups[2].Value }
+    <# SEARCH/REPLACE pairs of an edit block. The closing REPLACE marker of a pair may be missing
+       when the next pair or the end of the block follows. #>
+    $pairs = New-Object System.Collections.Generic.List[object]
+    $state = 'outside'; $search = $null; $replace = $null
+    foreach ($line in $Body.Replace("`r`n", "`n").Split("`n")) {
+        $marker = Get-EditMarker $line
+        if ($marker -eq 'search') {
+            if ($state -eq 'replace') { $pairs.Add(@{ search = ($search -join "`n"); replace = ($replace -join "`n") }) }
+            $state = 'search'; $search = New-Object System.Collections.Generic.List[string]; $replace = New-Object System.Collections.Generic.List[string]
+            continue
+        }
+        if ($marker -eq 'divider' -and $state -eq 'search') { $state = 'replace'; continue }
+        if ($marker -eq 'replace' -and $state -eq 'replace') { $pairs.Add(@{ search = ($search -join "`n"); replace = ($replace -join "`n") }); $state = 'outside'; continue }
+        if ($state -eq 'search') { $search.Add($line) }
+        elseif ($state -eq 'replace') { $replace.Add($line) }
     }
+    if ($state -eq 'replace') { $pairs.Add(@{ search = ($search -join "`n"); replace = ($replace -join "`n") }) }
+    $pairs.ToArray()
 }
 
 function Get-ActionPaths($Action) {

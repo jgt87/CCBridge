@@ -237,7 +237,9 @@ function Get-EditResult {
     param([string]$ProjectRoot, [string]$Path, $Edits)
     try { $full = Assert-Writable $ProjectRoot $Path } catch { return [pscustomobject]@{ ok = $false; error = $_.Exception.Message } }
     if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return [pscustomobject]@{ ok = $false; error = "file not found: $Path (use write to create it)" } }
-    if (-not $Edits -or -not @($Edits).Count) { return [pscustomobject]@{ ok = $false; error = 'edit block has no SEARCH/REPLACE pairs' } }
+    if (-not $Edits -or -not @($Edits).Count) {
+        return [pscustomobject]@{ ok = $false; error = 'edit block has no SEARCH/REPLACE pairs. Each change needs a line <<<<<<< SEARCH, the exact current lines, a line =======, the new lines, and a line >>>>>>> REPLACE, with real < and > characters at the start of the line. To replace the whole file, use a write block instead.' }
+    }
     $info = Read-TextFile $full
     $text = $info.Text
     $n = 0

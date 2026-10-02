@@ -428,7 +428,7 @@ function New-StreamState {
 
 # Banners that mean Copilot will not answer today, and progress texts that are not an answer.
 $script:LimitPattern = '(?i)daily limit|usage limit|reached (your|the) .{0,30}limit|out of credits|dagelijkse limiet|limiet bereikt'
-$script:PlaceholderPattern = '(?i)^(working on it|taking a look|thinking|searching|generating|one moment|bezig|even kijken)[^\n]{0,40}$'
+$script:PlaceholderPattern = '(?i)^(working on it|taking a look|thinking|searching|generating|one moment|bezig|even kijken)[^\n]{0,40}(\u2026|\.\.\.)\s*$'
 
 $script:StreamFinalFlags = '^(isFinal|isLast|final|isComplete|isCompleted|completed|done|isDone|endOfStream|isEnd|isLastChunk)$'
 $script:StreamStateFields = '^(state|status|messageState|streamState|phase|eventType|kind)$'
@@ -1175,8 +1175,44 @@ function Get-PageReplyText {
     }
     return null;
   };
+  // Letters and digits only, lowercase: compares raw markdown with rendered text.
+  const alnum = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  // Copilot's code viewer adds labels to the visible text; they are never part of the answer.
+  const chrome = /^(copilot said:|copy code|copy|go to line.*|.*isn't fully supported\. syntax highlighting is based on .*|.*wordt niet volledig ondersteund.*)$/i;
+  const visibleText = (el) => {
+    const md = el.querySelector('[data-testid="markdown-reply"]') || el;
+    return (md.innerText || '').split('\n').filter(l => !chrome.test(l.trim())).join('\n');
+  };
+  // Any string in the component state that holds this reply: it starts with the reply's visible
+  // beginning. Independent of field names, which differ between Copilot versions and tenants.
+  const search = (props, head, tail, minLen) => {
+    const found = [];
+    const seen = new Set();
+    const walk = (o, d) => {
+      if (!o || typeof o !== 'object' || d > 3 || seen.has(o) || o instanceof Node) return;
+      seen.add(o);
+      for (const k of Object.keys(o)) {
+        if (k === 'children' || k === '_owner') continue;
+        let v; try { v = o[k]; } catch (x) { continue; }
+        if (typeof v === 'string') {
+          if (v.length >= 20) { const a = alnum(v); if (a.length >= minLen && a.slice(0, 600).includes(head)) found.push({ v, end: !tail || a.includes(tail) }); }
+        } else if (v && typeof v === 'object') walk(v, d + 1);
+      }
+    };
+    walk(props, 0);
+    if (!found.length) return null;
+    const withEnd = found.filter(x => x.end);
+    const pool = withEnd.length ? withEnd : found;
+    // The shortest match is this reply alone (longer ones can span the whole conversation).
+    return pool.sort((x, y) => x.v.length - y.v.length)[0].v;
+  };
   const textOf = (el) => {
     let e = el.querySelector('[data-testid="markdown-reply"]') || el;
+    const vis = visibleText(el);
+    const va = alnum(vis);
+    // A short start (the visible text skips code-block info strings and edit markers), and a plausible
+    // length (visible text can miss lines of long code blocks, so the stored text may be longer).
+    const head = va.slice(0, 16), tail = va.length > 80 ? va.slice(-30) : '', minLen = Math.floor(va.length * 0.5);
     for (let i = 0; i < 8 && e; i++, e = e.parentElement) {
       const fk = Object.keys(e).find(k => k.startsWith('__reactFiber$'));
       if (!fk) continue;
@@ -1184,10 +1220,11 @@ function Get-PageReplyText {
       for (let j = 0; j < 30 && f; j++, f = f.return) {
         let t = null; try { t = pick(f.memoizedProps); } catch (x) { }
         if (t) return { how: 'state', text: t };
+        if (head.length >= 10) { try { t = search(f.memoizedProps, head, tail, minLen); } catch (x) { } }
+        if (t) return { how: 'state', text: t };
       }
     }
-    const md = el.querySelector('[data-testid="markdown-reply"]') || el;
-    return { how: 'page', text: md.innerText || '' };
+    return { how: 'page', text: vis };
   };
   const parts = [];
   for (const el of replies.slice(from)) {
@@ -1195,7 +1232,7 @@ function Get-PageReplyText {
     // Progress placeholders are not part of the answer; blocks of one answer can share the same
     // state text: keep each text once.
     const flat = (p.text || '').replace(/^\s*copilot said:\s*/i, '').trim();
-    if (p.how !== 'state' && flat.length < 60 && /^(working on it|taking a look|thinking|searching|generating|one moment)/i.test(flat)) continue;
+    if (p.how !== 'state' && flat.length < 60 && /^(working on it|taking a look|thinking|searching|generating|one moment)[^\n]{0,40}(\u2026|\.\.\.)\s*$/i.test(flat)) continue;
     if (p.text && !parts.some(q => q.text === p.text)) parts.push(p);
   }
   return JSON.stringify({

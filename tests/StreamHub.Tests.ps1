@@ -62,5 +62,6 @@ Describe 'Page texts that are not an answer' {
         (& $m { $args[0] -match $script:PlaceholderPattern } ('Working on it' + $ell)) | Should Be $true
         (& $m { $args[0] -match $script:PlaceholderPattern } 'Taking a look...') | Should Be $true
         (& $m { $args[0] -match $script:PlaceholderPattern } 'Recursion is when a function calls itself to solve smaller parts of a problem.') | Should Be $false
+        (& $m { $args[0] -match $script:PlaceholderPattern } 'Searching the web gives 42') | Should Be $false
     }
 }
