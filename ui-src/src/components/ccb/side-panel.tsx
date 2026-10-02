@@ -14,27 +14,32 @@ interface TreeNode {
   children?: TreeNode[];
 }
 
+/** Adds one file to the tree, creating the folders on its path as needed. */
+function addFileToTree(root: TreeNode, f: FileInfo) {
+  const parts = f.path.split("/");
+  let node = root;
+  parts.forEach((part, idx) => {
+    const isFile = idx === parts.length - 1;
+    node.children ??= [];
+    let child = node.children.find((c) => c.name === part && Boolean(c.children) === !isFile);
+    if (!child) {
+      child = { name: part, path: parts.slice(0, idx + 1).join("/"), ...(isFile ? { size: f.size } : { children: [] }) };
+      node.children.push(child);
+    }
+    node = child;
+  });
+}
+
+/** Folders first, then files, each alphabetically; recursively. */
+function sortTree(nodes: TreeNode[]) {
+  nodes.sort((a, b) => (a.children ? 0 : 1) - (b.children ? 0 : 1) || a.name.localeCompare(b.name));
+  for (const n of nodes) if (n.children) sortTree(n.children);
+}
+
 function buildTree(files: FileInfo[]): TreeNode[] {
   const root: TreeNode = { name: "", path: "", children: [] };
-  for (const f of files) {
-    const parts = f.path.split("/");
-    let node = root;
-    parts.forEach((part, idx) => {
-      const isFile = idx === parts.length - 1;
-      node.children ??= [];
-      let child = node.children.find((c) => c.name === part && Boolean(c.children) === !isFile);
-      if (!child) {
-        child = { name: part, path: parts.slice(0, idx + 1).join("/"), ...(isFile ? { size: f.size } : { children: [] }) };
-        node.children.push(child);
-      }
-      node = child;
-    });
-  }
-  const sort = (nodes: TreeNode[]) => {
-    nodes.sort((a, b) => (a.children ? 0 : 1) - (b.children ? 0 : 1) || a.name.localeCompare(b.name));
-    for (const n of nodes) if (n.children) sort(n.children);
-  };
-  sort(root.children!);
+  for (const f of files) addFileToTree(root, f);
+  sortTree(root.children!);
   return root.children!;
 }
 
@@ -83,6 +88,28 @@ function TreeRows({ nodes, depth, onOpen }: { nodes: TreeNode[]; depth: number; 
   );
 }
 
+/** Files tab: source-data upload and the project tree. */
+function FilesPanel({ files, onOpenFile, onUploaded }: { files: FileInfo[]; onOpenFile: (path: string) => void; onUploaded: () => void }) {
+  const tree = useMemo(() => buildTree(files), [files]);
+  return (
+    <div className="p-2">
+      <FileUpload
+        className="mb-2 max-w-none"
+        hint="Any file type. Copilot can read it but never change it;"
+        maxFileSize={500 * 1024 * 1024}
+        onUploadSuccess={onUploaded}
+        title="Add source data"
+        upload={api.uploadSource}
+      />
+      {tree.length ? (
+        <TreeRows depth={0} nodes={tree} onOpen={onOpenFile} />
+      ) : (
+        <p className="p-3 text-muted-foreground text-sm">No files yet. Ask Copilot to create some.</p>
+      )}
+    </div>
+  );
+}
+
 export function SidePanel({
   files,
   todos,
@@ -100,25 +127,7 @@ export function SidePanel({
   onUploaded: () => void;
   busy: boolean;
 }) {
-  const tree = useMemo(() => buildTree(files), [files]);
-
-  const filesPanel = (
-    <div className="p-2">
-      <FileUpload
-        className="mb-2 max-w-none"
-        hint="Any file type. Copilot can read it but never change it;"
-        maxFileSize={500 * 1024 * 1024}
-        onUploadSuccess={onUploaded}
-        title="Add source data"
-        upload={api.uploadSource}
-      />
-      {tree.length ? (
-        <TreeRows depth={0} nodes={tree} onOpen={onOpenFile} />
-      ) : (
-        <p className="p-3 text-muted-foreground text-sm">No files yet. Ask Copilot to create some.</p>
-      )}
-    </div>
-  );
+  const filesPanel = <FilesPanel files={files} onOpenFile={onOpenFile} onUploaded={onUploaded} />;
 
   const tasksPanel = (
     <div className="space-y-1 p-3">

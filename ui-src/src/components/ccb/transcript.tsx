@@ -8,73 +8,82 @@ import { stripActionBlocks } from "@/lib/diff";
 import { cn } from "@/lib/utils";
 import { ActionCard, type ActionItem } from "./action-card";
 
+type NoteTone = "info" | "error" | "done" | "undo" | "human";
+
 export type TranscriptItem =
   | { kind: "user"; seq: number; text: string }
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[] }
   | { kind: "action"; seq: number; item: ActionItem }
-  | { kind: "note"; seq: number; tone: "info" | "error" | "done" | "undo" | "human"; text: string };
+  | { kind: "note"; seq: number; tone: NoteTone; text: string };
+
+// --- Building the transcript from events ------------------------------------------------
+
+interface BuildContext {
+  items: TranscriptItem[];
+  actions: Map<string, ActionItem>;
+}
+
+/** Event types shown as a one-line note: tone, and the text used when the event has none. */
+const NOTE_EVENTS: Partial<Record<AgentEvent["type"], { tone: NoteTone; fallback: string; keepEmpty?: boolean }>> = {
+  done: { tone: "done", fallback: "Done.", keepEmpty: false },
+  status: { tone: "info", fallback: "" },
+  error: { tone: "error", fallback: "" },
+  undo: { tone: "undo", fallback: "" },
+  newchat: { tone: "info", fallback: "New Copilot chat started." },
+  "human-required": { tone: "human", fallback: "" },
+};
+
+function addNote(e: AgentEvent, ctx: BuildContext) {
+  const note = NOTE_EVENTS[e.type];
+  if (!note) return;
+  // "done" also replaces an empty string; the other notes only replace a missing text.
+  const text = note.keepEmpty === false ? e.text || note.fallback : (e.text ?? note.fallback);
+  ctx.items.push({ kind: "note", seq: e.seq, tone: note.tone, text });
+}
+
+/** An action event creates the card the first time and updates it afterwards. */
+function mergeAction(e: AgentEvent, ctx: BuildContext) {
+  const existing = ctx.actions.get(e.id!);
+  const next: ActionItem = {
+    ...(existing ?? { id: e.id!, action: e.action!, target: e.target ?? "", status: "running" }),
+    status: e.status ?? "running",
+    preview: e.preview ?? existing?.preview,
+    warning: e.warning ?? existing?.warning,
+    error: e.error ?? existing?.error,
+    target: e.target ?? existing?.target ?? "",
+  };
+  ctx.actions.set(e.id!, next);
+  if (!existing) ctx.items.push({ kind: "action", seq: e.seq, item: next });
+}
+
+/** An action-result event updates the card of its action (results without a card are ignored). */
+function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
+  const existing = ctx.actions.get(e.id!);
+  if (!existing) return;
+  Object.assign(existing, {
+    status: e.status ?? existing.status,
+    summary: e.summary ?? existing.summary,
+    output: e.output ?? existing.output,
+  });
+}
+
+const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildContext) => void>> = {
+  user: (e, ctx) => ctx.items.push({ kind: "user", seq: e.seq, text: e.text ?? "" }),
+  assistant: (e, ctx) =>
+    ctx.items.push({ kind: "assistant", seq: e.seq, text: e.text ?? "", uncertain: e.uncertain ?? 0, references: e.references ?? [] }),
+  action: mergeAction,
+  "action-result": mergeActionResult,
+};
 
 /** Folds the event stream into transcript items; action + action-result events merge by id. */
 export function buildTranscript(events: AgentEvent[]): TranscriptItem[] {
-  const items: TranscriptItem[] = [];
-  const actions = new Map<string, ActionItem>();
-  for (const e of events) {
-    switch (e.type) {
-      case "user":
-        items.push({ kind: "user", seq: e.seq, text: e.text ?? "" });
-        break;
-      case "assistant":
-        items.push({ kind: "assistant", seq: e.seq, text: e.text ?? "", uncertain: e.uncertain ?? 0, references: e.references ?? [] });
-        break;
-      case "action": {
-        const existing = actions.get(e.id!);
-        const next: ActionItem = {
-          ...(existing ?? { id: e.id!, action: e.action!, target: e.target ?? "", status: "running" }),
-          status: e.status ?? "running",
-          preview: e.preview ?? existing?.preview,
-          warning: e.warning ?? existing?.warning,
-          error: e.error ?? existing?.error,
-          target: e.target ?? existing?.target ?? "",
-        };
-        actions.set(e.id!, next);
-        if (!existing) items.push({ kind: "action", seq: e.seq, item: next });
-        break;
-      }
-      case "action-result": {
-        const existing = actions.get(e.id!);
-        if (existing) {
-          Object.assign(existing, {
-            status: e.status ?? existing.status,
-            summary: e.summary ?? existing.summary,
-            output: e.output ?? existing.output,
-          });
-        }
-        break;
-      }
-      case "done":
-        items.push({ kind: "note", seq: e.seq, tone: "done", text: e.text || "Done." });
-        break;
-      case "status":
-        items.push({ kind: "note", seq: e.seq, tone: "info", text: e.text ?? "" });
-        break;
-      case "error":
-        items.push({ kind: "note", seq: e.seq, tone: "error", text: e.text ?? "" });
-        break;
-      case "undo":
-        items.push({ kind: "note", seq: e.seq, tone: "undo", text: e.text ?? "" });
-        break;
-      case "newchat":
-        items.push({ kind: "note", seq: e.seq, tone: "info", text: e.text ?? "New Copilot chat started." });
-        break;
-      case "human-required":
-        items.push({ kind: "note", seq: e.seq, tone: "human", text: e.text ?? "" });
-        break;
-
-    }
-  }
+  const ctx: BuildContext = { items: [], actions: new Map() };
+  for (const e of events) (HANDLERS[e.type] ?? addNote)(e, ctx);
   // Re-create action items so React sees the merged state.
-  return items.map((it) => (it.kind === "action" ? { ...it, item: { ...actions.get(it.item.id)! } } : it));
+  return ctx.items.map((it) => (it.kind === "action" ? { ...it, item: { ...ctx.actions.get(it.item.id)! } } : it));
 }
+
+// --- Rendering ---------------------------------------------------------------------------
 
 function Markdown({ text }: { text: string }) {
   return (
@@ -118,6 +127,77 @@ const NOTE_STYLE = {
   },
 };
 
+function UserMessage({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end">
+      <div className="flex max-w-[85%] items-start gap-2 rounded-2xl rounded-tr-sm bg-black/5 px-4 py-2.5 text-sm dark:bg-white/10">
+        <span className="whitespace-pre-wrap">{text}</span>
+        <User className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-50" />
+      </div>
+    </div>
+  );
+}
+
+function AssistantMessage({ text, references }: { text: string; references: Reference[] }) {
+  const visible = stripActionBlocks(text);
+  if (!visible && !references.length) return null;
+  return (
+    <div className="px-1">
+      {visible && <Markdown text={visible} />}
+      {references.length > 0 && <Sources refs={references} />}
+    </div>
+  );
+}
+
+function NoteLine({ tone, text }: { tone: NoteTone; text: string }) {
+  const style = NOTE_STYLE[tone];
+  return (
+    <div className={cn("flex items-start gap-2 px-1 text-sm", style.cls)}>
+      <span className="mt-0.5">{style.icon}</span>
+      <span className="whitespace-pre-wrap">{text}</span>
+    </div>
+  );
+}
+
+function TranscriptRow({ item }: { item: TranscriptItem }) {
+  switch (item.kind) {
+    case "user":
+      return <UserMessage text={item.text} />;
+    case "assistant":
+      return <AssistantMessage references={item.references} text={item.text} />;
+    case "action":
+      return <ActionCard item={item.item} />;
+    case "note":
+      return <NoteLine text={item.text} tone={item.tone} />;
+  }
+}
+
+function thinkingTexts(progress: string, stopping: boolean): string[] {
+  if (stopping) return ["Stopping..."];
+  if (progress) return ["Copilot is writing...", "Receiving the reply..."];
+  return ["Asking Copilot...", "Waiting for the reply...", "Copilot is thinking..."];
+}
+
+function ThinkingIndicator({ progress, stopping }: { progress: string; stopping: boolean }) {
+  return (
+    <div className="rounded-xl border border-black/10 border-dashed px-3 py-2 dark:border-white/10">
+      <AITextLoading
+        className="font-semibold text-base"
+        containerClassName="justify-start p-0"
+        interval={1800}
+        texts={thinkingTexts(progress, stopping)}
+      />
+      {progress && (
+        <pre className="mt-2 max-h-32 overflow-hidden whitespace-pre-wrap font-mono text-muted-foreground text-xs [mask-image:linear-gradient(to_bottom,transparent,black_40%)]">
+          {progress.slice(-700)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+const rowKey = (it: TranscriptItem) => (it.kind === "action" ? it.item.id : it.seq);
+
 export function Transcript({
   items,
   busy,
@@ -143,51 +223,10 @@ export function Transcript({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-6">
-      {items.map((it) => {
-        if (it.kind === "user")
-          return (
-            <div className="flex justify-end" key={it.seq}>
-              <div className="flex max-w-[85%] items-start gap-2 rounded-2xl rounded-tr-sm bg-black/5 px-4 py-2.5 text-sm dark:bg-white/10">
-                <span className="whitespace-pre-wrap">{it.text}</span>
-                <User className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-50" />
-              </div>
-            </div>
-          );
-        if (it.kind === "assistant") {
-          const visible = stripActionBlocks(it.text);
-          if (!visible && !it.references.length) return null;
-          return (
-            <div className="px-1" key={it.seq}>
-              {visible && <Markdown text={visible} />}
-              {it.references.length > 0 && <Sources refs={it.references} />}
-            </div>
-          );
-        }
-        if (it.kind === "action") return <ActionCard item={it.item} key={it.item.id} />;
-        const style = NOTE_STYLE[it.tone];
-        return (
-          <div className={cn("flex items-start gap-2 px-1 text-sm", style.cls)} key={it.seq}>
-            <span className="mt-0.5">{style.icon}</span>
-            <span className="whitespace-pre-wrap">{it.text}</span>
-          </div>
-        );
-      })}
-
-      {busy && !awaiting && (
-        <div className="rounded-xl border border-black/10 border-dashed px-3 py-2 dark:border-white/10">
-          <AITextLoading
-            className="font-semibold text-base"
-            containerClassName="justify-start p-0"
-            interval={1800}
-            texts={stopping ? ["Stopping..."] : progress ? ["Copilot is writing...", "Receiving the reply..."] : ["Asking Copilot...", "Waiting for the reply...", "Copilot is thinking..."]}
-          />
-          {progress && (
-            <pre className="mt-2 max-h-32 overflow-hidden whitespace-pre-wrap font-mono text-muted-foreground text-xs [mask-image:linear-gradient(to_bottom,transparent,black_40%)]">
-              {progress.slice(-700)}
-            </pre>
-          )}
-        </div>
-      )}
+      {items.map((it) => (
+        <TranscriptRow item={it} key={rowKey(it)} />
+      ))}
+      {busy && !awaiting && <ThinkingIndicator progress={progress} stopping={stopping} />}
       <div ref={endRef} />
     </div>
   );
