@@ -1449,7 +1449,20 @@ function Start-AgentWorker {
                     }
                     if ($task.newChat) { $State.NeedNewChat = $true }
                     $force = if ($task.forceKind) { "$($task.forceKind)" } elseif ($task.source -eq 'mcp' -or $task.source -eq 'api') { 'work' } else { '' }
-                    Invoke-AgentTurn $State $task.text $force
+                    # "Run the meetings runbook": the runbook job sends the runbook's instructions and
+                    # contents to Copilot, as the Run button does. Not for "send again as a coding task".
+                    $runReq = if ($force -ne 'coding' -and $State.ProjectRoot) { Get-RunbookRunRequest $task.text @(Get-Runbooks $State.ProjectRoot) } else { $null }
+                    if ($runReq -and $runReq.name) {
+                        Add-AgentEvent $State 'user' @{ text = $task.text }
+                        Add-AgentEvent $State 'kind' @{ taskKind = 'runbook' }
+                        Invoke-RunbookJob $State $runReq.name
+                    } elseif ($runReq) {
+                        Add-AgentEvent $State 'user' @{ text = $task.text }
+                        $which = if (@($runReq.names).Count) { 'Which runbook should run? Name one of: ' + (@($runReq.names) -join ', ') + '. Or press Run on it in the Fetch tab.' } else { 'This project has no runbooks yet. Create one with "New runbook from a template" in the Fetch tab (or ask Copilot to create one), then run it.' }
+                        Add-AgentEvent $State 'status' @{ text = $which }
+                    } else {
+                        Invoke-AgentTurn $State $task.text $force
+                    }
                 }
                 'fetch' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-FetchJob $State $task.name }
                 'runbook' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-RunbookJob $State $task.name }

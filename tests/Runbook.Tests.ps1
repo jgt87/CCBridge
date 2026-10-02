@@ -124,3 +124,33 @@ Describe 'The runbook instructions for Copilot' {
         $m | Should Not Match 'CCBridge'
     }
 }
+Describe 'Get-RunbookRunRequest (running a runbook from the chat)' {
+    $rbs = @(
+        [pscustomobject]@{ name = 'meetings'; title = 'Meetings this week'; path = 'runbooks/meetings.runbook.md' },
+        [pscustomobject]@{ name = 'meetings-next-week'; title = 'Next week'; path = 'runbooks/meetings-next-week.runbook.md' },
+        [pscustomobject]@{ name = 'email-followups'; title = 'Emails waiting for my reply'; path = 'runbooks/email-followups.runbook.md' }
+    )
+    It 'runs a runbook that is only named' {
+        (Get-RunbookRunRequest '@runbooks/email-followups.runbook.md' $rbs).name | Should Be 'email-followups'
+        (Get-RunbookRunRequest 'email followups' $rbs).name | Should Be 'email-followups'
+        (Get-RunbookRunRequest 'Emails waiting for my reply' $rbs).name | Should Be 'email-followups'
+        (Get-RunbookRunRequest 'meetings-next-week runbook' $rbs).name | Should Be 'meetings-next-week'
+        (Get-RunbookRunRequest 'run the meetings runbook' $rbs).name | Should Be 'meetings'
+        (Get-RunbookRunRequest 'draai het draaiboek email-followups' $rbs).name | Should Be 'email-followups'
+    }
+    It 'runs the only runbook, or asks which one' {
+        (Get-RunbookRunRequest 'run the runbook' @($rbs[0])).name | Should Be 'meetings'
+        $r = Get-RunbookRunRequest 'run the runbook' $rbs
+        $r.ambiguous | Should Be $true
+        $r.names -join ',' | Should Be 'meetings,meetings-next-week,email-followups'
+        (Get-RunbookRunRequest 'run the runbook' @()).ambiguous | Should Be $true
+    }
+    It 'leaves creating, changing and questions about runbooks to Copilot' {
+        Get-RunbookRunRequest 'create a runbook for my meetings' $rbs | Should BeNullOrEmpty
+        Get-RunbookRunRequest 'update the meetings runbook to include Teams' $rbs | Should BeNullOrEmpty
+        Get-RunbookRunRequest 'what does the meetings runbook do?' $rbs | Should BeNullOrEmpty
+        Get-RunbookRunRequest 'show the email-followups runbook' $rbs | Should BeNullOrEmpty
+        Get-RunbookRunRequest 'what is a runbook' $rbs | Should BeNullOrEmpty
+        Get-RunbookRunRequest 'fix the button' $rbs | Should BeNullOrEmpty
+    }
+}
