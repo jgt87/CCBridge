@@ -41,3 +41,22 @@ Describe 'Edit blocks' {
         $a[0].edits.Count | Should Be 1
     }
 }
+
+Describe 'Action as the first line of a plain code block' {
+    It 'reads "read PATH" in a block without an action name' {
+        $a = @(Get-ActionBlocks "Let me look first:`n```````n read index.html`n``````")
+        $a.Count | Should Be 1
+        $a[0].type | Should Be 'read'
+        $a[0].arg | Should Be 'index.html'
+    }
+    It 'reads an edit whose name is on the first line of a text block' {
+        $a = @(Get-ActionBlocks "````````text`nedit index.html`n<<<<<<< SEARCH`nold`n=======`nnew`n>>>>>>> REPLACE`n````````")
+        $a[0].type | Should Be 'edit'
+        $a[0].arg | Should Be 'index.html'
+        $a[0].edits[0].replace | Should Be 'new'
+    }
+    It 'leaves ordinary code blocks alone' {
+        @(Get-ActionBlocks "``````js`nread(file)`n``````").Count | Should Be 0
+        @(Get-ActionBlocks "```````nconsole.log(1)`n``````").Count | Should Be 0
+    }
+}

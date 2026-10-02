@@ -3,6 +3,7 @@
 $ErrorActionPreference = 'Stop'
 
 $script:ActionTypes = @('read', 'glob', 'grep', 'write', 'edit', 'run', 'todo', 'done')
+$script:PlainInfo = @('', 'text', 'txt', 'plaintext', 'plain', 'none')
 
 function Get-ActionBlocks {
     <#
@@ -16,7 +17,7 @@ function Get-ActionBlocks {
     $actions = New-Object System.Collections.Generic.List[object]
     $i = 0
     while ($i -lt $lines.Length) {
-        $m = [regex]::Match($lines[$i], '^\s{0,3}(`{3,}|~{3,})\s*([A-Za-z]+)(?:[:\s]\s*(.*))?$')
+        $m = [regex]::Match($lines[$i], '^\s{0,3}(`{3,}|~{3,})\s*([A-Za-z]*)(?:[:\s]\s*(.*))?$')
         if (-not $m.Success) { $i++; continue }
         $fence = $m.Groups[1].Value
         $type = $m.Groups[2].Value.ToLowerInvariant()
@@ -24,6 +25,12 @@ function Get-ActionBlocks {
         $closeRe = '^\s{0,3}' + [regex]::Escape($fence[0]) + '{' + $fence.Length + ',}\s*$'
         $body = New-Object System.Collections.Generic.List[string]
         $j = $i + 1
+        # Copilot sometimes leaves the info string empty (or "text") and writes the action as the
+        # first line of the block: "read index.html". Take the action from that line.
+        if ($script:PlainInfo -contains $type -and -not $arg -and $j -lt $lines.Length) {
+            $first = [regex]::Match($lines[$j], '^\s*(read|glob|grep|write|edit|run|todo|done)\b[:\s]*(.*)$')
+            if ($first.Success) { $type = $first.Groups[1].Value.ToLowerInvariant(); $arg = $first.Groups[2].Value.Trim(); $j++ }
+        }
         # In an edit block, code fences inside a SEARCH/REPLACE section are file content
         # (e.g. a markdown example), not the end of the block.
         $inPair = $false

@@ -519,7 +519,7 @@ function Invoke-AgentTurn {
                     $nudged = $true
                     Write-CCBLog info agent 'Reply described the change without action blocks; asking Copilot to make it'
                     Add-AgentEvent $State 'status' @{ text = 'Copilot described the change instead of making it; asking it to make the change itself.' }
-                    $message = 'Please make these changes yourself instead of describing them: use read blocks for files you still need to see, write or edit blocks for the changes, and done when the task is finished.'
+                    $message = 'Please make these changes yourself instead of describing them. You do not need me to provide files: the helper program carries out your action blocks and sends you the results. Reply with read blocks for the files you need now; after that use edit or write blocks for the changes, and a done block when the task is finished.'
                     continue
                 }
                 break
