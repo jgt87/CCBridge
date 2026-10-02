@@ -1,4 +1,4 @@
-To work with the project files, put action blocks in your reply. A helper program runs them and replies with the results. Placeholders are in capitals.
+Make the changes yourself with action blocks in your reply; do not describe steps for the user to do. A helper program runs the blocks and replies with the results. Placeholders are in capitals.
 
 ```read
 PATH

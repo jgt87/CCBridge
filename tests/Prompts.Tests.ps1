@@ -80,3 +80,24 @@ Describe 'Project notes (AGENTS.md)' {
         Remove-Item $dir -Recurse -Force
     }
 }
+
+Describe 'Test-NeedsActionNudge' {
+    $m = Get-Module Agent
+    function St([string]$Mode = 'ask', [string[]]$Parts = @('actions')) {
+        $set = New-Object 'System.Collections.Generic.HashSet[string]'; foreach ($p in $Parts) { [void]$set.Add($p) }
+        @{ Mode = $Mode; SentParts = $set }
+    }
+    $steps = "To move the CSS:`n1. Create style.css`n2. Cut the style block`n3. Add a link tag"
+    $code = "Put this in style.css:`n``````css`nbody { margin: 0; }`n```````n"
+    It 'asks once when a coding task got steps or code instead of actions' {
+        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St) $steps) | Should Be $true
+        (& $m { param($s, $t) Test-NeedsActionNudge $s 'project' $t $false } (St) $code) | Should Be $true
+        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $true } (St) $steps) | Should Be $false
+    }
+    It 'leaves plain answers, plain chat, plan mode and chats without the action instructions alone' {
+        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St) 'Done, nothing else to change.') | Should Be $false
+        (& $m { param($s, $t) Test-NeedsActionNudge $s 'chat' $t $false } (St) $steps) | Should Be $false
+        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St 'plan') $steps) | Should Be $false
+        (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St 'ask' @()) $steps) | Should Be $false
+    }
+}

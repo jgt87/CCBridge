@@ -196,6 +196,18 @@ function Invoke-FetchJob {
     }
 }
 
+function Test-NeedsActionNudge {
+    <# True when a project or coding task got an explanation (steps or code) instead of action blocks,
+       in a chat that has the action instructions, outside plan mode, and not asked before this turn. #>
+    param($State, [string]$Kind, [string]$Text, [bool]$AlreadyNudged)
+    if ($AlreadyNudged -or $State.Mode -eq 'plan') { return $false }
+    if ($Kind -notin 'coding', 'project', 'mixed') { return $false }
+    if (-not $State.SentParts.Contains('actions')) { return $false }
+    $hasCode = $Text -match '(?m)^\s{0,3}(`{3,}|~{3,})'
+    $hasSteps = ([regex]::Matches($Text, '(?m)^\s{0,3}(\d+[.)]|[-*])\s+\S')).Count -ge 2
+    $hasCode -or $hasSteps
+}
+
 function Start-NewChat($State) {
     try { New-CopilotChat (Get-Bridge $State) }
     catch {
@@ -440,6 +452,7 @@ function Invoke-AgentTurn {
         Write-CCBLog info agent "Task kind: $kind" @{ partsAdded = $State.SentParts.Count - $partsBefore; chars = $message.Length }
         $message += Get-PinnedFiles $State.ProjectRoot $Text
 
+        $nudged = $false
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
             Invoke-RolloverIfNeeded $State
@@ -473,7 +486,18 @@ function Invoke-AgentTurn {
             foreach ($claim in @($r.ActionClaims)) {
                 Add-AgentEvent $State 'human-required' @{ text = "Copilot's reply says: ""$claim"" CCBridge did not confirm any Microsoft 365 action. Check Outlook / Teams if this is unexpected." }
             }
-            if (-not $actions.Count) { break }
+            if (-not $actions.Count) {
+                $effectiveKind = if ($kind -eq 'chat' -and $State.ChatKind) { $State.ChatKind } else { $kind }
+                if (Test-NeedsActionNudge $State $effectiveKind $r.Text $nudged) {
+                    # Copilot explained the change instead of making it: ask once to do it itself.
+                    $nudged = $true
+                    Write-CCBLog info agent 'Reply described the change without action blocks; asking Copilot to make it'
+                    Add-AgentEvent $State 'status' @{ text = 'Copilot described the change instead of making it; asking it to make the change itself.' }
+                    $message = 'Please make these changes yourself instead of describing them: use read blocks for files you still need to see, write or edit blocks for the changes, and done when the task is finished.'
+                    continue
+                }
+                break
+            }
 
             $results = New-Object Collections.Generic.List[string]
             $isDone = $false
