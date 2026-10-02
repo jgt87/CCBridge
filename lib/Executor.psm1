@@ -398,11 +398,57 @@ function Get-ClosestLines([string]$Text, [string]$Search) {
     "The closest place is lines $($from + 1)-$($to + 1); their exact current text is:`n````n$snippet`n````"
 }
 
+$script:EllipsisLine = '^\s*(\.\.\.|\u2026|/\*\s*(\.\.\.|\u2026)\s*\*/|<!--\s*(\.\.\.|\u2026)\s*-->|//\s*(\.\.\.|\u2026)|#\s*(\.\.\.|\u2026))\s*$'
+
+function Find-ElidedTarget([string]$Text, [string]$Search) {
+    <# A SEARCH shortened with a line of only "..." (first lines, ..., last lines): the block from the
+       first lines through the first following occurrence of the last lines. Must match one place. #>
+    $segments = New-Object System.Collections.Generic.List[string]
+    $cur = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $Search.Split("`n")) {
+        if ($l -match $script:EllipsisLine) { if ($cur.Count) { $segments.Add(($cur -join "`n")); $cur = New-Object System.Collections.Generic.List[string] } }
+        else { $cur.Add($l) }
+    }
+    if ($cur.Count) { $segments.Add(($cur -join "`n")) }
+    if ($segments.Count -lt 2) { return $null }
+    $parts = foreach ($s in $segments) { ($s.Trim("`n").Split("`n") | ForEach-Object { '[ \t]*' + [regex]::Escape($_.Trim()) + '[ \t]*' }) -join '\n' }
+    $pattern = '(?m)^' + ($parts -join '\n[\s\S]*?\n') + '$'
+    $ms = [regex]::Matches($Text, $pattern)
+    if ($ms.Count -eq 1) { return @{ start = $ms[0].Index; length = $ms[0].Length; note = "replaced lines $(Get-LineNumber $Text $ms[0].Index)-$(Get-LineNumber $Text ($ms[0].Index + $ms[0].Length - 1)) (SEARCH shortened with ...)" } }
+    if ($ms.Count -gt 1) { return @{ error = "the shortened SEARCH (with ...) matches $($ms.Count) places; include more of its first lines" } }
+    @{ error = 'SEARCH text not found in the file (shortened with ...): its first lines or its last lines are not in the file as written. Read the file again and copy them exactly.' }
+}
+
+function Get-BlockBalance([string]$Text) {
+    <# Net open minus close counts of braces and of style/script tags, to spot half blocks. #>
+    $t = [regex]::Replace($Text, '("([^"\\\n]|\\.)*"|''([^''\\\n]|\\.)*'')', '""')   # ignore braces in strings
+    @{
+        braces = ([regex]::Matches($t, '\{')).Count - ([regex]::Matches($t, '\}')).Count
+        style  = ([regex]::Matches($Text, '(?i)<style\b')).Count - ([regex]::Matches($Text, '(?i)</style>')).Count
+        script = ([regex]::Matches($Text, '(?i)<script\b')).Count - ([regex]::Matches($Text, '(?i)</script>')).Count
+    }
+}
+
+function Test-HalfBlock([string]$Search, [string]$Replace) {
+    <# An edit that would leave a block half open or half closed: SEARCH and REPLACE differ in the
+       balance of braces or <style>/<script> tags. Returns the reason, or $null. #>
+    $s = Get-BlockBalance $Search; $r = Get-BlockBalance $Replace
+    foreach ($k in 'style', 'script') {
+        if ($s[$k] -ne $r[$k]) { return "SEARCH and REPLACE do not open and close the same <$k> blocks, so part of a block would be left behind. Include the whole block through its closing </$k> line (you may shorten its middle with a line containing only ...)" }
+    }
+    if ($s.braces -ne $r.braces) { return "SEARCH and REPLACE do not open and close the same number of { } blocks, so part of a block would be left behind. Include the whole block through its closing brace (you may shorten its middle with a line containing only ...)" }
+    $null
+}
+
 function Find-EditTarget([string]$Text, [string]$Search, [int]$After = -1) {
     <# Where $Search is in $Text: one exact match (or, failing that, one match ignoring trailing
        whitespace per line). When it matches several places and $After is the end of the previous
        change in the same edit block, the first match after it is taken (changes come in file
        order) and a note says so; otherwise the error lists the line of every match. #>
+    if (($Search.Split("`n") | Where-Object { $_ -match $script:EllipsisLine }) -and $Text.IndexOf($Search, [StringComparison]::Ordinal) -lt 0) {
+        $el = Find-ElidedTarget $Text $Search
+        if ($el) { return $el }
+    }
     $hits = New-Object System.Collections.Generic.List[object]
     $i = $Text.IndexOf($Search, [StringComparison]::Ordinal)
     while ($i -ge 0 -and $Search.Length) {
@@ -459,6 +505,9 @@ function Get-EditResult {
             if ($done.applied) { $applied.Add("pair ${n}: already applied - $($done.evidence)"); continue }
         }
         if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed; send the whole edit block again." } }
+        $matched = $text.Substring($hit.start, $hit.length)
+        $half = Test-HalfBlock $matched $replace
+        if ($half) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $half. Nothing was changed; send the whole edit block again." } }
         if ($hit.note) { $notes.Add("pair ${n}: $($hit.note)") }
         $text = $text.Substring(0, $hit.start) + $replace + $text.Substring($hit.start + $hit.length)
         $after = $hit.start + $replace.Length

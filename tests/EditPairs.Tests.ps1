@@ -160,3 +160,40 @@ Describe 'Moving code to another file (Test-MoveOrder)' {
     }
     Remove-Item $proj -Recurse -Force
 }
+Describe 'Long blocks: SEARCH shortened with ..., and half blocks' {
+    $proj = Join-Path $env:TEMP ('ccb-long-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory $proj | Out-Null
+    $f = Join-Path $proj 'index.html'
+    $css = (1..30 | ForEach-Object { "    .rule$_ { margin: ${_}px; }" }) -join "`n"
+    $page = "<head>`n  <title>x</title>`n  <style>`n$css`n  </style>`n</head>`n<body></body>"
+    It 'replaces the whole block between the first and the last lines' {
+        [IO.File]::WriteAllText($f, $page)
+        [IO.File]::WriteAllText((Join-Path $proj 'x.css'), $css)   # moved code first (see Test-MoveOrder)
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = "  <style>`n    .rule1 { margin: 1px; }`n    ...`n  </style>"; replace = '  <link rel="stylesheet" href="x.css">' }) $null
+        $out | Should Match 'SEARCH shortened with \.\.\.'
+        $text = [IO.File]::ReadAllText($f)
+        $text | Should Not Match 'rule'
+        $text | Should Match "<title>x</title>`n  <link rel=""stylesheet"" href=""x.css"">`n</head>"
+    }
+    It 'accepts /* ... */ and <!-- ... --> as the shortening line' {
+        [IO.File]::WriteAllText($f, $page)
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = "  <style>`n    /* ... */`n  </style>"; replace = '' }) $null
+        [IO.File]::ReadAllText($f) | Should Not Match 'rule'
+    }
+    It 'refuses only the first lines of a block (half a block) and changes nothing' {
+        [IO.File]::WriteAllText($f, $page)
+        $first9 = "  <style>`n" + ((1..8 | ForEach-Object { "    .rule$_ { margin: ${_}px; }" }) -join "`n")
+        { Invoke-EditAction $proj 'index.html' @(@{ search = $first9; replace = '  <link rel="stylesheet" href="x.css">' }) $null } | Should Throw 'do not open and close the same <style> blocks'
+        [IO.File]::ReadAllText($f) | Should BeExactly $page
+    }
+    It 'refuses an edit that cuts a { } block in half' {
+        [IO.File]::WriteAllText($f, "function a() {`n  return 1;`n}`nfunction b() {`n  return 2;`n}")
+        { Invoke-EditAction $proj 'index.html' @(@{ search = "function a() {`n  return 1;"; replace = '' }) $null } | Should Throw 'same number of { } blocks'
+    }
+    It 'still allows ordinary edits inside a block' {
+        [IO.File]::WriteAllText($f, "function a() {`n  return 1;`n}")
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = "function a() {`n  return 1;"; replace = "function a() {`n  return 2;" }) $null
+        $out | Should Match '^edited'
+    }
+    Remove-Item $proj -Recurse -Force
+}
