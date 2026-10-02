@@ -14,7 +14,8 @@ export type TranscriptItem =
   | { kind: "user"; seq: number; text: string }
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[] }
   | { kind: "action"; seq: number; item: ActionItem }
-  | { kind: "note"; seq: number; tone: NoteTone; text: string };
+  | { kind: "note"; seq: number; tone: NoteTone; text: string }
+  | { kind: "next"; seq: number; steps: string[] };
 
 // --- Building the transcript from events ------------------------------------------------
 
@@ -71,6 +72,9 @@ function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
 
 const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildContext) => void>> = {
   user: (e, ctx) => ctx.items.push({ kind: "user", seq: e.seq, text: e.text ?? "" }),
+  "next-steps": (e, ctx) => {
+    if (e.steps?.length) ctx.items.push({ kind: "next", seq: e.seq, steps: e.steps });
+  },
   assistant: (e, ctx) =>
     ctx.items.push({ kind: "assistant", seq: e.seq, text: e.text ?? "", uncertain: e.uncertain ?? 0, references: e.references ?? [] }),
   action: mergeAction,
@@ -161,7 +165,31 @@ function NoteLine({ tone, text }: { tone: NoteTone; text: string }) {
   );
 }
 
-function TranscriptRow({ item }: { item: TranscriptItem }) {
+/** Follow-ups Copilot suggested; a click puts the text in the message box (nothing is sent yet). */
+function NextSteps({ steps, onUse }: { steps: string[]; onUse?: (text: string) => void }) {
+  return (
+    <div className="rounded-xl border border-black/10 border-dashed px-3 py-2 dark:border-white/10">
+      <div className="mb-1.5 text-muted-foreground text-xs">Suggested next steps (click one to put it in the message box)</div>
+      <div className="flex flex-col gap-1">
+        {steps.map((s, i) => (
+          <button
+            className="w-full rounded-md px-2 py-1 text-left text-sm hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/5"
+            disabled={!onUse}
+            key={`${i}-${s}`}
+            onClick={() => onUse?.(s)}
+            title={s}
+            type="button"
+          >
+            <span className="mr-1.5 text-muted-foreground">{i + 1}.</span>
+            <span className="line-clamp-2">{s}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TranscriptRow({ item, onUsePrompt }: { item: TranscriptItem; onUsePrompt?: (text: string) => void }) {
   switch (item.kind) {
     case "user":
       return <UserMessage text={item.text} />;
@@ -171,6 +199,8 @@ function TranscriptRow({ item }: { item: TranscriptItem }) {
       return <ActionCard item={item.item} />;
     case "note":
       return <NoteLine text={item.text} tone={item.tone} />;
+    case "next":
+      return <NextSteps onUse={onUsePrompt} steps={item.steps} />;
   }
 }
 
@@ -206,12 +236,15 @@ export function Transcript({
   progress,
   empty,
   stopping = false,
+  onUsePrompt,
 }: {
   items: TranscriptItem[];
   busy: boolean;
   progress: string;
   empty?: React.ReactNode;
   stopping?: boolean;
+  /** Puts a suggested next step in the message box. */
+  onUsePrompt?: (text: string) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const awaiting = items.some((i) => i.kind === "action" && i.item.status === "awaiting");
@@ -226,7 +259,7 @@ export function Transcript({
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-6">
       {items.map((it) => (
-        <TranscriptRow item={it} key={rowKey(it)} />
+        <TranscriptRow item={it} key={rowKey(it)} onUsePrompt={onUsePrompt} />
       ))}
       {busy && !awaiting && <ThinkingIndicator progress={progress} stopping={stopping} />}
       <div ref={endRef} />

@@ -408,6 +408,10 @@ export default function App() {
                   </div>
                 }
                 items={transcript}
+                onUsePrompt={(text) => {
+                  setDraft(text);
+                  setFocusKey((k) => k + 1);
+                }}
                 progress={state.progress}
               />
               </ErrorBoundary>

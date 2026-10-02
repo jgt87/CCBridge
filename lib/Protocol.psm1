@@ -112,4 +112,41 @@ function Get-TodoItems([string]$Body) {
     })
 }
 
-Export-ModuleMember -Function Get-ActionBlocks, Get-ActionPaths, Get-TodoItems
+function Get-NextSteps {
+    <# Suggested follow-ups in a reply, as prompts the user can send: the list under a heading such as
+       "Next steps", "Remaining steps", "Follow-ups", "What's next" or "Volgende stappen", and
+       sentences like "The next step is to ...". Fixed patterns (CCBridge has no language model);
+       code blocks are skipped. At most $Max, each at most 300 characters. #>
+    param([AllowEmptyString()][string]$Text, [int]$Max = 5)
+    $steps = New-Object System.Collections.Generic.List[string]
+    $add = {
+        param([string]$s)
+        $s = ($s -replace '^\s*(\*\*|__)|(\*\*|__)\s*$', '').Trim().TrimEnd(':').Trim()
+        if ($s.Length -lt 6) { return }
+        if ($s.Length -gt 300) { $s = $s.Substring(0, 297) + '...' }
+        $s = $s.Substring(0, 1).ToUpperInvariant() + $s.Substring(1)
+        if (-not ($steps | Where-Object { $_ -eq $s })) { $steps.Add($s) }
+    }
+    $heading = '(?i)^\s*(#{1,6}\s*)?(\*\*|__)?\s*(next steps?|remaining steps|remaining work|follow[- ]?ups?( steps)?|what''s next|what is next|suggested next steps|volgende stappen|vervolgstappen)\b[^\n]{0,40}$'
+    $item = '^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.+)$'
+    $inFence = $false; $inList = $false; $listStarted = $false
+    foreach ($line in $Text.Replace("`r`n", "`n").Split("`n")) {
+        if ($line -match '^\s{0,3}(`{3,}|~{3,})') { $inFence = -not $inFence; if ($inList -and $listStarted) { $inList = $false }; continue }
+        if ($inFence) { continue }
+        if ($line -match $heading) { $inList = $true; $listStarted = $false; continue }
+        if ($inList) {
+            $m = [regex]::Match($line, $item)
+            if ($m.Success) { & $add $m.Groups[1].Value; $listStarted = $true; continue }
+            if (-not $line.Trim()) { continue }
+            # Text right under the heading (no list): one step.
+            if (-not $listStarted) { & $add $line; $listStarted = $true; continue }
+            $inList = $false
+        }
+    }
+    # "The next step is to populate styles.css ..." (also outside a heading)
+    $flat = [regex]::Replace($Text, '(?s)```.*?```', ' ')
+    foreach ($m in [regex]::Matches($flat, '(?i)\b(?:the\s+)?next step\s+(?:is|would be|will be|should be)\s*:?\s*(?:to\s+)?([^\n]{8,240}?)(?:\.(?:\s|$)|\n|$)')) { & $add $m.Groups[1].Value }
+    @($steps | Select-Object -First $Max)
+}
+
+Export-ModuleMember -Function Get-ActionBlocks, Get-ActionPaths, Get-TodoItems, Get-NextSteps

@@ -57,7 +57,8 @@ export interface AgentEvent {
     | "undo"
     | "human-required"
     | "newchat"
-    | "fetch";
+    | "fetch"
+    | "next-steps";
   time: string;
   text?: string;
   uncertain?: number;
@@ -79,6 +80,8 @@ export interface AgentEvent {
   decidedBy?: string;
   items?: TodoItem[];
   files?: string[];
+  /** next-steps: follow-ups found in Copilot's last reply, offered as one-click prompts. */
+  steps?: string[];
   name?: string;
   path?: string;
 }
@@ -154,6 +157,7 @@ export function normalizeEvent(raw: AgentEvent): AgentEvent {
   }
   if (e.items !== undefined && !Array.isArray(e.items)) e.items = [];
   if (e.files !== undefined && !Array.isArray(e.files)) e.files = [];
+  if (e.steps !== undefined) e.steps = (Array.isArray(e.steps) ? e.steps : []).map((s) => asText(s) ?? "").filter(Boolean);
   return e;
 }
 

@@ -573,6 +573,7 @@ function Invoke-AgentTurn {
         $message += Get-PinnedFiles $State.ProjectRoot $Text
 
         $nudges = 0   # times this message was sent again because Copilot explained instead of acting
+        $lastReply = ''; $doneText = ''   # for the suggested next steps after the turn
         $reviewed = $false   # the consistency review after a big change happens once per message
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
@@ -597,6 +598,7 @@ function Invoke-AgentTurn {
                 break
             }
             $actions = @(Get-ActionBlocks $r.Text)
+            $lastReply = "$($r.Text)"
             Write-CCBLog verbose agent "Round ${round}: reply parsed" @{ actions = @($actions | ForEach-Object { "$($_.type) $($_.arg)".Trim() }) }
             Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @($r.References) }
             if ($r.Result -and $r.Result -ne 'Success') { Add-AgentEvent $State 'error' @{ text = "Copilot answered with '$($r.Result)': $($r.ResultMessage)" }; break }
@@ -637,7 +639,7 @@ function Invoke-AgentTurn {
             for ($k = 0; $k -lt $actions.Count; $k++) {
                 if ($State.Cancel) { break }
                 $a = $actions[$k]
-                if ($a.type -eq 'done') { $isDone = $true; Add-AgentEvent $State 'done' @{ text = $a.body.Trim() }; continue }
+                if ($a.type -eq 'done') { $isDone = $true; $doneText = $a.body.Trim(); Add-AgentEvent $State 'done' @{ text = $doneText }; continue }
                 $id = "$($State.Seq)-$k"
                 $res = Invoke-AgentAction $State $a $id $checkpoint $r.Uncertain
                 if (-not $res.reported) { Add-AgentEvent $State 'action-result' @{ id = $id; ok = $res.ok; status = $(if ($res.ok) { 'ok' } else { 'failed' }); summary = $res.summary; output = (Limit-Text $res.output 4000); changed = [bool]$res.changed } }
@@ -662,6 +664,11 @@ function Invoke-AgentTurn {
             if ($round -eq $State.Config.maxRounds) { Add-AgentEvent $State 'status' @{ text = "Stopped after $($State.Config.maxRounds) rounds. Send a message to continue." }; break }
 
             $message = "Results:`n`n" + (Format-ActionResults $State $results) + "`n`nContinue. Use done when the task is finished."
+        }
+        # "Next steps" in Copilot's last reply become one-click prompts (sent only when the user picks one).
+        if (-not $State.Cancel) {
+            $next = @(Get-NextSteps ($lastReply + "`n`n" + $doneText))
+            if ($next.Count) { Add-AgentEvent $State 'next-steps' @{ steps = $next } }
         }
     } catch {
         Write-CCBLogError agent 'turn failed' $_

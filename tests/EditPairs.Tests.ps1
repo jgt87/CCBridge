@@ -183,12 +183,24 @@ Describe 'Long blocks: SEARCH shortened with ..., and half blocks' {
     It 'refuses only the first lines of a block (half a block) and changes nothing' {
         [IO.File]::WriteAllText($f, $page)
         $first9 = "  <style>`n" + ((1..8 | ForEach-Object { "    .rule$_ { margin: ${_}px; }" }) -join "`n")
-        { Invoke-EditAction $proj 'index.html' @(@{ search = $first9; replace = '  <link rel="stylesheet" href="x.css">' }) $null } | Should Throw 'do not open and close the same <style> blocks'
+        { Invoke-EditAction $proj 'index.html' @(@{ search = $first9; replace = '  <link rel="stylesheet" href="x.css">' }) $null } | Should Throw 'would leave a <style> block half open'
         [IO.File]::ReadAllText($f) | Should BeExactly $page
     }
     It 'refuses an edit that cuts a { } block in half' {
         [IO.File]::WriteAllText($f, "function a() {`n  return 1;`n}`nfunction b() {`n  return 2;`n}")
-        { Invoke-EditAction $proj 'index.html' @(@{ search = "function a() {`n  return 1;"; replace = '' }) $null } | Should Throw 'same number of { } blocks'
+        { Invoke-EditAction $proj 'index.html' @(@{ search = "function a() {`n  return 1;"; replace = '' }) $null } | Should Throw 'would leave a { } block half open'
+    }
+    It 'allows repairing a file whose blocks are already broken' {
+        # An earlier partial edit left CSS rules and a closing </style> without its opening tag.
+        [IO.File]::WriteAllText($f, "<head>`n  <link rel=""stylesheet"" href=""x.css"">`n    .rule9 { margin: 9px; }`n    .rule10 { margin: 10px; }`n  </style>`n</head>")
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = "    .rule9 { margin: 9px; }`n    .rule10 { margin: 10px; }`n  </style>"; replace = '' }) $null
+        $out | Should Match '^edited'
+        [IO.File]::ReadAllText($f) | Should Not Match 'rule9|</style>'
+    }
+    It 'allows an edit elsewhere in a broken file that does not make it worse' {
+        [IO.File]::WriteAllText($f, "<script>`nlet a = 1;`n<body><h1>Old</h1></body>")
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = '<h1>Old</h1>'; replace = '<h1>New</h1>' }) $null
+        $out | Should Match '^edited'
     }
     It 'still allows ordinary edits inside a block' {
         [IO.File]::WriteAllText($f, "function a() {`n  return 1;`n}")
@@ -196,4 +208,29 @@ Describe 'Long blocks: SEARCH shortened with ..., and half blocks' {
         $out | Should Match '^edited'
     }
     Remove-Item $proj -Recurse -Force
+}
+Describe 'Get-NextSteps' {
+    It 'takes the list under a Next steps heading' {
+        $r = "Done with the CSS.`n`n### Next steps`n1. Populate **styles.css** with the extracted CSS`n2. Remove the inline <style> block from index.html`n`nThanks!"
+        $s = @(Get-NextSteps $r)
+        $s.Count | Should Be 2
+        $s[0] | Should BeExactly 'Populate **styles.css** with the extracted CSS'
+        $s[1] | Should Match '^Remove the inline'
+    }
+    It 'understands bold headings, bullets and Dutch' {
+        @(Get-NextSteps "**Next steps:**`n- add tests for the parser").Count | Should Be 1
+        @(Get-NextSteps "## Volgende stappen`n- voeg de JSON toe aan de pagina")[0] | Should Be 'Voeg de JSON toe aan de pagina'
+    }
+    It 'takes a "the next step is to ..." sentence' {
+        $s = @(Get-NextSteps 'The CSS was removed. The next step is to populate styles.css with the extracted css content, after which index.html only links it.')
+        $s[0] | Should Match '^Populate styles\.css with the extracted css content'
+    }
+    It 'ignores code blocks and replies without next steps' {
+        @(Get-NextSteps "``````md`n## Next steps`n- inside code`n``````").Count | Should Be 0
+        @(Get-NextSteps 'All done, nothing else to do.').Count | Should Be 0
+    }
+    It 'keeps at most five' {
+        $list = "Next steps:`n" + ((1..8 | ForEach-Object { "- step number $_" }) -join "`n")
+        @(Get-NextSteps $list).Count | Should Be 5
+    }
 }
