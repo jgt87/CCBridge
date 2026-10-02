@@ -54,7 +54,9 @@ Describe 'New-PromptMessage' {
         $second = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Create hello.ps1' -Sent $sent -Context $ctx
         $second | Should Match 'expert software developer'
         $third = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Now add a test' -Sent $sent -Context $ctx
-        $third | Should BeExactly 'Now add a test'
+        $third | Should Match '^Now add a test\n\n\(Do this yourself with action blocks'
+        $third | Should Not Match 'expert software developer'
+        New-PromptMessage -AppRoot $root -Kind 'chat' -Text 'thanks' -Sent $sent -Context $ctx | Should BeExactly 'thanks'
         $fourth = New-PromptMessage -AppRoot $root -Kind 'mixed' -Text 'Also read my emails about it' -Sent $sent -Context $ctx
         $fourth | Should Match 'only to read it'
         $fourth | Should Not Match 'expert software developer'

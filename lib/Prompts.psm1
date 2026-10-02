@@ -82,7 +82,12 @@ function New-PromptMessage {
         [void]$Sent.Add($id)
     }
     if ($Summary) { $out.Add("Summary of the previous chat:`n$Summary") }
-    if (-not $out.Count) { return $Text }
+    if (-not $out.Count) {
+        # A follow-up in a chat that already has the instructions: a one-line reminder for work on
+        # files, because Copilot tends to explain instead of act once the instructions are far back.
+        if ($Text -and $Kind -in 'coding', 'project', 'mixed') { return "$Text`n`n$(Read-PromptPart $AppRoot 'reminder.md')" }
+        return $Text
+    }
     $body = $out -join "`n`n"
     if ($Text) { $body += "`n`nRequest: $Text" }
     $body
