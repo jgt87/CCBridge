@@ -194,6 +194,14 @@ function Invoke-GlobAction {
 
 function Invoke-GrepAction {
     param([string]$ProjectRoot, [string]$Pattern, [string]$FileGlob, [int]$MaxHits = 100)
+    # Copilot often searches for plain text such as "fetch(": when the pattern is not a valid
+    # regular expression, search for it literally instead of failing.
+    $note = ''
+    try { $null = [regex]::new($Pattern) }
+    catch {
+        $note = "(searched for the text literally: '$Pattern' is not a valid regular expression)`n"
+        $Pattern = [regex]::Escape($Pattern)
+    }
     $files = Get-ProjectFiles $ProjectRoot
     if ($FileGlob) { $re = ConvertTo-GlobRegex $FileGlob; $files = $files | Where-Object { $_.path -match $re } }
     $hits = New-Object System.Collections.Generic.List[string]
@@ -206,12 +214,12 @@ function Invoke-GrepAction {
             $n++
             if ($line -match $Pattern) {
                 $hits.Add("$($f.path):$n`: $($line.Trim())")
-                if ($hits.Count -ge $MaxHits) { return ($hits -join "`n") + "`n(stopped at $MaxHits matches)" }
+                if ($hits.Count -ge $MaxHits) { return $note + ($hits -join "`n") + "`n(stopped at $MaxHits matches)" }
             }
         }
     }
-    if (-not $hits.Count) { return "(no matches for $Pattern)" }
-    $hits -join "`n"
+    if (-not $hits.Count) { return "$note(no matches for $Pattern)" }
+    $note + ($hits -join "`n")
 }
 
 function Assert-Writable([string]$ProjectRoot, [string]$Path) {

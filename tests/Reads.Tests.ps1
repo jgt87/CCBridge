@@ -58,3 +58,16 @@ Describe '@file:START-END in a message' {
 }
 
 Remove-Item $proj -Recurse -Force
+
+Describe 'Invoke-GrepAction' {
+    It 'searches literally when the pattern is not a valid regular expression' {
+        $p = Join-Path $env:TEMP ('ccb-grep-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory $p | Out-Null
+        [IO.File]::WriteAllText((Join-Path $p 'index.html'), "<script>`nfetch('calendar.json')`n</script>")
+        $out = Invoke-GrepAction $p 'fetch(' ''
+        $out | Should Match 'searched for the text literally'
+        $out | Should Match 'index\.html:2: fetch\('
+        (Invoke-GrepAction $p 'fetch\(|script' '') | Should Not Match 'literally'
+        Remove-Item $p -Recurse -Force
+    }
+}
