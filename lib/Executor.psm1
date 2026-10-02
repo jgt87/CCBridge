@@ -135,18 +135,44 @@ function Get-SessionChangeStats {
 
 # --- Actions -------------------------------------------------------------------------
 
+function Split-ReadPath([string]$Spec) {
+    <# "index.html", "index.html:181-420" or "index.html:181-" -> path and line range. #>
+    $m = [regex]::Match($Spec.Trim(), '^(?<p>.+?):(?<a>\d+)(?:-(?<b>\d*))?$')
+    if ($m.Success) {
+        $b = if ($m.Groups['b'].Success -and $m.Groups['b'].Value) { [int]$m.Groups['b'].Value } elseif ($m.Groups['b'].Success) { [int]::MaxValue } else { [int]$m.Groups['a'].Value }
+        return [pscustomobject]@{ Path = $m.Groups['p'].Value; From = [Math]::Max(1, [int]$m.Groups['a'].Value); To = $b }
+    }
+    [pscustomobject]@{ Path = $Spec.Trim(); From = 1; To = [int]::MaxValue }
+}
+
 function Invoke-ReadAction {
+    <# File contents for Copilot. A path may carry a line range (PATH:START-END). Long content is
+       cut at a whole line, with a note that says which lines are shown and how to read the rest. #>
     param([string]$ProjectRoot, [string[]]$Paths, [int]$MaxCharsPerFile = 40000)
-    foreach ($p in $Paths) {
+    foreach ($spec in $Paths) {
+        $r = Split-ReadPath $spec
+        $p = $r.Path
         try {
             $full = Resolve-ProjectPath $ProjectRoot $p
             if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $p`n(file not found)"; continue }
             if (Test-BinaryFile $full) { "### $p`n(binary file, $((Get-Item -LiteralPath $full).Length) bytes - not shown)"; continue }
-            $t = (Read-TextFile $full).Text
-            $note = ''
-            if ($t.Length -gt $MaxCharsPerFile) { $note = "`n(truncated: showing $MaxCharsPerFile of $($t.Length) characters)"; $t = $t.Substring(0, $MaxCharsPerFile) }
+            $lines = (Read-TextFile $full).Text.Replace("`r`n", "`n").Split("`n")
+            $total = $lines.Length
+            $from = [Math]::Min($r.From, [Math]::Max(1, $total)); $to = [Math]::Min($r.To, $total)
+            $sb = New-Object Text.StringBuilder
+            $last = $from - 1
+            for ($i = $from; $i -le $to; $i++) {
+                $line = $lines[$i - 1]
+                if ($sb.Length -gt 0 -and $sb.Length + $line.Length + 1 -gt $MaxCharsPerFile) { break }
+                if ($sb.Length -gt 0) { [void]$sb.Append("`n") }
+                [void]$sb.Append($line)
+                $last = $i
+            }
+            $whole = ($from -eq 1 -and $last -eq $total)
+            $head = if ($whole) { "### $p" } else { "### $p (lines $from-$last of $total)" }
+            $note = if ($last -lt $to) { "`n(cut to fit: showing lines $from-$last of $total. Read $($p):$($last + 1)-$to for the rest.)" } else { '' }
             $fence = '````'
-            "### $p`n$fence`n$t`n$fence$note"
+            "$head`n$fence`n$($sb.ToString())`n$fence$note"
         } catch { "### $p`n(error: $($_.Exception.Message))" }
     }
 }

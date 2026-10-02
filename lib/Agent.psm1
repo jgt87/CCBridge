@@ -228,8 +228,10 @@ function Start-NewChat($State) {
 
 function Get-PinnedFiles {
     param([string]$ProjectRoot, [string]$Text)
-    $paths = @([regex]::Matches($Text, '(?<![\w@])@([\w.][\w./\\-]*\w)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique |
-        Where-Object { try { Test-Path -LiteralPath (Resolve-ProjectPath $ProjectRoot $_) -PathType Leaf } catch { $false } })
+    # @path or @path:START-END (only those lines)
+    $paths = @([regex]::Matches($Text, '(?<![\w@])@([\w.][\w./\\-]*\w)(:\d+(?:-\d*)?)?') |
+        Where-Object { try { Test-Path -LiteralPath (Resolve-ProjectPath $ProjectRoot $_.Groups[1].Value) -PathType Leaf } catch { $false } } |
+        ForEach-Object { $_.Groups[1].Value + $_.Groups[2].Value } | Select-Object -Unique)
     if (-not $paths.Count) { return '' }
     "`n`n# Attached files`n" + ((Invoke-ReadAction $ProjectRoot $paths) -join "`n`n")
 }
@@ -259,6 +261,30 @@ function Get-ProjectContext($State) {
     $notes = Get-ProjectNotes $root
     $full = "$location`n$files" + $(if ($notes) { "`n`nProject notes (AGENTS.md):`n$notes" } else { '' })
     @{ Location = $location; Full = $full }
+}
+
+function Format-ActionResults {
+    <# The results message. File contents get the budget first: other results (command output,
+       write/edit confirmations) are kept short, the rest is shared by the files read. A file that
+       does not fit is read again to fit, cut at a whole line with a note on how to read the rest. #>
+    param($State, $Results)
+    $budget = [int]$State.Config.resultCharBudget
+    $reads = @($Results | Where-Object { $_.readPaths })
+    $others = @($Results | Where-Object { -not $_.readPaths })
+    $otherText = @{}
+    foreach ($r in $others) { $otherText[$r.head] = Limit-Text $r.output 6000 }
+    $used = ($otherText.Values | Measure-Object -Property Length -Sum).Sum
+    $readBudget = [Math]::Max(4000, $budget - [int]$used)
+    $files = [Math]::Max(1, ($reads | ForEach-Object { @($_.readPaths).Count } | Measure-Object -Sum).Sum)
+    $perFile = [Math]::Max(1500, [int]($readBudget / $files))
+    $parts = foreach ($r in $Results) {
+        $out = if ($r.readPaths) {
+            if ($r.output.Length -le $perFile * @($r.readPaths).Count) { $r.output }
+            else { (Invoke-ReadAction $State.ProjectRoot @($r.readPaths) -MaxCharsPerFile $perFile) -join "`n`n" }
+        } else { $otherText[$r.head] }
+        "$($r.head)`n$out".TrimEnd()
+    }
+    $parts -join "`n`n"
 }
 
 function Limit-Text([string]$Text, [int]$Max) {
@@ -311,7 +337,7 @@ function Invoke-AgentAction {
         'read' {
             $paths = Get-ActionPaths $Action
             $evt.target = $paths -join ', '; Add-AgentEvent $State 'action' $evt
-            return @{ ok = $true; summary = "read $($paths.Count) file(s)"; output = ((Invoke-ReadAction $root $paths) -join "`n`n") }
+            return @{ ok = $true; summary = "read $($paths.Count) file(s)"; output = ((Invoke-ReadAction $root $paths -MaxCharsPerFile 200000) -join "`n`n"); readPaths = @($paths) }
         }
         'glob' {
             $pat = if ($Action.arg) { $Action.arg } else { $Action.body.Split("`n")[0].Trim() }
@@ -499,7 +525,7 @@ function Invoke-AgentTurn {
                 break
             }
 
-            $results = New-Object Collections.Generic.List[string]
+            $results = New-Object Collections.Generic.List[object]
             $isDone = $false
             for ($k = 0; $k -lt $actions.Count; $k++) {
                 if ($State.Cancel) { break }
@@ -508,14 +534,13 @@ function Invoke-AgentTurn {
                 $id = "$($State.Seq)-$k"
                 $res = Invoke-AgentAction $State $a $id $checkpoint $r.Uncertain
                 if (-not $res.reported) { Add-AgentEvent $State 'action-result' @{ id = $id; ok = $res.ok; status = $(if ($res.ok) { 'ok' } else { 'failed' }); summary = $res.summary; output = (Limit-Text $res.output 4000); changed = [bool]$res.changed } }
-                $results.Add("### $($k + 1). $($a.type) $($a.arg)`n$($res.output)".TrimEnd())
+                $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = "$($res.output)"; readPaths = $res.readPaths })
             }
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
             if ($isDone) { break }
             if ($round -eq $State.Config.maxRounds) { Add-AgentEvent $State 'status' @{ text = "Stopped after $($State.Config.maxRounds) rounds. Send a message to continue." }; break }
 
-            $perResult = [Math]::Max(1500, [int]($State.Config.resultCharBudget / [Math]::Max(1, $results.Count)))
-            $message = "Results:`n`n" + (($results | ForEach-Object { Limit-Text $_ $perResult }) -join "`n`n") + "`n`nContinue. Use done when the task is finished."
+            $message = "Results:`n`n" + (Format-ActionResults $State $results) + "`n`nContinue. Use done when the task is finished."
         }
     } catch {
         Write-CCBLogError agent 'turn failed' $_

@@ -4,7 +4,7 @@
   "projectsFolder": "CCBridge",
   "maxRounds": 12,
   "promptCharBudget": 75000,
-  "resultCharBudget": 40000,
+  "resultCharBudget": 60000,
   "replyTimeoutSec": 300,
   "commandTimeoutSec": 180,
   "rolloverMargin": 2,

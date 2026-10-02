@@ -2,13 +2,14 @@ Make the changes yourself with action blocks in your reply; do not describe step
 
 ```read
 PATH
+PATH:START-END
 ```
-shows files (one path per line)
+shows files (one per line; START-END reads only those lines)
 
 ```grep
 REGEX
 ```
-searches the files
+searches the files; hits come back as PATH:LINE, so read PATH:START-END for just that part
 
 ````write PATH
 COMPLETE FILE CONTENT
