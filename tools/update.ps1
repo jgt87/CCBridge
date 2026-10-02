@@ -19,7 +19,7 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $repo = 'jgt87/CCBridge'
 $branch = 'main'
 Import-Module (Join-Path $root 'lib\Log.psm1')
-function Say([string]$Message) { [Console]::Error.WriteLine("[CCBridge update] $Message"); Write-CCBLog info update $Message }
+function Say([string]$Message) { [Console]::Error.WriteLine("[StreamHub update] $Message"); Write-CCBLog info update $Message }
 
 function Invoke-Git([string[]]$GitArgs, [int]$TimeoutSec = 30) {
     $psi = New-Object Diagnostics.ProcessStartInfo
@@ -65,7 +65,7 @@ try {
     $latest = [string]$release.tag_name
     if (-not $latest -or $latest -eq $current) { Write-CCBLog verbose update "up to date ($current)"; if ($Report) { Say "Already up to date ($current)." }; return }
     $asset = @($release.assets | Where-Object { $_.name -like 'CCBridge-*.zip' }) | Select-Object -First 1
-    if (-not $asset) { Say "release $latest has no CCBridge zip"; return }
+    if (-not $asset) { Say "release $latest has no StreamHub zip"; return }
 
     $tmp = Join-Path $env:TEMP ('ccbridge-update-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     $null = New-Item -ItemType Directory -Path $tmp

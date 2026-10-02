@@ -13,10 +13,10 @@ $dir = if ($env:CCBRIDGE_DIR) { $env:CCBRIDGE_DIR } else { Join-Path $env:LOCALA
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 if ([Net.WebRequest]::DefaultWebProxy) { [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials }
 
-Write-Host "Installing CCBridge into $dir" -ForegroundColor Cyan
+Write-Host "Installing StreamHub into $dir" -ForegroundColor Cyan
 $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'CCBridge-installer' }
 $asset = @($release.assets | Where-Object { $_.name -like 'CCBridge-*.zip' }) | Select-Object -First 1
-if (-not $asset) { throw "The latest release ($($release.tag_name)) has no CCBridge zip." }
+if (-not $asset) { throw "The latest release ($($release.tag_name)) has no StreamHub zip." }
 
 $tmp = Join-Path $env:TEMP ('ccbridge-install-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $null = New-Item -ItemType Directory -Path $tmp
@@ -37,23 +37,25 @@ try {
 # Shortcuts: Start menu and desktop (skip with $env:CCBRIDGE_NO_SHORTCUTS = '1').
 $shell = New-Object -ComObject WScript.Shell
 $targets = @(
-    (Join-Path ([Environment]::GetFolderPath('Programs')) 'CCBridge.lnk'),
-    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'CCBridge.lnk')
+    (Join-Path ([Environment]::GetFolderPath('Programs')) 'StreamHub.lnk'),
+    (Join-Path ([Environment]::GetFolderPath('Desktop')) 'StreamHub.lnk')
 )
 if ($env:CCBRIDGE_NO_SHORTCUTS -eq '1') { $targets = @() }
+# Shortcuts from before the rename (CCBridge.lnk) are replaced by the StreamHub ones.
+foreach ($old in (Join-Path ([Environment]::GetFolderPath('Programs')) 'CCBridge.lnk'), (Join-Path ([Environment]::GetFolderPath('Desktop')) 'CCBridge.lnk')) { if ($targets.Count -and (Test-Path -LiteralPath $old)) { [IO.File]::Delete($old) } }
 foreach ($lnkPath in $targets) {
     $lnk = $shell.CreateShortcut($lnkPath)
     $lnk.TargetPath = Join-Path $dir 'start.cmd'
     $lnk.WorkingDirectory = $dir
     $lnk.IconLocation = "$env:SystemRoot\System32\shell32.dll,13"
-    $lnk.Description = 'CCBridge - coding with Microsoft 365 Copilot Chat'
+    $lnk.Description = 'StreamHub - coding with Microsoft 365 Copilot Chat'
     $lnk.Save()
 }
 
 Write-Host ''
-Write-Host "CCBridge $($release.tag_name) is installed." -ForegroundColor Green
-Write-Host '  Start it:  CCBridge shortcut on the desktop or in the Start menu'
-Write-Host '  Updates:   automatic each time CCBridge starts (turn off with "autoUpdate": false in config\harness.local.json)'
+Write-Host "StreamHub $($release.tag_name) is installed." -ForegroundColor Green
+Write-Host '  Start it:  StreamHub shortcut on the desktop or in the Start menu'
+Write-Host '  Updates:   automatic each time StreamHub starts (turn off with "autoUpdate": false in config\harness.local.json)'
 Write-Host '  MCP:       register in your MCP client with'
 Write-Host "             powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$dir\mcp\ccbridge-mcp.ps1`""
 if (Get-Command claude -ErrorAction SilentlyContinue) {

@@ -222,10 +222,10 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
             $State.Tasks.Enqueue(@{ kind = 'ask'; jobId = $job.id; text = $prompt; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false) })
             Wait-BridgeJob $job ([int](Get-Arg $ToolArgs 'timeout_sec' 240))
             if ($job.status -eq 'finished') {
-                $note = if ($job.uncertain) { "`n`n(CCBridge note: parts of this reply were repaired after Copilot's link filter removed text; check code carefully.)" } else { '' }
+                $note = if ($job.uncertain) { "`n`n(StreamHub note: parts of this reply were repaired after Copilot's link filter removed text; check code carefully.)" } else { '' }
                 $src = Format-Sources $job.references
                 if (@($job.proposedActions).Count) { $note += "`n`nHUMAN REQUIRED: Copilot proposed a Microsoft 365 action (" + ((@($job.proposedActions) | ForEach-Object { $_.title }) -join '; ') + "). CCBridge never confirms it; the user must review it in the Copilot window." }
-                foreach ($c in @($job.actionClaims)) { $note += "`n`nHUMAN CHECK: Copilot's reply says ""$c"" - CCBridge confirmed no Microsoft 365 action." }
+                foreach ($c in @($job.actionClaims)) { $note += "`n`nHUMAN CHECK: Copilot's reply says ""$c"" - StreamHub confirmed no Microsoft 365 action." }
                 return @{ text = "$($job.reply)$note$(if ($src) { "`n`n$src" })" }
             }
             if ($job.status -eq 'error') { return @{ text = "Copilot error: $($job.error)"; isError = $true } }
