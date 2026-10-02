@@ -36,6 +36,25 @@ function Get-CCBridgeVersion([string]$AppRoot) {
     'dev'
 }
 
+function Get-CCBridgeBuild {
+    <# Release version and commit, shown in the web app. A release copy has version.txt and
+       commit.txt (written by build-release.ps1); a git copy uses its latest release tag and HEAD. #>
+    param([string]$AppRoot)
+    if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
+    $version = $null; $commit = $null
+    $v = Join-Path $AppRoot 'version.txt'
+    $c = Join-Path $AppRoot 'commit.txt'
+    if (Test-Path $v) { $version = ([IO.File]::ReadAllText($v)).Trim() }
+    if (Test-Path $c) { $commit = ([IO.File]::ReadAllText($c)).Trim() }
+    if (Test-Path (Join-Path $AppRoot '.git')) {
+        try {
+            if (-not $version) { $version = (& git -C $AppRoot describe --tags --abbrev=0 2>$null | Select-Object -First 1) }
+            if (-not $commit) { $commit = (& git -C $AppRoot rev-parse --short HEAD 2>$null | Select-Object -First 1) }
+        } catch { }
+    }
+    [pscustomobject]@{ version = $(if ($version) { "$version" } else { 'dev' }); commit = $(if ($commit) { "$commit" } else { '' }) }
+}
+
 function Set-CCBridgeLocalSetting {
     <# Writes one setting into config\<Name>.local.json (kept across updates). #>
     param([Parameter(Mandatory)][ValidateSet('harness', 'selectors')][string]$Name, [Parameter(Mandatory)][string]$Key, $Value, [string]$AppRoot)
@@ -70,4 +89,4 @@ function Get-CCBridgeEnvironment {
     }
 }
 
-Export-ModuleMember -Function Get-CCBridgeConfig, Get-CCBridgeVersion, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment
+Export-ModuleMember -Function Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment

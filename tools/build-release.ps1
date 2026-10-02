@@ -24,6 +24,9 @@ foreach ($item in $include) {
 Get-ChildItem $app -Recurse -File | Where-Object { $_.Name -like '*.local.json' -or $_.Name -in 'capture-report.json', 'probe-report.txt' } |
     ForEach-Object { [IO.File]::Delete($_.FullName) }
 [IO.File]::WriteAllText((Join-Path $app 'version.txt'), $Version)
+# The commit the release was built from, shown next to the version in the web app.
+$commit = try { (& git -C $root rev-parse --short HEAD 2>$null | Select-Object -First 1) } catch { $null }
+if ($commit) { [IO.File]::WriteAllText((Join-Path $app 'commit.txt'), "$commit") }
 
 $zip = Join-Path $dist "CCBridge-$Version.zip"
 if (Test-Path $zip) { [IO.File]::Delete($zip) }

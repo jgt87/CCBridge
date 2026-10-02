@@ -171,10 +171,13 @@ export default function SmoothTab({
   className,
   activeColor = "bg-[#1F9CFE]",
   onChange,
-}: SmoothTabProps) {
+  columns,
+}: SmoothTabProps & { columns?: number }) {
   const [selected, setSelected] = React.useState<string>(defaultTabId);
   const [direction, setDirection] = React.useState(0);
-  const [dimensions, setDimensions] = React.useState({ width: 0, left: 0 });
+  const [dimensions, setDimensions] = React.useState({ width: 0, height: 0, left: 0, top: 0 });
+  // CCBridge: tabs can wrap into a grid (e.g. 2 x 2), so the highlight follows both axes.
+  const cols = Math.max(1, Math.min(columns ?? items.length, items.length));
 
   // Reference for the selected button
   const buttonRefs = React.useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -192,19 +195,27 @@ export default function SmoothTab({
 
         setDimensions({
           width: rect.width,
+          height: rect.height,
           left: rect.left - containerRect.left,
+          top: rect.top - containerRect.top,
         });
       }
     };
 
-    // Initial update
+    // Initial update: measure now (layout is ready in a layout effect) and once more after paint
+    updateDimensions();
     requestAnimationFrame(() => {
       updateDimensions();
     });
 
-    // Update on resize
+    // Update on resize, also of the tab bar itself (side panel opened, closed or resized)
     window.addEventListener("resize", updateDimensions);
-    return () => window.removeEventListener("resize", updateDimensions);
+    const ro = typeof ResizeObserver !== "undefined" && containerRef.current ? new ResizeObserver(updateDimensions) : null;
+    if (ro && containerRef.current) ro.observe(containerRef.current);
+    return () => {
+      window.removeEventListener("resize", updateDimensions);
+      ro?.disconnect();
+    };
   }, [selected]);
 
   const handleTabClick = (tabId: string) => {
@@ -234,7 +245,7 @@ export default function SmoothTab({
       <div
         aria-label="Smooth tabs"
         className={cn(
-          "relative flex items-center justify-between gap-1 py-1",
+          "relative flex items-center justify-between gap-1 p-1",
           "w-full bg-background",
           "rounded-xl border",
           "transition-all duration-200",
@@ -246,16 +257,17 @@ export default function SmoothTab({
         {/* Sliding Background */}
         <motion.div
           animate={{
-            width: dimensions.width - 8,
-            x: dimensions.left + 4,
+            width: dimensions.width,
+            height: dimensions.height,
+            x: dimensions.left,
+            y: dimensions.top,
             opacity: 1,
           }}
           className={cn(
-            "absolute z-[1] rounded-lg",
+            "absolute top-0 left-0 z-[1] rounded-lg",
             selectedItem?.color || activeColor
           )}
           initial={false}
-          style={{ height: "calc(100% - 8px)", top: "4px" }}
           transition={{
             type: "spring",
             stiffness: 400,
@@ -265,7 +277,7 @@ export default function SmoothTab({
 
         <div
           className="relative z-[2] grid w-full gap-1"
-          style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
         >
           {items.map((item) => {
             const isSelected = selected === item.id;

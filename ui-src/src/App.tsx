@@ -349,12 +349,22 @@ export default function App() {
                 }}
                 onUndo={() => api.undo()}
                 onUploaded={refreshFiles}
+                project={state.project}
                 todos={state.todos}
               />
             </div>
             {state.version && (
-              <div className="shrink-0 px-1 pt-2 text-muted-foreground text-xs" title="Installed CCBridge version; updates install automatically at start (or run update.cmd)">
-                CCBridge {state.version}
+              <div
+                className="flex shrink-0 items-center gap-2 px-1 pt-2 text-muted-foreground text-xs"
+                title="Installed CCBridge release and the commit it was built from; updates install automatically at start (or run update.cmd)"
+              >
+                <span>CCBridge {state.release || state.version}</span>
+                {state.commit && (
+                  <>
+                    <span aria-hidden className="h-3 w-px bg-black/15 dark:bg-white/20" />
+                    <span className="font-mono">{state.commit}</span>
+                  </>
+                )}
               </div>
             )}
           </aside>

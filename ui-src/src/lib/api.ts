@@ -84,7 +84,8 @@ export interface AgentEvent {
 }
 
 export interface AppState {
-  project: { name: string; path: string } | null;
+  /** location: the folders the project sits in, e.g. ["OneDrive", "CCBridge", "budget tracker"]. */
+  project: { name: string; path: string; location?: string[] } | null;
   mode: Mode;
   busy: boolean;
   progress: string;
@@ -100,6 +101,9 @@ export interface AppState {
   logLevel: "off" | "info" | "verbose" | "trace";
   /** Installed CCBridge version (version.txt), or git-<sha> for a development copy. */
   version: string;
+  /** Release tag (v0.1.12) and the commit it was built from (short hash). */
+  release?: string;
+  commit?: string;
 }
 
 export interface Reference {
@@ -185,6 +189,7 @@ export const api = {
   undo: () => call<{ ok: boolean }>("POST", "/api/undo"),
   stop: () => call<{ ok: boolean }>("POST", "/api/stop"),
   connect: () => call<{ ok: boolean }>("POST", "/api/connect"),
+  showProject: () => call<{ ok: boolean }>("POST", "/api/project/show"),
   setWorkIq: (value: "on" | "off" | "leave") => call<{ ok: boolean }>("POST", "/api/workiq", { value }),
   setLogging: (level: "off" | "info" | "verbose" | "trace") => call<{ ok: boolean }>("POST", "/api/logging", { level }),
   diagnostics: () => call<{ ok: boolean; path: string; fullPath: string }>("POST", "/api/diagnostics"),

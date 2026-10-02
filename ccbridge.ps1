@@ -71,4 +71,5 @@ Initialize-CCBLog -Level $LogLevel -Config $config
 $state = New-AgentState -Config $config -AppRoot $root
 $state.LogLevel = Get-CCBLogLevel
 $state.Version = Get-CCBridgeVersion $root
+$state.Build = Get-CCBridgeBuild $root
 Start-CCBridgeServer -State $state -NoBrowser:$NoBrowser

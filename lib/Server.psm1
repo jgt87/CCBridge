@@ -11,6 +11,16 @@ $script:Mime = @{
     '.woff2' = 'font/woff2'; '.woff' = 'font/woff'
 }
 
+$script:LocationCache = @{}
+function Get-ProjectLocation([string]$ProjectRoot) {
+    <# The folders the project sits in, for the side panel: OneDrive, CCBridge, <project>. Cached:
+       the snapshot is built several times a second. #>
+    if (-not $script:LocationCache.ContainsKey($ProjectRoot)) {
+        $loc = try { Get-OneDriveLocation $ProjectRoot } catch { $null }
+        $script:LocationCache[$ProjectRoot] = if ($loc) { @($loc.Display -split ' > ') } else { @($ProjectRoot.TrimEnd('\').Split('\') | Select-Object -Last 3) }
+    }
+    $script:LocationCache[$ProjectRoot]
+}
 function Send-Response($Ctx, [int]$Status, [string]$ContentType, [byte[]]$Bytes) {
     $res = $Ctx.Response
     $res.StatusCode = $Status
@@ -34,13 +44,15 @@ function Read-JsonBody($Ctx) {
 
 function Get-StateSnapshot($State) {
     @{
-        project = $(if ($State.ProjectRoot) { @{ name = (Split-Path $State.ProjectRoot -Leaf); path = $State.ProjectRoot } } else { $null })
+        project = $(if ($State.ProjectRoot) { @{ name = (Split-Path $State.ProjectRoot -Leaf); path = $State.ProjectRoot; location = @(Get-ProjectLocation $State.ProjectRoot) } } else { $null })
         mode = $State.Mode; busy = $State.Busy; progress = $State.Progress
         copilot = $State.Copilot; copilotMessage = $State.CopilotMessage
         throttle = $State.Throttle; credits = $State.Credits; todos = @($State.Todos)
         promptLimit = $State.Config.promptCharBudget
         logLevel = (Get-CCBLogLevel)
         version = [string]$State.Version
+        release = $(if ($State.Build) { [string]$State.Build.version } else { [string]$State.Version })
+        commit = $(if ($State.Build) { [string]$State.Build.commit } else { '' })
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
         workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
     }
@@ -150,6 +162,10 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/diagnostics$' {
             $zip = & (Join-Path $State.AppRoot 'tools\collect-diagnostics.ps1') -NoOpen
             return Send-Json $Ctx @{ ok = $true; path = (Protect-LogText $zip); fullPath = $zip }
+        }
+        '^POST /api/project/show$' {
+            if ($State.ProjectRoot -and (Test-Path -LiteralPath $State.ProjectRoot)) { Start-Process explorer.exe "`"$($State.ProjectRoot)`"" }
+            return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/diagnostics/show$' {
             $b = Read-JsonBody $Ctx

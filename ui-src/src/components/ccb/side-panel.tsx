@@ -1,4 +1,5 @@
-import { ChevronRight, CloudDownload, File, FileClock, Folder, FolderLock, FolderTree, ListTodo, Lock, RotateCcw, SquareCheck, Square } from "lucide-react";
+import { ChevronRight, CloudDownload, ExternalLink, File, FileClock, Folder, FolderLock, FolderOpen, FolderTree, ListTodo, Lock, RotateCcw, SquareCheck, Square } from "lucide-react";
+import type React from "react";
 import { useMemo, useState } from "react";
 import FileUpload from "@/components/kokonutui/file-upload";
 import GradientButton from "@/components/kokonutui/gradient-button";
@@ -67,56 +68,103 @@ function ChangeBadge({ node }: { node: TreeNode }) {
   );
 }
 
-function TreeRows({ nodes, depth, onOpen }: { nodes: TreeNode[]; depth: number; onOpen: (p: string) => void }) {
+// Tree guide lines: every item gets a short horizontal tick from its parent's vertical line; the
+// vertical line stops at the last item's tick, as in a file explorer.
+const LINE = "border-black/15 dark:border-white/15";
+const ITEM = cn(
+  "relative pl-4",
+  "before:pointer-events-none before:absolute before:top-[14px] before:left-0 before:w-3 before:border-t before:content-['']",
+  "after:pointer-events-none after:absolute after:top-0 after:left-0 after:h-full after:border-l after:content-[''] last:after:h-[14px]",
+  "before:border-black/15 after:border-black/15 dark:before:border-white/15 dark:after:border-white/15"
+);
+const ROW = "flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5";
+
+function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) => void }) {
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   return (
-    <>
-      {nodes.map((n) =>
-        n.children ? (
-          <div key={n.path}>
+    <ul>
+      {nodes.map((n) => (
+        <li className={ITEM} key={n.path}>
+          {n.children ? (
+            <>
+              <button className={ROW} onClick={() => setClosed((c) => ({ ...c, [n.path]: !c[n.path] }))} title={n.path} type="button">
+                <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !closed[n.path] && "rotate-90")} />
+                {n.path === "source" ? (
+                  <FolderLock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <span className="truncate">{n.name}</span>
+                <ChangeBadge node={n} />
+              </button>
+              {!closed[n.path] && (
+                <div className="ml-[13px]">
+                  <TreeRows nodes={n.children} onOpen={onOpen} />
+                </div>
+              )}
+            </>
+          ) : (
             <button
-              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5"
-              onClick={() => setClosed((c) => ({ ...c, [n.path]: !c[n.path] }))}
-              style={{ paddingLeft: 8 + depth * 14 }}
+              className={ROW}
+              onClick={() => onOpen(n.path)}
+              title={`${n.path} (${n.size} bytes)${n.path.startsWith("source/") ? " - source data, read-only for Copilot" : ""}`}
               type="button"
             >
-              <ChevronRight className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", !closed[n.path] && "rotate-90")} />
-              {n.path === "source" ? (
-                <FolderLock className="h-3.5 w-3.5 text-muted-foreground" />
+              {n.path.startsWith("source/") ? (
+                <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               ) : (
-                <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
               <span className="truncate">{n.name}</span>
               <ChangeBadge node={n} />
             </button>
-            {!closed[n.path] && <TreeRows depth={depth + 1} nodes={n.children} onOpen={onOpen} />}
-          </div>
-        ) : (
-          <button
-            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5"
-            key={n.path}
-            onClick={() => onOpen(n.path)}
-            style={{ paddingLeft: 26 + depth * 14 }}
-            title={`${n.path} (${n.size} bytes)${n.path.startsWith("source/") ? " - source data, read-only for Copilot" : ""}`}
-            type="button"
-          >
-            {n.path.startsWith("source/") ? (
-              <Lock className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : (
-              <File className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-            <span className="truncate">{n.name}</span>
-            <ChangeBadge node={n} />
-          </button>
-        )
-      )}
-    </>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
-/** Files tab: source-data upload and the project tree. */
-function FilesPanel({ files, onOpenFile, onUploaded }: { files: FileInfo[]; onOpenFile: (path: string) => void; onUploaded: () => void }) {
+/** The project folder as the top of the tree; its OneDrive location shows on hover. */
+function ProjectRoot({ project, children }: { project: { name: string; path: string; location?: string[] }; children: React.ReactNode }) {
+  const where = project.location?.length ? project.location.join(" > ") : project.path;
+  return (
+    <div>
+      <div className="flex h-7 items-center gap-1.5 rounded-md px-1.5 text-sm" title={`${where}\n${project.path}`}>
+        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{project.name}</span>
+        <button
+          className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+          onClick={() => api.showProject()}
+          title="Open the project folder in File Explorer"
+          type="button"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className={cn("ml-[13px]", LINE)}>{children}</div>
+    </div>
+  );
+}
+
+/** Files tab: source-data upload and the project tree under the project folder. */
+function FilesPanel({
+  files,
+  onOpenFile,
+  onUploaded,
+  project,
+}: {
+  files: FileInfo[];
+  onOpenFile: (path: string) => void;
+  onUploaded: () => void;
+  project?: { name: string; path: string; location?: string[] } | null;
+}) {
   const tree = useMemo(() => buildTree(files), [files]);
+  const rows = tree.length ? (
+    <TreeRows nodes={tree} onOpen={onOpenFile} />
+  ) : (
+    <p className="p-2 text-muted-foreground text-sm">No files yet. Ask Copilot to create some.</p>
+  );
   return (
     <div className="p-2">
       <FileUpload
@@ -127,15 +175,10 @@ function FilesPanel({ files, onOpenFile, onUploaded }: { files: FileInfo[]; onOp
         title="Add source data"
         upload={api.uploadSource}
       />
-      {tree.length ? (
-        <TreeRows depth={0} nodes={tree} onOpen={onOpenFile} />
-      ) : (
-        <p className="p-3 text-muted-foreground text-sm">No files yet. Ask Copilot to create some.</p>
-      )}
+      {project ? <ProjectRoot project={project}>{rows}</ProjectRoot> : rows}
     </div>
   );
 }
-
 export function SidePanel({
   files,
   todos,
@@ -148,6 +191,7 @@ export function SidePanel({
   onRunFetch,
   onSaveFetch,
   onAttach,
+  project,
 }: {
   files: FileInfo[];
   todos: TodoItem[];
@@ -160,8 +204,9 @@ export function SidePanel({
   onRunFetch: (name: string) => void;
   onSaveFetch: (name: string, prompt: string) => Promise<void>;
   onAttach: (path: string) => void;
+  project?: { name: string; path: string; location?: string[] } | null;
 }) {
-  const filesPanel = <FilesPanel files={files} onOpenFile={onOpenFile} onUploaded={onUploaded} />;
+  const filesPanel = <FilesPanel files={files} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />;
 
   const tasksPanel = (
     <div className="space-y-1 p-3">
@@ -217,6 +262,7 @@ export function SidePanel({
 
   return (
     <SmoothTab
+      columns={2}
       defaultTabId="files"
       items={[
         { id: "files", title: "Files", icon: FolderTree, color: "bg-zinc-700", content: filesPanel },
