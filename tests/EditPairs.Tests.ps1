@@ -1,6 +1,7 @@
 # Edit blocks in the forms Copilot actually sends.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Protocol.psm1') -Force
+Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 
 function Edit([string]$Body) { "````````edit index.html`n$Body`n````````" }
 
@@ -59,4 +60,22 @@ Describe 'Action as the first line of a plain code block' {
         @(Get-ActionBlocks "``````js`nread(file)`n``````").Count | Should Be 0
         @(Get-ActionBlocks "```````nconsole.log(1)`n``````").Count | Should Be 0
     }
+}
+Describe 'Edits whose SEARCH text matches several places' {
+    $proj = Join-Path $env:TEMP ('ccb-ambig-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory $proj | Out-Null
+    $f = Join-Path $proj 'index.html'
+    It 'takes the first match after the previous change and says so' {
+        [IO.File]::WriteAllText($f, "<head>`n<style>a{}</style>`n</head>`n<div>`n</div>`n<script>`n</script>`n<div>`n</div>")
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = '<script>'; replace = '<script src="app.js">' }, @{ search = "<div>`n</div>"; replace = '<section></section>' }) $null
+        $out | Should Match 'matched 2 places \(lines 4, 8\); changed the one at line 8'
+        $text = [IO.File]::ReadAllText($f)
+        $text | Should Match "<div>`n</div>`n<script src=""app.js"">`n</script>`n<section></section>$"
+    }
+    It 'lists the lines of every match when there is no previous change, and changes nothing' {
+        [IO.File]::WriteAllText($f, "<div>`n</div>`nx`n<div>`n</div>")
+        { Invoke-EditAction $proj 'index.html' @(@{ search = "<div>`n</div>"; replace = 'y' }) $null } | Should Throw 'matches 2 places (lines 1, 4)'
+        [IO.File]::ReadAllText($f) | Should BeExactly "<div>`n</div>`nx`n<div>`n</div>"
+    }
+    Remove-Item $proj -Recurse -Force
 }

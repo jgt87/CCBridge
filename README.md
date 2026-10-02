@@ -115,7 +115,7 @@ Command line, one prompt without the interface:
 powershell -NoProfile -ExecutionPolicy Bypass -File ccbridge.ps1 -Ping "say hi" -NewChat
 ```
 
-`start.cmd` / `ccbridge.ps1` options: `-Port <n>`, `-NoBrowser`, `-NoUpdate` (skip the update check once), `-LogLevel off|info|verbose|trace`. If CCBridge is already running, `start.cmd` just opens it.
+`start.cmd` / `ccbridge.ps1` options: `-Port <n>`, `-NoBrowser`, `-NoUpdate` (skip the update check once), `-LogLevel off|info|verbose|trace`. If CCBridge is already running, `start.cmd` stops that instance first (it would keep serving its old version after an update) and starts the current one; the open browser tab reconnects by itself. The MCP server and `-Ping` runs are left alone.
 
 ---
 
@@ -218,7 +218,7 @@ Settings live in `config\harness.json` and `config\selectors.json`. Put your own
 | `autoUpdate` | (on) | `false` turns automatic updates off |
 | `logLevel` | `info` | `off`, `info`, `verbose`, `trace` |
 
-`selectors.json` holds the Copilot address, `chatUrl` (default `https://m365.cloud.microsoft/chat`, opened at start and for every new chat), and the CSS selectors for Copilot's message box, Send button and (via `capture.cmd`) the Work IQ toggle. If Microsoft changes the Copilot page, a selector fix in `selectors.local.json` is usually all that is needed.
+`selectors.json` holds the Copilot address, `chatUrl` (default `https://www.microsoft365.com/chat`, opened at start and when a new chat needs a page reload; it signs in without an extra prompt and may redirect to `m365.cloud.microsoft/chat`), `chatHosts` (the hosts on which CCBridge recognises the Copilot tab), and the CSS selectors for Copilot's message box, Send button and (via `capture.cmd`) the Work IQ toggle. If Microsoft changes the Copilot page, a selector fix in `selectors.local.json` is usually all that is needed.
 
 ---
 

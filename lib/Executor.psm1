@@ -252,18 +252,37 @@ function Invoke-WriteAction {
     "wrote $(ConvertTo-RelativePath $ProjectRoot $full) ($lines lines)"
 }
 
-function Find-EditTarget([string]$Text, [string]$Search) {
-    <# Index of the single exact match of $Search; falls back to ignoring trailing whitespace per line. #>
+function Get-LineNumber([string]$Text, [int]$Index) {
+    if ($Index -le 0) { return 1 }
+    ([regex]::Matches($Text.Substring(0, $Index), "`n")).Count + 1
+}
+
+function Find-EditTarget([string]$Text, [string]$Search, [int]$After = -1) {
+    <# Where $Search is in $Text: one exact match (or, failing that, one match ignoring trailing
+       whitespace per line). When it matches several places and $After is the end of the previous
+       change in the same edit block, the first match after it is taken (changes come in file
+       order) and a note says so; otherwise the error lists the line of every match. #>
+    $hits = New-Object System.Collections.Generic.List[object]
     $i = $Text.IndexOf($Search, [StringComparison]::Ordinal)
-    if ($i -ge 0) {
-        if ($Text.IndexOf($Search, $i + 1, [StringComparison]::Ordinal) -ge 0) { return @{ error = 'SEARCH text matches more than once; include more surrounding lines' } }
-        return @{ start = $i; length = $Search.Length }
+    while ($i -ge 0 -and $Search.Length) {
+        $hits.Add(@{ start = $i; length = $Search.Length })
+        $i = $Text.IndexOf($Search, $i + 1, [StringComparison]::Ordinal)
     }
-    $pattern = '(?m)' + (($Search.Split("`n") | ForEach-Object { [regex]::Escape($_.TrimEnd()) + '[ \t]*' }) -join '\n')
-    $ms = [regex]::Matches($Text, $pattern)
-    if ($ms.Count -eq 1) { return @{ start = $ms[0].Index; length = $ms[0].Length } }
-    if ($ms.Count -gt 1) { return @{ error = 'SEARCH text matches more than once; include more surrounding lines' } }
-    @{ error = 'SEARCH text not found in the file; read the file again and copy the lines exactly' }
+    if (-not $hits.Count) {
+        $pattern = '(?m)' + (($Search.Split("`n") | ForEach-Object { [regex]::Escape($_.TrimEnd()) + '[ \t]*' }) -join '\n')
+        foreach ($m in [regex]::Matches($Text, $pattern)) { $hits.Add(@{ start = $m.Index; length = $m.Length }) }
+    }
+    if ($hits.Count -eq 1) { return $hits[0] }
+    if (-not $hits.Count) { return @{ error = 'SEARCH text not found in the file; read the file again and copy the lines exactly' } }
+    $lines = @($hits | ForEach-Object { Get-LineNumber $Text $_.start })
+    if ($After -ge 0) {
+        $next = $hits | Where-Object { $_.start -ge $After } | Select-Object -First 1
+        if ($next) {
+            $line = Get-LineNumber $Text $next.start
+            return @{ start = $next.start; length = $next.length; note = "matched $($hits.Count) places (lines $(($lines | Select-Object -First 6) -join ', ')); changed the one at line $line, the first after the previous change" }
+        }
+    }
+    @{ error = "SEARCH text matches $($hits.Count) places (lines $(($lines | Select-Object -First 6) -join ', ')); include more surrounding lines so it matches only one" }
 }
 
 function Get-EditResult {
@@ -277,16 +296,20 @@ function Get-EditResult {
     $info = Read-TextFile $full
     $text = $info.Text
     $n = 0
+    $after = -1   # end of the previous change: a SEARCH that matches several places takes the next one
+    $notes = New-Object System.Collections.Generic.List[string]
     foreach ($e in $Edits) {
         $n++
         $search = $e.search.Replace("`r`n", "`n")
         $replace = Repair-CodeText $full $e.replace.Replace("`r`n", "`n")
-        $hit = Find-EditTarget $text $search
-        if ($hit.error -and $search -match '&lt;|&gt;') { $hit = Find-EditTarget $text (ConvertFrom-AngleEntities $search) }
-        if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error)" } }
+        $hit = Find-EditTarget $text $search $after
+        if ($hit.error -and $search -match '&lt;|&gt;') { $hit = Find-EditTarget $text (ConvertFrom-AngleEntities $search) $after }
+        if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed; send the whole edit block again." } }
+        if ($hit.note) { $notes.Add("pair ${n}: $($hit.note)") }
         $text = $text.Substring(0, $hit.start) + $replace + $text.Substring($hit.start + $hit.length)
+        $after = $hit.start + $replace.Length
     }
-    [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; pairs = $n }
+    [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; pairs = $n; notes = @($notes) }
 }
 
 function Invoke-EditAction {
@@ -295,7 +318,7 @@ function Invoke-EditAction {
     if (-not $r.ok) { throw $r.error }
     if ($Checkpoint) { Save-CheckpointFile $Checkpoint $ProjectRoot $r.full }
     Write-TextFile $r.full $r.new $r.bom $r.crlf
-    "edited $(ConvertTo-RelativePath $ProjectRoot $r.full) ($($r.pairs) change(s))"
+    "edited $(ConvertTo-RelativePath $ProjectRoot $r.full) ($($r.pairs) change(s))" + $(if (@($r.notes).Count) { "; " + (@($r.notes) -join "; ") + ". Check that this is the right place." } else { '' })
 }
 
 # --- Human in the loop -----------------------------------------------------------------

@@ -111,7 +111,7 @@ Describe 'Executor' {
 
     It 'rejects an ambiguous or missing SEARCH and writes nothing' {
         [IO.File]::WriteAllText((Join-Path $proj 'dup.txt'), "a`na`n")
-        (Get-EditResult $proj 'dup.txt' @(@{ search = 'a'; replace = 'b' })).error | Should Match 'more than once'
+        (Get-EditResult $proj 'dup.txt' @(@{ search = 'a'; replace = 'b' })).error | Should Match 'matches 2 places'
         (Get-EditResult $proj 'dup.txt' @(@{ search = 'zzz'; replace = 'b' })).error | Should Match 'not found'
         [IO.File]::ReadAllText((Join-Path $proj 'dup.txt')) | Should BeExactly "a`na`n"
     }
