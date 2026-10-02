@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -19,6 +19,7 @@ function New-AgentState {
         LogLevel = $null   # set by the front end; the worker applies changes on the fly
         ChatKind = $null   # kind of task the current chat is about (chat, assistant, project, coding, mixed)
         SentParts = (New-Object 'System.Collections.Generic.HashSet[string]')   # prompt parts this chat already has
+        PreviewToken = [guid]::NewGuid().ToString('N'); PreviewPort = 0   # page check: project served read-only at /preview/<token>/
         NextConnectAttempt = $null
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
         WorkIq = $(if ($Config.workIq) { [string]$Config.workIq } else { 'leave' }); WorkIqActual = $null; WorkIqWarned = $false
@@ -104,7 +105,13 @@ $script:Bridge = $null
 function Get-Bridge($State) {
     if ($script:Bridge) {
         $ws = $script:Bridge.Session.Ws
-        if (-not $script:Bridge.Session.Lost -and $ws -and $ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) { return $script:Bridge }
+        if (-not $script:Bridge.Session.Lost -and $ws -and $ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+            # Pacing changed in the settings applies to the next prompt.
+            if ($State.Config.pacing -and $script:Bridge.PSObject.Properties['Pacing']) {
+                foreach ($k in 'newChatSettleSec', 'beforeSendSec', 'betweenPromptsSec') { if ($null -ne $State.Config.pacing.$k) { $script:Bridge.Pacing[$k] = [double]$State.Config.pacing.$k } }
+            }
+            return $script:Bridge
+        }
         Write-CCBLog info agent 'The connection to the Copilot tab was lost; reconnecting'
         Reset-Bridge $State
     }
@@ -114,6 +121,17 @@ function Get-Bridge($State) {
         $save = if ($null -ne $State.Config.saveReplyFrames) { [bool]$State.Config.saveReplyFrames } else { $true }
         $script:Bridge = Connect-Copilot -Port $State.Config.cdpPort -SaveReplyFrames $save
         $State.Copilot = 'ready'; $State.CopilotMessage = ''
+        # Page health check: the parts CCBridge relies on are where selectors.json says.
+        try {
+            $health = @(Test-CopilotPage $script:Bridge)
+            $bad = @($health | Where-Object { $_.ok -eq $false })
+            Write-CCBLog $(if ($bad.Count) { 'info' } else { 'verbose' }) agent "Copilot page check: $(if ($bad.Count) { "$($bad.Count) problem(s)" } else { 'all parts found' })" @{ parts = @($health | ForEach-Object { "$($_.part)=$(if ($null -eq $_.ok) { 'unchecked' } elseif ($_.ok) { 'ok' } else { 'missing' })" }) }
+            if ($bad.Count) {
+                $what = ($bad | ForEach-Object { "$($_.part) (selectors.$($_.setting): $($_.note))" }) -join '; '
+                $State.CopilotMessage = "Page check: $what"
+                Add-AgentEvent $State 'status' @{ text = "Copilot page check: $what. Copilot's page may have changed; CCBridge may not be able to $(if (@($bad | Where-Object needed).Count) { 'type or send prompts' } else { 'start new chats or read replies reliably' }). Run capture.cmd and send the report to update the selectors." }
+            }
+        } catch { Write-CCBLogError agent 'Copilot page check failed' $_ }
         $script:Bridge
     } catch {
         $State.Copilot = 'error'; $State.CopilotMessage = $_.Exception.Message
@@ -167,6 +185,11 @@ function Send-ToCopilot {
     } finally { $State.Progress = '' }
     if ($r.Throttling -and $r.Throttling.maxNumUserMessagesInConversation) {
         $State.Throttle = @{ used = [int]$r.Throttling.numUserMessagesInConversation; max = [int]$r.Throttling.maxNumUserMessagesInConversation }
+    } elseif (-not $r.Cancelled) {
+        # The reply came without Copilot's own count (read from the page): count locally, against
+        # messagesPerChat, so the chat is still continued in a new one before Copilot's limit.
+        $max = if ($State.Throttle.max) { [int]$State.Throttle.max } elseif ($State.Config.messagesPerChat) { [int]$State.Config.messagesPerChat } else { 30 }
+        $State.Throttle = @{ used = [int]$State.Throttle.used + 1; max = $max }
     }
     if ($r.Metering -and $null -ne $r.Metering.remainingAllowance) {
         $State.Credits = @{ remaining = [int]$r.Metering.remainingAllowance; total = [int]$r.Metering.totalAllowance; resetAt = [string]$r.Metering.resetAt }
@@ -294,6 +317,71 @@ function Get-StepFailureInfo {
         default { @{ code = "$($Type.ToUpperInvariant())-FAILED"; reasons = @('See the reason above; this case has no specific explanation yet.'); next = 'Copilot gets the reason in the next message. If it keeps failing, use Copy details and send them.' }; break }
     }
     $info
+}
+
+function Test-WebPage {
+    <# Opens project pages in a spare Edge tab (served read-only by the web app at /preview/<token>/)
+       and collects what goes wrong while they load: JavaScript errors, console errors, and files
+       that fail to load (missing styles.css, a fetch() of a JSON file that is not there). The tab
+       is closed afterwards. Returns one line per problem. #>
+    param($State, [string[]]$Pages, [int]$WaitSec = 6)
+    if (-not $State.PreviewPort) { return }
+    $cdpPort = $State.Config.cdpPort
+    foreach ($page in @($Pages | Select-Object -First 3)) {
+        $base = "http://localhost:$($State.PreviewPort)/preview/$($State.PreviewToken)/"
+        $url = $base + (($page.Split('/') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/')
+        $target = $null; $s = $null
+        try {
+            $target = Invoke-RestMethod -Method Put "http://127.0.0.1:$cdpPort/json/new?about:blank"
+            $s = Connect-Cdp $target.webSocketDebuggerUrl
+            foreach ($m in 'Runtime.enable', 'Log.enable', 'Network.enable', 'Page.enable') { $null = Invoke-Cdp $s $m }
+            $null = Invoke-Cdp $s 'Page.navigate' @{ url = $url }
+            $problems = New-Object System.Collections.Generic.List[string]
+            $urls = @{}
+            $rel = { param([string]$u) if ($u.StartsWith($base)) { [Uri]::UnescapeDataString($u.Substring($base.Length)) } else { ($u -replace '\?.*$', '') } }
+            $loaded = $null
+            $until = (Get-Date).AddSeconds($WaitSec)
+            while ((Get-Date) -lt $until) {
+                $m = Receive-CdpEvent $s 200
+                if (-not $m) { if ($loaded -and ((Get-Date) - $loaded).TotalMilliseconds -gt 1500) { break }; continue }
+                switch ($m.method) {
+                    'Page.loadEventFired' { $loaded = Get-Date }
+                    'Network.requestWillBeSent' { $urls["$($m.params.requestId)"] = "$($m.params.request.url)" }
+                    'Network.responseReceived' {
+                        # The browser asks for /favicon.ico by itself: not a problem of the page.
+                        if ([int]$m.params.response.status -ge 400 -and "$($m.params.response.url)" -notmatch '/favicon\.ico(\?|$)') { $problems.Add("$page loads $(& $rel $m.params.response.url): HTTP $($m.params.response.status)$(if ($m.params.response.status -eq 404) { ' (file not found)' })") }
+                    }
+                    'Network.loadingFailed' {
+                        if (-not $m.params.canceled) { $problems.Add("$page could not load $(& $rel $urls["$($m.params.requestId)"]): $($m.params.errorText)") }
+                    }
+                    'Runtime.exceptionThrown' {
+                        $d = $m.params.exceptionDetails
+                        $msg = if ($d.exception.description) { ($d.exception.description -split "`n")[0] } else { $d.text }
+                        $where = if ($d.url) { " ($(& $rel $d.url):$([int]$d.lineNumber + 1))" } else { '' }
+                        $problems.Add("$page JavaScript error$where`: $msg")
+                    }
+                    'Runtime.consoleAPICalled' {
+                        if ($m.params.type -in 'error', 'assert') {
+                            $text = (@($m.params.args) | ForEach-Object { if ($null -ne $_.value) { "$($_.value)" } elseif ($_.description) { $_.description } } ) -join ' '
+                            $problems.Add("$page console error: $($text.Substring(0, [Math]::Min(300, $text.Length)))")
+                        }
+                    }
+                    'Log.entryAdded' {
+                        $en = $m.params.entry
+                        if ($en.level -eq 'error' -and $en.source -ne 'network') { $problems.Add("$page browser error: $($en.text)") }
+                    }
+                }
+            }
+            if (-not $loaded) { $problems.Add("$page did not finish loading within $WaitSec seconds") }
+            foreach ($p in ($problems | Select-Object -Unique -First 20)) { $p }
+            Write-CCBLog info agent "Page check $page" @{ problems = $problems.Count }
+        } catch {
+            Write-CCBLogError agent "Page check $page failed" $_
+        } finally {
+            if ($s) { try { Disconnect-Cdp $s } catch { } }
+            if ($target) { try { $null = Invoke-RestMethod "http://127.0.0.1:$cdpPort/json/close/$($target.id)" } catch { } }
+        }
+    }
 }
 
 function Test-NeedsReview {
@@ -705,9 +793,22 @@ function Invoke-AgentTurn {
                 # After a big change: one consistency review by Copilot (dead code, broken references).
                 if (-not $reviewed) {
                     $changes = @(Get-CheckpointChanges $State.ProjectRoot $checkpoint)
-                    if (Test-NeedsReview $State $changes) {
+                    # Page check: when web files changed, open the changed pages (or index.html) and
+                    # collect JavaScript errors and files that fail to load.
+                    $pageIssues = @()
+                    $webChanged = @($changes | Where-Object { ($_.added -or $_.removed) -and $_.path -match '(?i)\.(html?|css|m?js|json)$' })
+                    if ($webChanged.Count -and "$($State.Config.pageCheck)" -ne 'off' -and $State.PreviewPort -and $State.Mode -ne 'plan') {
+                        $pages = @($webChanged | Where-Object { -not $_.deleted -and $_.path -match '(?i)\.html?$' } | ForEach-Object { $_.path })
+                        if (-not $pages.Count -and (Test-Path -LiteralPath (Join-Path $State.ProjectRoot 'index.html'))) { $pages = @('index.html') }
+                        if ($pages.Count) {
+                            Add-AgentEvent $State 'status' @{ text = "Checking $($pages -join ', ') in a browser tab for JavaScript errors and files that fail to load..." }
+                            $pageIssues = @(Test-WebPage $State $pages)
+                            if (-not $pageIssues.Count) { Add-AgentEvent $State 'status' @{ text = "Page check: $($pages -join ', ') loaded without errors." } }
+                        }
+                    }
+                    if ($pageIssues.Count -or (Test-NeedsReview $State $changes)) {
                         $reviewed = $true
-                        $issues = @(Test-ProjectConsistency $State.ProjectRoot @($changes | ForEach-Object { $_.path }))
+                        $issues = @(@(Test-ProjectConsistency $State.ProjectRoot @($changes | ForEach-Object { $_.path })) + @($pageIssues | ForEach-Object { "page check: $_" }))
                         Write-CCBLog info agent 'Asking Copilot for a consistency review' @{ files = $changes.Count; issues = $issues.Count }
                         Add-AgentEvent $State 'status' @{ text = "Big change: asking Copilot to review $(@($changes).Count) changed file(s) for leftovers, dead code and broken references$(if ($issues.Count) { " ($($issues.Count) problem(s) found by the local checks)" })." }
                         $message = New-ReviewMessage $State $changes $issues

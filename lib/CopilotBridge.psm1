@@ -170,6 +170,33 @@ function Get-CopilotPageSnapshot {
     $snap
 }
 
+function Test-CopilotPage {
+    <# Checks that the parts of Copilot's page CCBridge relies on are where selectors.json says:
+       the message box, the Send button, the New chat button, and (when the chat has replies) the
+       reply container and its Copy button. Returns one entry per part: @{ part; ok; setting; note }.
+       When Microsoft changes the page, this names the setting to fix instead of failing later. #>
+    param([Parameter(Mandatory)]$Bridge)
+    $sel = $Bridge.Selectors
+    $parts = [ordered]@{
+        'message box' = @{ setting = 'editor'; css = $sel.editor; needed = $true }
+        'Send button' = @{ setting = 'sendButton'; css = $sel.sendButton; needed = $false }
+        'New chat button' = @{ setting = 'newChatButton'; css = (Get-SelectorOrDefault $Bridge 'newChatButton' "a[aria-label='New chat' i]"); needed = $false }
+        'reply' = @{ setting = 'replyContainer'; css = (Get-SelectorOrDefault $Bridge 'replyContainer' "[data-testid='copilot-message-reply-div']"); needed = $false }
+        'Copy button of a reply' = @{ setting = 'copyReplyButton'; css = (Get-SelectorOrDefault $Bridge 'copyReplyButton' "button[aria-label='Copy Response' i]"); needed = $false }
+    }
+    $list = ($parts.Values | ForEach-Object { ConvertTo-JsString $_.css }) -join ','
+    $counts = try { @(Invoke-CdpEval $Bridge.Session "JSON.stringify([$list].map(s => { try { return document.querySelectorAll(s).length; } catch (e) { return -1; } }).concat([document.querySelectorAll('[data-testid=""chatQuestion""], [data-testid=""copilot-message-div""]').length]))" | ConvertFrom-Json) } catch { @() }
+    $hasConversation = $counts.Count -and $counts[-1] -gt 0
+    $i = 0
+    foreach ($name in $parts.Keys) {
+        $p = $parts[$name]; $n = if ($counts.Count) { [int]$counts[$i] } else { -1 }; $i++
+        $ok = $n -gt 0
+        $note = if ($n -lt 0) { 'the selector is not valid CSS' } elseif ($ok) { '' } elseif (-not $p.needed -and $name -in 'reply', 'Copy button of a reply' -and -not $hasConversation) { 'not checked: no replies on the page yet' } elseif ($name -eq 'Send button') { 'not checked: Copilot shows it once there is text in the message box' } else { 'not found on the page' }
+        if (-not $ok -and $note -like 'not checked*') { $ok = $null }
+        [pscustomobject]@{ part = $name; ok = $ok; setting = $p.setting; note = $note; needed = $p.needed }
+    }
+}
+
 function Wait-CopilotSignIn {
     <# After a sign-in page appeared: waits until the person has signed in and Copilot's message box
        is back (up to $TimeoutSec). #>
@@ -1389,4 +1416,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

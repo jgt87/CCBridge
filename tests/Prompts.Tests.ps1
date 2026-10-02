@@ -1,6 +1,7 @@
 # The prompt sent to Copilot is as small as the request allows.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Log.psm1') -Force
+Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
@@ -199,4 +200,27 @@ Describe 'Why a step failed (Get-StepFailureInfo)' {
     It 'has a fallback for anything else' {
         (& $m { Get-StepFailureInfo 'grep' 'something odd' }).code | Should Be 'GREP-FAILED'
     }
+}
+Describe 'Settings' {
+    $app = Join-Path $env:TEMP ('ccb-settings-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory "$app\config" | Out-Null
+    Copy-Item (Join-Path $root 'config\harness.json') "$app\config\harness.json"
+    It 'lists the settings with value, default and limits' {
+        $s = @(Get-CCBridgeSettings $app)
+        ($s | Where-Object key -eq 'pacing.beforeSendSec').default | Should Be 1
+        ($s | Where-Object key -eq 'reviewAfterChanges').options -contains 'off' | Should Be $true
+        ($s | Where-Object key -eq 'stallSec').custom | Should Be $false
+    }
+    It 'saves a value (also inside pacing), validates it, and resets it' {
+        Set-CCBridgeSetting 'pacing.beforeSendSec' 2.5 $app | Should Be 2.5
+        Set-CCBridgeSetting 'stallSec' '120' $app | Should Be 120
+        (Get-CCBridgeConfig harness $app).pacing.newChatSettleSec | Should Be 3   # untouched fields keep their default
+        { Set-CCBridgeSetting 'stallSec' 5 $app } | Should Throw 'between 30 and 600'
+        { Set-CCBridgeSetting 'pageCheck' 'maybe' $app } | Should Throw 'one of: on, off'
+        { Set-CCBridgeSetting 'nope' 1 $app } | Should Throw 'Unknown setting'
+        Set-CCBridgeSetting 'pacing.beforeSendSec' $null $app | Should Be 1
+        (Get-Content "$app\config\harness.local.json" -Raw) | Should Not Match 'pacing'
+        (@(Get-CCBridgeSettings $app) | Where-Object key -eq 'stallSec').custom | Should Be $true
+    }
+    Remove-Item $app -Recurse -Force
 }

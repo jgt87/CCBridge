@@ -8,6 +8,7 @@
   "replyTimeoutSec": 300,
   "commandTimeoutSec": 180,
   "rolloverMargin": 2,
+  "messagesPerChat": 30,
   "autoApproveCommands": [],
   "workIq": "leave",
   "saveReplyFrames": true,
@@ -15,6 +16,7 @@
   "actionRetries": 2,
   "reviewAfterChanges": "big",
   "reviewMinLines": 40,
+  "pageCheck": "on",
   "pacing": {
     "newChatSettleSec": 3,
     "beforeSendSec": 1,

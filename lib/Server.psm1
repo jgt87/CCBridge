@@ -150,6 +150,17 @@ function Invoke-ApiRequest($Ctx, $State) {
             $State.WorkIq = [string]$b.value; $State.WorkIqWarned = $false
             return Send-Json $Ctx @{ ok = $true }
         }
+        '^GET /api/settings$' { return Send-Json $Ctx @{ settings = @(Get-CCBridgeSettings $State.AppRoot) } }
+        '^POST /api/settings$' {
+            $b = Read-JsonBody $Ctx
+            $value = Set-CCBridgeSetting ([string]$b.key) $b.value $State.AppRoot
+            # In effect right away: the worker reads $State.Config on every turn.
+            $keep = @{ port = $State.Config.port; cdpPort = $State.Config.cdpPort }   # ports in use stay (also -Port)
+            $State.Config = Get-CCBridgeConfig harness $State.AppRoot
+            $State.Config.port = $keep.port; $State.Config.cdpPort = $keep.cdpPort
+            Write-CCBLog info server "Setting $($b.key) = $(if ($null -eq $b.value) { '(default)' } else { $b.value })"
+            return Send-Json $Ctx @{ ok = $true; value = $value; settings = @(Get-CCBridgeSettings $State.AppRoot) }
+        }
         '^POST /api/logging$' {
             $b = Read-JsonBody $Ctx
             if (@('info', 'verbose', 'trace', 'off') -notcontains $b.level) { throw 'level must be off, info, verbose or trace' }
@@ -198,6 +209,28 @@ function Set-Project($State, [string]$Path) {
     $State.NeedNewChat = $State.NeedNewChat -or $State.ChatStarted   # a new project starts a fresh Copilot chat
     Add-AgentEvent $State 'project' @{ name = (Split-Path $Path -Leaf); path = $Path }
     try { [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'), $State.ProjectRoot) } catch { }
+}
+
+$script:PreviewTypes = @{ '.html' = 'text/html; charset=utf-8'; '.htm' = 'text/html; charset=utf-8'; '.css' = 'text/css; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.mjs' = 'text/javascript; charset=utf-8'
+    '.json' = 'application/json; charset=utf-8'; '.svg' = 'image/svg+xml'; '.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.jpeg' = 'image/jpeg'; '.gif' = 'image/gif'; '.webp' = 'image/webp'
+    '.ico' = 'image/x-icon'; '.woff' = 'font/woff'; '.woff2' = 'font/woff2'; '.txt' = 'text/plain; charset=utf-8'; '.csv' = 'text/csv; charset=utf-8'; '.xml' = 'application/xml' }
+
+function Send-PreviewFile($Ctx, $State, [string]$RelPath) {
+    <# The project's files, read-only, for the page check (GET only, confined to the project). #>
+    $res = $Ctx.Response
+    try {
+        if ($Ctx.Request.HttpMethod -ne 'GET' -or -not $State.ProjectRoot) { $res.StatusCode = 404; return }
+        $rel = [Uri]::UnescapeDataString($RelPath); if (-not $rel) { $rel = 'index.html' }
+        $full = Resolve-ProjectPath $State.ProjectRoot $rel
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { $res.StatusCode = 404; return }
+        $bytes = [IO.File]::ReadAllBytes($full)
+        $ext = [IO.Path]::GetExtension($full).ToLowerInvariant()
+        $res.ContentType = if ($script:PreviewTypes[$ext]) { $script:PreviewTypes[$ext] } else { 'application/octet-stream' }
+        $res.Headers['Cache-Control'] = 'no-store'
+        $res.ContentLength64 = $bytes.Length
+        $res.OutputStream.Write($bytes, 0, $bytes.Length)
+    } catch { try { $res.StatusCode = 404 } catch { } }
+    finally { try { $res.Close() } catch { } }
 }
 
 function Send-StaticFile($Ctx, [string]$UiDir, [string]$Token) {
@@ -254,6 +287,7 @@ function Start-CCBridgeServer {
     Write-Host "CCBridge is running at $url  (Ctrl+C to stop)"
     Write-Host "Log: $(Get-CCBLogDir) (level $(Get-CCBLogLevel))"
     Write-CCBLog info server "Web app started on $url" (Get-CCBridgeEnvironment $appRoot)
+    $State.PreviewPort = $port   # the page check can open project pages through this server
     if (-not $NoBrowser) { Start-Process $url }
 
     try {
@@ -268,7 +302,10 @@ function Start-CCBridgeServer {
             $reqWatch = [Diagnostics.Stopwatch]::StartNew()
             $reqPath = $ctx.Request.Url.AbsolutePath
             try {
-                if ($ctx.Request.Url.AbsolutePath.StartsWith('/api/')) {
+                $previewPrefix = "/preview/$($State.PreviewToken)/"
+                if ($ctx.Request.Url.AbsolutePath.StartsWith($previewPrefix)) {
+                    Send-PreviewFile $ctx $State $ctx.Request.Url.AbsolutePath.Substring($previewPrefix.Length)
+                } elseif ($ctx.Request.Url.AbsolutePath.StartsWith('/api/')) {
                     $origin = $ctx.Request.Headers['Origin']
                     if (($origin -and $origin -ne "http://localhost:$port") -or $ctx.Request.Headers['X-CCB-Token'] -ne $token) {
                         Send-Json $ctx @{ error = 'forbidden' } 403
