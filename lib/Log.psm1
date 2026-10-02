@@ -72,6 +72,9 @@ function Write-CCBLogError {
     <# Logs an exception (message + PowerShell stack) at info level. #>
     param([Parameter(Mandatory)][string]$Component, [Parameter(Mandatory)][string]$Context, $ErrorRecord)
     $msg = if ($ErrorRecord.Exception) { $ErrorRecord.Exception.Message } else { "$ErrorRecord" }
+    # "One or more errors occurred" and similar wrappers: add the inner causes.
+    $inner = if ($ErrorRecord.Exception) { $ErrorRecord.Exception.InnerException } else { $null }
+    while ($inner) { $msg += " <- $($inner.Message)"; $inner = $inner.InnerException }
     $stack = if ($ErrorRecord.ScriptStackTrace) { ($ErrorRecord.ScriptStackTrace -split "`n" | Select-Object -First 6) -join ' | ' } else { '' }
     Write-CCBLog info $Component "ERROR $Context`: $msg" @{ stack = $stack }
 }

@@ -18,7 +18,7 @@ $report = [ordered]@{ captured = (Get-Date).ToString('s'); edge = $null; snapsho
 function Pause-ForUser([string]$Text) { Write-Host ''; Write-Host $Text -ForegroundColor Cyan; [void](Read-Host 'Press Enter to continue') }
 
 $null = Start-CdpEdge -Port $port -Url $sel.chatUrl
-$target = Get-CdpPageTarget -Port $port -UrlLike '*m365.cloud.microsoft*'
+$target = Get-CdpPageTarget -Port $port -UrlLike ('*' + ([uri]$sel.chatUrl).Host + '*')
 $s = Connect-Cdp $target.webSocketDebuggerUrl
 $report.edge = (Invoke-RestMethod "http://127.0.0.1:$port/json/version").Browser
 $null = Invoke-Cdp $s 'Network.enable'

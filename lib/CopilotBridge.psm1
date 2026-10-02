@@ -20,23 +20,48 @@ function Connect-Copilot {
         [bool]$SaveReplyFrames = $true
     )
     $sel = if ($SelectorsPath) { Get-Content $SelectorsPath -Raw | ConvertFrom-Json } else { Get-CCBridgeConfig selectors (Split-Path -Parent $script:ModuleDir) }
-    $null = Start-CdpEdge -Port $Port -Url $sel.chatUrl
-    $target = Get-CdpPageTarget -Port $Port -UrlLike '*m365.cloud.microsoft*'
-    $session = Connect-Cdp $target.webSocketDebuggerUrl
-    $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; SaveFrames = $SaveReplyFrames }
-
-    if ($target.url -notlike '*m365.cloud.microsoft*') {
-        $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl }
+    # The Copilot tab is recognised by the host of chatUrl (selectors.json), the one place to change the address.
+    $hostLike = '*' + ([uri]$sel.chatUrl).Host + '*'
+    $deadline = (Get-Date).AddSeconds($SignInTimeoutSec + 30)
+    $signInAnnounced = $false
+    for ($attempt = 1; ; $attempt++) {
+        $session = $null
+        try {
+            # Edge may still be starting, or may replace the tab (first start, sign-in redirects):
+            # every attempt looks for the current Copilot tab again.
+            $null = Start-CdpEdge -Port $Port -Url $sel.chatUrl
+            $target = Get-CdpPageTarget -Port $Port -UrlLike $hostLike
+            $session = Connect-Cdp $target.webSocketDebuggerUrl
+            $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; SaveFrames = $SaveReplyFrames }
+            if ($target.url -notlike $hostLike) { $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl } }
+            $null = Invoke-Cdp $session 'Network.enable'
+            Write-CCBLog verbose bridge "Attached to page target (attempt $attempt)" @{ url = ($target.url -replace '\?.*', ''); port = $Port }
+            $wait = if ($signInAnnounced) { [int][Math]::Max(1, ($deadline - (Get-Date)).TotalSeconds) } else { 20 }
+            if (Wait-CopilotEditor $bridge -TimeoutSec $wait) {
+                Write-CCBLog info bridge "Connected to Copilot Chat$(if ($attempt -gt 1) { " (after $attempt attempts)" })"
+                return $bridge
+            }
+            if ($signInAnnounced) { throw 'Copilot message box never appeared; not signed in?' }
+            $signInAnnounced = $true
+            Write-Host "Sign in to Copilot in the Edge window that just opened (waiting up to $SignInTimeoutSec s)..."
+            Write-CCBLog info bridge "Message box not found; waiting for sign-in (up to $SignInTimeoutSec s)"
+            if (Wait-CopilotEditor $bridge -TimeoutSec ([int][Math]::Max(1, ($deadline - (Get-Date)).TotalSeconds))) {
+                Write-CCBLog info bridge 'Connected to Copilot Chat after sign-in'
+                return $bridge
+            }
+            throw 'Copilot message box never appeared; not signed in?'
+        } catch {
+            if ($session) { try { Disconnect-Cdp $session } catch { } }
+            $why = $_.Exception.Message
+            if ($why -like '*never appeared*') {
+                Write-CCBLog info bridge 'Message box never appeared (not signed in, or the page changed: check selectors.editor)'
+                throw
+            }
+            if ((Get-Date) -gt $deadline -or $attempt -ge 15) { Write-CCBLog info bridge "Giving up connecting to Copilot after $attempt attempts: $why"; throw }
+            Write-CCBLog info bridge "Copilot tab changed while connecting; reconnecting (attempt $attempt): $why"
+            Start-Sleep -Seconds 2
+        }
     }
-    $null = Invoke-Cdp $session 'Network.enable'
-    Write-CCBLog verbose bridge "Attached to page target" @{ url = ($target.url -replace '\?.*', ''); port = $Port }
-    if (-not (Wait-CopilotEditor $bridge -TimeoutSec 20)) {
-        Write-Host "Sign in to Copilot in the Edge window that just opened (waiting up to $SignInTimeoutSec s)..."
-        Write-CCBLog info bridge "Message box not found; waiting for sign-in (up to $SignInTimeoutSec s)"
-        if (-not (Wait-CopilotEditor $bridge -TimeoutSec $SignInTimeoutSec)) { Write-CCBLog info bridge 'Message box never appeared (not signed in, or the page changed: check selectors.editor)'; throw 'Copilot message box never appeared; not signed in?' }
-    }
-    Write-CCBLog info bridge 'Connected to Copilot Chat'
-    $bridge
 }
 
 function Wait-CopilotEditor {
@@ -54,7 +79,7 @@ function Wait-CopilotEditor {
 "@
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
-        try { if (Invoke-CdpEval $Bridge.Session $js) { return $true } } catch { }
+        try { if (Invoke-CdpEval $Bridge.Session $js) { return $true } } catch { if ($Bridge.Session.Lost) { throw } }
         # Keep draining events so the socket buffer does not back up.
         $null = Receive-CdpEvent $Bridge.Session 500
     }

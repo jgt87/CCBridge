@@ -62,7 +62,8 @@ function Get-CCBridgeEnvironment {
         os = [Environment]::OSVersion.VersionString
         culture = (Get-Culture).Name
         edge = $(if ($edge) { (Get-Item $edge).VersionInfo.ProductVersion } else { 'not found' })
-        oneDrive = [ordered]@{ commercial = [bool]$env:OneDriveCommercial; consumer = [bool]$env:OneDriveConsumer }
+        oneDrive = [ordered]@{ commercial = [bool]$env:OneDriveCommercial; consumer = [bool]$env:OneDriveConsumer; oneDrive = [bool]$env:OneDrive
+            used = $(if ($env:OneDriveCommercial -and (Test-Path $env:OneDriveCommercial)) { 'OneDriveCommercial' } elseif ($env:OneDrive -and (Test-Path $env:OneDrive)) { 'OneDrive' } elseif ($env:OneDriveConsumer -and (Test-Path $env:OneDriveConsumer)) { 'OneDriveConsumer' } else { 'none' }) }
         localOverrides = @(Get-ChildItem (Join-Path $AppRoot 'config') -Filter '*.local.json' -ErrorAction SilentlyContinue | ForEach-Object Name)
         settings = [ordered]@{ port = $harness.port; cdpPort = $harness.cdpPort; workIq = $harness.workIq; autoUpdate = $harness.autoUpdate; saveReplyFrames = $harness.saveReplyFrames; promptCharBudget = $harness.promptCharBudget; maxRounds = $harness.maxRounds }
         workIqToggleConfigured = [bool]$sel.workIq.toggle

@@ -36,9 +36,9 @@ if ($envInfo.edgeDebugPortOpen) {
     try {
         $port = [int](Get-CCBridgeConfig harness $root).cdpPort
         $sel = Get-CCBridgeConfig selectors $root
-        $target = Get-CdpPageTarget -Port $port -UrlLike '*m365.cloud.microsoft*'
+        $target = Get-CdpPageTarget -Port $port -UrlLike ('*' + ([uri]$sel.chatUrl).Host + '*')
         $s = Connect-Cdp $target.webSocketDebuggerUrl
-        $checks = [ordered]@{ pageHost = ([uri]$target.url).Host }
+        $checks = [ordered]@{ chatUrl = $sel.chatUrl; pageHost = ([uri]$target.url).Host }
         foreach ($name in 'editor', 'sendButton', 'stopButton') {
             $q = $sel.$name | ConvertTo-Json -Compress
             $checks[$name] = Invoke-CdpEval $s "(() => { const e = document.querySelector($q); return e ? (e.__lexicalEditor ? 'found (lexical)' : 'found') : 'missing'; })()"

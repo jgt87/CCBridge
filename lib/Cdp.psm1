@@ -67,6 +67,7 @@ function Connect-Cdp {
         Segment = New-Object ArraySegment[byte] -ArgumentList @(, $buffer)
         Stream  = New-Object System.IO.MemoryStream
         Pending = $null
+        Lost    = $false
         Events  = New-Object System.Collections.Generic.Queue[object]
     }
 }
@@ -81,10 +82,19 @@ function Receive-CdpMessage {
             $Session.Pending = $Session.Ws.ReceiveAsync($Session.Segment, [Threading.CancellationToken]::None)
         }
         $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
-        if (-not $Session.Pending.Wait($remaining)) { return $null }
-        $r = $Session.Pending.Result
+        try {
+            if (-not $Session.Pending.Wait($remaining)) { return $null }
+            $r = $Session.Pending.Result
+        } catch {
+            # The tab went away (closed, replaced during sign-in, Edge closed): report the real reason.
+            $Session.Pending = $null
+            $Session.Lost = $true
+            $inner = $_.Exception
+            while ($inner.InnerException) { $inner = $inner.InnerException }
+            throw "Lost the connection to the Copilot tab in Edge ($($inner.Message))"
+        }
         $Session.Pending = $null
-        if ($r.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { throw 'CDP socket closed' }
+        if ($r.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { $Session.Lost = $true; throw 'Lost the connection to the Copilot tab in Edge (the tab closed the connection)' }
         $Session.Stream.Write($Session.Buffer, 0, $r.Count)
         if ($r.EndOfMessage) {
             $text = [Text.Encoding]::UTF8.GetString($Session.Stream.ToArray())
