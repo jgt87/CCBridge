@@ -7,8 +7,9 @@ Each action is a fenced code block with the action name right after the opening 
 ```read
 PATH
 PATH:START-END
+PATH:outline
 ```
-shows files (one per line; START-END shows only those lines)
+shows files (one per line; START-END shows only those lines; outline shows the structure with line numbers, useful for large files)
 
 ```grep
 REGEX

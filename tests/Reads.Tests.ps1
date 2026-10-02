@@ -100,3 +100,29 @@ Describe 'Consistency review after big changes' {
     }
     Remove-Item $proj -Recurse -Force
 }
+Describe 'Get-FileOutline' {
+    It 'outlines an HTML page with style and script blocks' {
+        $html = "<html>`n<head>`n<title>x</title>`n<style>`nbody{}`n.a{}`n</style>`n</head>`n<body>`n<h1>Calendar</h1>`n<div id=""list""></div>`n<script>`nfunction loadMeetings() {`n}`nconst render = (m) => {`n};`n</script>`n</body>`n</html>"
+        $o = @(Get-FileOutline $html 'index.html')
+        ($o -join "`n") | Should Match '(?m)^2  <head>'
+        ($o -join "`n") | Should Match '(?m)^4-7  <style> block'
+        ($o -join "`n") | Should Match '(?m)^10  <h1> Calendar'
+        ($o -join "`n") | Should Match '(?m)^11  <div id="list">'
+        ($o -join "`n") | Should Match '(?m)^13    function loadMeetings \(in script\)'
+        ($o -join "`n") | Should Match '(?m)^15    function render'
+        ($o -join "`n") | Should Match '(?m)^12-17  <script> block'
+    }
+    It 'outlines CSS and JavaScript' {
+        (@(Get-FileOutline "/* Layout */`n.page {`n  margin: 0;`n}`n@media (max-width: 600px) {`n}" 'styles.css') -join "`n") | Should Match '1  /\* Layout \*/[\s\S]*2  \.page[\s\S]*5  @media \(max-width: 600px\)'
+        (@(Get-FileOutline "export async function load() {}`nclass Cal {}" 'app.js') -join "`n") | Should Match '1  function load[\s\S]*2  class Cal'
+    }
+    It 'is offered with read PATH:outline and after a cut' {
+        $p = Join-Path $env:TEMP ('ccb-ol-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        $big = "<html>`n<head>`n<style>`n" + ((1..300 | ForEach-Object { ".r$_ { margin: 0; }" }) -join "`n") + "`n</style>`n</head>`n<body>`n<h1>T</h1>`n</body>`n</html>"
+        [IO.File]::WriteAllText((Join-Path $p 'index.html'), $big)
+        @(Invoke-ReadAction $p @('index.html:outline'))[0] | Should Match '### index\.html \(outline, 309 lines\)[\s\S]*3-304  <style> block'
+        $cut = @(Invoke-ReadAction $p @('index.html') -MaxCharsPerFile 800)[0]
+        $cut | Should Match 'Outline of index\.html:[\s\S]*3-304  <style> block'
+        Remove-Item $p -Recurse -Force
+    }
+}

@@ -185,6 +185,58 @@ function Get-SessionChangeStats {
 
 # --- Actions -------------------------------------------------------------------------
 
+function Get-FileOutline {
+    <# The structure of a file with line numbers, so Copilot can read just the part it needs:
+       HTML (head/body, style and script blocks, elements with an id, headings), JavaScript /
+       TypeScript (functions, classes, arrow functions), CSS (@media blocks, section comments,
+       selectors), PowerShell (functions), Markdown (headings). At most $Max entries. #>
+    param([string]$Text, [string]$Path, [int]$Max = 80)
+    $ext = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+    $lines = $Text.Replace("`r`n", "`n").Split("`n")
+    $out = New-Object System.Collections.Generic.List[string]
+    $open = @{}   # block name -> start line
+    for ($i = 0; $i -lt $lines.Length -and $out.Count -lt $Max; $i++) {
+        $l = $lines[$i]; $n = $i + 1; $t = $l.Trim()
+        switch -Regex ($ext) {
+            '^\.html?$' {
+                if ($t -match '(?i)^<(head|body)\b') { $out.Add("$n  <$($Matches[1].ToLowerInvariant())>") }
+                if ($t -match '(?i)<(style|script)\b([^>]*)>') {
+                    $tag = $Matches[1].ToLowerInvariant(); $attrs = $Matches[2].Trim()
+                    if ($t -match "(?i)</$tag>") { $out.Add("$n  <$tag$(if ($attrs) { " $attrs" })> (one line)") } else { $open[$tag] = @{ start = $n; attrs = $attrs } }
+                } elseif ($t -match '(?i)</(style|script)>') {
+                    $tag = $Matches[1].ToLowerInvariant()
+                    if ($open[$tag]) { $out.Add("$($open[$tag].start)-$n  <$tag$(if ($open[$tag].attrs) { " $($open[$tag].attrs)" })> block"); $open.Remove($tag) }
+                }
+                if (-not $open['style'] -and -not $open['script']) {
+                    if ($t -match '(?i)<(h[1-3])[^>]*>([^<]{1,60})') { $out.Add("$n  <$($Matches[1])> $($Matches[2].Trim())") }
+                    elseif ($t -match '(?i)<(\w+)[^>]*\bid\s*=\s*["'']([^"'']+)') { $out.Add("$n  <$($Matches[1].ToLowerInvariant()) id=""$($Matches[2])"">") }
+                } elseif ($open['script'] -and $t -match '^(async\s+)?function\s+([\w$]+)|^(const|let|var)\s+([\w$]+)\s*=\s*(async\s*)?(\([^)]*\)|[\w$]+)\s*=>|^class\s+([\w$]+)') {
+                    $name = @($Matches[2], $Matches[4], $Matches[7]) | Where-Object { $_ } | Select-Object -First 1
+                    $out.Add("$n    function $name (in script)")
+                }
+            }
+            '^\.(js|mjs|cjs|jsx|ts|tsx)$' {
+                if ($t -match '^(export\s+)?(default\s+)?(async\s+)?function\s*\*?\s*([\w$]+)') { $out.Add("$n  function $($Matches[4])") }
+                elseif ($t -match '^(export\s+)?(const|let|var)\s+([\w$]+)\s*=\s*(async\s*)?(\([^)]*\)|[\w$]+)\s*=>') { $out.Add("$n  function $($Matches[3])") }
+                elseif ($t -match '^(export\s+)?(default\s+)?class\s+([\w$]+)') { $out.Add("$n  class $($Matches[3])") }
+            }
+            '^\.(css|scss|less)$' {
+                if ($t -match '^@media|^@supports|^@keyframes') { $out.Add("$n  $($t.TrimEnd('{').Trim())") }
+                elseif ($t -match '^/\*\s*(.{3,60}?)\s*\*/$' -and $t -notmatch '^/\*\s*\*/') { $out.Add("$n  /* $($Matches[1]) */") }
+                elseif ($l -match '^[^\s@/}][^{]*\{\s*$|^[^\s@/}][^{]*\{') { $out.Add("$n  $(($l -replace '\{.*$', '').Trim())") }
+            }
+            '^\.(ps1|psm1)$' {
+                if ($t -match '^function\s+([\w-]+)') { $out.Add("$n  function $($Matches[1])") }
+            }
+            '^\.(md|markdown)$' {
+                if ($t -match '^(#{1,4})\s+(.+)$') { $out.Add("$n  $($Matches[1]) $($Matches[2])") }
+            }
+        }
+    }
+    if ($out.Count -ge $Max) { $out.Add('(outline shortened)') }
+    $out.ToArray()
+}
+
 function Split-ReadPath([string]$Spec) {
     <# "index.html", "index.html:181-420" or "index.html:181-" -> path and line range. #>
     $m = [regex]::Match($Spec.Trim(), '^(?<p>.+?):(?<a>\d+)(?:-(?<b>\d*))?$')
@@ -200,6 +252,18 @@ function Invoke-ReadAction {
        cut at a whole line, with a note that says which lines are shown and how to read the rest. #>
     param([string]$ProjectRoot, [string[]]$Paths, [int]$MaxCharsPerFile = 40000)
     foreach ($spec in $Paths) {
+        if ($spec -match '^(.+?):outline$') {
+            $op = $Matches[1]
+            try {
+                $full = Resolve-ProjectPath $ProjectRoot $op
+                if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $op`n(file not found)"; continue }
+                $text = (Read-TextFile $full).Text
+                $total = $text.Replace("`r`n", "`n").Split("`n").Length
+                $ol = @(Get-FileOutline $text $full)
+                "### $op (outline, $total lines)`n````n$(if ($ol.Count) { $ol -join "`n" } else { '(no structure found; read the file or a line range)' })`n````"
+            } catch { "### $op`n(error: $($_.Exception.Message))" }
+            continue
+        }
         $r = Split-ReadPath $spec
         $p = $r.Path
         try {
@@ -220,7 +284,11 @@ function Invoke-ReadAction {
             }
             $whole = ($from -eq 1 -and $last -eq $total)
             $head = if ($whole) { "### $p" } else { "### $p (lines $from-$last of $total)" }
-            $note = if ($last -lt $to) { "`n(cut to fit: showing lines $from-$last of $total. Read $($p):$($last + 1)-$to for the rest.)" } else { '' }
+            $note = if ($last -lt $to) {
+                $ol = @(Get-FileOutline ($lines -join "`n") $full)
+                "`n(cut to fit: showing lines $from-$last of $total. Read $($p):$($last + 1)-$to for the rest, or only the part you need using this outline.)" +
+                $(if ($ol.Count) { "`nOutline of ${p}:`n" + ($ol -join "`n") } else { '' })
+            } else { '' }
             $fence = '````'
             "$head`n$fence`n$($sb.ToString())`n$fence$note"
         } catch { "### $p`n(error: $($_.Exception.Message))" }
@@ -619,5 +687,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-CheckpointChanges, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-FileOutline, Get-CheckpointChanges, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction
