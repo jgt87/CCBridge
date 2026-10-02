@@ -748,7 +748,7 @@ function Complete-StreamReply {
         while ((Get-Date) -lt $until) {
             $st = Get-PageReplyState $Bridge
             if ($st -and -not $st.stop -and (-not $PageBefore -or $st.replies -gt $PageBefore.replies)) {
-                $pt = Get-PageReplyText $Bridge
+                $pt = Get-PageReplyText $Bridge -FromIndex $(if ($PageBefore) { $PageBefore.replies } else { -1 })
                 $isPlaceholder = $pt.how -ne 'state' -and ("$($pt.text)" -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
                 if (-not $isPlaceholder -and "$($pt.text)".Trim() -and ("$($pt.text)" -replace '\s', '') -ne ($SentPrompt -replace '\s', '')) { $text = "$($pt.text)"; $how = "page $($pt.how)"; break }
             }
@@ -938,7 +938,7 @@ function Send-CopilotPromptUnlocked {
                         References = @(); ProposedActions = @(); ActionClaims = @(); Source = 'page' }
                 }
                 if ($st.lastLen -ne $pageLastLen) { if ($pageLastLen -ge 0) { $lastActivity = Get-Date }; $pageLastLen = $st.lastLen; $pageDoneSince = $null }
-                $finished = -not $st.stop -and $st.replies -gt $pageBefore.replies -and $st.copies -gt $pageBefore.copies -and $st.lastLen -gt 0 -and
+                $finished = -not $st.stop -and $st.replies -gt $pageBefore.replies -and ($st.lastHasCopy -or $st.copies -gt $pageBefore.copies) -and $st.lastLen -gt 0 -and
                     ($sawStop -or $sendWatch.Elapsed.TotalSeconds -ge 6)
                 # When StreamHub carried this reply and has been quiet for a moment, the page need not settle.
                 $stableNeeded = if ($stream.Items -and $stream.LastAt -and ((Get-Date) - $stream.LastAt).TotalMilliseconds -ge 300) { 0 } else { $pageStableSec }
@@ -946,7 +946,7 @@ function Send-CopilotPromptUnlocked {
                 elseif (-not $pageDoneSince) { $pageDoneSince = Get-Date }
                 if ($finished -and ((Get-Date) - $pageDoneSince).TotalSeconds -ge $stableNeeded) {
                     # Finished on the page and stable, and no completion came over the socket.
-                    $pt = Get-PageReplyText $Bridge
+                    $pt = Get-PageReplyText $Bridge -FromIndex $pageBefore.replies
                     $ptext = "$($pt.text)"
                     # Copilot's own progress placeholders are not an answer.
                     $placeholder = $pt.how -ne 'state' -and ($ptext -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
@@ -980,6 +980,26 @@ function Send-CopilotPromptUnlocked {
         if ((Get-Date) -gt $nextStallCheck -and $quiet -ge 30) {
             $nextStallCheck = (Get-Date).AddSeconds(10)
             $gaveUp = Test-CopilotGaveUp $Bridge
+            if ($gaveUp -and $pageBefore) {
+                # Copilot also shows Regenerate under a finished reply. If this turn has a real reply on
+                # the page, it finished without CCBridge noticing: read it rather than give up.
+                $st = Get-PageReplyState $Bridge
+                if ($st -and -not $st.stop -and $st.replies -gt $pageBefore.replies) {
+                    $pt = Get-PageReplyText $Bridge -FromIndex $pageBefore.replies
+                    $ptext = "$($pt.text)"
+                    $placeholder = $pt.how -ne 'state' -and ($ptext -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
+                    if ($ptext.Trim().Length -gt 40 -and -not $placeholder) {
+                        Write-CCBLog info bridge "Reply read from the page after a quiet spell ($($pt.how), $($pt.parts) block(s))" @{ chars = $ptext.Length; lastHasCopy = $st.lastHasCopy; copies = $st.copies; copiesBefore = $pageBefore.copies; ms = $sendWatch.ElapsedMilliseconds }
+                        Write-NetTrace $net 'reply read from the page after a quiet spell'
+                        Add-TimelineEvent $Bridge 'returned' "page ($($pt.how), after a quiet spell)"
+                        if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
+                        return [pscustomobject]@{ Cancelled = $false; Text = $ptext; ServerText = $ptext; Uncertain = $(if ($pt.how -eq 'state') { 0 } else { 1 })
+                            SentText = $Text; SentMatches = $true; Result = 'Success'; ResultMessage = "read from the page ($($pt.how))"
+                            ConversationId = $null; Throttling = $null; Metering = $null; References = @(); ProposedActions = @()
+                            ActionClaims = @(Get-ActionClaims $ptext); Source = 'page' }
+                    }
+                }
+            }
             $hangs = -not $gaveUp -and $StallSec -gt 0 -and $quiet -ge $StallSec
             if ($hangs) { Stop-CopilotReply $Bridge -DrainSec 5 }
             if ($gaveUp -or $hangs) {
@@ -1101,6 +1121,7 @@ function Get-PageReplyState {
     copies: [...document.querySelectorAll($copy)].filter(vis).length,
     stop: [...document.querySelectorAll($stop)].some(vis),
     lastLen: last ? (last.innerText || '').length : 0,
+    lastHasCopy: !!last && [...((last.closest('[data-testid="copilot-message-div"]') || last.parentElement || last).querySelectorAll($copy))].some(vis),
     bar: [...document.querySelectorAll($bars)].filter(vis).map(e => (e.innerText || '').trim()).filter(Boolean).join(' | ').slice(0, 300),
     now: Date.now()
   };
@@ -1133,15 +1154,16 @@ function Get-PageReplyState {
 }
 
 function Get-PageReplyText {
-    <# Text of the last reply from the page. First the raw markdown the page keeps in its React state
-       (exact, code intact); otherwise the reply's visible text (formatting lost, marked uncertain). #>
-    param([Parameter(Mandatory)]$Bridge)
+    <# Text of this turn's reply from the page: every reply block from index $FromIndex on (Copilot can
+       split one answer over several blocks), each from the raw markdown the page keeps in its React
+       state (exact, code intact), else from its visible text (formatting lost, marked uncertain). #>
+    param([Parameter(Mandatory)]$Bridge, [int]$FromIndex = -1)
     $reply = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'replyContainer' "[data-testid='copilot-message-reply-div']")
     $js = @"
 (() => {
   const replies = [...document.querySelectorAll($reply)];
-  const last = replies[replies.length - 1];
-  if (!last) return JSON.stringify({ how: 'none', text: '' });
+  if (!replies.length) return JSON.stringify({ how: 'none', text: '', parts: 0 });
+  const from = $FromIndex < 0 ? replies.length - 1 : Math.min($FromIndex, replies.length - 1);
   const pick = (p) => {
     if (!p || typeof p !== 'object') return null;
     const r = p.response;
@@ -1153,18 +1175,34 @@ function Get-PageReplyText {
     }
     return null;
   };
-  let e = last.querySelector('[data-testid="markdown-reply"]') || last;
-  for (let i = 0; i < 8 && e; i++, e = e.parentElement) {
-    const fk = Object.keys(e).find(k => k.startsWith('__reactFiber$'));
-    if (!fk) continue;
-    let f = e[fk];
-    for (let j = 0; j < 30 && f; j++, f = f.return) {
-      let t = null; try { t = pick(f.memoizedProps); } catch (x) { }
-      if (t) return JSON.stringify({ how: 'state', text: t });
+  const textOf = (el) => {
+    let e = el.querySelector('[data-testid="markdown-reply"]') || el;
+    for (let i = 0; i < 8 && e; i++, e = e.parentElement) {
+      const fk = Object.keys(e).find(k => k.startsWith('__reactFiber$'));
+      if (!fk) continue;
+      let f = e[fk];
+      for (let j = 0; j < 30 && f; j++, f = f.return) {
+        let t = null; try { t = pick(f.memoizedProps); } catch (x) { }
+        if (t) return { how: 'state', text: t };
+      }
     }
+    const md = el.querySelector('[data-testid="markdown-reply"]') || el;
+    return { how: 'page', text: md.innerText || '' };
+  };
+  const parts = [];
+  for (const el of replies.slice(from)) {
+    const p = textOf(el);
+    // Progress placeholders are not part of the answer; blocks of one answer can share the same
+    // state text: keep each text once.
+    const flat = (p.text || '').replace(/^\s*copilot said:\s*/i, '').trim();
+    if (p.how !== 'state' && flat.length < 60 && /^(working on it|taking a look|thinking|searching|generating|one moment)/i.test(flat)) continue;
+    if (p.text && !parts.some(q => q.text === p.text)) parts.push(p);
   }
-  const md = last.querySelector('[data-testid="markdown-reply"]') || last;
-  return JSON.stringify({ how: 'page', text: md.innerText || '' });
+  return JSON.stringify({
+    how: parts.length && parts.every(p => p.how === 'state') ? 'state' : 'page',
+    text: parts.map(p => p.text).join('\n\n'),
+    parts: parts.length
+  });
 })()
 "@
     Invoke-CdpEval $Bridge.Session $js | ConvertFrom-Json
