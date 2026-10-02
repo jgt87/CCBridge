@@ -168,6 +168,16 @@ Describe 'Executor' {
         Get-ChildItem (Join-Path $proj 'source') -File | ForEach-Object { $_.IsReadOnly = $false }
     }
 
+    It 'runs every line of a multi-line run block and stops at the first failure' {
+        $r = Invoke-RunAction $proj "echo first`necho second & echo same-line`nexit /b 4`necho never"
+        $r.output | Should Match 'first'
+        $r.output | Should Match 'second'
+        $r.output | Should Match 'same-line'
+        $r.output | Should Not Match '(?m)^never'
+        $r.exitCode | Should Be 4
+        @(Get-ChildItem $env:TEMP -Filter 'ccbridge-run-*.cmd' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-1) }).Count | Should Be 0
+    }
+
     It 'stops a running command at once when cancelled, including its child processes' {
         $start = Get-Date
         $flag = @{ stop = $false }

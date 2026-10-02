@@ -257,9 +257,24 @@ function Get-CommandRisk {
 function Invoke-RunAction {
     <# Runs a command with cmd.exe in the project folder. Output is trimmed to head + tail. #>
     param([string]$ProjectRoot, [string]$Command, [int]$TimeoutSec = 120, [int]$MaxChars = 8000, [scriptblock]$CancelCheck)
+    # Several lines (Copilot often sends a sequence): a cmd /c command line only runs the first, so
+    # they go into a temporary batch file that echoes each command and stops at the first failure.
+    $lines = @($Command.Replace("`r`n", "`n").Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $batch = $null
+    if ($lines.Count -gt 1) {
+        $batch = Join-Path $env:TEMP ('ccbridge-run-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.cmd')
+        $body = New-Object Text.StringBuilder
+        [void]$body.AppendLine('@echo off')
+        foreach ($l in $lines) {
+            [void]$body.AppendLine('echo ^> ' + ($l -replace '([&|<>^%])', '^$1'))
+            [void]$body.AppendLine('call ' + $l)
+            [void]$body.AppendLine('if errorlevel 1 exit /b %errorlevel%')
+        }
+        [IO.File]::WriteAllText($batch, $body.ToString(), (New-Object Text.UTF8Encoding($false)))
+    }
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = "$env:ComSpec"
-    $psi.Arguments = '/d /s /c "' + $Command + ' 2>&1"'
+    $psi.Arguments = if ($batch) { '/d /s /c ""' + $batch + '" 2>&1"' } else { '/d /s /c "' + $Command + ' 2>&1"' }
     $psi.WorkingDirectory = $ProjectRoot
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
@@ -284,6 +299,7 @@ function Invoke-RunAction {
         $head = [int]($MaxChars * 0.25)
         $text = $text.Substring(0, $head) + "`n... ($($text.Length - $MaxChars) characters omitted) ...`n" + $text.Substring($text.Length - ($MaxChars - $head))
     }
+    if ($batch) { try { [IO.File]::Delete($batch) } catch { } }
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 

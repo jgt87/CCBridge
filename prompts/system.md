@@ -35,7 +35,7 @@ Changes part of a file. SEARCH must match the current file exactly (including in
 ```run
 dotnet build
 ```
-Runs one command in the project folder with cmd.exe on Windows and returns its output. Use it to build, test and run. Do not start programs that wait for input or never exit.
+Runs commands in the project folder with cmd.exe on Windows and returns their output. Several lines run one after another and stop at the first command that fails. Use it to build, test and run. Do not start programs that wait for input or never exit.
 
 ```todo
 - [x] done step
