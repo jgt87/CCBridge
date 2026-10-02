@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -64,6 +64,7 @@ function Add-AgentEvent {
             'action-result'  { Write-CCBLog verbose agent "result $($Data.id) $($Data.status)" @{ summary = $Data.summary } }
             'checkpoint'     { Write-CCBLog verbose agent "change set saved" @{ files = $Data.files } }
             'undo'           { Write-CCBLog info agent "undo: $($Data.text)" }
+            'fetch'          { Write-CCBLog info agent "fetched $($Data.name) -> $($Data.path)" }
         }
         # Keep memory bounded; the UI only needs recent history after a reload.
         if ($State.Events.Count -gt 2000) { $State.Events.RemoveRange(0, 500) }
@@ -158,6 +159,41 @@ function Send-ToCopilot {
 
 function Test-ConnectionLost($ErrorRecord) {
     "$($ErrorRecord.Exception.Message)" -match 'Lost the connection to the Copilot tab|Could not connect to the Copilot tab'
+}
+
+function Invoke-FetchJob {
+    <# Runs a saved fetch prompt in a fresh Copilot chat and writes the answer to fetch/<name>.md.
+       Copilot only answers: action blocks in the answer are not carried out. An existing answer
+       file is kept when the fetch fails. #>
+    param($State, [string]$Name)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
+    $item = Get-FetchPrompts $State.ProjectRoot | Where-Object name -eq $Name | Select-Object -First 1
+    if (-not $item) { Add-AgentEvent $State 'error' @{ text = "There is no fetch prompt named '$Name'." }; return }
+    $State.Busy = $true; $State.Cancel = $false
+    try {
+        Add-AgentEvent $State 'status' @{ text = "Fetching '$Name' from Copilot..." }
+        Write-CCBLog info agent "Fetch $Name" @{ promptChars = $item.prompt.Length }
+        Start-NewChat $State   # a fetch never mixes with the conversation
+        $tk = Get-TaskKind $item.prompt
+        $kind = if ($tk -eq 'assistant' -or $tk -eq 'mixed') { 'fetch-m365' } else { 'fetch' }
+        $sent = New-Object 'System.Collections.Generic.HashSet[string]'
+        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $item.prompt -Sent $sent
+        $r = Send-ToCopilot $State $message
+        if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "Fetch '$Name' stopped; $($item.output) was left unchanged." }; return }
+        if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
+            Add-AgentEvent $State 'error' @{ text = "Fetch '$Name' got no usable answer ($($r.Result): $($r.ResultMessage)); $($item.output) was left unchanged." }
+            return
+        }
+        $content = Format-FetchResult -Name $Name -Reply $r.Text -References @($r.References)
+        $path = Save-FetchResult $State.ProjectRoot $Name $content
+        Add-AgentEvent $State 'fetch' @{ name = $Name; path = $path; text = "Saved the answer to $path. Attach it with @$path." }
+    } catch {
+        Write-CCBLogError agent "Fetch $Name failed" $_
+        Add-AgentEvent $State 'error' @{ text = "Fetch '$Name' failed: $($_.Exception.Message)" }
+    } finally {
+        $State.NeedNewChat = $true   # the next message starts its own chat
+        $State.Busy = $false; $State.Cancel = $false
+    }
 }
 
 function Start-NewChat($State) {
@@ -503,6 +539,7 @@ function Start-AgentWorker {
                     if ($task.newChat) { $State.NeedNewChat = $true }
                     Invoke-AgentTurn $State $task.text
                 }
+                'fetch' { Invoke-FetchJob $State $task.name }
                 'ask' {
                     # A plain question to Copilot, without project context or actions.
                     if ($task.newChat -or (Test-OtherSender)) { Start-NewChat $State }

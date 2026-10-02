@@ -14,6 +14,7 @@ Target machines have only what ships with Windows: **Windows PowerShell 5.1 + Ed
 | `lib/CopilotBridge.psm1` | Types into Copilot Chat, reads the reply from the Chathub SignalR WebSocket, rebuilds damaged replies, machine-wide send lock |
 | `lib/Workspace.psm1` | OneDrive projects, path confinement, file listing, read-only `source/` + vault |
 | `lib/Protocol.psm1` | Parses action blocks (`read glob grep write edit run todo done`) from replies |
+| `lib/Fetch.psm1` | Saved fetch prompts (`fetch/<name>.prompt.md`) and their answer files (`fetch/<name>.md`); the agent job `Invoke-FetchJob` runs one in a fresh chat with kind `fetch` / `fetch-m365` and writes the answer itself (no actions) |
 | `lib/Executor.psm1` | Carries out actions, checkpoints/undo, `&lt;`/`&gt;` repair |
 | `lib/Agent.psm1` | Agent loop + worker runspace; talks to front ends via a synchronized `$State` |
 | `lib/Server.psm1` | HTTP server + JSON API for the web UI (token in `%LOCALAPPDATA%\CCBridge\session-token.txt`) |

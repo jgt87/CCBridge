@@ -107,6 +107,7 @@ The same bridge and agent loop for MCP clients (Claude Code, VS Code, ...), in a
 5. **Source data**: drop files on *Add source data* (Files tab). They are read-only for Copilot; ask it to produce outputs from them (it writes to other folders).
 6. **Stop**: the square button stops right away, also in the middle of Copilot's reply or a running command.
 7. **New chat**: *New chat* in the chat box header starts a fresh Copilot conversation with an empty chat view (the project stays open). The counter next to it shows messages used in the current chat.
+8. **Fetch prompts**: the *Fetch* tab keeps prompts that get current data, such as "List my meetings for today with times, attendees and the agenda". *New fetch prompt* saves one as `fetch/<name>.prompt.md`; *Run* / *Refresh* asks Copilot in a fresh chat and writes its answer to `fetch/<name>.md` (with when it was fetched and the sources Copilot cited). *Attach* adds `@fetch/<name>.md` to your message; the @ menu shows how old each fetched file is. Copilot only answers in a fetch: action blocks are not carried out, the Microsoft 365 read-only rule applies, and a failed fetch leaves the previous answer file in place. The prompt files are plain text, so you can also edit them in the folder.
 
 Command line, one prompt without the interface:
 

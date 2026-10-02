@@ -25,7 +25,8 @@ import { CopilotStatus } from "@/components/ccb/copilot-status";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
-import { type AgentEvent, type AppState, api, type FileInfo, type Mode } from "@/lib/api";
+import { type AgentEvent, type AppState, api, type FetchItem, type FileInfo, type Mode } from "@/lib/api";
+import { fetchedAge } from "@/components/ccb/fetch-panel";
 
 const MODES: PromptMode[] = [
   { id: "ask", label: "Ask before changes", description: "Approve every file change and command", icon: <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" /> },
@@ -43,6 +44,7 @@ export default function App() {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [files, setFiles] = useState<FileInfo[]>([]);
+  const [fetchItems, setFetchItems] = useState<FetchItem[]>([]);
   const [draft, setDraft] = useState("");
   const [palette, setPalette] = useState<null | "commands" | "attach">(null);
   const [viewer, setViewer] = useState<{ path: string; text: string } | null>(null);
@@ -89,6 +91,7 @@ export default function App() {
 
   const refreshFiles = useCallback(() => {
     api.files().then((r) => setFiles(r.files), () => {});
+    api.fetchList().then(setFetchItems, () => {});
   }, []);
 
   // Poll the server: new events plus a state snapshot.
@@ -103,7 +106,7 @@ export default function App() {
         if (r.events.length) {
           lastSeq.current = r.events[r.events.length - 1].seq;
           setEvents((prev) => [...prev, ...r.events]);
-          if (r.events.some((e) => e.type === "project" || e.type === "undo" || (e.type === "action-result" && e.changed))) refreshFiles();
+          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || (e.type === "action-result" && e.changed))) refreshFiles();
           if (r.events.some((e) => e.type === "newchat" || e.type === "error")) setNewChatPending(false);
         }
         setError("");
@@ -192,17 +195,22 @@ export default function App() {
     }
   };
 
+  const attachPath = (path: string) => {
+    setDraft((d) => `${d}${d && !d.endsWith(" ") ? " " : ""}@${path} `);
+    setFocusKey((k) => k + 1);
+  };
+
+  const fetchedByPath = new Map(fetchItems.map((it) => [it.output, it]));
   const fileActions: Action[] = files.map((f) => ({
     id: `file:${f.path}`,
     label: f.path.split("/").pop() ?? f.path,
-    description: f.path,
+    // Fetched data shows how old it is, so stale data is easy to spot before attaching.
+    description: fetchedByPath.has(f.path) ? `${f.path} - fetched ${fetchedAge(fetchedByPath.get(f.path)!.fetchedAt)}` : f.path,
     icon: <FileCode2 className="h-4 w-4 text-muted-foreground" />,
     end: palette === "attach" ? "Attach" : "Open",
     onSelect: () => {
-      if (palette === "attach") {
-        setDraft((d) => `${d}${d && !d.endsWith(" ") ? " " : ""}@${f.path} `);
-        setFocusKey((k) => k + 1);
-      } else openFile(f.path);
+      if (palette === "attach") attachPath(f.path);
+      else openFile(f.path);
     },
   }));
 
@@ -327,7 +335,22 @@ export default function App() {
             }
           >
             <div className="min-h-0 flex-1">
-              <SidePanel busy={state.busy} changes={changes} files={files} onOpenFile={openFile} onUndo={() => api.undo()} onUploaded={refreshFiles} todos={state.todos} />
+              <SidePanel
+                busy={state.busy}
+                changes={changes}
+                fetchItems={fetchItems}
+                files={files}
+                onAttach={attachPath}
+                onOpenFile={openFile}
+                onRunFetch={(name) => api.runFetch(name).catch((e) => setError((e as Error).message))}
+                onSaveFetch={async (name, prompt) => {
+                  await api.saveFetch(name, prompt);
+                  refreshFiles();
+                }}
+                onUndo={() => api.undo()}
+                onUploaded={refreshFiles}
+                todos={state.todos}
+              />
             </div>
             {state.version && (
               <div className="shrink-0 px-1 pt-2 text-muted-foreground text-xs" title="Installed CCBridge version; updates install automatically at start (or run update.cmd)">

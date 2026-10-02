@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Agent') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Agent', 'Fetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -84,6 +84,25 @@ function Invoke-ApiRequest($Ctx, $State) {
             $full = Resolve-ProjectPath $State.ProjectRoot $req.QueryString['path']
             if ((Get-Item -LiteralPath $full).Length -gt 2MB) { throw 'File is larger than 2 MB' }
             return Send-Json $Ctx @{ path = $req.QueryString['path']; text = (Read-TextFile $full).Text }
+        }
+        '^GET /api/fetch$' {
+            if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ items = @() } }
+            return Send-Json $Ctx @{ items = @(Get-FetchPrompts $State.ProjectRoot) }
+        }
+        '^POST /api/fetch$' {
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            $item = Save-FetchPrompt $State.ProjectRoot ([string]$b.name) ([string]$b.prompt)
+            Write-CCBLog info server "Fetch prompt saved: $($item.name)" @{ chars = $item.prompt.Length }
+            return Send-Json $Ctx @{ ok = $true; item = $item }
+        }
+        '^POST /api/fetch/run$' {
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            if ($State.Busy) { throw 'CCBridge is still working on the previous message' }
+            $State.Busy = $true
+            $State.Tasks.Enqueue(@{ kind = 'fetch'; name = [string]$b.name })
+            return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/chat$' {
             $b = Read-JsonBody $Ctx

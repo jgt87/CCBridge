@@ -56,7 +56,8 @@ export interface AgentEvent {
     | "checkpoint"
     | "undo"
     | "human-required"
-    | "newchat";
+    | "newchat"
+    | "fetch";
   time: string;
   text?: string;
   uncertain?: number;
@@ -113,6 +114,16 @@ export interface ProjectInfo {
   modified: string;
 }
 
+/** A saved fetch prompt (fetch/<name>.prompt.md) and its latest answer (fetch/<name>.md). */
+export interface FetchItem {
+  name: string;
+  prompt: string;
+  promptPath: string;
+  output: string;
+  fetchedAt: string | null;
+  outputSize: number;
+}
+
 export interface FileInfo {
   path: string;
   size: number;
@@ -164,6 +175,9 @@ export const api = {
   file: (path: string) =>
     call<{ path: string; text: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),
   chat: (text: string) => call<{ ok: boolean }>("POST", "/api/chat", { text }),
+  fetchList: () => call<{ items: FetchItem[] }>("GET", "/api/fetch").then((r) => (Array.isArray(r.items) ? r.items : [])),
+  saveFetch: (name: string, prompt: string) => call<{ ok: boolean; item: FetchItem }>("POST", "/api/fetch", { name, prompt }),
+  runFetch: (name: string) => call<{ ok: boolean }>("POST", "/api/fetch/run", { name }),
   approve: (id: string, decision: "approve" | "reject", note = "") =>
     call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user" }),
   setMode: (mode: Mode) => call<{ ok: boolean }>("POST", "/api/mode", { mode }),

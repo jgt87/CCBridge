@@ -1,0 +1,1 @@
+Your answer is saved as a file exactly as you write it and used later as reference data. Give the complete, current information asked for in markdown, with dates, times, names and sources where relevant. Do not use action blocks and do not ask questions back; if something is unavailable, say so in one line.

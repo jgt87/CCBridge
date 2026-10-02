@@ -1,11 +1,12 @@
-import { ChevronRight, File, FileClock, Folder, FolderLock, FolderTree, ListTodo, Lock, RotateCcw, SquareCheck, Square } from "lucide-react";
+import { ChevronRight, CloudDownload, File, FileClock, Folder, FolderLock, FolderTree, ListTodo, Lock, RotateCcw, SquareCheck, Square } from "lucide-react";
 import { useMemo, useState } from "react";
 import FileUpload from "@/components/kokonutui/file-upload";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import { api } from "@/lib/api";
 import { ChangePill } from "./change-pill";
 import SmoothTab from "@/components/kokonutui/smooth-tab";
-import type { FileInfo, TodoItem } from "@/lib/api";
+import type { FetchItem, FileInfo, TodoItem } from "@/lib/api";
+import { FetchPanel } from "./fetch-panel";
 import { cn } from "@/lib/utils";
 
 interface TreeNode {
@@ -143,6 +144,10 @@ export function SidePanel({
   onUndo,
   onUploaded,
   busy,
+  fetchItems,
+  onRunFetch,
+  onSaveFetch,
+  onAttach,
 }: {
   files: FileInfo[];
   todos: TodoItem[];
@@ -151,6 +156,10 @@ export function SidePanel({
   onUndo: () => void;
   onUploaded: () => void;
   busy: boolean;
+  fetchItems: FetchItem[];
+  onRunFetch: (name: string) => void;
+  onSaveFetch: (name: string, prompt: string) => Promise<void>;
+  onAttach: (path: string) => void;
 }) {
   const filesPanel = <FilesPanel files={files} onOpenFile={onOpenFile} onUploaded={onUploaded} />;
 
@@ -213,6 +222,13 @@ export function SidePanel({
         { id: "files", title: "Files", icon: FolderTree, color: "bg-zinc-700", content: filesPanel },
         { id: "tasks", title: "Tasks", icon: ListTodo, color: "bg-zinc-700", content: tasksPanel },
         { id: "changes", title: "Changes", icon: FileClock, color: "bg-zinc-700", content: changesPanel },
+        {
+          id: "fetch",
+          title: "Fetch",
+          icon: CloudDownload,
+          color: "bg-zinc-700",
+          content: <FetchPanel busy={busy} items={fetchItems} onAttach={onAttach} onOpen={onOpenFile} onRun={onRunFetch} onSave={onSaveFetch} />,
+        },
       ]}
     />
   );

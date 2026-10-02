@@ -34,6 +34,8 @@ function Get-PromptParts {
         'project'   { @('role:project', 'actions', 'rules', 'project') }
         'coding'    { @('role:coding', 'actions', 'rules', 'project') }
         'mixed'     { @('role:coding', 'actions', 'rules', 'm365', 'project') }
+        'fetch'     { @('fetch') }                                  # saved fetch prompt: the answer becomes a file
+        'fetch-m365' { @('role:assistant', 'm365', 'fetch') }
         default     { @() }
     }
 }
@@ -50,6 +52,7 @@ function Get-PromptPart {
         '^rules$'     { return Read-PromptPart $AppRoot 'rules.md' }
         '^m365$'      { return Read-PromptPart $AppRoot 'm365.md' }
         '^save$'      { return Read-PromptPart $AppRoot 'save.md' }
+        '^fetch$'     { return Read-PromptPart $AppRoot 'fetch.md' }
         '^location$'  { return [string]$Context.Location }
         '^project$'   { return [string]$Context.Full }
     }
