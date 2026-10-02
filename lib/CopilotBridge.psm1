@@ -165,8 +165,19 @@ function Get-CopilotPageSnapshot {
         foreach ($old in @(Get-ChildItem $dir -Filter *.png | Sort-Object Name -Descending | Select-Object -Skip 20)) { [IO.File]::Delete($old.FullName) }
     } catch { }
     $snap | Add-Member -NotePropertyName screenshot -NotePropertyValue $file -Force
-    $snap | Add-Member -NotePropertyName signIn -NotePropertyValue ("$($snap.host)" -match 'login\.microsoftonline|login\.live|account\.microsoft') -Force
+    $off = "$($snap.host)" -and "$($snap.host)" -ne '?' -and -not (Test-CopilotUrl "https://$($snap.host)/" $Bridge.Selectors)
+    $snap | Add-Member -NotePropertyName signIn -NotePropertyValue ($off -or "$($snap.host)" -match 'login\.microsoftonline|login\.live|account\.microsoft') -Force
     $snap
+}
+
+function Wait-CopilotSignIn {
+    <# After a sign-in page appeared: waits until the person has signed in and Copilot's message box
+       is back (up to $TimeoutSec). #>
+    param([Parameter(Mandatory)]$Bridge, [int]$TimeoutSec = 300)
+    Write-CCBLog info bridge "Waiting for sign-in in the Copilot window (up to $TimeoutSec s)"
+    $ok = Wait-CopilotEditor $Bridge -TimeoutSec $TimeoutSec
+    if ($ok) { $null = Wait-CopilotReady $Bridge; Write-CCBLog info bridge 'Signed in again; Copilot is back' }
+    $ok
 }
 
 function Format-PageSnapshot($Snap) {
@@ -770,8 +781,8 @@ function Complete-StreamReply {
         $until = (Get-Date).AddSeconds(3)
         while ((Get-Date) -lt $until) {
             $st = Get-PageReplyState $Bridge
-            if ($st -and -not $st.stop -and (-not $PageBefore -or $st.replies -gt $PageBefore.replies)) {
-                $pt = Get-PageReplyText $Bridge -FromIndex $(if ($PageBefore) { $PageBefore.replies } else { -1 })
+            if ($st -and -not $st.stop -and (-not $PageBefore -or $st.fresh -gt 0)) {
+                $pt = if ($PageBefore) { Get-PageReplyText $Bridge -Fresh } else { Get-PageReplyText $Bridge }
                 $isPlaceholder = $pt.how -ne 'state' -and ("$($pt.text)" -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
                 if (-not $isPlaceholder -and "$($pt.text)".Trim() -and ("$($pt.text)" -replace '\s', '') -ne ($SentPrompt -replace '\s', '')) { $text = "$($pt.text)"; $how = "page $($pt.how)"; break }
             }
@@ -899,6 +910,7 @@ function Send-CopilotPromptUnlocked {
 
     # The page itself is watched too: if the reply does not arrive over the Chathub socket (other
     # tenants may deliver it differently), it is read from the page once Copilot has finished.
+    Set-PageReplyBaseline $Bridge
     $pageBefore = Get-PageReplyState $Bridge
     if ($Bridge.PSObject.Properties['LastReplyAt'] -and $Bridge.LastReplyAt -and $Bridge.Pacing) {
         $left = [double]$Bridge.Pacing.betweenPromptsSec - ((Get-Date) - $Bridge.LastReplyAt).TotalSeconds
@@ -940,7 +952,7 @@ function Send-CopilotPromptUnlocked {
             if ($was -eq 'idle' -and $pageBefore) {
                 # Copilot had already finished; only CCBridge was still waiting. Keep its reply.
                 try {
-                    $pt = Get-PageReplyText $Bridge -FromIndex $pageBefore.replies
+                    $pt = Get-PageReplyText $Bridge -Fresh
                     $ptext = "$($pt.text)"
                     $placeholder = $pt.how -ne 'state' -and ($ptext -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
                     if ($ptext.Trim() -and -not $placeholder -and ($ptext -replace '\s', '') -ne ($Text -replace '\s', '')) { $keep = $ptext; $finished = $true }
@@ -958,7 +970,7 @@ function Send-CopilotPromptUnlocked {
             $st = Get-PageReplyState $Bridge
             if ($st -and (Test-Timeline $Bridge)) {
                 # Record each change of what the page shows.
-                $sig = "stop=$($st.stop) replies=$($st.replies) copies=$($st.copies) len=$($st.lastLen) stateLen=$($st.stateLen) flags=$(($st.flags | ConvertTo-Json -Compress))"
+                $sig = "stop=$($st.stop) replies=$($st.replies) new=$($st.fresh) copies=$($st.copies) len=$($st.lastLen) stateLen=$($st.stateLen) flags=$(($st.flags | ConvertTo-Json -Compress))"
                 if ($sig -ne $Bridge.Timeline.LastPage) { $Bridge.Timeline.LastPage = $sig; Add-TimelineEvent $Bridge 'page' $sig $(if ($st.now) { [DateTimeOffset]::FromUnixTimeMilliseconds([long]$st.now).LocalDateTime } else { $null }) }
             }
             if ($st) {
@@ -973,9 +985,9 @@ function Send-CopilotPromptUnlocked {
                 }
                 if ($st.lastLen -ne $pageLastLen) { if ($pageLastLen -ge 0) { $lastActivity = Get-Date }; $pageLastLen = $st.lastLen; $pageDoneSince = $null; $pageQuietSince = $null }
                 # No Stop button and nothing changing: finished, even when the reply shows no Copy button.
-                if (-not $st.stop -and $st.replies -gt $pageBefore.replies -and $st.lastLen -gt 0) { if (-not $pageQuietSince) { $pageQuietSince = Get-Date } } else { $pageQuietSince = $null }
+                if (-not $st.stop -and $st.lastFresh -and $st.lastLen -gt 0) { if (-not $pageQuietSince) { $pageQuietSince = Get-Date } } else { $pageQuietSince = $null }
                 $quietDone = $pageQuietSince -and ((Get-Date) - $pageQuietSince).TotalSeconds -ge 8
-                $finished = -not $st.stop -and $st.replies -gt $pageBefore.replies -and ($st.lastHasCopy -or $st.copies -gt $pageBefore.copies -or $quietDone) -and $st.lastLen -gt 0 -and
+                $finished = -not $st.stop -and $st.lastFresh -and ($st.lastHasCopy -or $st.copies -gt $pageBefore.copies -or $quietDone) -and $st.lastLen -gt 0 -and
                     ($sawStop -or $sendWatch.Elapsed.TotalSeconds -ge 6)
                 # When StreamHub carried this reply and has been quiet for a moment, the page need not settle.
                 $stableNeeded = if ($stream.Items -and $stream.LastAt -and ((Get-Date) - $stream.LastAt).TotalMilliseconds -ge 300) { 0 } else { $pageStableSec }
@@ -983,7 +995,7 @@ function Send-CopilotPromptUnlocked {
                 elseif (-not $pageDoneSince) { $pageDoneSince = Get-Date }
                 if ($finished -and ((Get-Date) - $pageDoneSince).TotalSeconds -ge $stableNeeded) {
                     # Finished on the page and stable, and no completion came over the socket.
-                    $pt = Get-PageReplyText $Bridge -FromIndex $pageBefore.replies
+                    $pt = Get-PageReplyText $Bridge -Fresh
                     $ptext = "$($pt.text)"
                     # Copilot's own progress placeholders are not an answer.
                     $placeholder = $pt.how -ne 'state' -and ($ptext -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
@@ -1021,8 +1033,8 @@ function Send-CopilotPromptUnlocked {
                 # Copilot also shows Regenerate under a finished reply. If this turn has a real reply on
                 # the page, it finished without CCBridge noticing: read it rather than give up.
                 $st = Get-PageReplyState $Bridge
-                if ($st -and -not $st.stop -and $st.replies -gt $pageBefore.replies) {
-                    $pt = Get-PageReplyText $Bridge -FromIndex $pageBefore.replies
+                if ($st -and -not $st.stop -and $st.fresh -gt 0) {
+                    $pt = Get-PageReplyText $Bridge -Fresh
                     $ptext = "$($pt.text)"
                     $placeholder = $pt.how -ne 'state' -and ($ptext -replace '(?i)^\s*copilot said:\s*', '').Trim() -match $script:PlaceholderPattern
                     if ($ptext.Trim().Length -gt 40 -and -not $placeholder) {
@@ -1153,7 +1165,13 @@ function Get-PageReplyState {
   const vis = e => e && e.offsetParent !== null;
   const replies = [...document.querySelectorAll($reply)];
   const last = replies[replies.length - 1];
+  // Copilot keeps only recent messages on the page in a long chat, so the number of replies says
+  // nothing: a reply is new when its message id was not on the page when the prompt was sent.
+  const seen = window.__ccbSeen;
+  const isSeen = (r) => { const h = r.closest('[data-testid="copilot-message-div"]') || r; return r.dataset.ccbSeen === '1' || !!(seen && h.id && seen.has(h.id)); };
   const out = {
+    fresh: replies.filter(r => !isSeen(r)).length,
+    lastFresh: !!last && !isSeen(last),
     replies: replies.length,
     copies: [...document.querySelectorAll($copy)].filter(vis).length,
     stop: [...document.querySelectorAll($stop)].some(vis),
@@ -1190,17 +1208,37 @@ function Get-PageReplyState {
     try { Invoke-CdpEval $Bridge.Session $js | ConvertFrom-Json } catch { if ($Bridge.Session.Lost) { throw }; $null }
 }
 
+function Set-PageReplyBaseline {
+    <# Records the replies on the page just before a prompt is sent; replies not recorded are new. #>
+    param([Parameter(Mandatory)]$Bridge)
+    $reply = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'replyContainer' "[data-testid='copilot-message-reply-div']")
+    try {
+        $null = Invoke-CdpEval $Bridge.Session @"
+(() => {
+  const rs = [...document.querySelectorAll($reply)];
+  window.__ccbSeen = new Set(rs.map(r => (r.closest('[data-testid="copilot-message-div"]') || r).id).filter(Boolean));
+  rs.forEach(r => { r.dataset.ccbSeen = '1'; });
+  return rs.length;
+})()
+"@
+    } catch { if ($Bridge.Session.Lost) { throw } }
+}
+
 function Get-PageReplyText {
     <# Text of this turn's reply from the page: every reply block from index $FromIndex on (Copilot can
        split one answer over several blocks), each from the raw markdown the page keeps in its React
        state (exact, code intact), else from its visible text (formatting lost, marked uncertain). #>
-    param([Parameter(Mandatory)]$Bridge, [int]$FromIndex = -1)
+    param([Parameter(Mandatory)]$Bridge, [int]$FromIndex = -1, [switch]$Fresh)
+    $freshJs = if ($Fresh) { 'true' } else { 'false' }
     $reply = ConvertTo-JsString (Get-SelectorOrDefault $Bridge 'replyContainer' "[data-testid='copilot-message-reply-div']")
     $js = @"
 (() => {
   const replies = [...document.querySelectorAll($reply)];
   if (!replies.length) return JSON.stringify({ how: 'none', text: '', parts: 0 });
   const from = $FromIndex < 0 ? replies.length - 1 : Math.min($FromIndex, replies.length - 1);
+  const seen = window.__ccbSeen;
+  const isSeen = (r) => { const h = r.closest('[data-testid="copilot-message-div"]') || r; return r.dataset.ccbSeen === '1' || !!(seen && h.id && seen.has(h.id)); };
+  const pick_list = $freshJs ? replies.filter(r => !isSeen(r)) : replies.slice(from);
   const pick = (p) => {
     if (!p || typeof p !== 'object') return null;
     const r = p.response;
@@ -1264,7 +1302,7 @@ function Get-PageReplyText {
     return { how: 'page', text: vis };
   };
   const parts = [];
-  for (const el of replies.slice(from)) {
+  for (const el of pick_list) {
     const p = textOf(el);
     // Progress placeholders are not part of the answer; blocks of one answer can share the same
     // state text: keep each text once.
@@ -1351,4 +1389,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

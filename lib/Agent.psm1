@@ -252,6 +252,21 @@ function New-ActionRetryMessage {
 function Start-NewChat($State) {
     try { New-CopilotChat (Get-Bridge $State) }
     catch {
+        if ("$($_.Exception.Message)" -match 'the page shows a sign-in page') {
+            # The organisation asks to sign in again (for example multi-factor authentication).
+            Add-AgentEvent $State 'status' @{ text = 'Copilot asks you to sign in again. Complete the sign-in in the Copilot window in Edge; CCBridge waits up to 5 minutes.' }
+            $State.Copilot = 'connecting'; $State.CopilotMessage = 'Waiting for you to sign in to Copilot in Edge'
+            $ok = Wait-CopilotSignIn (Get-Bridge $State) 300
+            $State.Copilot = $(if ($ok) { 'ready' } else { 'error' }); $State.CopilotMessage = $(if ($ok) { '' } else { 'Sign-in was not completed' })
+            if (-not $ok) { throw 'Copilot sign-in was not completed within 5 minutes. Sign in in the Copilot window in Edge and send your message again.' }
+            Add-AgentEvent $State 'status' @{ text = 'Signed in again; continuing.' }
+            New-CopilotChat (Get-Bridge $State)
+            $State.ChatStarted = $false; $State.ChatKind = $null
+            $State.SentParts = New-Object 'System.Collections.Generic.HashSet[string]'
+            $State.FollowUps = 0; $State.LastTurnActed = $null; $State.NeedNewChat = $false
+            $State.Throttle = @{ used = 0; max = $State.Throttle.max }
+            return
+        }
         if (-not (Test-ConnectionLost $_)) { throw }
         # Nothing was sent yet: reconnect and try once more.
         Write-CCBLog info agent 'Connection lost while starting a new chat; reconnecting' @{ error = $_.Exception.Message }
