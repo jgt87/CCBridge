@@ -168,6 +168,25 @@ Describe 'Executor' {
         Get-ChildItem (Join-Path $proj 'source') -File | ForEach-Object { $_.IsReadOnly = $false }
     }
 
+    It 'counts lines added and removed per file since a point in time (undo backups as baseline)' {
+        $since = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')
+        Start-Sleep -Milliseconds 20
+        [IO.File]::WriteAllText((Join-Path $proj 'stats.txt'), "a`nb`nc`n")
+        $cp1 = New-Checkpoint $proj
+        Invoke-EditAction $proj 'stats.txt' @(@{ search = 'b'; replace = "B`nb2" }) $cp1 | Out-Null   # b -> B, +b2
+        $cp2 = New-Checkpoint $proj
+        Invoke-WriteAction $proj 'fresh.txt' "one`ntwo`n" $cp2 | Out-Null
+        Invoke-EditAction $proj 'stats.txt' @(@{ search = 'c'; replace = 'c' }) $cp2 | Out-Null       # no-op edit
+        $s = Get-SessionChangeStats $proj $since
+        $s['stats.txt'].added | Should Be 2
+        $s['stats.txt'].removed | Should Be 1
+        $s['fresh.txt'].added | Should Be 2
+        $s['fresh.txt'].removed | Should Be 0
+        (Get-SessionChangeStats $proj '99999999').Count | Should Be 0                     # nothing after a later point
+        Undo-LastCheckpoint $proj | Out-Null; Undo-LastCheckpoint $proj | Out-Null
+        (Get-SessionChangeStats $proj $since).Count | Should Be 0                            # undone: nothing changed
+    }
+
     It 'runs every line of a multi-line run block and stops at the first failure' {
         $r = Invoke-RunAction $proj "echo first`necho second & echo same-line`nexit /b 4`necho never"
         $r.output | Should Match 'first'

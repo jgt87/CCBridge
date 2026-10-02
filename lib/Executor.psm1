@@ -92,6 +92,47 @@ function Undo-LastCheckpoint {
     @()
 }
 
+function Measure-LineChanges([string]$Old, [string]$New) {
+    <# Lines added and removed between two texts (line multiset comparison; moved lines count as unchanged). #>
+    $counts = New-Object Collections.Hashtable ([StringComparer]::Ordinal)   # exact: case changes count
+    foreach ($l in $(if ($Old) { $Old.Replace("`r`n", "`n").TrimEnd("`n").Split("`n") } else { @() })) { $counts[$l] = 1 + [int]$counts[$l] }
+    $added = 0
+    foreach ($l in $(if ($New) { $New.Replace("`r`n", "`n").TrimEnd("`n").Split("`n") } else { @() })) {
+        if ([int]$counts[$l] -gt 0) { $counts[$l] = $counts[$l] - 1 } else { $added++ }
+    }
+    $removed = 0
+    foreach ($v in $counts.Values) { $removed += $v }
+    @{ added = $added; removed = $removed }
+}
+
+function Get-SessionChangeStats {
+    <# Per changed file: lines added/removed since $SinceId (a checkpoint id, yyyyMMdd-HHmmss-fff),
+       measured against the version before the first change in that period (from the undo backups). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string]$SinceId = '')
+    $base = Join-Path (Get-ProjectStateDir $ProjectRoot) 'backups'
+    $result = @{}
+    if (-not (Test-Path $base)) { return $result }
+    $baseline = @{}   # rel -> backup file, or $null for files the period created
+    foreach ($cp in Get-ChildItem -Directory $base | Where-Object { $_.Name -ge $SinceId } | Sort-Object Name) {
+        $manifest = Join-Path $cp.FullName 'manifest.json'
+        if (-not (Test-Path $manifest)) { continue }
+        foreach ($p in (Get-Content $manifest -Raw | ConvertFrom-Json).PSObject.Properties) {
+            if ($baseline.ContainsKey($p.Name)) { continue }
+            $baseline[$p.Name] = if ($p.Value -eq 'new') { $null } else { Join-Path $cp.FullName ($p.Name.Replace('/', '\')) }
+        }
+    }
+    foreach ($rel in $baseline.Keys) {
+        try {
+            $full = Resolve-ProjectPath $ProjectRoot $rel
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Get-Item -LiteralPath $full).Length -gt 2MB -or (Test-BinaryFile $full)) { continue }
+            $old = if ($baseline[$rel]) { (Read-TextFile $baseline[$rel]).Text } else { '' }
+            $stats = Measure-LineChanges $old (Read-TextFile $full).Text
+            if ($stats.added -or $stats.removed) { $result[$rel] = $stats }
+        } catch { }
+    }
+    $result
+}
+
 # --- Actions -------------------------------------------------------------------------
 
 function Invoke-ReadAction {
@@ -303,5 +344,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

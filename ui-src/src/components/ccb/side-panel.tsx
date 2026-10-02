@@ -11,6 +11,8 @@ interface TreeNode {
   name: string;
   path: string;
   size?: number;
+  added?: number;
+  removed?: number;
   children?: TreeNode[];
 }
 
@@ -23,7 +25,7 @@ function addFileToTree(root: TreeNode, f: FileInfo) {
     node.children ??= [];
     let child = node.children.find((c) => c.name === part && Boolean(c.children) === !isFile);
     if (!child) {
-      child = { name: part, path: parts.slice(0, idx + 1).join("/"), ...(isFile ? { size: f.size } : { children: [] }) };
+      child = { name: part, path: parts.slice(0, idx + 1).join("/"), ...(isFile ? { size: f.size, added: f.added, removed: f.removed } : { children: [] }) };
       node.children.push(child);
     }
     node = child;
@@ -41,6 +43,29 @@ function buildTree(files: FileInfo[]): TreeNode[] {
   for (const f of files) addFileToTree(root, f);
   sortTree(root.children!);
   return root.children!;
+}
+
+/** Lines added/removed in a file, or summed over a folder. */
+function changeTotals(n: TreeNode): { added: number; removed: number } {
+  if (!n.children) return { added: n.added ?? 0, removed: n.removed ?? 0 };
+  return n.children.reduce(
+    (t, c) => {
+      const s = changeTotals(c);
+      return { added: t.added + s.added, removed: t.removed + s.removed };
+    },
+    { added: 0, removed: 0 }
+  );
+}
+
+function ChangeBadge({ node }: { node: TreeNode }) {
+  const { added, removed } = changeTotals(node);
+  if (!added && !removed) return null;
+  return (
+    <span className="ml-auto flex shrink-0 gap-1 pl-2 font-mono text-[11px] tabular-nums" title={`${added} line(s) added, ${removed} removed since the project was opened`}>
+      {added > 0 && <span className="text-foreground/70">+{added}</span>}
+      {removed > 0 && <span className="text-rose-500/80">-{removed}</span>}
+    </span>
+  );
 }
 
 function TreeRows({ nodes, depth, onOpen }: { nodes: TreeNode[]; depth: number; onOpen: (p: string) => void }) {
@@ -63,6 +88,7 @@ function TreeRows({ nodes, depth, onOpen }: { nodes: TreeNode[]; depth: number; 
                 <Folder className="h-3.5 w-3.5 text-muted-foreground" />
               )}
               <span className="truncate">{n.name}</span>
+              <ChangeBadge node={n} />
             </button>
             {!closed[n.path] && <TreeRows depth={depth + 1} nodes={n.children} onOpen={onOpen} />}
           </div>
@@ -81,6 +107,7 @@ function TreeRows({ nodes, depth, onOpen }: { nodes: TreeNode[]; depth: number; 
               <File className="h-3.5 w-3.5 text-muted-foreground" />
             )}
             <span className="truncate">{n.name}</span>
+            <ChangeBadge node={n} />
           </button>
         )
       )}
