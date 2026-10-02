@@ -25,7 +25,7 @@ export interface ActionItem {
   id: string;
   action: string;
   target: string;
-  status: string; // running | awaiting | ok | failed | rejected | skipped
+  status: string; // running | awaiting | ok | already applied | failed | rejected | skipped
   preview?: Preview | null;
   warning?: string | null;
   error?: string;
@@ -60,6 +60,7 @@ function StatusBadge({ status }: { status: string }) {
     running: "text-muted-foreground",
     awaiting: "font-medium text-foreground",
     ok: "text-muted-foreground",
+    "already applied": "text-muted-foreground",
     failed: "text-rose-500",
     rejected: "text-zinc-500",
     skipped: "text-zinc-500",
@@ -68,6 +69,7 @@ function StatusBadge({ status }: { status: string }) {
     running: "running",
     awaiting: "needs approval",
     ok: "done",
+    "already applied": "already applied (verified)",
     failed: "failed",
     rejected: "rejected",
     skipped: "skipped (plan mode)",
@@ -183,7 +185,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
               </button>
             </div>
           )}
-          {item.status === "ok" && item.summary && (
+          {(item.status === "ok" || item.status === "already applied") && item.summary && (
             <div className="flex items-center gap-1 text-muted-foreground text-xs">
               <Check className="h-3.5 w-3.5" /> {item.summary}
             </div>

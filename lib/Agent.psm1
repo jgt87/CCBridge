@@ -249,6 +249,35 @@ function New-ActionRetryMessage {
     ($parts -join "`n`n") + "`n`nTask: $Task"
 }
 
+function Test-NeedsReview {
+    <# Whether a finished task changed enough to ask Copilot for a consistency review: at least
+       reviewMinLines changed lines in total, or a file created while another lost 20+ lines (code
+       moved out). harness.json reviewAfterChanges: "big" (default), "always" or "off". #>
+    param($State, $Changes)
+    $setting = if ($State.Config.reviewAfterChanges) { "$($State.Config.reviewAfterChanges)" } else { 'big' }
+    $changes = @($Changes | Where-Object { $_.added -or $_.removed })
+    if ($setting -eq 'off' -or -not $changes.Count -or $State.Mode -eq 'plan') { return $false }
+    if ($setting -eq 'always') { return $true }
+    $min = if ($State.Config.reviewMinLines) { [int]$State.Config.reviewMinLines } else { 40 }
+    $total = ($changes | ForEach-Object { $_.added + $_.removed } | Measure-Object -Sum).Sum
+    $movedOut = @($changes | Where-Object { $_.created -and $_.added -ge 10 }).Count -and @($changes | Where-Object { -not $_.created -and $_.removed -ge 20 }).Count
+    ($total -ge $min) -or $movedOut
+}
+
+function New-ReviewMessage {
+    <# The review request: what changed, the local check results and the current contents. #>
+    param($State, $Changes, [string[]]$Issues)
+    $list = ($Changes | Where-Object { $_.added -or $_.removed } | ForEach-Object {
+        $what = if ($_.deleted) { 'deleted' } elseif ($_.created) { 'new' } else { 'changed' }
+        "- $($_.path) ($what, +$($_.added) -$($_.removed) lines)"
+    }) -join "`n"
+    $checks = if (@($Issues).Count) { "Local checks found:`n" + ((@($Issues) | ForEach-Object { "- $_" }) -join "`n") } else { 'Local checks (JSON and PowerShell syntax, referenced local files exist): no problems found.' }
+    $paths = @($Changes | Where-Object { -not $_.deleted -and ($_.added -or $_.removed) } | ForEach-Object { $_.path })
+    $perFile = [Math]::Max(4000, [int]($State.Config.resultCharBudget / [Math]::Max(1, $paths.Count)))
+    $contents = if ($paths.Count) { (Invoke-ReadAction $State.ProjectRoot $paths -MaxCharsPerFile $perFile) -join "`n`n" } else { '' }
+    (Get-PromptPart $State.AppRoot 'review') + "`n`nChanged files:`n$list`n`n$checks`n`n$contents"
+}
+
 function Start-NewChat($State) {
     try { New-CopilotChat (Get-Bridge $State) }
     catch {
@@ -438,6 +467,12 @@ function Invoke-AgentAction {
                 Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = $er.error })
                 return @{ ok = $false; summary = "edit $($Action.arg) failed"; output = "error: $($er.error)" }
             }
+            if ($er.unchanged) {
+                $out = Format-AlreadyApplied $Action.arg $er
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'done' })
+                Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $true; status = 'already applied'; summary = 'already applied (verified)'; output = $out }
+                return @{ ok = $true; summary = 'already applied'; output = $out; reported = $true }
+            }
             $preview = @{ path = $Action.arg; exists = $true; old = (Get-PreviewText $er.old); new = (Get-PreviewText $er.new) }
         }
         $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0)
@@ -538,6 +573,7 @@ function Invoke-AgentTurn {
         $message += Get-PinnedFiles $State.ProjectRoot $Text
 
         $nudges = 0   # times this message was sent again because Copilot explained instead of acting
+        $reviewed = $false   # the consistency review after a big change happens once per message
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
             Invoke-RolloverIfNeeded $State
@@ -608,7 +644,21 @@ function Invoke-AgentTurn {
                 $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = "$($res.output)"; readPaths = $res.readPaths })
             }
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
-            if ($isDone) { break }
+            if ($isDone) {
+                # After a big change: one consistency review by Copilot (dead code, broken references).
+                if (-not $reviewed) {
+                    $changes = @(Get-CheckpointChanges $State.ProjectRoot $checkpoint)
+                    if (Test-NeedsReview $State $changes) {
+                        $reviewed = $true
+                        $issues = @(Test-ProjectConsistency $State.ProjectRoot @($changes | ForEach-Object { $_.path }))
+                        Write-CCBLog info agent 'Asking Copilot for a consistency review' @{ files = $changes.Count; issues = $issues.Count }
+                        Add-AgentEvent $State 'status' @{ text = "Big change: asking Copilot to review $(@($changes).Count) changed file(s) for leftovers, dead code and broken references$(if ($issues.Count) { " ($($issues.Count) problem(s) found by the local checks)" })." }
+                        $message = New-ReviewMessage $State $changes $issues
+                        continue
+                    }
+                }
+                break
+            }
             if ($round -eq $State.Config.maxRounds) { Add-AgentEvent $State 'status' @{ text = "Stopped after $($State.Config.maxRounds) rounds. Send a message to continue." }; break }
 
             $message = "Results:`n`n" + (Format-ActionResults $State $results) + "`n`nContinue. Use done when the task is finished."

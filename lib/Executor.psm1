@@ -105,6 +105,56 @@ function Measure-LineChanges([string]$Old, [string]$New) {
     @{ added = $added; removed = $removed }
 }
 
+function Get-CheckpointChanges {
+    <# Per file changed since $Checkpoint started: lines added/removed, created, deleted. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)]$Checkpoint)
+    foreach ($rel in @($Checkpoint.Files.Keys)) {
+        $full = Join-Path $ProjectRoot ($rel.Replace('/', '\'))
+        $old = if ($Checkpoint.Files[$rel] -eq 'new') { '' } else {
+            $b = Join-Path $Checkpoint.Dir ($rel.Replace('/', '\'))
+            if (Test-Path -LiteralPath $b) { (Read-TextFile $b).Text } else { '' }
+        }
+        $exists = Test-Path -LiteralPath $full -PathType Leaf
+        $new = if ($exists) { (Read-TextFile $full).Text } else { '' }
+        $d = Measure-LineChanges $old $new
+        [pscustomobject]@{ path = $rel; created = ($Checkpoint.Files[$rel] -eq 'new'); deleted = (-not $exists); added = $d.added; removed = $d.removed }
+    }
+}
+
+function Test-ProjectConsistency {
+    <# Fixed checks on the given project files (no judgement of the code): JSON parses, PowerShell has
+       no syntax errors, and local files referenced from HTML, JavaScript and CSS (href, src, fetch,
+       import, url()) exist. Returns one line per problem. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths)
+    foreach ($rel in @($Paths)) {
+        try { $full = Resolve-ProjectPath $ProjectRoot $rel } catch { continue }
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Test-BinaryFile $full)) { continue }
+        $ext = [IO.Path]::GetExtension($full).ToLowerInvariant()
+        $text = (Read-TextFile $full).Text
+        if ($ext -eq '.json') {
+            try { $null = $text | ConvertFrom-Json } catch { "${rel}: not valid JSON ($($_.Exception.Message.Split("`n")[0]))" }
+        }
+        if ($ext -in '.ps1', '.psm1', '.psd1') {
+            $tok = $null; $errs = $null
+            $null = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$tok, [ref]$errs)
+            foreach ($x in @($errs) | Select-Object -First 3) { "${rel}:$($x.Extent.StartLineNumber): $($x.Message)" }
+        }
+        if ($ext -in '.html', '.htm', '.js', '.mjs', '.jsx', '.ts', '.tsx', '.css') {
+            $refs = New-Object System.Collections.Generic.List[string]
+            foreach ($re in @('(?i)\b(?:href|src)\s*=\s*["'']([^"''#?]+)', '(?i)\bfetch\(\s*["''`]([^"''`?#]+)', '(?i)\bimport\s[^;]*?from\s*["'']([^"'']+)', '(?i)\burl\(\s*["'']?([^"'')?#]+)')) {
+                foreach ($m in [regex]::Matches($text, $re)) { $refs.Add($m.Groups[1].Value.Trim()) }
+            }
+            foreach ($ref in ($refs | Select-Object -Unique)) {
+                if (-not $ref -or $ref -match '^(?i)([a-z][a-z0-9+.-]*:|//|#|\$|\{)' -or $ref.Contains('${')) { continue }
+                $target = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $full) ($ref.TrimStart('/').Replace('/', '\'))))
+                if ($ref.StartsWith('/')) { $target = [IO.Path]::GetFullPath((Join-Path $ProjectRoot ($ref.TrimStart('/').Replace('/', '\')))) }
+                if (-not $target.StartsWith([IO.Path]::GetFullPath($ProjectRoot), [StringComparison]::OrdinalIgnoreCase)) { continue }
+                if (-not (Test-Path -LiteralPath $target)) { "${rel}: refers to $ref, which does not exist" }
+            }
+        }
+    }
+}
+
 function Get-SessionChangeStats {
     <# Per changed file: lines added/removed since $SinceId (a checkpoint id, yyyyMMdd-HHmmss-fff),
        measured against the version before the first change in that period (from the undo backups). #>
@@ -257,6 +307,97 @@ function Get-LineNumber([string]$Text, [int]$Index) {
     ([regex]::Matches($Text.Substring(0, $Index), "`n")).Count + 1
 }
 
+function Get-LocalReferences([string]$Text) {
+    <# Local files a text refers to: href/src attributes, fetch(), import ... from, CSS url(). #>
+    $refs = New-Object System.Collections.Generic.List[string]
+    foreach ($re in @('(?i)\b(?:href|src)\s*=\s*["'']([^"''#?]+)', '(?i)\bfetch\(\s*["''`]([^"''`?#]+)', '(?i)\bimport\s[^;]*?from\s*["'']([^"'']+)', '(?i)\burl\(\s*["'']?([^"'')?#]+)')) {
+        foreach ($m in [regex]::Matches($Text, $re)) {
+            $r = $m.Groups[1].Value.Trim()
+            if ($r -and $r -notmatch '^(?i)([a-z][a-z0-9+.-]*:|//|#|\$|\{)' -and -not $r.Contains('${')) { $refs.Add($r) }
+        }
+    }
+    @($refs | Select-Object -Unique)
+}
+
+function Test-MoveOrder {
+    <# Guards against losing code that is being moved to another file: when an edit removes a sizeable
+       block (15+ distinctive lines) and adds a reference to a local file, the removed lines must
+       already be in that file. Returns $null when fine, else the reason (nothing is changed). #>
+    param([string]$ProjectRoot, [string]$FullPath, [string]$Old, [string]$New)
+    $newLines = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($l in $New.Replace("`r`n", "`n").Split("`n")) { [void]$newLines.Add($l.Trim()) }
+    $removed = @($Old.Replace("`r`n", "`n").Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -ge 4 -and -not $newLines.Contains($_) } | Select-Object -Unique)
+    if ($removed.Count -lt 15) { return $null }
+    $before = @(Get-LocalReferences $Old)
+    $added = @(Get-LocalReferences $New | Where-Object { $before -notcontains $_ })
+    if (-not $added.Count) { return $null }
+    $have = New-Object 'System.Collections.Generic.HashSet[string]'
+    $names = @()
+    foreach ($ref in $added) {
+        $target = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $FullPath) ($ref.TrimStart('/').Replace('/', '\'))))
+        if ($ref.StartsWith('/')) { $target = [IO.Path]::GetFullPath((Join-Path $ProjectRoot ($ref.TrimStart('/').Replace('/', '\')))) }
+        $names += $ref
+        if (Test-Path -LiteralPath $target -PathType Leaf) {
+            foreach ($l in (Read-TextFile $target).Text.Replace("`r`n", "`n").Split("`n")) { [void]$have.Add($l.Trim()) }
+        }
+    }
+    $found = @($removed | Where-Object { $have.Contains($_) }).Count
+    if ($found -ge [Math]::Ceiling($removed.Count * 0.8)) { return $null }
+    $list = $names -join ', '
+    "this edit removes $($removed.Count) lines from the file and links $list, but $list does not contain them yet (only $found of $($removed.Count) found). Nothing was changed, so no code is lost. First write $list with the complete moved code, then send this edit again."
+}
+
+function Test-AlreadyApplied([string]$Text, [string]$Search, [string]$Replace) {
+    <# Whether a change whose SEARCH text is not in the file was already made: the new text is in the
+       file (exactly or apart from indentation) and none of the distinctive old lines (8+ characters,
+       not also in the new text) is left. For a removal (empty replacement) only the second applies.
+       Returns @{ applied; evidence } - the evidence is reported, so Copilot can review the verdict. #>
+    $fileLines = @($Text.Replace("`r`n", "`n").Split("`n") | ForEach-Object { $_.Trim() })
+    $newLines = @($Replace.Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $oldLines = @($Search.Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -ge 8 -and $newLines -notcontains $_ })
+    if (-not $oldLines.Count -and -not $newLines.Count) { return @{ applied = $false } }
+    $left = @($oldLines | Where-Object { $fileLines -contains $_ })
+    if ($left.Count) { return @{ applied = $false } }
+    if (-not $newLines.Count) {
+        return @{ applied = $true; evidence = "it removes text that is no longer in the file (none of its $($oldLines.Count) distinctive line(s) are there)" }
+    }
+    $pattern = '(?m)^' + (($Replace.Split("`n") | Where-Object { $_.Trim() } | ForEach-Object { '[ \t]*' + [regex]::Escape($_.Trim()) + '[ \t]*' }) -join '\n(?:[ \t]*\n)*')
+    $m = [regex]::Match($Text, $pattern)
+    if (-not $m.Success) { return @{ applied = $false } }
+    $from = Get-LineNumber $Text $m.Index
+    $to = Get-LineNumber $Text ($m.Index + [Math]::Max(0, $m.Length - 1))
+    @{ applied = $true; evidence = "the new text is already at lines $from-$to and none of the old lines are in the file" }
+}
+
+function Get-ClosestLines([string]$Text, [string]$Search) {
+    <# The file's current lines where $Search most likely belongs (most SEARCH lines found nearby),
+       for Copilot to copy exactly in its next try. #>
+    $fileLines = $Text.Replace("`r`n", "`n").Split("`n")
+    $want = @($Search.Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -ge 3 })
+    if (-not $want.Count) { return 'Read the file again and copy the lines exactly.' }
+    $span = [Math]::Max(1, $Search.Split("`n").Count)
+    $best = -1; $bestScore = 0
+    for ($i = 0; $i -lt $fileLines.Length; $i++) {
+        $t = $fileLines[$i].Trim()
+        if (-not $t) { continue }
+        # A line counts when it equals, or contains, one of the SEARCH lines (or the other way round).
+        $hit = $false
+        foreach ($w in $want) { if ($t -eq $w -or ($w.Length -ge 8 -and ($t.Contains($w) -or $w.Contains($t) -and $t.Length -ge 8))) { $hit = $true; break } }
+        if (-not $hit) { continue }
+        $score = 0
+        for ($k = $i; $k -lt [Math]::Min($fileLines.Length, $i + $span + 2); $k++) {
+            $tk = $fileLines[$k].Trim()
+            if ($tk -and ($want -contains $tk)) { $score++ }
+        }
+        if ($score -gt $bestScore -or ($score -eq $bestScore -and $best -lt 0)) { $best = $i; $bestScore = [Math]::Max($score, 1) }
+    }
+    if ($best -lt 0) { return 'None of its lines are in the file as written: read the file again (or grep for a distinctive part) and copy the lines exactly.' }
+    $from = [Math]::Max(0, $best - 2); $to = [Math]::Min($fileLines.Length - 1, $best + $span + 2)
+    $snippet = ($fileLines[$from..$to] -join "`n")
+    if ($snippet.Length -gt 3000) { $snippet = $snippet.Substring(0, 3000) }
+    "The closest place is lines $($from + 1)-$($to + 1); their exact current text is:`n````n$snippet`n````"
+}
+
 function Find-EditTarget([string]$Text, [string]$Search, [int]$After = -1) {
     <# Where $Search is in $Text: one exact match (or, failing that, one match ignoring trailing
        whitespace per line). When it matches several places and $After is the end of the previous
@@ -272,8 +413,15 @@ function Find-EditTarget([string]$Text, [string]$Search, [int]$After = -1) {
         $pattern = '(?m)' + (($Search.Split("`n") | ForEach-Object { [regex]::Escape($_.TrimEnd()) + '[ \t]*' }) -join '\n')
         foreach ($m in [regex]::Matches($Text, $pattern)) { $hits.Add(@{ start = $m.Index; length = $m.Length }) }
     }
-    if ($hits.Count -eq 1) { return $hits[0] }
-    if (-not $hits.Count) { return @{ error = 'SEARCH text not found in the file; read the file again and copy the lines exactly' } }
+    $note = $null
+    if (-not $hits.Count -and $Search.Trim()) {
+        # Same lines with different indentation (spaces vs tabs, another depth).
+        $pattern = '(?m)^' + (($Search.Split("`n") | ForEach-Object { '[ \t]*' + [regex]::Escape($_.Trim()) + '[ \t]*' }) -join '\n')
+        foreach ($m in [regex]::Matches($Text, $pattern)) { $hits.Add(@{ start = $m.Index; length = $m.Length }) }
+        if ($hits.Count) { $note = 'matched ignoring indentation' }
+    }
+    if ($hits.Count -eq 1) { if ($note) { $hits[0].note = $note }; return $hits[0] }
+    if (-not $hits.Count) { return @{ error = "SEARCH text not found in the file. $(Get-ClosestLines $Text $Search)" } }
     $lines = @($hits | ForEach-Object { Get-LineNumber $Text $_.start })
     if ($After -ge 0) {
         $next = $hits | Where-Object { $_.start -ge $After } | Select-Object -First 1
@@ -298,26 +446,44 @@ function Get-EditResult {
     $n = 0
     $after = -1   # end of the previous change: a SEARCH that matches several places takes the next one
     $notes = New-Object System.Collections.Generic.List[string]
+    $applied = New-Object System.Collections.Generic.List[string]   # pairs found already made
     foreach ($e in $Edits) {
         $n++
         $search = $e.search.Replace("`r`n", "`n")
         $replace = Repair-CodeText $full $e.replace.Replace("`r`n", "`n")
         $hit = Find-EditTarget $text $search $after
         if ($hit.error -and $search -match '&lt;|&gt;') { $hit = Find-EditTarget $text (ConvertFrom-AngleEntities $search) $after }
+        if ($hit.error -and $hit.error -like 'SEARCH text not found*') {
+            # Not an error when the change is already in the file (Copilot sent an edit again).
+            $done = Test-AlreadyApplied $text $search $replace
+            if ($done.applied) { $applied.Add("pair ${n}: already applied - $($done.evidence)"); continue }
+        }
         if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed; send the whole edit block again." } }
         if ($hit.note) { $notes.Add("pair ${n}: $($hit.note)") }
         $text = $text.Substring(0, $hit.start) + $replace + $text.Substring($hit.start + $hit.length)
         $after = $hit.start + $replace.Length
     }
-    [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; pairs = $n; notes = @($notes) }
+    $moveProblem = Test-MoveOrder $ProjectRoot $full $info.Text $text
+    if ($moveProblem) { return [pscustomobject]@{ ok = $false; error = $moveProblem } }
+    [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; pairs = $n; notes = @($notes)
+        alreadyApplied = @($applied); unchanged = ($text -ceq $info.Text) }
+}
+
+function Format-AlreadyApplied([string]$Rel, $R) {
+    <# The result of an edit whose changes were all already made: no error, but the verdict and its
+       evidence go back to Copilot to review. #>
+    "no change needed: $Rel already contains these changes. " + (@($R.alreadyApplied) -join '; ') + '. Check that this is what you meant; if not, read the file and send a corrected edit.'
 }
 
 function Invoke-EditAction {
     param([string]$ProjectRoot, [string]$Path, $Edits, $Checkpoint)
     $r = Get-EditResult $ProjectRoot $Path $Edits
     if (-not $r.ok) { throw $r.error }
+    $rel = ConvertTo-RelativePath $ProjectRoot $r.full
+    if ($r.unchanged) { return Format-AlreadyApplied $rel $r }
     if ($Checkpoint) { Save-CheckpointFile $Checkpoint $ProjectRoot $r.full }
     Write-TextFile $r.full $r.new $r.bom $r.crlf
+    if (@($r.alreadyApplied).Count) { return "edited $rel ($($r.pairs - @($r.alreadyApplied).Count) change(s)); " + (@($r.alreadyApplied) -join '; ') + '. If that is not what you meant, send a corrected edit.' }
     "edited $(ConvertTo-RelativePath $ProjectRoot $r.full) ($($r.pairs) change(s))" + $(if (@($r.notes).Count) { "; " + (@($r.notes) -join "; ") + ". Check that this is the right place." } else { '' })
 }
 
@@ -403,5 +569,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-CheckpointChanges, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

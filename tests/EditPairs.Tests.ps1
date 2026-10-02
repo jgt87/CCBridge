@@ -79,3 +79,84 @@ Describe 'Edits whose SEARCH text matches several places' {
     }
     Remove-Item $proj -Recurse -Force
 }
+Describe 'SEARCH text that is not in the file as written' {
+    $proj = Join-Path $env:TEMP ('ccb-closest-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory $proj | Out-Null
+    $f = Join-Path $proj 'index.html'
+    It 'applies a change whose lines only differ in indentation, and says so' {
+        [IO.File]::WriteAllText($f, "<head>`n`t<title>x</title>`n`t<style>`n`t`tbody{}`n`t</style>`n</head>")
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = "  <style>`n    body{}`n  </style>"; replace = '  <link rel="stylesheet" href="styles.css">' }) $null
+        $out | Should Match 'matched ignoring indentation'
+        [IO.File]::ReadAllText($f) | Should Match '<link rel="stylesheet" href="styles.css">'
+        [IO.File]::ReadAllText($f) | Should Not Match 'body\{\}'
+    }
+    It 'shows the closest current lines when the text is not there' {
+        [IO.File]::WriteAllText($f, "<html>`n<head>`n<title>Calendar</title>`n<link rel=""stylesheet"" href=""styles.css"">`n</head>`n<body>`n</body>`n</html>")
+        $err = $null
+        try { Invoke-EditAction $proj 'index.html' @(@{ search = "<link rel=""stylesheet"" href=""styles.css"">`n<style data-remove-me>"; replace = 'x' }) $null } catch { $err = $_.Exception.Message }
+        $err | Should Match 'SEARCH text not found in the file\. The closest place is lines 2-'
+        $err | Should Match '<title>Calendar</title>'
+        $err | Should Match 'Nothing was changed'
+    }
+    Remove-Item $proj -Recurse -Force
+}
+Describe 'Changes that were already made' {
+    $proj = Join-Path $env:TEMP ('ccb-applied-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory $proj | Out-Null
+    $f = Join-Path $proj 'index.html'
+    $after = "<head>`n  <link rel=""stylesheet"" href=""styles.css"">`n</head>`n<body></body>"
+    It 'reports a replacement that is already in the file, with evidence, and writes nothing' {
+        [IO.File]::WriteAllText($f, $after)
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = "  <style>`n    body { margin: 0; }`n  </style>"; replace = '  <link rel="stylesheet" href="styles.css">' }) $null
+        $out | Should Match '^no change needed: index\.html already contains these changes'
+        $out | Should Match 'the new text is already at lines 2-2 and none of the old lines are in the file'
+        [IO.File]::ReadAllText($f) | Should BeExactly $after
+    }
+    It 'reports a removal of text that is no longer there' {
+        [IO.File]::WriteAllText($f, $after)
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = "  <style>`n    body { margin: 0; }`n  </style>"; replace = '' }) $null
+        $out | Should Match 'removes text that is no longer in the file'
+    }
+    It 'is still an error when old lines are left (a typo, not a finished change)' {
+        [IO.File]::WriteAllText($f, "<style>`n    body { margin: 0; }`n</style>")
+        { Invoke-EditAction $proj 'index.html' @(@{ search = "<style>`n    body { margin: 1px; }`n</style>"; replace = '<link rel="stylesheet" href="styles.css">' }) $null } | Should Throw 'not found'
+    }
+    It 'applies the other changes of a block and lists the ones already made' {
+        [IO.File]::WriteAllText($f, $after)
+        $out = Invoke-EditAction $proj 'index.html' @(
+            @{ search = "  <style>`n    body { margin: 0; }`n  </style>"; replace = '  <link rel="stylesheet" href="styles.css">' },
+            @{ search = '<body></body>'; replace = '<body><main></main></body>' }) $null
+        $out | Should Match '^edited index\.html \(1 change\(s\)\); pair 1: already applied'
+        [IO.File]::ReadAllText($f) | Should Match '<main></main>'
+    }
+    Remove-Item $proj -Recurse -Force
+}
+Describe 'Moving code to another file (Test-MoveOrder)' {
+    $proj = Join-Path $env:TEMP ('ccb-move-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory $proj | Out-Null
+    $css = (1..20 | ForEach-Object { "  .rule$_ { margin: ${_}px; }" }) -join "`n"
+    $page = "<head>`n<style>`n$css`n</style>`n</head>`n<body></body>"
+    $edit = @(@{ search = "<style>`n$css`n</style>"; replace = '<link rel="stylesheet" href="styles.css">' })
+    It 'refuses to remove the code while the new file only has a placeholder' {
+        [IO.File]::WriteAllText((Join-Path $proj 'index.html'), $page)
+        [IO.File]::WriteAllText((Join-Path $proj 'styles.css'), '/* styles moved here */')
+        { Invoke-EditAction $proj 'index.html' $edit $null } | Should Throw 'does not contain them yet (only 0 of 22 found)'
+        [IO.File]::ReadAllText((Join-Path $proj 'index.html')) | Should BeExactly $page
+    }
+    It 'refuses when the new file does not exist yet' {
+        Remove-Item (Join-Path $proj 'styles.css')
+        { Invoke-EditAction $proj 'index.html' $edit $null } | Should Throw 'First write styles.css'
+    }
+    It 'allows the edit once the new file holds the moved code' {
+        [IO.File]::WriteAllText((Join-Path $proj 'styles.css'), $css)
+        $out = Invoke-EditAction $proj 'index.html' $edit $null
+        $out | Should Match '^edited index\.html'
+        [IO.File]::ReadAllText((Join-Path $proj 'index.html')) | Should Match 'href="styles.css"'
+    }
+    It 'leaves small edits and plain removals alone' {
+        [IO.File]::WriteAllText((Join-Path $proj 'index.html'), $page)
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = "<style>`n$css`n</style>"; replace = '' }) $null
+        $out | Should Match '^edited index\.html'
+    }
+    Remove-Item $proj -Recurse -Force
+}
