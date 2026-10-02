@@ -71,3 +71,32 @@ Describe 'Invoke-GrepAction' {
         Remove-Item $p -Recurse -Force
     }
 }
+Describe 'Consistency review after big changes' {
+    $proj = Join-Path $env:TEMP ('ccb-review-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory $proj | Out-Null
+    It 'finds broken references and invalid JSON, and accepts what is fine' {
+        [IO.File]::WriteAllText((Join-Path $proj 'index.html'), "<link rel=""stylesheet"" href=""styles.css"">`n<script src=""app.js""></script>`n<script>fetch('calendar-data.json')</script>`n<a href=""https://example.com"">x</a>")
+        [IO.File]::WriteAllText((Join-Path $proj 'styles.css'), 'body { background: url("img/bg.png"); }')
+        [IO.File]::WriteAllText((Join-Path $proj 'calendar-data.json'), '{ "meetings": [ }')
+        $issues = @(Test-ProjectConsistency $proj @('index.html', 'styles.css', 'calendar-data.json'))
+        ($issues -join "`n") | Should Match 'index\.html: refers to app\.js, which does not exist'
+        ($issues -join "`n") | Should Match 'styles\.css: refers to img/bg\.png'
+        ($issues -join "`n") | Should Match 'calendar-data\.json: not valid JSON'
+        ($issues -join "`n") | Should Not Match 'styles\.css, which|example\.com'
+    }
+    It 'measures what a checkpoint changed' {
+        $f = Join-Path $proj 'page.html'
+        [IO.File]::WriteAllText($f, (1..30 | ForEach-Object { "line $_" }) -join "`n")
+        $cp = New-Checkpoint $proj 'test'
+        $null = Invoke-WriteAction $proj 'page.html' ((1..5 | ForEach-Object { "line $_" }) -join "`n") $cp
+        $null = Invoke-WriteAction $proj 'moved.css' ((1..25 | ForEach-Object { "rule $_" }) -join "`n") $cp
+        $ch = @(Get-CheckpointChanges $proj $cp)
+        ($ch | Where-Object path -eq 'page.html').removed | Should Be 25
+        ($ch | Where-Object path -eq 'moved.css').created | Should Be $true
+        $state = @{ Config = [pscustomobject]@{ reviewAfterChanges = 'big'; reviewMinLines = 400 }; Mode = 'ask' }
+        (& (Get-Module Agent) { param($s, $c) Test-NeedsReview $s $c } $state $ch) | Should Be $true    # moved out
+        $state.Config.reviewAfterChanges = 'off'
+        (& (Get-Module Agent) { param($s, $c) Test-NeedsReview $s $c } $state $ch) | Should Be $false
+    }
+    Remove-Item $proj -Recurse -Force
+}

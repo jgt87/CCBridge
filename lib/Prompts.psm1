@@ -54,6 +54,7 @@ function Get-PromptPart {
         '^save$'      { return Read-PromptPart $AppRoot 'save.md' }
         '^fetch$'     { return Read-PromptPart $AppRoot 'fetch.md' }
         '^retry$'     { return Read-PromptPart $AppRoot 'retry.md' }
+        '^review$'    { return Read-PromptPart $AppRoot 'review.md' }
         '^location$'  { return [string]$Context.Location }
         '^project$'   { return [string]$Context.Full }
     }

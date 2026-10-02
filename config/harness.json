@@ -13,6 +13,8 @@
   "saveReplyFrames": true,
   "stallSec": 90,
   "actionRetries": 2,
+  "reviewAfterChanges": "big",
+  "reviewMinLines": 40,
   "pacing": {
     "newChatSettleSec": 3,
     "beforeSendSec": 1,
