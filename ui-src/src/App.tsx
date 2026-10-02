@@ -11,6 +11,7 @@ import {
   PanelLeftOpen,
   PencilRuler,
   RotateCcw,
+  Settings,
   ShieldCheck,
   X,
   Zap,
@@ -22,6 +23,7 @@ import CommandButton from "@/components/kokonutui/command-button";
 import Loader from "@/components/kokonutui/loader";
 import { ErrorBoundary } from "@/components/ccb/error-boundary";
 import { CopilotStatus } from "@/components/ccb/copilot-status";
+import { SettingsPanel } from "@/components/ccb/settings-panel";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
@@ -54,6 +56,7 @@ export default function App() {
   const [focusKey, setFocusKey] = useState(0);
   const [newChatPending, setNewChatPending] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const lastSeq = useRef(0);
 
   // Side panel, as in Copilot: on a wide window it sits beside the chat and can be collapsed;
@@ -226,6 +229,7 @@ export default function App() {
   const commandActions: Action[] = [
     { id: "new-chat", label: "New Copilot chat", description: "Start fresh; the project stays open", icon: <MessageSquarePlus className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: startNewChat },
     { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: <RotateCcw className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => api.undo() },
+    { id: "settings", label: "Settings", description: "Pacing, retries, checks, timeouts and sizes for this computer", icon: <Settings className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setShowSettings(true), 0) },
     { id: "project", label: "Switch worktree", description: "Open or create a OneDrive project folder", icon: <FolderOpen className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setShowPicker(true) },
     { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: <AtSign className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setPalette("attach"), 0) },
     {
@@ -289,10 +293,21 @@ export default function App() {
         )}
         <div className="flex-1" />
         <CopilotStatus copilot={state.copilot} message={state.copilotMessage} />
+        <button
+          aria-label="Settings"
+          className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+          onClick={() => setShowSettings(true)}
+          title="Settings"
+          type="button"
+        >
+          <Settings className="h-4 w-4" />
+        </button>
         <CommandButton className="h-8" icon={MenuIcon} onClick={() => setPalette("commands")} title="Commands and files (Ctrl+K)">
           Menu
         </CommandButton>
       </header>
+
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
       {notice && (
         <div className="flex items-center justify-between gap-3 bg-black/5 px-4 py-2 text-sm dark:bg-white/10">

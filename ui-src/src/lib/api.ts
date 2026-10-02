@@ -134,6 +134,21 @@ export interface ProjectInfo {
   modified: string;
 }
 
+/** An adjustable setting (config\harness.local.json). */
+export interface Setting {
+  key: string;
+  group: string;
+  label: string;
+  help: string;
+  type: "number" | "select";
+  value: string | number | null;
+  default: string | number | null;
+  custom: boolean;
+  min?: number;
+  max?: number;
+  options?: string[];
+}
+
 /** A saved fetch prompt (fetch/<name>.prompt.md) and its latest answer (fetch/<name>.md). */
 export interface FetchItem {
   name: string;
@@ -209,6 +224,9 @@ export const api = {
   stop: () => call<{ ok: boolean }>("POST", "/api/stop"),
   connect: () => call<{ ok: boolean }>("POST", "/api/connect"),
   showProject: () => call<{ ok: boolean }>("POST", "/api/project/show"),
+  settings: () => call<{ settings: Setting[] }>("GET", "/api/settings").then((r) => (Array.isArray(r.settings) ? r.settings : [])),
+  setSetting: (key: string, value: string | number | null) =>
+    call<{ ok: boolean; settings: Setting[] }>("POST", "/api/settings", { key, value }).then((r) => ({ ...r, settings: Array.isArray(r.settings) ? r.settings : [] })),
   setWorkIq: (value: "on" | "off" | "leave") => call<{ ok: boolean }>("POST", "/api/workiq", { value }),
   setLogging: (level: "off" | "info" | "verbose" | "trace") => call<{ ok: boolean }>("POST", "/api/logging", { level }),
   diagnostics: () => call<{ ok: boolean; path: string; fullPath: string }>("POST", "/api/diagnostics"),

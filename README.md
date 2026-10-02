@@ -108,8 +108,10 @@ The same bridge and agent loop for MCP clients (Claude Code, VS Code, ...), in a
 6. **Stop**: the square button stops right away, also in the middle of Copilot's reply or a running command.
 7. **New chat**: *New chat* in the chat box header starts a fresh Copilot conversation with an empty chat view (the project stays open). The counter next to it shows messages used in the current chat.
 8. **Review after big changes**: when a task changed at least 40 lines, or moved code out of a file into a new one, CCBridge checks the changed files locally (JSON and PowerShell syntax, and that files referenced from HTML, JavaScript and CSS exist) and then asks Copilot once to review them for leftovers, dead code and broken references, fixing real problems through the usual approvals. Costs at least one Copilot message; `reviewAfterChanges` (`big`, `always`, `off`) and `reviewMinLines` in `config\harness.local.json` change it.
-9. **Suggested next steps**: when Copilot's reply lists "Next steps" (or says "the next step is to ..."), they appear under the reply; click one to put it in the message box, adjust it if needed and send it.
-10. **Fetch prompts**: the *Fetch* tab keeps prompts that get current data, such as "List my meetings for today with times, attendees and the agenda". *New fetch prompt* saves one as `fetch/<name>.prompt.md`; *Run* / *Refresh* asks Copilot in a fresh chat and writes its answer to `fetch/<name>.md` (with when it was fetched and the sources Copilot cited). *Attach* adds `@fetch/<name>.md` to your message; the @ menu shows how old each fetched file is. Copilot only answers in a fetch: action blocks are not carried out, the Microsoft 365 read-only rule applies, and a failed fetch leaves the previous answer file in place. The prompt files are plain text, so you can also edit them in the folder.
+9. **Page check**: after a task changed web files (HTML, CSS, JavaScript, JSON), CCBridge opens the changed page (or `index.html`) in a hidden Edge tab, served read-only from the project, and collects JavaScript errors, console errors and files that fail to load (a missing `styles.css`, a `fetch()` of a JSON file that is not there). Problems go to Copilot in the review after the task. `pageCheck` (`on`/`off`) in Settings.
+10. **Settings**: the gear next to Menu (or Menu > Settings) shows pacing, waiting, retries, checks, timeouts and sizes for this computer; changes apply right away and are kept across updates (in `config\harness.local.json`).
+11. **Suggested next steps**: when Copilot's reply lists "Next steps" (or says "the next step is to ..."), they appear under the reply; click one to put it in the message box, adjust it if needed and send it.
+12. **Fetch prompts**: the *Fetch* tab keeps prompts that get current data, such as "List my meetings for today with times, attendees and the agenda". *New fetch prompt* saves one as `fetch/<name>.prompt.md`; *Run* / *Refresh* asks Copilot in a fresh chat and writes its answer to `fetch/<name>.md` (with when it was fetched and the sources Copilot cited). *Attach* adds `@fetch/<name>.md` to your message; the @ menu shows how old each fetched file is. Copilot only answers in a fetch: action blocks are not carried out, the Microsoft 365 read-only rule applies, and a failed fetch leaves the previous answer file in place. The prompt files are plain text, so you can also edit them in the folder.
 
 Command line, one prompt without the interface:
 
@@ -297,6 +299,14 @@ The same run measures speed. For every step it records the exact time (`HH:mm:ss
 `reply-timing.cmd` is a quick speed check: steps 1-3 only (three short prompts).
 
 ## Troubleshooting
+
+**Large files.** When a file does not fit in one message, it is cut at a whole line and followed by its outline (style and script blocks, functions, elements with an id, headings, with line numbers), so Copilot reads just the part it needs. Copilot can also ask for `read PATH:outline`.
+
+**Copilot page check.** After connecting, CCBridge checks that the parts of Copilot's page it relies on (message box, Send and New chat buttons, replies and their Copy button) are where `config\selectors.json` says. If Microsoft changed the page, a message names the selector to fix; run `capture.cmd` and send the report.
+
+**Message limit per chat.** When Copilot reports no message count (replies read from the page), CCBridge counts messages itself against `messagesPerChat` (30) and continues in a new chat with a summary before the limit.
+
+**Reply format of your tenant (`stream-shape.cmd`).** Writes the structure of Copilot's recent replies (field names, types, lengths and status words; no answer text) to `C:\temp\CCBridge-stream-shape-<date>.txt`. Sending that file lets CCBridge support your tenant's reply format (for example StreamHub) directly, which is faster and gives back the chat message count and remaining credits.
 
 **Reading an error.** Every error in the chat shows a category (for example `EDGE-LOST`, `SIGN-IN`, `NO-ANSWER`, `TIMEOUT`, `CREDITS`, `EDIT`), what to do, an error id and **Copy details** (id, time, version, category and the technical detail, ready to send). The same id is in the log, next to the full detail, so `diagnostics.cmd` plus the id leads straight to it. A failed step (read, grep, edit, write, run) shows its own category on its card (for example `EDIT-NOT-FOUND`, `EDIT-AMBIGUOUS`, `EDIT-HALF-BLOCK`, `EDIT-MOVE-ORDER`, `RUN-FAILED`), the possible reasons and what happens next; failed steps are always logged, also without verbose logging.
 
