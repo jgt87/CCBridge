@@ -70,6 +70,9 @@ The running web server holds `lib/*.psm1` in memory: restart it after backend ch
 
 ## Product rules
 
+- **CCBridge has no language model of its own.** Copilot is the only intelligence; everything CCBridge decides (task kind, which instructions to send, follow-up recaps and re-sends, nudges, when a reply is finished, how an edit is applied) is a fixed, testable rule on text and page state. Never write code that assumes CCBridge understands a request. When Copilot misbehaves, fix it with clearer instructions sent to Copilot or a deterministic rule, and cover the rule with a Pester test.
+- Follow-ups in a work chat (`Get-TurnKind`): a chat-like follow-up inherits the chat's task kind; each follow-up gets the recap in `prompts/reminder.md`; the full instructions are sent again after a turn without actions or after every 5 follow-ups.
+
 - **Human in the loop for Microsoft 365 (non-negotiable)**: CCBridge never confirms a Microsoft 365 action (sending/forwarding mail, creating/changing/cancelling meetings, posting in Teams, sharing or deleting data). The bridge only ever clicks the composer's Send button. Proposed actions (`Get-ProposedActions`) stop the turn with a `human-required` event; risky commands (`Get-CommandRisk`: Microsoft 365 access or deletion) always need a person in the web app and are refused when `$State.Headless` (MCP). Do not add an auto-approve path around this.
 - **Work IQ**: the toggle selector lives in `config\selectors.local.json` (from `capture.cmd`); `harness.json` `workIq` = on/off/leave. Saved reply frames may contain Microsoft 365 data: they stay in `%LOCALAPPDATA%` and must never become test fixtures without scrubbing (`"saveReplyFrames": false` turns them off).
 - **User source data is read-only**: files in a project's `source/` must never be edited, moved or deleted. Write working copies elsewhere (`work/`, `output/`). The executor refuses writes there and restores `source/` after every command.

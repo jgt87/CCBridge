@@ -1,1 +1,1 @@
-(Do this yourself with action blocks: read what you need, then edit or write, then done. The helper program carries them out and sends you the results.)
+(How to answer: you work on the user's project through the helper program, which carries out your action blocks and sends you the results. Look with ```read PATH``` or ```grep REGEX```, change files with ````edit PATH```` (SEARCH/REPLACE) or ````write PATH````, run commands with ```run COMMAND```, and finish with ```done SUMMARY```. Do not describe steps for the user and do not ask for files: read them yourself.)

@@ -196,6 +196,28 @@ function Invoke-FetchJob {
     }
 }
 
+function Get-TurnKind {
+    <# The kind of task for this message, with the follow-up rules of a work chat. CCBridge has no
+       language model of its own, so these are fixed rules, not an understanding of the request:
+       - a follow-up that reads like plain chat ("do it", "and the other page too") continues the
+         chat's task and gets its instructions instead of a bare pass-through;
+       - the full instructions are sent again when the previous turn ended without any action
+         (Copilot drifted into explaining) or after every 5 follow-ups;
+       - other follow-ups get the short recap (prompts/reminder.md, added by New-PromptMessage). #>
+    param($State, [string]$Text)
+    $kind = Get-TaskKind $Text
+    if ($kind -eq 'chat' -and $State.ChatKind) { $kind = $State.ChatKind }
+    if ($kind -in 'coding', 'project', 'mixed' -and $State.SentParts.Contains('actions')) {
+        $State.FollowUps = [int]$State.FollowUps + 1
+        $why = if ($State.LastTurnActed -eq $false) { 'the previous turn had no actions' } elseif ($State.FollowUps -ge 5) { "$($State.FollowUps) follow-ups since the instructions" } else { $null }
+        if ($why) {
+            Write-CCBLog info agent "Sending the full instructions again ($why)"
+            foreach ($p in 'actions', 'rules', 'role:coding', 'role:project') { [void]$State.SentParts.Remove($p) }
+        }
+    }
+    $kind
+}
+
 function Test-NeedsActionNudge {
     <# True when a project or coding task got an explanation (steps or code) instead of action blocks,
        in a chat that has the action instructions, outside plan mode, and not asked before this turn. #>
@@ -220,6 +242,7 @@ function Start-NewChat($State) {
     $State.ChatStarted = $false
     $State.ChatKind = $null
     $State.SentParts = New-Object 'System.Collections.Generic.HashSet[string]'
+    $State.FollowUps = 0; $State.LastTurnActed = $null
     $State.NeedNewChat = $false
     $State.Throttle = @{ used = 0; max = $State.Throttle.max }
 }
@@ -470,12 +493,14 @@ function Invoke-AgentTurn {
         if ($State.NeedNewChat) { Start-NewChat $State }
         # As little as the request needs: plain chat goes as it is; other kinds add only the parts
         # (role, actions, rules, project context) this chat has not had yet.
-        $kind = Get-TaskKind $Text
+        $kind = Get-TurnKind $State $Text
         $summary = $State.Summary; $State.Summary = $null
         $partsBefore = $State.SentParts.Count
         $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $Text -Sent $State.SentParts -Context (Get-ProjectContext $State) -Summary $summary
+        if ($State.SentParts.Count -gt $partsBefore -and $State.SentParts.Contains('actions')) { $State.FollowUps = 0 }
         if ($kind -ne 'chat') { $State.ChatKind = $kind }
         Write-CCBLog info agent "Task kind: $kind" @{ partsAdded = $State.SentParts.Count - $partsBefore; chars = $message.Length }
+        $State.LastTurnActed = $null
         $message += Get-PinnedFiles $State.ProjectRoot $Text
 
         $nudged = $false
@@ -493,7 +518,12 @@ function Invoke-AgentTurn {
             Write-CCBLog verbose agent "Round ${round}: sending" @{ chars = $message.Length }
             $r = Send-ToCopilot $State $message
             if ($r.Cancelled) {
-                Add-AgentEvent $State 'status' @{ text = 'Stopped while Copilot was writing; its partial reply was discarded.' }
+                if ($r.CopilotFinished -and "$($r.Text)".Trim()) {
+                    Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @() }
+                    Add-AgentEvent $State 'status' @{ text = 'Stopped. Copilot had already finished; its reply is shown above, but its actions were not carried out.' }
+                } else {
+                    Add-AgentEvent $State 'status' @{ text = 'Stopped while Copilot was writing; its partial reply was discarded.' }
+                }
                 break
             }
             $actions = @(Get-ActionBlocks $r.Text)
@@ -513,6 +543,7 @@ function Invoke-AgentTurn {
                 Add-AgentEvent $State 'human-required' @{ text = "Copilot's reply says: ""$claim"" CCBridge did not confirm any Microsoft 365 action. Check Outlook / Teams if this is unexpected." }
             }
             if (-not $actions.Count) {
+                if ($State.LastTurnActed -ne $true) { $State.LastTurnActed = $false }
                 $effectiveKind = if ($kind -eq 'chat' -and $State.ChatKind) { $State.ChatKind } else { $kind }
                 if (Test-NeedsActionNudge $State $effectiveKind $r.Text $nudged) {
                     # Copilot explained the change instead of making it: ask once to do it itself.
@@ -525,6 +556,7 @@ function Invoke-AgentTurn {
                 break
             }
 
+            $State.LastTurnActed = $true
             $results = New-Object Collections.Generic.List[object]
             $isDone = $false
             for ($k = 0; $k -lt $actions.Count; $k++) {

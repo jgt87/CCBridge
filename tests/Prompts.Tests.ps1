@@ -54,7 +54,8 @@ Describe 'New-PromptMessage' {
         $second = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Create hello.ps1' -Sent $sent -Context $ctx
         $second | Should Match 'expert software developer'
         $third = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Now add a test' -Sent $sent -Context $ctx
-        $third | Should Match '^Now add a test\n\n\(Do this yourself with action blocks'
+        $third | Should Match '^Now add a test\n\n\(How to answer: you work on the user''s project through the helper program'
+        $third | Should Match '````edit PATH````'
         $third | Should Not Match 'expert software developer'
         New-PromptMessage -AppRoot $root -Kind 'chat' -Text 'thanks' -Sent $sent -Context $ctx | Should BeExactly 'thanks'
         $fourth = New-PromptMessage -AppRoot $root -Kind 'mixed' -Text 'Also read my emails about it' -Sent $sent -Context $ctx
@@ -101,5 +102,36 @@ Describe 'Test-NeedsActionNudge' {
         (& $m { param($s, $t) Test-NeedsActionNudge $s 'chat' $t $false } (St) $steps) | Should Be $false
         (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St 'plan') $steps) | Should Be $false
         (& $m { param($s, $t) Test-NeedsActionNudge $s 'coding' $t $false } (St 'ask' @()) $steps) | Should Be $false
+    }
+}
+Describe 'Follow-ups in a work chat (Get-TurnKind)' {
+    $m = Get-Module Agent
+    function New-ChatState([string]$ChatKind = 'coding') {
+        $set = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($p in 'role:coding', 'actions', 'rules', 'project') { [void]$set.Add($p) }
+        @{ ChatKind = $ChatKind; SentParts = $set; FollowUps = 0; LastTurnActed = $true }
+    }
+    It 'gives a chat-like follow-up the task of the chat' {
+        $s = New-ChatState
+        (& $m { param($st) Get-TurnKind $st 'do it now please' } $s) | Should Be 'coding'
+        $s.SentParts.Contains('actions') | Should Be $true
+    }
+    It 'sends the full instructions again after a turn without actions' {
+        $s = New-ChatState; $s.LastTurnActed = $false
+        $null = & $m { param($st) Get-TurnKind $st 'and now the other page' } $s
+        $s.SentParts.Contains('actions') | Should Be $false
+        $s.SentParts.Contains('rules') | Should Be $false
+        $s.SentParts.Contains('project') | Should Be $true
+    }
+    It 'sends them again after every 5 follow-ups' {
+        $s = New-ChatState
+        1..4 | ForEach-Object { $null = & $m { param($st) Get-TurnKind $st 'next step' } $s }
+        $s.SentParts.Contains('actions') | Should Be $true
+        $null = & $m { param($st) Get-TurnKind $st 'next step' } $s
+        $s.SentParts.Contains('actions') | Should Be $false
+    }
+    It 'leaves a plain chat alone' {
+        $s = @{ ChatKind = $null; SentParts = (New-Object 'System.Collections.Generic.HashSet[string]'); FollowUps = 0; LastTurnActed = $null }
+        (& $m { param($st) Get-TurnKind $st 'thanks!' } $s) | Should Be 'chat'
     }
 }
