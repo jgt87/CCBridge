@@ -128,15 +128,49 @@ const ITEM = cn(
 );
 const ROW = "flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5";
 
+/** Folders you closed in the tree, for the whole tree at once (see useClosedFolders). */
+const ClosedFolders = createContext<{ closed: Record<string, boolean>; toggle: (path: string) => void }>({ closed: {}, toggle: () => {} });
+
+/**
+ * The folders closed in this project's tree, kept in this browser per project: they stay closed
+ * when you switch tabs, reload the page or come back to the project.
+ */
+function useClosedFolders(projectPath: string | undefined) {
+  const key = `ccb.closedFolders.${(projectPath ?? "").toLowerCase()}`;
+  const read = () => {
+    try {
+      const v = JSON.parse(localStorage.getItem(key) ?? "{}");
+      return v && typeof v === "object" ? (v as Record<string, boolean>) : {};
+    } catch {
+      return {};
+    }
+  };
+  const [closed, setClosed] = useState<Record<string, boolean>>(read);
+  useEffect(() => setClosed(read()), [key]);
+  const toggle = (path: string) =>
+    setClosed((c) => {
+      const next = { ...c };
+      if (next[path]) delete next[path];
+      else next[path] = true;
+      try {
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        /* storage blocked: closed until the page reloads */
+      }
+      return next;
+    });
+  return { closed, toggle };
+}
+
 function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) => void }) {
-  const [closed, setClosed] = useState<Record<string, boolean>>({});
+  const { closed, toggle } = useContext(ClosedFolders);
   return (
     <ul>
       {nodes.map((n) => (
         <li className={ITEM} key={n.path}>
           {n.children ? (
             <>
-              <button className={ROW} onClick={() => setClosed((c) => ({ ...c, [n.path]: !c[n.path] }))} title={n.path} type="button">
+              <button aria-expanded={!closed[n.path]} className={ROW} onClick={() => toggle(n.path)} title={n.path} type="button">
                 <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !closed[n.path] && "rotate-90")} />
                 {n.path === "source" ? (
                   <FolderLock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -206,6 +240,7 @@ function FilesPanel({
   issueStamp: string;
 }) {
   const tree = useMemo(() => buildTree(files), [files]);
+  const folders = useClosedFolders(project?.path);
   // The issue index: open issues per file, reloaded when the project's details change.
   const [index, setIndex] = useState<{ counts: Map<string, number>; files: number; updated: string | null }>({ counts: new Map(), files: 0, updated: null });
   const indexing = Boolean(activity?.label);
@@ -289,7 +324,9 @@ function FilesPanel({
         id="files.tree"
         title="Files"
       >
-        <IssueCounts.Provider value={index.counts}>{project ? <ProjectRoot project={project}>{rows}</ProjectRoot> : rows}</IssueCounts.Provider>
+        <ClosedFolders.Provider value={folders}>
+          <IssueCounts.Provider value={index.counts}>{project ? <ProjectRoot project={project}>{rows}</ProjectRoot> : rows}</IssueCounts.Provider>
+        </ClosedFolders.Provider>
       </PanelSection>
     </div>
   );
