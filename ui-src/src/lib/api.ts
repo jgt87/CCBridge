@@ -4,6 +4,22 @@
 const token =
   document.querySelector<HTMLMetaElement>('meta[name="ccb-token"]')?.content ?? "";
 
+/** The page holds a stale session token (older CCBridge install): reload once (not again within 10 s) to get the current one. */
+function reloadOnStaleToken() {
+  const last = Number(sessionStorage.getItem("ccb-reload") ?? 0);
+  if (Date.now() - last > 10_000) {
+    sessionStorage.setItem("ccb-reload", String(Date.now()));
+    location.reload();
+  }
+}
+
+/** The server's error as one line: message, hint, and the error id and code (the id is also in the log). */
+function serverErrorText(status: number, data: { error?: string; errId?: string; code?: string; hint?: string }): string {
+  const hint = data.hint ? ` ${data.hint}` : "";
+  const id = data.errId ? ` (error ${data.errId}${data.code ? `, ${data.code}` : ""})` : "";
+  return `${data.error ?? `HTTP ${status}`}${hint}${id}`;
+}
+
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
@@ -13,21 +29,13 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  // Not JSON (an empty or HTML error page): no details, the status below still reports the failure.
   const data = await res.json().catch(() => ({}));
   if (res.status === 403) {
-    // The page holds a stale session token (older CCBridge install); reload once to get the current one.
-    const last = Number(sessionStorage.getItem("ccb-reload") ?? 0);
-    if (Date.now() - last > 10_000) {
-      sessionStorage.setItem("ccb-reload", String(Date.now()));
-      location.reload();
-    }
+    reloadOnStaleToken();
     throw new Error("session expired; reload the page");
   }
-  if (!res.ok) {
-    const d = data as { error?: string; errId?: string; code?: string; hint?: string };
-    // The id is also in the log: it leads to the details when investigating.
-    throw new Error(`${d.error ?? `HTTP ${res.status}`}${d.hint ? ` ${d.hint}` : ""}${d.errId ? ` (error ${d.errId}${d.code ? `, ${d.code}` : ""})` : ""}`);
-  }
+  if (!res.ok) throw new Error(serverErrorText(res.status, data));
   return data as T;
 }
 
@@ -366,20 +374,31 @@ function asText(v: unknown): string | undefined {
   return typeof v === "string" ? v : typeof v === "object" ? JSON.stringify(v) : String(v);
 }
 
-export function normalizeEvent(raw: AgentEvent): AgentEvent {
-  const e = { ...raw } as AgentEvent & Record<string, unknown>;
-  for (const k of TEXT_FIELDS) if (k in e) (e as Record<string, unknown>)[k] = asText(e[k]);
-  if (e.references !== undefined) {
-    e.references = (Array.isArray(e.references) ? e.references : [])
+/** A list of non-empty strings. */
+function asTexts(list: unknown[]): string[] {
+  return list.map((s) => asText(s) ?? "").filter(Boolean);
+}
+
+const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+
+/** How each structured field is cleaned when an event has it. */
+const FIELD_RULES: Record<string, (v: unknown) => unknown> = {
+  references: (v) =>
+    asArray(v)
       .filter((r): r is Reference => !!r && typeof r === "object")
-      .map((r) => ({ title: asText(r.title) ?? null, url: asText(r.url) ?? null, kind: asText(r.kind) ?? null }));
-  }
-  if (e.items !== undefined && !Array.isArray(e.items)) e.items = [];
-  if (e.files !== undefined && !Array.isArray(e.files)) e.files = [];
-  if (e.steps !== undefined) e.steps = (Array.isArray(e.steps) ? e.steps : []).map((s) => asText(s) ?? "").filter(Boolean);
-  if (e.reasons !== undefined) e.reasons = (Array.isArray(e.reasons) ? e.reasons : [e.reasons]).map((s) => asText(s) ?? "").filter(Boolean);
-  if (e.next !== undefined) e.next = asText(e.next);
-  return e;
+      .map((r) => ({ title: asText(r.title) ?? null, url: asText(r.url) ?? null, kind: asText(r.kind) ?? null })),
+  items: asArray,
+  files: asArray,
+  steps: (v) => asTexts(asArray(v)),
+  reasons: (v) => asTexts(Array.isArray(v) ? v : [v]), // a single reason becomes a list
+  next: asText,
+};
+
+export function normalizeEvent(raw: AgentEvent): AgentEvent {
+  const e = { ...raw } as Record<string, unknown>;
+  for (const k of TEXT_FIELDS) if (k in e) e[k] = asText(e[k]);
+  for (const [k, clean] of Object.entries(FIELD_RULES)) if (e[k] !== undefined) e[k] = clean(e[k]);
+  return e as unknown as AgentEvent;
 }
 
 /** Reports a page error to the CCBridge log (best effort). */
@@ -388,7 +407,7 @@ export function reportClientError(message: string, detail: Record<string, unknow
     method: "POST",
     headers: { "X-CCB-Token": token, "Content-Type": "application/json" },
     body: JSON.stringify({ message, ...detail }),
-  }).catch(() => {});
+  }).catch(() => {}); // the log is out of reach: reporting that would only fail the same way
 }
 
 /** A list from the server; a single object (PowerShell can unroll a list of one) becomes a list. */
@@ -480,7 +499,9 @@ export const api = {
           let msg = `HTTP ${xhr.status}`;
           try {
             msg = JSON.parse(xhr.responseText).error ?? msg;
-          } catch {}
+          } catch {
+            // Not JSON: keep "HTTP <status>" as the message.
+          }
           reject(new Error(msg));
         }
       };

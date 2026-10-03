@@ -41,8 +41,8 @@ Target machines have only what ships with Windows: **Windows PowerShell 5.1 + Ed
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Pester .\tests"
 # Parse-check a script under 5.1
 powershell -NoProfile -Command "$e=$null; $null=[Management.Automation.Language.Parser]::ParseFile('<file>',[ref]$null,[ref]$e); $e"
-# Rebuild the UI after any change in ui-src (writes ui/)
-cd ui-src; npm run build
+# Rebuild the UI after any change in ui-src (writes ui/); UI unit tests (vitest, dev only: src/**/*.test.ts)
+cd ui-src; npm run build; npm test
 # Build a release zip (dist\) and publish it as a GitHub Release
 # (it also creates and pushes the annotated tag of the same name on HEAD and publishes the GitHub
 # Release "StreamHub vX.Y.Z" with the zip; needs a clean, pushed tree and refuses an existing tag or
