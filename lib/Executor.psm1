@@ -569,25 +569,90 @@ function Find-ElidedTarget([string]$Text, [string]$Search) {
     @{ error = 'SEARCH text not found in the file (shortened with ...): its first lines or its last lines are not in the file as written. Read the file again and copy them exactly.' }
 }
 
-function Get-BlockBalance([string]$Text) {
-    <# Net open minus close counts of braces and of style/script tags, to spot half blocks. #>
-    $t = [regex]::Replace($Text, '("([^"\\\n]|\\.)*"|''([^''\\\n]|\\.)*'')', '""')   # ignore braces in strings
+# Braces are only counted in languages that use them for blocks; in HTML only inside <script> and
+# <style>. Strings, template strings and comments are blanked first (line breaks kept, so line
+# numbers stay right).
+$script:BraceCode = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|c|cc|cpp|h|hpp|go|rs|php|swift|dart|scala)$'
+$script:BraceStyle = '(?i)\.(css|scss|less)$'
+$script:BracePs = '(?i)\.(ps1|psm1|psd1)$'
+$script:BraceMarkup = '(?i)\.(html?|xhtml|vue|svelte|php)$'
+
+function Hide-Matches([string]$Text, [string]$Pattern) {
+    # Each match becomes spaces, keeping its line breaks.
+    [regex]::Replace($Text, $Pattern, [Text.RegularExpressions.MatchEvaluator] { param($m) [regex]::Replace($m.Value, '[^\n]', ' ') })
+}
+
+function Get-BraceText([string]$Text, [string]$Path) {
+    <# The part of a file whose braces are block braces: strings, template strings and comments
+       blanked; for HTML only the <script> and <style> contents; empty for files without braces. #>
+    $t = $Text.Replace("`r`n", "`n")
+    $isMarkup = $Path -match '(?i)\.(html?|xhtml)$'
+    if ($isMarkup) {
+        # Keep only what is inside <script>...</script> and <style>...</style>.
+        $sb = New-Object Text.StringBuilder ([regex]::Replace($t, '[^\n]', ' '))
+        foreach ($m in [regex]::Matches($t, '(?is)(<(script|style)\b[^>]*>)(.*?)(</\2\s*>)')) {
+            $g = $m.Groups[3]
+            for ($i = 0; $i -lt $g.Length; $i++) { $sb[$g.Index + $i] = $t[$g.Index + $i] }
+        }
+        $t = $sb.ToString()
+    }
+    if ($isMarkup -or $Path -match $script:BraceCode) {
+        return Hide-Matches $t '/\*[\s\S]*?\*/|<!--[\s\S]*?-->|`(?:[^`\\]|\\[\s\S])*`|"(?:[^"\\\n]|\\.)*"|''(?:[^''\\\n]|\\.)*''|(?<![:\\])//[^\n]*'
+    }
+    if ($Path -match $script:BraceStyle) {
+        $p = '/\*[\s\S]*?\*/|"(?:[^"\\\n]|\\.)*"|''(?:[^''\\\n]|\\.)*'''
+        if ($Path -notmatch '(?i)\.css$') { $p += '|(?<![:\\])//[^\n]*' }   # scss and less also have // comments
+        return Hide-Matches $t $p
+    }
+    if ($Path -match $script:BracePs) { return Hide-Matches $t '<#[\s\S]*?#>|"(?:[^"`\n]|`.)*"|''(?:[^''\n]|'''')*''|#[^\n]*' }
+    if ($Path -match '(?i)\.json$') { return Hide-Matches $t '"(?:[^"\\\n]|\\.)*"' }
+    ''
+}
+
+function Get-BlockBalance([string]$Text, [string]$Path = 'file.js') {
+    <# Net open minus close counts of block braces and (in markup) of style/script tags. #>
+    $b = Get-BraceText $Text $Path
+    $markup = $Path -match $script:BraceMarkup
     @{
-        braces = ([regex]::Matches($t, '\{')).Count - ([regex]::Matches($t, '\}')).Count
-        style  = ([regex]::Matches($Text, '(?i)<style\b')).Count - ([regex]::Matches($Text, '(?i)</style>')).Count
-        script = ([regex]::Matches($Text, '(?i)<script\b')).Count - ([regex]::Matches($Text, '(?i)</script>')).Count
+        braces = ([regex]::Matches($b, '\{')).Count - ([regex]::Matches($b, '\}')).Count
+        style  = $(if ($markup) { ([regex]::Matches($Text, '(?i)<style\b')).Count - ([regex]::Matches($Text, '(?i)</style>')).Count } else { 0 })
+        script = $(if ($markup) { ([regex]::Matches($Text, '(?i)<script\b')).Count - ([regex]::Matches($Text, '(?i)</script>')).Count } else { 0 })
     }
 }
 
-function Test-HalfBlock([string]$Old, [string]$New) {
+function Find-UnbalancedBrace([string]$Text, [string]$Path) {
+    <# Where the braces stop matching: the first } without an opening {, or else the last { that is
+       never closed. Returns @{ line; text; kind } or $null. #>
+    $b = Get-BraceText $Text $Path
+    $lines = $Text.Replace("`r`n", "`n").Split("`n")
+    $stack = New-Object System.Collections.Generic.Stack[int]
+    $line = 1
+    foreach ($ch in $b.ToCharArray()) {
+        if ($ch -eq "`n") { $line++; continue }
+        if ($ch -eq '{') { $stack.Push($line) }
+        elseif ($ch -eq '}') {
+            if (-not $stack.Count) { return @{ line = $line; text = $lines[$line - 1].Trim(); kind = 'a } that closes nothing' } }
+            [void]$stack.Pop()
+        }
+    }
+    if ($stack.Count) { $l = $stack.Peek(); return @{ line = $l; text = $lines[$l - 1].Trim(); kind = 'a { that is never closed' } }
+    $null
+}
+
+function Test-HalfBlock([string]$Old, [string]$New, [string]$Path = 'file.js') {
     <# Whether an edit leaves the file more unbalanced than it was: more unclosed (or unopened)
        { } blocks or <style>/<script> blocks after the edit than before. A file that is already
-       broken may be repaired, or edited without making it worse. Returns the reason, or $null. #>
-    $o = Get-BlockBalance $Old; $n = Get-BlockBalance $New
+       broken may be repaired, or edited without making it worse. Returns the reason (with the line
+       where the braces stop matching), or $null. #>
+    $o = Get-BlockBalance $Old $Path; $n = Get-BlockBalance $New $Path
     foreach ($k in 'style', 'script') {
         if ([Math]::Abs($n[$k]) -gt [Math]::Abs($o[$k])) { return "this edit would leave a <$k> block half open or half closed in the file, so part of that block would be left behind. Include the whole block through its closing </$k> line (you may shorten its middle with a line containing only ...)" }
     }
-    if ([Math]::Abs($n.braces) -gt [Math]::Abs($o.braces)) { return "this edit would leave a { } block half open or half closed in the file, so part of that block would be left behind. Include the whole block through its closing brace (you may shorten its middle with a line containing only ...)" }
+    if ([Math]::Abs($n.braces) -gt [Math]::Abs($o.braces)) {
+        $where = Find-UnbalancedBrace $New $Path
+        $at = if ($where) { " After the edit there is $($where.kind) at line $($where.line): $(if ($where.text.Length -gt 120) { $where.text.Substring(0, 117) + '...' } else { $where.text })." } else { '' }
+        return "this edit would leave a { } block half open or half closed in the file, so part of that block would be left behind.$at Include the whole block through its closing brace (you may shorten its middle with a line containing only ...)"
+    }
     $null
 }
 
@@ -694,11 +759,11 @@ function Get-EditResult {
             $done = Test-AlreadyApplied $text $search $replace
             if ($done.applied) { $applied.Add("pair ${n}: already applied - $($done.evidence)"); continue }
         }
-        if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed; send the whole edit block again." } }
+        if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed. Read the file again and send a corrected edit block." } }
 
         if ($hit.note -eq 'matched ignoring indentation') {
             $fix = Set-EditIndent $search $text.Substring($hit.start, $hit.length) $replace $full
-            if ($fix.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($fix.error). Nothing was changed; send the whole edit block again." } }
+            if ($fix.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($fix.error). Nothing was changed. Read the file again and send a corrected edit block." } }
             $replace = $fix.text
             $hit.note = 'matched ignoring indentation; the new lines were re-indented to match the file'
         }
@@ -706,8 +771,8 @@ function Get-EditResult {
         $text = $text.Substring(0, $hit.start) + $replace + $text.Substring($hit.start + $hit.length)
         $after = $hit.start + $replace.Length
     }
-    $half = Test-HalfBlock $info.Text $text
-    if ($half) { return [pscustomobject]@{ ok = $false; error = "$half. Nothing was changed; send the whole edit block again." } }
+    $half = Test-HalfBlock $info.Text $text $full
+    if ($half) { return [pscustomobject]@{ ok = $false; error = "$half. Nothing was changed. Read the lines around it first, then send a corrected edit - or replace the whole file with a write block." } }
     $moveProblem = Test-MoveOrder $ProjectRoot $full $info.Text $text
     if ($moveProblem) { return [pscustomobject]@{ ok = $false; error = $moveProblem } }
     [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; pairs = $n; notes = @($notes)
@@ -912,5 +977,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

@@ -244,10 +244,12 @@ export default function AI_Prompt({
                     </button>
                   )}
                 </div>
+                {/* CCBridge: Queue (while busy) sits right next to Stop / Send. */}
+                <div className="flex items-center gap-1.5">
                 {busy && canSend && (
                   <button
                     aria-label="Add to the queue"
-                    className="mr-1 rounded-lg bg-black/5 px-2 py-1.5 text-xs hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10"
+                    className="h-8 rounded-lg bg-black/5 px-2.5 text-xs hover:bg-black/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
                     onClick={submit}
                     title="Add to the queue: runs after the current task (Enter)"
                     type="button"
@@ -287,6 +289,7 @@ export default function AI_Prompt({
                     />
                   </button>
                 )}
+                </div>
               </div>
             </div>
           </div>

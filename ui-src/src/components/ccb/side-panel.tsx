@@ -1,4 +1,4 @@
-import { ChevronRight, CloudDownload, ExternalLink, File, FileClock, Folder, FolderLock, FolderOpen, FolderTree, ListTodo, Lock, RotateCcw, SquareCheck, Square } from "lucide-react";
+import { ChevronRight, CloudDownload, CloudUpload, ExternalLink, File, FileClock, Folder, FolderLock, FolderOpen, FolderTree, ListTodo, Lock, RotateCcw, SquareCheck, Square } from "lucide-react";
 import type React from "react";
 import { useMemo, useState } from "react";
 import FileUpload from "@/components/kokonutui/file-upload";
@@ -166,21 +166,56 @@ function FilesPanel({
   project?: { name: string; path: string; location?: string[] } | null;
 }) {
   const tree = useMemo(() => buildTree(files), [files]);
+  // The upload area is collapsed by default; the choice is remembered in this browser.
+  const [uploadOpen, setUploadOpenState] = useState(() => {
+    try {
+      return localStorage.getItem("ccb.uploadOpen") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setUploadOpen = (open: boolean) => {
+    setUploadOpenState(open);
+    try {
+      localStorage.setItem("ccb.uploadOpen", open ? "1" : "0");
+    } catch {
+      /* storage blocked: only this session remembers it */
+    }
+  };
   const rows = tree.length ? (
     <TreeRows nodes={tree} onOpen={onOpenFile} />
   ) : (
     <p className="p-2 text-muted-foreground text-sm">No files yet. Ask Copilot to create some.</p>
   );
   return (
-    <div className="p-2">
-      <FileUpload
-        className="mb-2 max-w-none"
-        hint="Any file type. Copilot can read it but never change it;"
-        maxFileSize={500 * 1024 * 1024}
-        onUploadSuccess={onUploaded}
-        title="Add source data"
-        upload={api.uploadSource}
-      />
+    // Dragging a file over the panel opens the upload area, so drag-and-drop works while it is collapsed.
+    <div className="p-2" onDragEnter={() => setUploadOpen(true)}>
+      <div className="mb-2 rounded-lg border border-black/10 dark:border-white/10">
+        <button
+          aria-expanded={uploadOpen}
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-black/5 dark:hover:bg-white/5"
+          onClick={() => setUploadOpen(!uploadOpen)}
+          title={uploadOpen ? "Hide the upload area" : "Show the upload area"}
+          type="button"
+        >
+          <CloudUpload className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm">Add source data</span>
+            {!uploadOpen && <span className="block truncate text-muted-foreground text-xs">Read-only files for Copilot, in source/</span>}
+          </span>
+          <ChevronRight className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", uploadOpen && "rotate-90")} />
+        </button>
+        {uploadOpen && (
+          <FileUpload
+            className="max-w-none px-1 pb-1"
+            hint="Any file type. Copilot can read it but never change it;"
+            maxFileSize={500 * 1024 * 1024}
+            onUploadSuccess={onUploaded}
+            title="Add source data"
+            upload={api.uploadSource}
+          />
+        )}
+      </div>
       {project ? <ProjectRoot project={project}>{rows}</ProjectRoot> : rows}
     </div>
   );

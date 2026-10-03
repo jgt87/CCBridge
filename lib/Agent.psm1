@@ -743,6 +743,16 @@ function New-ActionRetryMessage {
     ($parts -join "`n`n") + "`n`nTask: $Task"
 }
 
+function Register-StepFailure {
+    <# Counts how often the same step failed the same way in one message (same action, path and
+       error, line numbers ignored). Returns the count. #>
+    param([hashtable]$Seen, $Action, [string]$Output)
+    $first = ("$Output".Split("`n") | Where-Object { $_.Trim() } | Select-Object -First 1)
+    $key = "$($Action.type)|$($Action.arg)|" + ("$first" -replace '\d+', '#')
+    $Seen[$key] = 1 + [int]$Seen[$key]
+    $Seen[$key]
+}
+
 function Get-StepFailureInfo {
     <# Why a step (read / grep / edit / write / run) may have failed and what happens next, from the
        action type and the reason it reported. Fixed rules: the usual causes, not a diagnosis. #>
@@ -1235,6 +1245,7 @@ function Invoke-AgentTurn {
         $message += Get-PinnedFiles $State.ProjectRoot $Text
 
         $nudges = 0   # times this message was sent again because Copilot explained instead of acting
+        $failSeen = @{}; $stopLoop = $false   # the same step failing the same way: warn at 2, stop at 3
         $lastReply = ''; $doneText = ''   # for the suggested next steps after the turn
         $reviewed = $false   # the consistency review after a big change happens once per message
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
@@ -1313,9 +1324,21 @@ function Invoke-AgentTurn {
                     }
                     Add-AgentEvent $State 'action-result' $result
                 }
-                $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = "$($res.output)"; readPaths = $res.readPaths })
+                $out = "$($res.output)"
+                if (-not $res.ok -and $a.type -in 'edit', 'write', 'run') {
+                    $times = Register-StepFailure $failSeen $a $out
+                    if ($times -eq 2) {
+                        $out += "`nThis is the second time this exact step failed in the same way. Do not send it again unchanged: read the lines it is about first and send a corrected step$(if ($a.type -eq 'edit') { ', or replace the whole file with a write block' })."
+                    } elseif ($times -ge 3) {
+                        $stopLoop = $true
+                        Add-AgentEvent $State 'error' @{ text = "The same $($a.type) of $($a.arg) failed $times times in a row with: $(("$($res.output)" -split "`n")[0] -replace '^error:\s*', ''). Stopped this message so it does not loop."; code = 'STEP-LOOP'; hint = 'Ask Copilot to rewrite the whole file with a write block, or make this change by hand; then continue.' }
+                    }
+                }
+                $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = $out; readPaths = $res.readPaths })
+                if ($stopLoop) { break }
             }
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
+            if ($stopLoop) { break }
             if ($isDone) {
                 # After a big change: one consistency review by Copilot (dead code, broken references).
                 if (-not $reviewed) {

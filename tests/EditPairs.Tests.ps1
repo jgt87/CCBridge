@@ -187,7 +187,8 @@ Describe 'Long blocks: SEARCH shortened with ..., and half blocks' {
         [IO.File]::ReadAllText($f) | Should BeExactly $page
     }
     It 'refuses an edit that cuts a { } block in half' {
-        [IO.File]::WriteAllText($f, "function a() {`n  return 1;`n}`nfunction b() {`n  return 2;`n}")
+        # In HTML only the code inside <script> and <style> counts.
+        [IO.File]::WriteAllText($f, "<script>`nfunction a() {`n  return 1;`n}`nfunction b() {`n  return 2;`n}`n</script>")
         { Invoke-EditAction $proj 'index.html' @(@{ search = "function a() {`n  return 1;"; replace = '' }) $null } | Should Throw 'would leave a { } block half open'
     }
     It 'allows repairing a file whose blocks are already broken' {
