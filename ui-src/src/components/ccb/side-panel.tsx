@@ -1,6 +1,6 @@
-import { ChevronRight, CloudDownload, CloudUpload, ExternalLink, File, FileClock, Folder, FolderLock, FolderOpen, FolderTree, ListTodo, Lock, RotateCcw, SquareCheck, Square } from "lucide-react";
+import { ChevronRight, CloudDownload, ExternalLink, File, FileClock, Folder, FolderLock, FolderOpen, FolderTree, ListTodo, Lock, RefreshCw, RotateCcw, SquareCheck, Square } from "lucide-react";
 import type React from "react";
-import { useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import FileUpload from "@/components/kokonutui/file-upload";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import { api } from "@/lib/api";
@@ -11,8 +11,11 @@ import { FetchPanel } from "./fetch-panel";
 import { RunbooksPanel } from "./runbooks-panel";
 import { QueuePanel } from "./queue-panel";
 import { SchedulesSummary } from "./schedules-modal";
+import { BetaTag } from "./beta-tag";
+import { IssuesPanel } from "./issues-panel";
+import { PanelSection, SectionButton, SectionCount } from "./panel-section";
 import { ReviewPanel } from "./review-panel";
-import type { QueueEntry, ScheduleItem } from "@/lib/api";
+import type { Activity, QueueEntry, ScheduleItem } from "@/lib/api";
 import type { ScheduleTarget } from "./schedule-form";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +66,46 @@ function changeTotals(n: TreeNode): { added: number; removed: number } {
       return { added: t.added + s.added, removed: t.removed + s.removed };
     },
     { added: 0, removed: 0 }
+  );
+}
+
+/** Open issues per file path, from the project's issue index (shown next to each file). */
+const IssueCounts = createContext<Map<string, number>>(new Map());
+
+function IssueBadge({ path }: { path: string }) {
+  const n = useContext(IssueCounts).get(path);
+  if (!n) return null;
+  return (
+    <span className="ml-auto shrink-0 rounded px-1 text-[10px] text-muted-foreground ring-1 ring-black/10 dark:ring-white/15" title={`${n} open issue(s); see Issues in the Changes tab`}>
+      {n}
+    </span>
+  );
+}
+
+/** The issue index of the project: a bar that runs left to right while it indexes, and a short status line. */
+function IndexBar({ activity, files, withIssues, updated }: { activity: Activity | null; files: number; withIssues: number; updated: string | null }) {
+  const running = Boolean(activity?.label);
+  const pct = running && activity?.total ? Math.min(100, Math.round((activity.done / activity.total) * 100)) : null;
+  const when = updated ? new Date(updated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  return (
+    <div>
+      <div className="truncate text-muted-foreground text-xs">
+        {running
+          ? activity?.label.replace(/ for issues.*$/, "") + "..."
+          : files
+            ? `Indexed${when ? ` at ${when}` : ""}${withIssues ? `, ${withIssues} file(s) with issues` : ", no issues"}`
+            : "Not indexed yet"}
+      </div>
+      {/* The bar only while an index run is busy. */}
+      {running && (
+        <div className="mt-1.5 h-0.5 w-full overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+          <div
+            className={cn("h-full rounded-full bg-foreground/60 transition-[width] duration-500", pct === null && "w-1/3 animate-pulse")}
+            style={pct === null ? undefined : { width: `${pct}%` }}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -123,6 +166,7 @@ function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) =>
               )}
               <span className="truncate">{n.name}</span>
               <ChangeBadge node={n} />
+              <IssueBadge path={n.path} />
             </button>
           )}
         </li>
@@ -139,14 +183,6 @@ function ProjectRoot({ project, children }: { project: { name: string; path: str
       <div className="flex h-7 items-center gap-1.5 rounded-md px-1.5 text-sm" title={`${where}\n${project.path}`}>
         <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate font-medium">{project.name}</span>
-        <button
-          className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
-          onClick={() => api.showProject()}
-          title="Open the project folder in File Explorer"
-          type="button"
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-        </button>
       </div>
       <div className={cn("ml-[13px]", LINE)}>{children}</div>
     </div>
@@ -159,13 +195,36 @@ function FilesPanel({
   onOpenFile,
   onUploaded,
   project,
+  activity,
+  issueStamp,
 }: {
   files: FileInfo[];
   onOpenFile: (path: string) => void;
   onUploaded: () => void;
   project?: { name: string; path: string; location?: string[] } | null;
+  activity: Activity | null;
+  issueStamp: string;
 }) {
   const tree = useMemo(() => buildTree(files), [files]);
+  // The issue index: open issues per file, reloaded when the project's details change.
+  const [index, setIndex] = useState<{ counts: Map<string, number>; files: number; updated: string | null }>({ counts: new Map(), files: 0, updated: null });
+  const indexing = Boolean(activity?.label);
+  useEffect(() => {
+    if (!project) return;
+    const load = () =>
+      api.issues().then(
+        (r) => {
+          const counts = new Map<string, number>();
+          for (const i of r.items) if (i.status !== "ignored") counts.set(i.path, (counts.get(i.path) ?? 0) + 1);
+          setIndex({ counts, files: r.summary?.files ?? 0, updated: r.summary?.updated ?? null });
+        },
+        () => undefined
+      );
+    load();
+    if (!indexing) return;
+    const t = window.setInterval(load, 3000);
+    return () => window.clearInterval(t);
+  }, [project, issueStamp, indexing]);
   // The upload area is collapsed by default; the choice is remembered in this browser.
   const [uploadOpen, setUploadOpenState] = useState(() => {
     try {
@@ -188,38 +247,62 @@ function FilesPanel({
     <p className="p-2 text-muted-foreground text-sm">No files yet. Ask Copilot to create some.</p>
   );
   return (
-    // Dragging a file over the panel opens the upload area, so drag-and-drop works while it is collapsed.
-    <div className="p-2" onDragEnter={() => setUploadOpen(true)}>
-      <div className="mb-2 rounded-lg border border-black/10 dark:border-white/10">
-        <button
-          aria-expanded={uploadOpen}
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-black/5 dark:hover:bg-white/5"
-          onClick={() => setUploadOpen(!uploadOpen)}
-          title={uploadOpen ? "Hide the upload area" : "Show the upload area"}
-          type="button"
+    // Dragging a file over the panel opens the source data section, so drag-and-drop works while it is folded.
+    <div onDragEnter={() => setUploadOpen(true)}>
+      <PanelSection
+        id="files.source"
+        onOpenChange={setUploadOpen}
+        open={uploadOpen}
+        summary="Read-only files for Copilot, in source/. Drop files here."
+        title="Source data"
+      >
+        <FileUpload
+          className="max-w-none p-0"
+          hint="Any file type. Copilot can read it but never change it;"
+          maxFileSize={500 * 1024 * 1024}
+          onUploadSuccess={onUploaded}
+          title="Add source data"
+          upload={api.uploadSource}
+        />
+      </PanelSection>
+      {project && (
+        <PanelSection
+          actions={
+            <SectionButton disabled={indexing} onClick={() => void api.reindexIssues(true)} title="Scan every file again">
+              <RefreshCw className={cn("h-3.5 w-3.5", indexing && "animate-spin")} />
+            </SectionButton>
+          }
+          id="files.index"
+          title="Index"
         >
-          <CloudUpload className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm">Add source data</span>
-            {!uploadOpen && <span className="block truncate text-muted-foreground text-xs">Read-only files for Copilot, in source/</span>}
-          </span>
-          <ChevronRight className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", uploadOpen && "rotate-90")} />
-        </button>
-        {uploadOpen && (
-          <FileUpload
-            className="max-w-none px-1 pb-1"
-            hint="Any file type. Copilot can read it but never change it;"
-            maxFileSize={500 * 1024 * 1024}
-            onUploadSuccess={onUploaded}
-            title="Add source data"
-            upload={api.uploadSource}
-          />
-        )}
-      </div>
-      {project ? <ProjectRoot project={project}>{rows}</ProjectRoot> : rows}
+          <IndexBar activity={activity} files={index.files} updated={index.updated} withIssues={index.counts.size} />
+        </PanelSection>
+      )}
+      <PanelSection
+        actions={
+          project && (
+            <SectionButton onClick={() => void api.showProject()} title="Open the project folder in File Explorer">
+              <ExternalLink className="h-3.5 w-3.5" />
+            </SectionButton>
+          )
+        }
+        id="files.tree"
+        title="Files"
+      >
+        <IssueCounts.Provider value={index.counts}>{project ? <ProjectRoot project={project}>{rows}</ProjectRoot> : rows}</IssueCounts.Provider>
+      </PanelSection>
     </div>
   );
 }
+function lastTab() {
+  try {
+    const t = localStorage.getItem("ccb.sideTab");
+    return t && ["files", "tasks", "changes", "fetch"].includes(t) ? t : "files";
+  } catch {
+    return "files";
+  }
+}
+
 export function SidePanel({
   files,
   todos,
@@ -242,8 +325,14 @@ export function SidePanel({
   pausedUntil,
   onSchedule,
   reviewTick,
+  issueStamp = "",
+  activity = null,
 }: {
   reviewTick: number;
+  /** Changes when the project's issue details change. */
+  issueStamp?: string;
+  /** What StreamHub is busy with besides Copilot (indexing, scanning). */
+  activity?: Activity | null;
   schedules: ScheduleItem[];
   pausedUntil?: string | null;
   /** Opens the schedules modal: with a target to schedule it, or null for the list. */
@@ -266,12 +355,14 @@ export function SidePanel({
   onRunRunbook: (name: string) => void;
   queue: QueueEntry[];
 }) {
-  const filesPanel = <FilesPanel files={files} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />;
+  const filesPanel = (
+    <FilesPanel activity={activity} files={files} issueStamp={issueStamp} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
+  );
 
   const tasksPanel = (
-    <div className="space-y-4 p-3">
+    <div>
+      <PanelSection badge={todos.length ? <SectionCount n={todos.filter((t) => !t.done).length} /> : null} id="tasks.plan" title="Plan">
       <div className="space-y-1">
-      <div className="font-medium text-sm">Plan</div>
       {todos.length ? (
         todos.map((t, i) => (
           <div className="flex items-start gap-2 text-sm" key={i}>
@@ -287,28 +378,31 @@ export function SidePanel({
         <p className="text-muted-foreground text-sm">Copilot's plan for the current task shows up here.</p>
       )}
       </div>
-      <div className="space-y-1.5 border-black/10 border-t pt-3 dark:border-white/10">
-        <div className="font-medium text-sm">Queue</div>
+      </PanelSection>
+      <PanelSection
+        badge={queue.some((q) => q.status === "queued" || q.status === "running") ? <SectionCount n={queue.filter((q) => q.status === "queued" || q.status === "running").length} /> : null}
+        id="tasks.queue"
+        title="Queue"
+      >
         <QueuePanel onOpen={onOpenFile} pausedUntil={pausedUntil} queue={queue} />
-      </div>
-      <div className="border-black/10 border-t pt-3 dark:border-white/10">
+      </PanelSection>
+      <PanelSection id="tasks.scheduled" title="Scheduled">
         <SchedulesSummary onOpen={() => onSchedule(null)} schedules={schedules} />
-      </div>
+      </PanelSection>
     </div>
   );
 
   const changesPanel = (
-    <div className="flex h-full flex-col gap-3 p-3">
+    <div>
+      <PanelSection badge={changes.length ? <SectionCount n={changes.length} /> : null} id="changes.sets" title="Change sets">
+      <div className="flex flex-col gap-2">
       <GradientButton
-        className="h-10 w-full"
+        className="h-9 w-full"
         disabled={busy || !changes.length}
         label="Undo last change set"
         onClick={onUndo}
         variant="subtle"
       />
-      <div className="border-black/10 border-b pb-3 dark:border-white/10">
-        <ReviewPanel onOpen={onOpenFile} tick={reviewTick} />
-      </div>
       {changes.length ? (
         [...changes].reverse().map((c) => (
           <div className="rounded-lg border border-black/10 p-2 dark:border-white/10" key={c.seq}>
@@ -330,13 +424,36 @@ export function SidePanel({
       ) : (
         <p className="text-muted-foreground text-sm">Files changed in this session are listed here. Each message is one undoable change set.</p>
       )}
+      </div>
+      </PanelSection>
+      <PanelSection
+        badge={<BetaTag title="Beta: still being refined. The checks run without a language model and can miss problems or report ones that are not real; use Ignore for those." />}
+        id="changes.issues"
+        title="Issues"
+      >
+        <IssuesPanel activity={activity} onOpen={onOpenFile} tick={issueStamp} />
+      </PanelSection>
+      <PanelSection
+        badge={<BetaTag title="Beta: still being refined. Findings are checked against the files, but review them before fixing." />}
+        id="changes.review"
+        title="Code review"
+      >
+        <ReviewPanel onOpen={onOpenFile} tick={reviewTick} />
+      </PanelSection>
     </div>
   );
 
   return (
     <SmoothTab
       columns={2}
-      defaultTabId="files"
+      defaultTabId={lastTab()}
+      onChange={(id) => {
+        try {
+          localStorage.setItem("ccb.sideTab", id); // per browser: the side panel reopens on this tab
+        } catch {
+          /* storage blocked */
+        }
+      }}
       items={[
         { id: "files", title: "Files", icon: FolderTree, color: "bg-zinc-700", content: filesPanel },
         { id: "tasks", title: "Tasks", icon: ListTodo, color: "bg-zinc-700", content: tasksPanel },
@@ -348,7 +465,7 @@ export function SidePanel({
           color: "bg-zinc-700",
           content: (
             <div>
-              <div className="border-black/10 border-b p-3 dark:border-white/10">
+              <PanelSection badge={runbooks.length ? <SectionCount n={runbooks.length} /> : null} id="fetch.runbooks" title="Runbooks">
                 <RunbooksPanel
                   busy={busy}
                   onAttach={onAttach}
@@ -359,8 +476,10 @@ export function SidePanel({
                   runbooks={runbooks}
                   templates={runbookTemplates}
                 />
-              </div>
-              <FetchPanel busy={busy} items={fetchItems} onAttach={onAttach} onOpen={onOpenFile} onRun={onRunFetch} onSave={onSaveFetch} onSchedule={(name) => onSchedule({ kind: "fetch", name })} />
+              </PanelSection>
+              <PanelSection badge={fetchItems.length ? <SectionCount n={fetchItems.length} /> : null} id="fetch.prompts" title="Fetch prompts">
+                <FetchPanel busy={busy} items={fetchItems} onAttach={onAttach} onOpen={onOpenFile} onRun={onRunFetch} onSave={onSaveFetch} onSchedule={(name) => onSchedule({ kind: "fetch", name })} />
+              </PanelSection>
             </div>
           ),
         },

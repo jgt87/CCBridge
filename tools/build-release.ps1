@@ -2,12 +2,45 @@
 .SYNOPSIS
   Builds dist\CCBridge-<version>.zip: everything needed to run CCBridge on a target machine
   (no UI source, tests or git data). The zip contains one folder, CCBridge\, with version.txt.
+  Then publishes the version: an annotated git tag with the same name on the current commit
+  (created locally and pushed), and a GitHub Release "StreamHub <version>" on that tag with
+  the zip. A version always has its tag and its release; -NoPublish only builds the zip.
 .EXAMPLE
-  powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1 -Version v0.1.0
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1 -Version v0.1.0 -NotesFile notes.md
 #>
-param([Parameter(Mandatory)][ValidatePattern('^v\d+\.\d+\.\d+$')][string]$Version)
+param(
+    [Parameter(Mandatory)][ValidatePattern('^v\d+\.\d+\.\d+$')][string]$Version,
+    [string]$NotesFile,
+    [switch]$NoPublish
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+
+function Invoke-Git {
+    $out = & git -C $root @args 2>&1
+    if ($LASTEXITCODE) { throw "git $($args -join ' ') failed: $(@($out) -join ' ')" }
+    @($out | ForEach-Object { "$_" })
+}
+
+if (-not $NoPublish) {
+    # Checks before anything is built: the tag must point at exactly what is in the zip.
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'The GitHub CLI (gh) is needed to publish; use -NoPublish to only build.' }
+    if (@(Invoke-Git status --porcelain --untracked-files=no).Count) { throw 'There are uncommitted changes: commit them first, so the tag matches the release.' }
+    $null = Invoke-Git fetch --tags origin
+    $head = (Invoke-Git rev-parse HEAD)[0]
+    $branch = (Invoke-Git rev-parse --abbrev-ref HEAD)[0]
+    $remote = @(Invoke-Git ls-remote origin "refs/heads/$branch") | Select-Object -First 1
+    if (-not $remote -or $remote.Split("`t")[0] -ne $head) { throw "Push $branch first: the release commit must be on GitHub." }
+    $existing = @(Invoke-Git tag --list $Version)
+    if ($existing.Count) {
+        $at = (Invoke-Git rev-list -n 1 $Version)[0]
+        if ($at -ne $head) { throw "Tag $Version already exists on another commit ($($at.Substring(0, 7))). Choose the next version." }
+    }
+    $null = & gh release view $Version --json tagName 2>&1
+    if (-not $LASTEXITCODE) { throw "Release $Version already exists on GitHub. Choose the next version." }
+    if ($NotesFile -and -not (Test-Path -LiteralPath $NotesFile)) { throw "Notes file not found: $NotesFile" }
+}
+
 $dist = Join-Path $root 'dist'
 $stage = Join-Path $env:TEMP ('ccbridge-release-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $app = Join-Path $stage 'CCBridge'
@@ -44,3 +77,16 @@ try {
 [IO.Directory]::Delete($stage, $true)
 $size = (Get-Item $zip).Length
 "Built $zip ($([Math]::Round($size / 1KB)) KB)"
+if ($NoPublish) { return }
+
+# The tag: annotated, on the commit that was built, locally and on GitHub.
+if (-not @(Invoke-Git tag --list $Version).Count) { $null = Invoke-Git tag -a $Version -m "StreamHub $Version" }
+$null = Invoke-Git push origin "refs/tags/$Version"
+"Tagged $Version at $commit and pushed the tag"
+
+# The release on that tag, with the zip.
+$ghArgs = @('release', 'create', $Version, $zip, '--verify-tag', '--title', "StreamHub $Version")
+if ($NotesFile) { $ghArgs += @('--notes-file', $NotesFile) } else { $ghArgs += '--generate-notes' }
+$out = & gh @ghArgs 2>&1
+if ($LASTEXITCODE) { throw "gh release create failed: $(@($out) -join ' ')" }
+"Released: $(@($out) | Select-Object -Last 1)"

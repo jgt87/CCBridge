@@ -1,0 +1,65 @@
+import { X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { languageForPath } from "@/lib/highlight";
+import { cn } from "@/lib/utils";
+import { CodeView, CopyButton } from "./code-block";
+import { MarkdownView } from "./markdown-view";
+import { ModalBackdrop } from "./modal-backdrop";
+
+const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
+
+/** A project file in a modal: Markdown rendered (with a Source view), code with colors and line numbers. */
+export function FileViewer({
+  file,
+  onClose,
+  onOpenFile,
+  previewBase,
+}: {
+  file: { path: string; text: string };
+  onClose: () => void;
+  onOpenFile: (path: string) => void;
+  previewBase?: string;
+}) {
+  const md = isMarkdown(file.path);
+  const [source, setSource] = useState(false);
+  useEffect(() => setSource(false), [file.path]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const tab = (on: boolean) =>
+    cn("rounded-md px-2 py-0.5 text-xs", on ? "bg-black/10 text-foreground dark:bg-white/10" : "text-muted-foreground hover:text-foreground");
+
+  return (
+    <ModalBackdrop center onClose={onClose}>
+      <div className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-black/10 border-b px-4 py-2 dark:border-white/10">
+          <span className="min-w-0 flex-1 truncate font-mono text-sm">{file.path}</span>
+          {md && (
+            <div className="flex items-center gap-0.5">
+              <button className={tab(!source)} onClick={() => setSource(false)} type="button">
+                Rendered
+              </button>
+              <button className={tab(source)} onClick={() => setSource(true)} type="button">
+                Source
+              </button>
+            </div>
+          )}
+          <CopyButton text={file.text} />
+          <button className="rounded p-1 hover:bg-black/5 dark:hover:bg-white/10" onClick={onClose} title="Close (Esc)" type="button">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {md && !source ? (
+            <MarkdownView className="px-6 py-4" onOpenFile={onOpenFile} path={file.path} previewBase={previewBase} text={file.text} />
+          ) : (
+            <CodeView language={md ? "markdown" : languageForPath(file.path)} text={file.text} />
+          )}
+        </div>
+      </div>
+    </ModalBackdrop>
+  );
+}

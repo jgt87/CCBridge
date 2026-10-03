@@ -136,6 +136,54 @@ export interface AppState {
   /** Release tag (v0.1.12) and the commit it was built from (short hash). */
   release?: string;
   commit?: string;
+  /** What StreamHub itself is busy with (indexing, scanning for issues); shown like "waiting for Copilot". */
+  activity?: Activity | null;
+  /** Where the project is served read-only (images in Markdown), e.g. /preview/TOKEN/. */
+  previewBase?: string;
+  /** Changes when the project's issue details change (reload the Issues panel). */
+  issueStamp?: string;
+}
+
+export interface Activity {
+  label: string;
+  done: number;
+  total: number;
+  current: string;
+  /** true: the background index run (the app stays usable); false: a step of the current task. */
+  background: boolean;
+}
+
+export type IssueCategory = "error" | "secret" | "health";
+export type IssueStatus = "open" | "fixing" | "gave up" | "ignored";
+
+export interface IssueItem {
+  id: string;
+  path: string;
+  line: number;
+  category: IssueCategory;
+  message: string;
+  status: IssueStatus;
+  attempts: number;
+  note: string;
+}
+
+export interface IssueSummary {
+  name: string;
+  root: string;
+  updated: string | null;
+  files: number;
+  open: Record<IssueCategory, number>;
+  fixing: number;
+  gaveUp: number;
+  ignored: number;
+}
+
+export interface IssueReport {
+  items: IssueItem[];
+  summary: IssueSummary | null;
+  projects: IssueSummary[];
+  indexing: { running: boolean; last: { files: number; scanned: number; ms: number; at: string } | null; error: string | null };
+  settings: { enabled: boolean; autoFix: IssueCategory[]; maxAttempts: number };
 }
 
 export interface Reference {
@@ -391,6 +439,18 @@ export const api = {
   deleteSchedule: (id: string) => call<{ ok: boolean }>("POST", "/api/schedules/delete", { id }),
   runSchedule: (id: string) => call<{ ok: boolean }>("POST", "/api/schedules/run", { id }),
   showProject: () => call<{ ok: boolean }>("POST", "/api/project/show"),
+  issues: () =>
+    call<IssueReport>("GET", "/api/issues").then((r) => ({
+      ...r,
+      items: asList(r.items),
+      projects: asList(r.projects),
+      settings: { ...r.settings, autoFix: asList(r.settings?.autoFix) },
+    })),
+  reindexIssues: (force = false) => call<{ ok: boolean; started: boolean }>("POST", "/api/issues/reindex", { force }),
+  fixIssues: (paths: string[], categories: IssueCategory[]) => call<{ ok: boolean; queued: number; issues: number }>("POST", "/api/issues/fix", { paths, categories }),
+  ignoreIssues: (ids: string[], undo = false) => call<{ ok: boolean }>("POST", "/api/issues/ignore", { ids, undo }),
+  resetSettings: () =>
+    call<{ ok: boolean; changed: string[]; settings: Setting[] }>("POST", "/api/settings/reset").then((r) => ({ ...r, changed: asList(r.changed), settings: asList(r.settings) })),
   settings: () => call<{ settings: Setting[] }>("GET", "/api/settings").then((r) => (Array.isArray(r.settings) ? r.settings : [])),
   setSetting: (key: string, value: string | number | null) =>
     call<{ ok: boolean; settings: Setting[] }>("POST", "/api/settings", { key, value }).then((r) => ({ ...r, settings: Array.isArray(r.settings) ? r.settings : [] })),

@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -31,6 +31,11 @@ function New-AgentState {
         NextConnectAttempt = $null
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
         WorkIq = $(if ($Config.workIq) { [string]$Config.workIq } else { 'leave' }); WorkIqActual = $null; WorkIqWarned = $false
+        # Issue cycle: what the worker is doing besides Copilot (shown like "waiting for Copilot"),
+        # the background indexer's progress, and the fix task being worked on.
+        Activity = [hashtable]::Synchronized(@{ label = ''; done = 0; total = 0; current = '' })
+        Indexing = [hashtable]::Synchronized(@{ running = $false; label = ''; done = 0; total = 0; current = ''; project = $null; last = $null; error = $null })
+        IssueFix = $null; IssueFixHandled = $false
     })
 }
 
@@ -569,8 +574,8 @@ function Save-TaskEvidence {
     [void]$sb.AppendLine('## Files changed').AppendLine()
     foreach ($c in @($Changes)) { [void]$sb.AppendLine("- ``$($c.path)`` +$($c.added) -$($c.removed)$(if ($c.created) { ' (new)' } elseif ($c.deleted) { ' (deleted)' })") }
     [void]$sb.AppendLine().AppendLine('## Checks').AppendLine()
-    $syn = if ($null -eq $Ev.syntaxLast) { 'not needed (no JSON, PowerShell or JavaScript changed)' } elseif (@($Ev.syntaxLast).Count) { "$(@($Ev.syntaxLast).Count) problem(s) left: " + (@($Ev.syntaxLast) -join '; ') } else { 'passed' }
-    [void]$sb.AppendLine("- Syntax check: $syn")
+    $syn = if ($null -eq $Ev.syntaxLast) { 'not run' } elseif (@($Ev.syntaxLast).Count) { "$(@($Ev.syntaxLast).Count) problem(s) left: " + (@($Ev.syntaxLast) -join '; ') } else { 'passed' }
+    [void]$sb.AppendLine("- File checks (syntax and structure per file type): $syn")
     $pg = if ($null -eq $Ev.page) { 'not run' } elseif (@($Ev.page).Count) { "$(@($Ev.page).Count) problem(s): " + (@($Ev.page) -join '; ') } else { 'passed' }
     [void]$sb.AppendLine("- Page check: $pg")
     [void]$sb.AppendLine("- Copilot consistency review: $(if ($Ev.reviewed) { 'done' } else { 'not needed' })")
@@ -1265,6 +1270,36 @@ function Invoke-AgentAction {
         }
         $newText = if ($Action.type -eq 'write') { $content } else { $er.new }
         $oldText = if ($Action.type -eq 'write') { "$($p.old)" } else { "$($er.old)" }
+        # The file's encoding must be able to hold the new text (batch files ASCII, ANSI files their
+        # code page, no garbled replacement characters).
+        $targetFull = Resolve-ProjectPath $root $Action.arg
+        $encName = if (Test-Path -LiteralPath $targetFull -PathType Leaf) { (Read-TextFile $targetFull).Encoding } else { 'utf8' }
+        $misfit = Test-EncodingFit $Action.arg $oldText $newText $encName
+        if ($misfit) {
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "encoding: $misfit" })
+            return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (encoding)"; output = "error: not written: $misfit." }
+        }
+        # What Copilot's text brought along: invisible characters are removed on writing (reported),
+        # curly quotes and long dashes in code are pointed out for Copilot to check.
+        $art = Find-CodeArtifacts $Action.arg $(if ($Action.type -eq 'write') { $content } else { (@($Action.edits) | ForEach-Object { $_.replace }) -join "`n" })
+        $artNote = @()
+        if ($art.removed) { $artNote += "removed $($art.removed) invisible or non-breaking space character(s) that came with the text" }
+        if (@($art.curlyLines).Count) { $artNote += "note: curly quotes or long dashes in the new text ($(if ($Action.type -eq 'write') { 'lines ' + ((@($art.curlyLines) | Select-Object -First 8) -join ', ') } else { 'in the REPLACE text' })); in code use straight quotes ' "" and -" }
+        # Leftover edit or merge markers are always damage (a malformed edit): refuse.
+        if ($Action.arg -notmatch '(?i)\.(md|markdown|txt)$') {
+            $mk = [regex]::Match("$newText", '(?m)^(<{7}( SEARCH|\s.*)?|>{7}( REPLACE|\s.*)?|={7})\s*$')
+            if ($mk.Success -and "$oldText" -notmatch "(?m)^$([regex]::Escape($mk.Value.TrimEnd()))\s*$") {
+                $mline = ([regex]::Matches($newText.Substring(0, $mk.Index), "`n")).Count + 1
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "leftover marker at line $mline" })
+                return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (leftover marker)"; output = "error: not written: line $mline of the new text is '$($mk.Value.Trim())', an edit or merge marker that must not end up in the file. Send the change again with only the real lines." }
+            }
+        }
+        # Secrets (keys, tokens, passwords) the change adds: a person approves them, also in auto mode.
+        $oldSecrets = @{}; foreach ($s in @(Find-Secrets $oldText)) { $k = $s -replace '^line \d+: ', ''; $oldSecrets[$k] = 1 + [int]$oldSecrets[$k] }
+        $newSecrets = @(foreach ($s in @(Find-Secrets $newText)) { $k = $s -replace '^line \d+: ', ''; if ($oldSecrets[$k]) { $oldSecrets[$k]-- } else { $s } })
+        if ($newSecrets.Count) {
+            $riskWarning = "This change adds what looks like a secret ($(($newSecrets | Select-Object -First 3) -join '; ')). Secrets in project files end up in OneDrive and in any copy of the project; prefer a setting or environment variable. Approve only if it is meant."
+        }
         # Code left out with a placeholder ("// rest of the code unchanged") would be lost: refuse.
         $ph = Find-PlaceholderLine $oldText $newText
         if ($ph) {
@@ -1274,7 +1309,7 @@ function Invoke-AgentAction {
             return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (left-out code)"; output = "error: not written: line $($ph.line) of the new text, '$($ph.text)', stands for code that was left out. $how" }
         }
         # A write that makes an existing file much shorter needs a person, also in auto mode.
-        if ($Action.type -eq 'write' -and $oldText.Length -gt 3000 -and $newText.Length -lt $oldText.Length * 0.4) {
+        if (-not $riskWarning -and $Action.type -eq 'write' -and $oldText.Length -gt 3000 -and $newText.Length -lt $oldText.Length * 0.4) {
             $oldLines = $oldText.Split("`n").Length; $newLines = "$newText".Split("`n").Length
             $riskWarning = "This write makes $($Action.arg) much shorter ($oldLines -> $newLines lines). If Copilot left code out, it would be lost. Approve only if that is what you want."
         }
@@ -1350,11 +1385,16 @@ function Invoke-AgentAction {
 
     try {
         switch ($Action.type) {
-            'write' { $out = Invoke-WriteAction $root $Action.arg $Action.body $Checkpoint; return @{ ok = $true; summary = $out; output = $out; changed = $true; path = $Action.arg } }
+            'write' {
+                $out = Invoke-WriteAction $root $Action.arg $Action.body $Checkpoint
+                if (@($artNote).Count) { $out += '; ' + ($artNote -join '; ') }
+                return @{ ok = $true; summary = $out; output = $out; changed = $true; path = $Action.arg }
+            }
             'remember' { $null = Invoke-WriteAction $root 'AGENTS.md' $Action.newNotes $Checkpoint; return @{ ok = $true; summary = 'added to the project notes (AGENTS.md)'; output = 'saved to the project notes (AGENTS.md, ## Learned)'; changed = $true; path = 'AGENTS.md' } }
             'edit'  {
                 $before = try { (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text } catch { '' }
                 $out = Invoke-EditAction $root $Action.arg $Action.edits $Checkpoint
+                if (@($artNote).Count) { $out += '; ' + ($artNote -join '; ') }
                 # The changed lines as they are now, so the next edit starts from the current text.
                 $view = try { $now = (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text; Get-ChangedView $before $now (Resolve-ProjectPath $root $Action.arg) $Action.arg } catch { '' }
                 return @{ ok = $true; summary = $out; output = $(if ($view) { "$out`n$view" } else { $out }); changed = $true; path = $Action.arg }
@@ -1378,6 +1418,136 @@ function Invoke-AgentAction {
 
 # --- One user turn -------------------------------------------------------------------
 
+# --- Issue cycle: index, change, scan the changed files, fix in cycles, scan again -------------
+
+function Get-IssueSettings($State) {
+    <# harness.json "issues": enabled (on/off), autoFix (categories fixed without asking: error,
+       secret, health), maxAttempts (fix tasks per file before 'gave up'). #>
+    $c = $State.Config.issues
+    @{ enabled = "$($c.enabled)" -ne 'off'
+       autoFix = @(if ($c -and $null -ne $c.autoFix) { @("$(@($c.autoFix) -join ',')".Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -ne 'none' }) } else { 'error' })
+       maxAttempts = $(if ($c -and [int]$c.maxAttempts -gt 0) { [int]$c.maxAttempts } else { 2 }) }
+}
+
+function Get-IssueBaseline($State) {
+    <# Step 1: the index is current before a change; returns the ids of the issues already there
+       (only issues a change adds are fixed automatically). $null when issues are off or failed. #>
+    if (-not (Get-IssueSettings $State).enabled -or -not $State.ProjectRoot) { return $null }
+    $State.Activity.label = 'Indexing the project for issues before the change'
+    try {
+        $null = Update-IssueIndex $State.ProjectRoot -Progress $State.Activity
+        $ids = @{}
+        foreach ($i in @(Get-IssueReport $State.ProjectRoot)) { $ids[$i.id] = $true }
+        $ids
+    } catch { Write-CCBLogError agent 'issue baseline' $_; $null } finally { $State.Activity.label = '' }
+}
+
+function Get-QueuedIssueFix($State, [string]$ProjectRoot, [string]$Path) {
+    # A fix task for this file that is still waiting in the queue (not the one running now).
+    @($State.Queue) | Where-Object { $_.source -eq 'issues' -and $_.status -eq 'queued' -and $_.task -and $_.task.issueFix -and
+        "$($_.task.issueFix.path)" -eq $Path -and "$($_.projectRoot)".TrimEnd('\') -eq $ProjectRoot.TrimEnd('\') } | Select-Object -First 1
+}
+
+function Submit-IssueFix {
+    <# Queues one fix task for one file's issues (a coding turn in the current chat). Returns $null
+       when it may not: past issues.maxAttempts, or a fix for that file is already waiting (that
+       task scans the whole file afterwards, so it covers these issues too). #>
+    param($State, [string]$Path, $Issues, [int]$Attempt, $Categories, [string]$ProjectRoot)
+    $root = if ($ProjectRoot) { $ProjectRoot } else { $State.ProjectRoot }
+    if ($Attempt -lt 1 -or $Attempt -gt (Get-IssueSettings $State).maxAttempts) { return $null }
+    if (Get-QueuedIssueFix $State $root $Path) { return $null }
+    $ids = @($Issues | ForEach-Object { $_.id })
+    Set-IssueState $root $ids 'fixing' -Attempts $Attempt
+    $task = @{ kind = 'chat'; text = (New-FixMessage $Path @($Issues) $Attempt); forceKind = 'coding'; projectRoot = $root
+        issueFix = @{ path = $Path; ids = $ids; attempt = $Attempt; categories = @($Categories) } }
+    Submit-AgentTask $State $task 'issues' "Fix $(@($ids).Count) issue(s) in $Path$(if ($Attempt -gt 1) { " (attempt $Attempt)" })"
+}
+
+function Invoke-IssueCycle {
+    <# Steps 3 to 6: scans the files a turn changed; queues a fix task per file for issues the
+       change added (categories in issues.autoFix); after a fix task checks that file again:
+       gone = fixed, still there = another attempt (up to issues.maxAttempts), then 'gave up'.
+       Returns the notes it showed. #>
+    param($State, [string[]]$Paths, $Baseline, $Fix)
+    $cfg = Get-IssueSettings $State
+    if (-not $cfg.enabled -or $null -eq $Baseline) { return }
+    $root = $State.ProjectRoot
+    $list = @($Paths | Where-Object { $_ } | ForEach-Object { $_.Replace('\', '/') } | Select-Object -Unique)
+    $State.Activity.label = "Scanning $($list.Count) changed file(s) for issues"
+    try { $null = Update-IssueIndex $root -Paths $list -Progress $State.Activity } finally { $State.Activity.label = '' }
+    $changed = @{}; foreach ($p in $list) { $changed[$p] = $true }
+    $report = @(Get-IssueReport $root | Where-Object { $changed.ContainsKey($_.path) -and $_.status -ne 'ignored' })
+    $notes = New-Object System.Collections.Generic.List[string]
+    if ($Fix) {
+        $State.IssueFixHandled = $true
+        $cats = @($Fix.categories)
+        $left = @($report | Where-Object { $_.path -eq $Fix.path -and $_.category -in $cats -and $_.status -ne 'gave up' })
+        $leftIds = @($left | ForEach-Object { $_.id })
+        $gone = @(@($Fix.ids) | Where-Object { $_ -notin $leftIds }).Count
+        if (-not $left.Count) { $notes.Add("Issue fix: $($Fix.path) is clean again ($gone problem(s) fixed).") }
+        elseif ([int]$Fix.attempt -lt $cfg.maxAttempts) {
+            $next = Submit-IssueFix $State $Fix.path $left ([int]$Fix.attempt + 1) $cats $root
+            if ($next) { $notes.Add("Issue fix: $($left.Count) problem(s) left in $($Fix.path); trying again (attempt $([int]$Fix.attempt + 1) of $($cfg.maxAttempts)).") }
+            else { $notes.Add("Issue fix: $($left.Count) problem(s) left in $($Fix.path); a fix for that file is already waiting in the queue.") }
+        } else {
+            Set-IssueState $root $leftIds 'gave up' -Attempts ([int]$Fix.attempt) -Note "still there after $($Fix.attempt) attempt(s)"
+            $notes.Add("Issue fix: $($left.Count) problem(s) in $($Fix.path) are still there after $($Fix.attempt) attempt(s); marked 'gave up'. They are listed under Issues in the Changes tab.")
+        }
+    }
+    $new = @($report | Where-Object { -not $Baseline.ContainsKey($_.id) -and $_.status -eq 'open' -and (-not $Fix -or $_.path -ne $Fix.path) })
+    # No chains: problems a fix task causes in other files are only reported. Otherwise fixing A
+    # could break B, fixing B break A, and so on, each starting again at attempt 1.
+    $auto = if ($Fix) { @() } else { @($new | Where-Object { $_.category -in $cfg.autoFix }) }
+    $groups = @($auto | Group-Object path | Where-Object { Submit-IssueFix $State $_.Name @($_.Group) 1 $cfg.autoFix $root })
+    if ($new.Count) {
+        $files = @($new | Group-Object path).Count
+        $reported = $new.Count - @($groups | ForEach-Object { $_.Group }).Count
+        $notes.Add("Issue scan: $($new.Count) new problem(s) in $files $(if ($Fix) { 'other ' })changed file(s)$(if ($groups.Count) { "; queued a fix for $($groups.Count) file(s)" })$(if ($reported) { "; $reported only reported (Issues in the Changes tab)" }).")
+    } elseif (-not $Fix) { $notes.Add("Issue scan: no new problems in the $($list.Count) changed file(s).") }
+    foreach ($n in $notes) { Add-AgentEvent $State 'status' @{ text = $n; issues = $true } }
+    @($notes)
+}
+
+function Reset-StaleIssueFixes {
+    <# Issues marked 'fixing' without a fix task waiting or running for their file go back to
+       'open' (the task was stopped, failed, or lost in a restart). Nothing is retried by this.
+       Returns how many were reset. #>
+    param($State, [string]$ProjectRoot)
+    if (-not $ProjectRoot -or -not (Test-Path -LiteralPath (Get-IssueIndexPath $ProjectRoot))) { return 0 }
+    $active = @{}
+    foreach ($e in @($State.Queue)) {
+        if ($e.source -eq 'issues' -and $e.status -in 'queued', 'running' -and $e.task -and $e.task.issueFix) { $active["$($e.task.issueFix.path)"] = $true }
+    }
+    if ($State.IssueFix) { $active["$($State.IssueFix.path)"] = $true }
+    $stale = @(Get-IssueReport $ProjectRoot | Where-Object { $_.status -eq 'fixing' -and -not $active.ContainsKey($_.path) } | ForEach-Object { $_.id })
+    if ($stale.Count) { Set-IssueState $ProjectRoot $stale 'open' -Note 'the fix task did not finish' }
+    $stale.Count
+}
+
+$script:Indexer = $null
+function Start-IssueIndexer {
+    <# A full index run in the background (project opened, app started, Re-index), so the app
+       stays usable. One at a time; $State.Indexing has the progress. Returns $true if started. #>
+    param($State, [string]$ProjectRoot, [switch]$Force)
+    if (-not (Get-IssueSettings $State).enabled -or -not $ProjectRoot -or $State.Indexing.running) { return $false }
+    if ($script:Indexer) { try { $script:Indexer.Dispose() } catch { } }
+    $ix = $State.Indexing
+    $ix.running = $true; $ix.label = "Indexing $(Split-Path $ProjectRoot -Leaf) for issues"; $ix.done = 0; $ix.total = 0; $ix.current = ''; $ix.project = $ProjectRoot; $ix.error = $null
+    $ps = [powershell]::Create()
+    [void]$ps.AddScript({
+        param($Lib, $Root, $Progress, $Force)
+        try {
+            Import-Module (Join-Path $Lib 'Issues.psm1')
+            $r = Update-IssueIndex $Root -Progress $Progress -Force:$Force
+            $Progress.last = @{ project = $Root; files = $r.files; scanned = $r.scanned; ms = $r.ms; at = (Get-Date).ToString('s') }
+        } catch { $Progress.error = $_.Exception.Message } finally { $Progress.label = ''; $Progress.running = $false }
+    }).AddArgument($PSScriptRoot).AddArgument($ProjectRoot).AddArgument($ix).AddArgument([bool]$Force)
+    $null = $ps.BeginInvoke()
+    $script:Indexer = $ps
+    Write-CCBLog info agent 'Issue index started' @{ project = $ProjectRoot; force = [bool]$Force }
+    $true
+}
+
 function Invoke-AgentTurn {
     param($State, [string]$Text, [string]$ForceKind = '')
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; $State.Busy = $false; return }
@@ -1388,6 +1558,7 @@ function Invoke-AgentTurn {
     Add-AgentEvent $State 'user' @{ text = $Text }
     $State.TurnText = $Text
     $checkpoint = New-Checkpoint $State.ProjectRoot $Text
+    $baseline = $null
     try { Sync-SourceVault $State.ProjectRoot } catch { Add-AgentEvent $State 'error' @{ text = "Could not back up source data: $($_.Exception.Message)" } }
     try {
         if (Test-OtherSender) { $State.NeedNewChat = $true }
@@ -1396,6 +1567,8 @@ function Invoke-AgentTurn {
         # (role, actions, rules, project context) this chat has not had yet.
         $ctx = Get-ProjectContext $State
         $kind = Get-TurnKind $State $Text $ctx $ForceKind
+        # Issue cycle step 1: index before the change (not for plain chat or plan mode).
+        if ($kind -ne 'chat' -and $State.Mode -ne 'plan') { $baseline = Get-IssueBaseline $State }
         # The app shows how a message was sent, with "Send again as a coding task" for plain chat.
         Add-AgentEvent $State 'kind' @{ taskKind = $kind }
         $summary = $State.Summary; $State.Summary = $null
@@ -1512,16 +1685,27 @@ function Invoke-AgentTurn {
                 $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = $out; readPaths = $res.readPaths; changedPath = $(if ($res.ok -and $res.changed) { $res.path } else { $null }) })
                 if ($stopLoop) { break }
             }
-            # Syntax check of the files this round changed (JSON, PowerShell, JavaScript), so a broken
-            # file is fixed in the next round, before more edits build on it.
+            # File checks of what this round changed (per type: syntax, unclosed brackets, tags and
+            # strings, duplicate keys or code, missing local files...), so a broken file is fixed in
+            # the next round, before more edits build on it. Only problems the task added count.
             $roundChanged = @($results | ForEach-Object { $_.changedPath } | Where-Object { $_ } | Select-Object -Unique)
             if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
-                $syntax = @(@(Test-ProjectConsistency $State.ProjectRoot $roundChanged -SyntaxOnly) + @(if ("$($State.Config.pageCheck)" -ne 'off') { Test-ScriptSyntax $State $roundChanged }))
-                if (@($roundChanged | Where-Object { $_ -match '(?i)\.(json|ps1|psm1|psd1|m?js|cjs)$' }).Count) { $ev.syntaxLast = @($syntax) }
+                $syntax = @(@(foreach ($p in $roundChanged) {
+                    try {
+                        $full = Resolve-ProjectPath $State.ProjectRoot $p
+                        if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Test-BinaryFile $full)) { continue }
+                        $now = Read-TextFile $full
+                        $rel = $p.Replace('\', '/')
+                        $before = ''
+                        if ($checkpoint.Files[$rel] -eq 'existed') { $bk = Join-Path $checkpoint.Dir ($rel.Replace('/', '\')); if (Test-Path -LiteralPath $bk) { $before = (Read-TextFile $bk).Text } }
+                        foreach ($issue in @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot)) { "${rel}: $issue" }
+                    } catch { Write-CCBLogError agent "File check $p" $_ }
+                }) + @(if ("$($State.Config.pageCheck)" -ne 'off') { Test-ScriptSyntax $State $roundChanged }))
+                $ev.syntaxLast = @($syntax)
                 if ($syntax.Count) {
-                    Write-CCBLog info agent 'Syntax problems after this round' @{ count = $syntax.Count }
-                    Add-AgentEvent $State 'status' @{ text = "Syntax check: $($syntax.Count) problem(s) in the changed files; Copilot is asked to fix them." }
-                    $results.Add(@{ head = '### Syntax check of the files changed in this reply'; output = (($syntax | ForEach-Object { "- $_" }) -join "`n") + "`nFix these first: the file does not work as it is." })
+                    Write-CCBLog info agent 'File check problems after this round' @{ count = $syntax.Count }
+                    Add-AgentEvent $State 'status' @{ text = "File check: $($syntax.Count) problem(s) in the changed files; Copilot is asked to fix them." }
+                    $results.Add(@{ head = '### File check of the files changed in this reply'; output = (($syntax | Select-Object -First 15 | ForEach-Object { "- $_" }) -join "`n") + "`nFix these first: each one breaks the file or is a likely mistake." })
                     if ($isDone -and $syntaxNudges -lt 2) { $isDone = $false; $syntaxNudges++ }
                 }
             }
@@ -1629,6 +1813,11 @@ function Invoke-AgentTurn {
             Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys); contents = $contents }
         }
         elseif ($checkpoint.Files.Count) { Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys) } }
+        # Issue cycle steps 3-6: scan what changed, queue fixes, check a fix task's file again.
+        if (($checkpoint.Files.Count -or $State.IssueFix) -and $null -ne $baseline -and -not $State.Cancel) {
+            $scan = @($checkpoint.Files.Keys) + @(if ($State.IssueFix) { "$($State.IssueFix.path)" })
+            try { $null = Invoke-IssueCycle $State $scan $baseline $State.IssueFix } catch { Write-CCBLogError agent 'issue cycle' $_ }
+        }
         $State.Busy = $false; $State.Cancel = $false
     }
 }
@@ -1708,7 +1897,13 @@ function Start-AgentWorker {
                     } elseif ($task.clarify) {
                         Invoke-ClarifyStep $State $task
                     } else {
-                        Invoke-AgentTurn $State $task.text $force
+                        $State.IssueFix = $task.issueFix; $State.IssueFixHandled = $false
+                        try { Invoke-AgentTurn $State $task.text $force }
+                        finally {
+                            $State.IssueFix = $null
+                            # Stopped or failed before the rescan: its issues go back to open (no retry).
+                            if ($task.issueFix -and -not $State.IssueFixHandled) { try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError agent 'issue fix reset' $_ } }
+                        }
                         if ($task.planFirst) { Publish-PlanReady $State $task $fromSeq }
                         if ($task.planBuild -and $task.planId) { Write-PlanResult $State "$($task.planId)" $fromSeq }
                     }
@@ -1779,4 +1974,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

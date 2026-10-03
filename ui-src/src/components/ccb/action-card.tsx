@@ -19,6 +19,7 @@ import { api, type Preview } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { countChanges, diffLines } from "@/lib/diff";
 import { ChangePill } from "./change-pill";
+import { ActionOutput } from "./action-output";
 import { DiffView } from "./diff-view";
 
 export interface ActionItem {
@@ -168,9 +169,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
             </pre>
           )}
           {item.output && !awaiting && (
-            <pre className="max-h-72 overflow-auto rounded-lg bg-black/5 px-3 py-2 font-mono text-xs dark:bg-white/5">
-              {item.output.replace(/^~~~~\n?/gm, "")}
-            </pre>
+            <ActionOutput fallbackPath={item.target} output={item.output} />
           )}
 
           {awaiting && (
@@ -193,6 +192,8 @@ export function ActionCard({ item }: { item: ActionItem }) {
                   variant="neutral"
                 />
               )}
+              {/* The note goes with Reject only, so it reads as the other choice. */}
+              <span className="text-muted-foreground text-xs">or</span>
               <Input
                 className="h-10 min-w-48 flex-1 text-xs"
                 onChange={(e) => setNote(e.target.value)}

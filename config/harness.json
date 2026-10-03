@@ -20,6 +20,11 @@
   "responseMode": "leave",
   "evidence": "on",
   "pageCheck": "on",
+  "issues": {
+    "enabled": "on",
+    "autoFix": "error",
+    "maxAttempts": 2
+  },
   "pacing": {
     "newChatSettleSec": 3,
     "beforeSendSec": 1,

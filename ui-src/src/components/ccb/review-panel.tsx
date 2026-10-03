@@ -107,9 +107,6 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1.5 font-medium text-sm">
-        <ScanSearch className="h-4 w-4" /> Code review
-      </div>
       <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
         <select className={field} onChange={(e) => setScope(e.target.value as Scope)} value={scope}>
           <option value="all">Whole project</option>
@@ -211,7 +208,7 @@ function FindingRow({ finding: f, picked, onToggle, onOpen }: { finding: ReviewF
   return (
     <div className={cn("rounded-md border border-black/10 p-1.5 dark:border-white/10", f.status === "unverified" && "opacity-60")}>
       <div className="flex items-start gap-1.5">
-        <input checked={picked} className="mt-0.5" disabled={Boolean(f.fixQueueId)} onChange={onToggle} title="Fix this finding" type="checkbox" />
+        <input checked={picked} className="mt-0.5 accent-zinc-500" disabled={Boolean(f.fixQueueId)} onChange={onToggle} title="Fix this finding" type="checkbox" />
         <button className="min-w-0 flex-1 text-left text-xs" onClick={() => setOpen(!open)} type="button">
           <span className="font-medium">{f.title}</span>
           {f.category && <span className="text-muted-foreground"> · {f.category}</span>}

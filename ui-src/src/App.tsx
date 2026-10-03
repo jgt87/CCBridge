@@ -7,7 +7,6 @@ import {
   Menu as MenuIcon,
   ScrollText,
   MessageSquarePlus,
-  PanelLeftClose,
   PanelLeftOpen,
   PencilRuler,
   RotateCcw,
@@ -28,6 +27,7 @@ import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
 import type { ScheduleTarget } from "@/components/ccb/schedule-form";
 import { SchedulesModal } from "@/components/ccb/schedules-modal";
+import { FileViewer } from "@/components/ccb/file-viewer";
 import { BACKDROP, ModalBackdrop } from "@/components/ccb/modal-backdrop";
 import { notifyEvents, notifyQueue } from "@/lib/notify";
 import type { ChatOptions } from "@/lib/api";
@@ -88,17 +88,16 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const lastSeq = useRef(0);
 
-  // Side panel, as in Copilot: on a wide window it sits beside the chat and can be collapsed;
-  // on a narrow one it is hidden and opens over the chat from the same button.
+  // Side panel: always beside the chat when the window is wide enough. On a narrow window it is
+  // hidden and a button (shown only then) opens it over the chat; a click beside it or Esc closes it.
   const [wide, setWide] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
-  const [sideOpen, setSideOpen] = useState(() => {
-    try {
-      return localStorage.getItem("ccb-side") !== "closed";
-    } catch {
-      return true;
-    }
-  });
   const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDrawerOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
     const onChange = () => {
@@ -108,18 +107,7 @@ export default function App() {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
-  const sideVisible = wide ? sideOpen : drawerOpen;
-  const toggleSide = () => {
-    if (!wide) return setDrawerOpen((o) => !o);
-    setSideOpen((o) => {
-      try {
-        localStorage.setItem("ccb-side", o ? "closed" : "open");
-      } catch {
-        /* per-browser convenience only */
-      }
-      return !o;
-    });
-  };
+  const sideVisible = wide || drawerOpen;
 
   const refreshFiles = useCallback(() => {
     api.files().then((r) => setFiles(r.files), () => {});
@@ -308,21 +296,20 @@ export default function App() {
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center gap-3 border-black/10 border-b px-4 dark:border-white/10">
-        {state.project && !pickerOpen && (
+        {state.project && !pickerOpen && !sideVisible && (
           <button
-            aria-expanded={sideVisible}
-            aria-label={sideVisible ? "Close side panel" : "Open side panel"}
+            aria-label="Open side panel"
             className="-ml-1.5 grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
-            onClick={toggleSide}
-            title={sideVisible ? "Close side panel" : "Open side panel"}
+            onClick={() => setDrawerOpen(true)}
+            title="Open side panel (the window is too narrow to show it beside the chat)"
             type="button"
           >
-            {sideVisible ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+            <PanelLeftOpen className="h-4 w-4" />
           </button>
         )}
         <div className="flex items-center gap-2 font-semibold tracking-tight">
           <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background text-xs">SH</span>
-          StreamHub
+          <span>StreamHub <span className="ml-0.5 font-normal text-muted-foreground">by JGT</span></span>
         </div>
         {state.project && (
           <button
@@ -398,7 +385,7 @@ export default function App() {
           <aside
             className={
               wide
-                ? `${sideOpen ? "flex" : "hidden"} w-80 shrink-0 flex-col border-black/10 border-r p-3 dark:border-white/10`
+                ? `flex w-80 shrink-0 flex-col border-black/10 border-r p-3 dark:border-white/10`
                 : `${drawerOpen ? "flex" : "hidden"} fixed top-14 bottom-0 left-0 z-40 w-80 max-w-[85vw] flex-col border-black/10 border-r bg-background p-3 shadow-lg dark:border-white/10`
             }
           >
@@ -426,6 +413,8 @@ export default function App() {
                 queue={state.queue ?? []}
                 schedules={state.schedules ?? []}
                 reviewTick={reviewTick}
+                issueStamp={state.issueStamp ?? ""}
+                activity={state.activity ?? null}
                 pausedUntil={state.pausedUntil}
                 onSchedule={(target) => {
                   setScheduling({ target });
@@ -461,6 +450,7 @@ export default function App() {
                 key={chatEvents.length ? chatEvents[0].seq : 0}
               >
               <Transcript
+                activity={state.activity ?? null}
                 busy={state.busy}
                 stopping={stopping}
                 empty={
@@ -494,7 +484,7 @@ export default function App() {
               </ErrorBoundary>
             </div>
             <div className="shrink-0 px-4">
-              <div className="mx-auto max-w-3xl">
+              <div className="mx-auto max-w-[max(48rem,80%)]">
                 {scheduling && (
                   <SchedulesModal
                     fetchItems={fetchItems}
@@ -604,19 +594,7 @@ export default function App() {
       )}
 
       {/* File viewer */}
-      {viewer && (
-        <ModalBackdrop center onClose={() => setViewer(null)}>
-          <div className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-background shadow-2xl">
-            <div className="flex items-center justify-between border-black/10 border-b px-4 py-2 dark:border-white/10">
-              <span className="font-mono text-sm">{viewer.path}</span>
-              <button onClick={() => setViewer(null)} type="button">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <pre className="min-h-0 flex-1 overflow-auto p-4 font-mono text-xs leading-5">{viewer.text}</pre>
-          </div>
-        </ModalBackdrop>
-      )}
+      {viewer && <FileViewer file={viewer} onClose={() => setViewer(null)} onOpenFile={openFile} previewBase={state.previewBase} />}
     </div>
   );
 }

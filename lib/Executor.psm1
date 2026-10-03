@@ -7,27 +7,82 @@ Import-Module (Join-Path $PSScriptRoot 'Log.psm1')
 
 $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
-function Read-TextFile([string]$Path) {
-    <# Returns text with LF line endings plus how to write it back (BOM, CRLF). #>
-    $bytes = [IO.File]::ReadAllBytes($Path)
-    $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
-    $text = (New-Object Text.UTF8Encoding($false)).GetString($bytes, $(if ($bom) { 3 } else { 0 }), $bytes.Length - $(if ($bom) { 3 } else { 0 }))
-    [pscustomobject]@{ Text = $text.Replace("`r`n", "`n"); Bom = $bom; Crlf = $text.Contains("`r`n") }
+function Get-TextEncodingName([byte[]]$Bytes) {
+    <# utf8bom, utf16le, utf16be (by their BOM), utf8 (valid UTF-8) or ansi (anything else: the
+       Windows code page, e.g. a file saved by older Notepad or Excel). #>
+    if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) { return 'utf8bom' }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFF -and $Bytes[1] -eq 0xFE) { return 'utf16le' }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFE -and $Bytes[1] -eq 0xFF) { return 'utf16be' }
+    try { $null = (New-Object Text.UTF8Encoding($false, $true)).GetString($Bytes); 'utf8' } catch { 'ansi' }
 }
 
-function Write-TextFile([string]$Path, [string]$Text, [bool]$Bom = $false, [bool]$Crlf = $false) {
+function Get-TextEncoding([string]$Name) {
+    switch ($Name) {
+        'utf8bom' { New-Object Text.UTF8Encoding($true) }
+        'utf16le' { New-Object Text.UnicodeEncoding($false, $true) }
+        'utf16be' { New-Object Text.UnicodeEncoding($true, $true) }
+        'ansi' { [Text.Encoding]::Default }
+        default { New-Object Text.UTF8Encoding($false) }
+    }
+}
+
+function Read-TextFile([string]$Path) {
+    <# Text with LF line endings, plus how to write it back: its encoding (utf8, utf8bom, ansi,
+       utf16le, utf16be), BOM, and CRLF when most of its lines end that way. #>
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $enc = Get-TextEncodingName $bytes
+    $skip = switch ($enc) { 'utf8bom' { 3 } 'utf16le' { 2 } 'utf16be' { 2 } default { 0 } }
+    $text = (Get-TextEncoding $enc).GetString($bytes, $skip, $bytes.Length - $skip)
+    $crlf = ([regex]::Matches($text, "`r`n")).Count
+    $lf = ([regex]::Matches($text, "(?<!`r)`n")).Count
+    [pscustomobject]@{ Text = $text.Replace("`r`n", "`n"); Bom = ($enc -in 'utf8bom', 'utf16le', 'utf16be'); Crlf = ($crlf -gt $lf); Encoding = $enc }
+}
+
+function Write-TextFile([string]$Path, [string]$Text, [bool]$Bom = $false, [bool]$Crlf = $false, [string]$Encoding = '') {
+    <# Writes in the given encoding (as read, or the default for a new file); without one, UTF-8
+       with or without BOM. #>
     $dir = Split-Path -Parent $Path
     if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir -Force }
     $t = $Text.Replace("`r`n", "`n")
     if ($Crlf) { $t = $t.Replace("`n", "`r`n") }
-    [IO.File]::WriteAllText($Path, $t, $(if ($Bom) { New-Object Text.UTF8Encoding($true) } else { $script:Utf8NoBom }))
+    $enc = if ($Encoding) { $Encoding } elseif ($Bom) { 'utf8bom' } else { 'utf8' }
+    [IO.File]::WriteAllText($Path, $t, (Get-TextEncoding $enc))
 }
 
+function Get-NewFileFormat {
+    <# How a new file is written, by type: .ps1/.psm1/.psd1 with a BOM when they contain non-ASCII
+       (Windows PowerShell 5.1 reads BOM-less files as ANSI); .cmd/.bat with CRLF and no BOM;
+       .csv/.tsv with a BOM (Excel); everything else UTF-8 without BOM. Line endings: CRLF for
+       .cmd/.bat, else what most of the project's text files use (LF when there are none). #>
+    param([string]$Path, [string]$Text, [string]$ProjectRoot)
+    $ext = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+    $nonAscii = $Text -match '[^\x00-\x7F]'
+    $bom = ($ext -in '.ps1', '.psm1', '.psd1' -and $nonAscii) -or ($ext -in '.csv', '.tsv')
+    $crlf = if ($ext -in '.cmd', '.bat') { $true } else { Get-ProjectLineEnding $ProjectRoot }
+    @{ Bom = $bom; Crlf = $crlf; Encoding = $(if ($bom) { 'utf8bom' } else { 'utf8' }) }
+}
+
+function Get-ProjectLineEnding([string]$ProjectRoot) {
+    <# Whether most of the project's text files (up to 40 looked at) use CRLF. #>
+    if (-not $ProjectRoot -or -not (Test-Path -LiteralPath $ProjectRoot)) { return $false }
+    $crlf = 0; $lf = 0; $n = 0
+    foreach ($f in @(Get-ProjectFiles $ProjectRoot)) {
+        if ($n -ge 40) { break }
+        if ($f.path -notmatch '(?i)\.(ps1|psm1|psd1|js|mjs|cjs|jsx|ts|tsx|css|scss|html?|json|md|txt|py|cs|java|xml|ya?ml|sql|sh|cmd|bat)$' -or [int64]$f.size -gt 512KB -or $f.path -match '(?i)^source/') { continue }
+        try {
+            $t = [IO.File]::ReadAllText((Resolve-ProjectPath $ProjectRoot $f.path))
+            if ($t.Contains("`n")) { $n++; if ($t.Contains("`r`n")) { $crlf++ } else { $lf++ } }
+        } catch { }
+    }
+    $crlf -gt $lf
+}
 function Test-BinaryFile([string]$Path) {
     $fs = [IO.File]::OpenRead($Path)
     try {
         $buf = New-Object byte[] 4096
         $n = $fs.Read($buf, 0, $buf.Length)
+        # UTF-16 text has zero bytes too: its BOM tells it apart.
+        if ($n -ge 2 -and (($buf[0] -eq 0xFF -and $buf[1] -eq 0xFE) -or ($buf[0] -eq 0xFE -and $buf[1] -eq 0xFF))) { return $false }
         for ($k = 0; $k -lt $n; $k++) { if ($buf[$k] -eq 0) { return $true } }
         $false
     } finally { $fs.Dispose() }
@@ -41,9 +96,60 @@ function Test-MarkupFile([string]$Path) { $script:MarkupExtensions -contains [IO
 
 function ConvertFrom-AngleEntities([string]$Text) { $Text.Replace('&lt;', '<').Replace('&gt;', '>') }
 
+# Code files (not prose, markup or data) where invisible characters from a web chat are never meant.
+$script:CodeTextExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|ps1|psm1|psd1|py|pyw|css|scss|less|json|ya?ml|toml|ini|sh|bash|cmd|bat|cs|java|kt|go|rs|php|sql|c|cc|cpp|h|hpp|swift|dart|lua|r)$'
+$script:Invisible = '[' + [char]0x200B + [char]0x200C + [char]0x200D + [char]0x2060 + [char]0xFEFF + ']'
+$script:OddSpace = '[' + [char]0x00A0 + [char]0x202F + [char]0x2007 + ']'
+
 function Repair-CodeText([string]$Path, [string]$Text) {
+    <# Text from Copilot made fit for the file: &lt; / &gt; back to < and > (not in markup), and in
+       code files the invisible characters a web chat brings along removed (zero-width spaces,
+       a BOM in the middle) and non-breaking spaces made normal spaces. #>
+    if ($Path -match $script:CodeTextExt) {
+        $Text = [regex]::Replace($Text, $script:Invisible, '')
+        $Text = [regex]::Replace($Text, $script:OddSpace, ' ')
+    }
     if (Test-MarkupFile $Path) { return $Text }
     ConvertFrom-AngleEntities $Text
+}
+
+function Find-CodeArtifacts {
+    <# What Copilot's text brings along that does not belong in a code file: invisible characters
+       and odd spaces (removed by Repair-CodeText), curly quotes and long dashes (reported, they
+       may be meant in text), and the replacement character (a sign of broken text). #>
+    param([string]$Path, [string]$Text)
+    $r = @{ removed = 0; curlyLines = @(); replacement = 0 }
+    if ($Path -notmatch $script:CodeTextExt) { return $r }
+    $r.removed = ([regex]::Matches($Text, $script:Invisible)).Count + ([regex]::Matches($Text, $script:OddSpace)).Count
+    $r.replacement = ([regex]::Matches($Text, [string][char]0xFFFD)).Count
+    $curly = '[' + [char]0x201C + [char]0x201D + [char]0x2018 + [char]0x2019 + [char]0x2013 + [char]0x2014 + ']'
+    $lines = $Text.Replace("`r`n", "`n").Split("`n")
+    $r.curlyLines = @(for ($i = 0; $i -lt $lines.Length; $i++) { if ($lines[$i] -match $curly) { $i + 1 } })
+    $r
+}
+
+function Test-EncodingFit {
+    <# Why new text cannot be saved in a file's encoding, or $null: .cmd/.bat must be ASCII; an
+       ANSI file only holds characters of the Windows code page; a new replacement character
+       means the text was garbled. #>
+    param([string]$Path, [string]$Old, [string]$New, [string]$Encoding)
+    $ext = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+    $repl = [string][char]0xFFFD
+    if (([regex]::Matches("$New", $repl)).Count -gt ([regex]::Matches("$Old", $repl)).Count) { return 'the new text contains the replacement character (a sign of garbled text); send the real characters' }
+    if ($ext -in '.cmd', '.bat') {
+        $m = [regex]::Match("$New", '[^\x00-\x7F]')
+        if ($m.Success) { $line = ([regex]::Matches($New.Substring(0, $m.Index), "`n")).Count + 1; return "batch files (.cmd, .bat) must be plain ASCII; line $line has '$($m.Value)'. Use plain characters, or put the text in another file" }
+    }
+    if ($Encoding -eq 'ansi') {
+        $enc = [Text.Encoding]::Default
+        $back = $enc.GetString($enc.GetBytes("$New"))
+        if ($back -cne "$New") {
+            for ($i = 0; $i -lt $New.Length; $i++) { if ($back[$i] -ne $New[$i]) { break } }
+            $line = ([regex]::Matches($New.Substring(0, [Math]::Min($i, $New.Length)), "`n")).Count + 1
+            return "the file is saved in the Windows code page ($($enc.WebName)), which cannot hold '$($New[$i])' (line $line). Use characters of that code page, or ask the user to save the file as UTF-8 first"
+        }
+    }
+    $null
 }
 # --- Checkpoints (undo) --------------------------------------------------------------
 
@@ -450,12 +556,12 @@ function Get-WritePreview {
 function Invoke-WriteAction {
     param([string]$ProjectRoot, [string]$Path, [string]$Content, $Checkpoint)
     $full = Assert-Writable $ProjectRoot $Path
-    $bom = $false; $crlf = $false
-    if (Test-Path -LiteralPath $full -PathType Leaf) { $info = Read-TextFile $full; $bom = $info.Bom; $crlf = $info.Crlf }
     $Content = Repair-CodeText $full $Content
+    if (Test-Path -LiteralPath $full -PathType Leaf) { $info = Read-TextFile $full; $bom = $info.Bom; $crlf = $info.Crlf; $encName = $info.Encoding }
+    else { $fmt = Get-NewFileFormat $full $Content $ProjectRoot; $bom = $fmt.Bom; $crlf = $fmt.Crlf; $encName = $fmt.Encoding }
     if ($Checkpoint) { Save-CheckpointFile $Checkpoint $ProjectRoot $full }
     if (-not $Content.EndsWith("`n")) { $Content += "`n" }
-    Write-TextFile $full $Content $bom $crlf
+    Write-TextFile $full $Content $bom $crlf $encName
     $lines = $Content.Split("`n").Length - 1
     "wrote $(ConvertTo-RelativePath $ProjectRoot $full) ($lines lines)"
 }
@@ -938,7 +1044,7 @@ function Get-EditResult {
     }
     $moveProblem = Test-MoveOrder $ProjectRoot $full $info.Text $text
     if ($moveProblem) { return [pscustomobject]@{ ok = $false; error = $moveProblem } }
-    [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; pairs = $n; notes = @($notes)
+    [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; encoding = $info.Encoding; pairs = $n; notes = @($notes)
         alreadyApplied = @($applied); unchanged = ($text -ceq $info.Text) }
 }
 
@@ -955,7 +1061,7 @@ function Invoke-EditAction {
     $rel = ConvertTo-RelativePath $ProjectRoot $r.full
     if ($r.unchanged) { return Format-AlreadyApplied $rel $r }
     if ($Checkpoint) { Save-CheckpointFile $Checkpoint $ProjectRoot $r.full }
-    Write-TextFile $r.full $r.new $r.bom $r.crlf
+    Write-TextFile $r.full $r.new $r.bom $r.crlf $r.encoding
     if (@($r.alreadyApplied).Count) { return "edited $rel ($($r.pairs - @($r.alreadyApplied).Count) change(s)); " + (@($r.alreadyApplied) -join '; ') + '. If that is not what you meant, send a corrected edit.' }
     "edited $(ConvertTo-RelativePath $ProjectRoot $r.full) ($($r.pairs) change(s))" + $(if (@($r.notes).Count) { "; " + (@($r.notes) -join "; ") + ". Check that this is the right place." } else { '' })
 }
@@ -1140,5 +1246,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

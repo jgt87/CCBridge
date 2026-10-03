@@ -75,7 +75,7 @@ export default function AITextLoading({
               },
             }}
           >
-            {texts[currentTextIndex]}
+            {texts[currentTextIndex % texts.length]}
           </motion.div>
         </AnimatePresence>
       </motion.div>

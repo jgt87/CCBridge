@@ -19,7 +19,7 @@ export function SchedulesSummary({ schedules, onOpen }: { schedules: ScheduleIte
     >
       <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1">
-        <span className="block font-medium text-sm">Scheduled</span>
+        <span className="block font-medium text-sm">Open schedules</span>
         <span className="block truncate text-muted-foreground text-xs">
           {schedules.length === 0
             ? "Run messages, fetches and runbooks on set days and times"

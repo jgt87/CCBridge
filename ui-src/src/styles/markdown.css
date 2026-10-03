@@ -1,0 +1,70 @@
+/* Markdown and code views (MarkdownView, CodeBlock, CodeView). The UI stays monochrome; syntax
+   colors are content, in GitHub's palette for light and dark. */
+
+/* --- text */
+.ccb-markdown h1 { font-size: 1.5em; }
+.ccb-markdown h2 { font-size: 1.25em; }
+.ccb-markdown h3 { font-size: 1.1em; }
+.ccb-markdown h1, .ccb-markdown h2 { padding-bottom: 0.2rem; border-bottom: 1px solid color-mix(in oklab, currentColor 12%, transparent); }
+.ccb-markdown h4, .ccb-markdown h5, .ccb-markdown h6 { font-weight: 600; margin: 0.7rem 0 0.3rem; }
+.ccb-markdown blockquote { border-left: 3px solid color-mix(in oklab, currentColor 20%, transparent); padding: 0.1rem 0 0.1rem 0.8rem; margin: 0.5rem 0; color: color-mix(in oklab, currentColor 75%, transparent); }
+.ccb-markdown hr { border: 0; border-top: 1px solid color-mix(in oklab, currentColor 15%, transparent); margin: 1rem 0; }
+.ccb-markdown img { max-width: 100%; display: inline-block; }
+.ccb-markdown ul.contains-task-list { list-style: none; padding-left: 0.25rem; }
+.ccb-markdown .task-list-item input { margin-right: 0.4rem; accent-color: #71717a; }
+.ccb-markdown details { margin: 0.5rem 0; }
+.ccb-markdown summary { cursor: pointer; font-weight: 500; }
+.ccb-markdown kbd { font-family: ui-monospace, Consolas, monospace; font-size: 0.8em; padding: 0.05rem 0.35rem; border: 1px solid color-mix(in oklab, currentColor 25%, transparent); border-radius: 0.25rem; }
+.ccb-markdown table { display: block; overflow-x: auto; }
+.ccb-markdown th { font-weight: 600; background: color-mix(in oklab, currentColor 5%, transparent); }
+.ccb-markdown h1[id], .ccb-markdown h2[id], .ccb-markdown h3[id], .ccb-markdown h4[id] { scroll-margin-top: 0.5rem; }
+
+/* --- footnotes (remark-gfm) */
+.ccb-markdown section.footnotes { margin-top: 1.5rem; font-size: 0.85em; color: color-mix(in oklab, currentColor 75%, transparent); border-top: 1px solid color-mix(in oklab, currentColor 12%, transparent); }
+.ccb-markdown sup a { text-decoration: none; }
+.ccb-markdown .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* --- front matter */
+.ccb-markdown table.md-frontmatter { font-size: 0.8em; margin: 0 0 1rem; }
+.ccb-markdown table.md-frontmatter th { text-align: left; color: color-mix(in oklab, currentColor 70%, transparent); }
+
+/* --- callouts (> [!NOTE] ...): grey, told apart by their title */
+.ccb-markdown blockquote.md-alert { color: inherit; border-left-width: 3px; background: color-mix(in oklab, currentColor 4%, transparent); border-radius: 0 0.4rem 0.4rem 0; padding: 0.4rem 0.8rem; }
+.ccb-markdown .md-alert-title { font-weight: 600; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 0.2rem; }
+.ccb-markdown .md-alert-warning, .ccb-markdown .md-alert-caution { border-left-color: color-mix(in oklab, currentColor 55%, transparent); }
+.ccb-markdown .md-alert-important { border-left-color: color-mix(in oklab, currentColor 40%, transparent); }
+
+/* --- math (KaTeX) */
+.ccb-markdown .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.25rem 0; }
+
+/* --- diagrams */
+.ccb-markdown .md-diagram { margin: 0.75rem 0; overflow-x: auto; text-align: center; }
+.ccb-markdown .md-diagram svg { max-width: 100%; height: auto; }
+.ccb-markdown .md-diagram-error { margin: 0.5rem 0; }
+
+/* --- code blocks */
+.ccb-markdown .md-code pre { margin: 0.5rem 0; }
+
+/* --- syntax colors (highlight.js classes) */
+.hljs-comment, .hljs-quote { color: #6e7781; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-type, .hljs-meta .hljs-keyword, .hljs-doctag, .hljs-template-tag { color: #cf222e; }
+.hljs-string, .hljs-regexp, .hljs-meta .hljs-string, .hljs-addition { color: #0a3069; }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet, .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id { color: #0550ae; }
+.hljs-title, .hljs-title.function_, .hljs-title.class_, .hljs-section { color: #8250df; }
+.hljs-built_in, .hljs-name, .hljs-tag { color: #116329; }
+.hljs-params, .hljs-subst { color: inherit; }
+.hljs-meta, .hljs-selector-pseudo { color: #953800; }
+.hljs-deletion { color: #82071e; background: #ffebe9; }
+.hljs-addition { background: #dafbe1; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+.dark .hljs-comment, .dark .hljs-quote { color: #8b949e; }
+.dark .hljs-keyword, .dark .hljs-selector-tag, .dark .hljs-type, .dark .hljs-meta .hljs-keyword, .dark .hljs-doctag, .dark .hljs-template-tag { color: #ff7b72; }
+.dark .hljs-string, .dark .hljs-regexp, .dark .hljs-meta .hljs-string, .dark .hljs-addition { color: #a5d6ff; }
+.dark .hljs-number, .dark .hljs-literal, .dark .hljs-symbol, .dark .hljs-bullet, .dark .hljs-attr, .dark .hljs-attribute, .dark .hljs-variable, .dark .hljs-template-variable, .dark .hljs-selector-attr, .dark .hljs-selector-class, .dark .hljs-selector-id { color: #79c0ff; }
+.dark .hljs-title, .dark .hljs-title.function_, .dark .hljs-title.class_, .dark .hljs-section { color: #d2a8ff; }
+.dark .hljs-built_in, .dark .hljs-name, .dark .hljs-tag { color: #7ee787; }
+.dark .hljs-meta, .dark .hljs-selector-pseudo { color: #ffa657; }
+.dark .hljs-deletion { color: #ffdcd7; background: #67060c; }
+.dark .hljs-addition { background: #033a16; }

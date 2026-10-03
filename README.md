@@ -57,7 +57,11 @@ Requirements: Windows 10/11, Windows PowerShell 5.1 in FullLanguage mode, Micros
 - **Approvals**: file changes show a diff with *Apply change* / *Reject* (optionally with a note for Copilot); commands need a press-and-hold on *Hold to run*. An action approved by another program (the local API or MCP) is marked *via API* / *via MCP* on its card and in the log, so you can always tell who approved what.
 - **Stop** (square button while Copilot works) acts immediately: it presses Copilot's own Stop while it is writing, kills a running command with everything it started, or rejects a pending approval. Changes made so far stay undoable.
 - **New chat** starts a fresh Copilot conversation and a clean chat view (stopping the current step first if needed); the Changes tab keeps the undo history.
-- **Side panel** (left): *Files* (project tree, upload of source data, click to view a file; changed files show `+added -removed` line counts since the project was opened, folders show their totals), *Tasks* (Copilot's checklist), *Changes* (every message is a change set; *Undo last change set*).
+- **Issues, found and fixed in cycles** (beta): every project file is indexed for problems without a language model: errors (broken syntax per file type, unclosed blocks and strings, missing local files, unknown commands), secrets in code, and code health (functions that are very complex, deeply nested or long). The cycle: *index* (in the background when a project opens) -> *change* -> *scan the changed files* -> *queue a fix task per file* for problems the change added -> *apply* -> *scan again*; a problem still there gets another attempt (2 by default), then it is marked *gave up*. The Changes tab lists every issue by file, with *Fix*, *Fix all* (pick errors, secrets, code health), *Ignore* and *Re-index*, plus a summary of all projects. While StreamHub indexes or scans, it says so in the chat as it does while waiting for Copilot, and a bar on the Files tab runs from left to right; files with open issues show a count in the tree. Settings > Issues: on/off, what is fixed automatically (errors by default), attempts per file.
+- **Code review** (beta, Changes tab): Copilot reviews the whole project, the changes since you opened it, or chosen files, read-only, for bugs, security, performance, structure, readability or tests. Every finding is checked against the file (its quoted lines must be there), the report is saved in `reviews/`, and you pick the findings to fix; each becomes a task in the queue.
+- **File viewer**: click a file to view it. Markdown is rendered as on GitHub (tables, task lists, footnotes, callouts such as `> [!NOTE]`, HTML such as `<details>`, cleaned of scripts), with Mermaid diagrams, math (`$...$`, `$$...$$`), code blocks with syntax colors and a copy button, front matter as a small table, links that open other project files and images from the project; *Source* shows the text. Code files show line numbers and syntax colors. Chat replies use the same rendering, and so do Copilot's actions in the chat: changes show as a diff with syntax colors (a Markdown file also as *Rendered*), and file contents in read and edit results show with colors and their real line numbers. Everything is bundled: nothing is loaded from the internet.
+- **Settings** (Menu > Settings) are kept per computer; *Reset all to defaults* puts every setting back to the app default.
+- **Side panel** (left; always shown on a wide window, on a narrow one a button opens it over the chat). Each tab has sections that fold away (remembered in the browser), and the panel reopens on the last tab: *Files* (Source data, Index, Files: the project tree; click to view a file; changed files show `+added -removed` line counts since the project was opened, folders show their totals, files with open issues a count), *Tasks* (Plan: Copilot's checklist, Queue, Scheduled), *Changes* (Change sets with *Undo last change set*, Issues, Code review), *Fetch* (Runbooks, Fetch prompts).
 - **Menu** (top right, or Ctrl+K): new Copilot chat, undo, switch project, attach a file, change mode, open any file, verbose logging on/off, export diagnostics.
 - Attach files to a message with `@path` (or the @ button) so Copilot gets their full content.
 - Monochrome, flat interface built with [Kokonut UI](https://kokonutui.com) components; served from prebuilt files, so the target machine never needs Node.
@@ -481,6 +485,7 @@ stateDiagram-v2
 | `<project>\PLAN.md` | Every decision of Clarify-first requests: questions, answers, plan versions, approval, result |
 | `<project>\evidence\` | Per task: what was asked, what changed, which checks passed |
 | `<project>\reviews\` | Code review reports (`.md`) and their findings (`.json`) |
+| `<project>\.streamhub\issues.json` | The project's issue details: every problem found per file, with its status (open, fixing, gave up, ignored) |
 | `<project>\runbooks\`, `exports\`, `fetch\` | Runbooks and their JSON exports; fetch prompts and their answers |
 | `%LOCALAPPDATA%\Programs\CCBridge` | The installed application |
 | `%LOCALAPPDATA%\CCBridge\edge-profile` | The Edge profile StreamHub uses for Copilot (your sign-in) |
@@ -488,6 +493,7 @@ stateDiagram-v2
 | `%LOCALAPPDATA%\CCBridge\logs` | Diagnostic logs (14 days) |
 | `%LOCALAPPDATA%\CCBridge\replies` | Raw data of the last 30 Copilot replies (`saveReplyFrames`) |
 | `%LOCALAPPDATA%\CCBridge\session-token.txt` | Token that protects the local web API |
+| `%LOCALAPPDATA%\CCBridge\issue-index.json` | The app-wide issue index: one summary per project, imported from each project's `.streamhub\issues.json` |
 | `%LOCALAPPDATA%\CCBridge\queue.json`, `queue-pause.json`, `schedules.json` | The queue, the daily-limit pause and the schedules, kept across restarts |
 
 ---
@@ -497,5 +503,5 @@ stateDiagram-v2
 - Backend: `lib/*.psm1` (Cdp, CopilotBridge, Workspace, Protocol, Executor, Agent, Server, Config, Log, Prompts, Fetch, Runbook, Schedule, Review, PlanFile, AppWindow) and `mcp/ccbridge-mcp.ps1`; the diagrams in [How it works](#how-it-works) show how they connect. The running web app keeps modules in memory: restart it after backend changes.
 - Interface: React + Vite + Tailwind with Kokonut UI components (adapted in `ui-src/src/components/kokonutui`); `npm run build` in `ui-src` writes the committed `ui/` folder.
 - Tests: `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Pester .\tests"` (Pester 3.4, ships with Windows; run under Windows PowerShell 5.1).
-- Release: `tools\build-release.ps1 -Version vX.Y.Z` builds `dist\CCBridge-vX.Y.Z.zip`; publish it as a GitHub Release asset.
+- Release: `tools\build-release.ps1 -Version vX.Y.Z [-NotesFile NOTES.md]` builds `dist\CCBridge-vX.Y.Z.zip`, tags the current commit `vX.Y.Z` (locally and on GitHub) and publishes the GitHub Release with the zip. Every version has its tag and its release; `-NoPublish` only builds the zip.
 - Contributor notes, PowerShell 5.1 pitfalls and Copilot quirks: [AGENTS.md](AGENTS.md).

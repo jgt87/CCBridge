@@ -3,7 +3,7 @@
 $ErrorActionPreference = 'Stop'
 
 $script:IgnoredDirs = @('.git', 'node_modules', 'bin', 'obj', 'dist', 'build', 'out', 'target', '.vs', '.vscode',
-                        '.idea', '__pycache__', '.venv', 'venv', '.next', '.ccbridge', '.pytest_cache')
+                        '.idea', '__pycache__', '.venv', 'venv', '.next', '.ccbridge', '.streamhub', '.pytest_cache')
 
 function Get-OneDriveRoot {
     foreach ($p in $env:OneDriveCommercial, $env:OneDrive, $env:OneDriveConsumer) {

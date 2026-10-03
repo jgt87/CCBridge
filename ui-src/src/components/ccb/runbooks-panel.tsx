@@ -52,7 +52,6 @@ export function RunbooksPanel({
 
   return (
     <div className="space-y-2">
-      <div className="font-medium text-sm">Runbooks</div>
       <p className="text-muted-foreground text-xs">
         Repeatable, read-only exports of Microsoft 365 data to JSON. Each runbook is a file in <span className="font-mono">runbooks/</span> with the sources, period, JSON
         shape and rules; edit it there. Results are checked and saved in <span className="font-mono">exports/</span>.

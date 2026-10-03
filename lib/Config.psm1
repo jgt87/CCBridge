@@ -82,6 +82,9 @@ $script:SettingDefs = @(
     @{ key = 'reviewMinLines'; group = 'Checks'; label = 'Big change from (lines)'; help = 'Changed lines from which a change counts as big.'; type = 'number'; min = 5; max = 1000 }
     @{ key = 'pageCheck'; group = 'Checks'; label = 'Page check'; help = 'After web files change, open the page in a browser tab and report JavaScript errors and files that fail to load.'; type = 'select'; options = @('on', 'off') }
     @{ key = 'evidence'; group = 'Checks'; label = 'Evidence per task'; help = 'After a task that changed files, save what was asked, what changed and which checks passed to evidence/ in the project.'; type = 'select'; options = @('on', 'off') }
+    @{ key = 'issues.enabled'; group = 'Issues'; label = 'Issue detection'; help = 'Keep an index of problems in every project file (file checks, secrets, code health) and scan the changed files after each task.'; type = 'select'; options = @('on', 'off') }
+    @{ key = 'issues.autoFix'; group = 'Issues'; label = 'Fix automatically'; help = 'Problems a task adds that StreamHub sends back to Copilot to fix, one file at a time: error (broken syntax, missing files, typos), secret (keys and passwords in code), health (functions that are too complex). The rest is only reported.'; type = 'select'; options = @('error', 'error,secret', 'error,secret,health', 'none') }
+    @{ key = 'issues.maxAttempts'; group = 'Issues'; label = 'Fix attempts per file'; help = 'Fix tasks per file before its remaining problems are marked "gave up".'; type = 'number'; min = 1; max = 5 }
     @{ key = 'appWindow'; group = 'Copilot'; label = 'Open StreamHub'; help = 'copilot-tab: as a tab in the Copilot window, ready for Edge''s Split screen; side-by-side: its own window, with Copilot on the right half of the screen; browser: in your default browser. Applies at the next start.'; type = 'select'; options = @('copilot-tab', 'side-by-side', 'browser') }
     @{ key = 'responseMode'; group = 'Copilot'; label = 'Response mode'; help = 'Copilot''s Auto / Quick response / Think deeper picker: leave = as set on the page.'; type = 'select'; options = @('leave', 'auto', 'quick', 'deep') }
     @{ key = 'resultCharBudget'; group = 'Sizes'; label = 'Results per round (characters)'; help = 'Room for file contents and command output sent back to Copilot in one message.'; type = 'number'; min = 10000; max = 120000 }
@@ -140,6 +143,16 @@ function Set-CCBridgeSetting {
     Get-SettingValue (Get-CCBridgeConfig harness $AppRoot) $Key
 }
 
+function Reset-CCBridgeSettings {
+    <# Puts every adjustable setting back to the app default (removes them from harness.local.json;
+       other local values, such as the ports, stay). Returns the keys that were changed. #>
+    param([string]$AppRoot)
+    if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
+    $changed = @(Get-CCBridgeSettings $AppRoot | Where-Object custom | ForEach-Object { $_.key })
+    foreach ($d in $script:SettingDefs) { $null = Set-CCBridgeSetting $d.key $null $AppRoot }
+    $changed
+}
+
 function Get-CCBridgeEnvironment {
     <# Facts that help diagnose a machine; no personal data. #>
     param([string]$AppRoot)
@@ -163,4 +176,4 @@ function Get-CCBridgeEnvironment {
     }
 }
 
-Export-ModuleMember -Function Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting
+Export-ModuleMember -Function Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings

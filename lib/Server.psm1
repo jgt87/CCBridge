@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -94,7 +94,20 @@ function Get-StateSnapshot($State) {
         commit = $(if ($State.Build) { [string]$State.Build.commit } else { '' })
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
         workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
+        activity = (Get-ActivityView $State)
+        previewBase = "/preview/$($State.PreviewToken)/"   # images in Markdown files (read-only project files)
+        issueStamp = $(if ($State.ProjectRoot) { $p = Get-IssueIndexPath $State.ProjectRoot; if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTimeUtc.Ticks.ToString() } else { '' } } else { '' })
     }
+}
+
+function Get-ActivityView($State) {
+    <# What StreamHub itself is busy with (indexing, scanning for issues), shown like "waiting for
+       Copilot". The worker's step comes first; else the background index run. #>
+    $view = $null
+    foreach ($a in $State.Activity, $State.Indexing) {
+        if ($a -and $a.label -and -not $view) { $view = @{ label = [string]$a.label; done = [int]$a.done; total = [int]$a.total; current = [string]$a.current; background = [bool]($a -eq $State.Indexing) } }
+    }
+    $view
 }
 
 function Invoke-ApiRequest($Ctx, $State) {
@@ -376,6 +389,45 @@ function Invoke-ApiRequest($Ctx, $State) {
             $State.WorkIq = [string]$b.value; $State.WorkIqWarned = $false
             return Send-Json $Ctx @{ ok = $true }
         }
+        '^GET /api/issues$' {
+            $items = @(); $summary = $null
+            if ($State.ProjectRoot) { $items = @(Get-IssueReport $State.ProjectRoot) }
+            $projects = @(Get-AppIssueIndex -AlsoProjects @($State.ProjectRoot))
+            if ($State.ProjectRoot) { $summary = @($projects | Where-Object { $_.root -eq $State.ProjectRoot.TrimEnd('\') }) | Select-Object -First 1 }
+            return Send-Json $Ctx @{ items = $items; summary = $summary; projects = $projects; indexing = @{ running = [bool]$State.Indexing.running; last = $State.Indexing.last; error = $State.Indexing.error }; settings = (Get-IssueSettings $State) }
+        }
+        '^POST /api/issues/reindex$' {
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $started = Start-IssueIndexer $State $State.ProjectRoot -Force:([bool]$b.force)
+            return Send-Json $Ctx @{ ok = $true; started = $started }
+        }
+        '^POST /api/issues/fix$' {
+            # Fix on a file (or all files): one queued task per file, the same cycle as after a task.
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $cats = @($b.categories | Where-Object { $_ }); if (-not $cats.Count) { $cats = @('error', 'secret', 'health') }
+            $paths = @($b.paths | Where-Object { $_ })
+            $todo = @(Get-IssueReport $State.ProjectRoot | Where-Object { $_.status -in 'open', 'gave up' -and $_.category -in $cats -and (-not $paths.Count -or $_.path -in $paths) })
+            $n = 0
+            foreach ($g in @($todo | Group-Object path)) { if (Submit-IssueFix $State $g.Name @($g.Group) 1 $cats) { $n++ } }
+            return Send-Json $Ctx @{ ok = $true; queued = $n; issues = $todo.Count }
+        }
+        '^POST /api/issues/ignore$' {
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $ids = @($b.ids | Where-Object { $_ }); if (-not $ids.Count) { throw 'No issues given.' }
+            Set-IssueState $State.ProjectRoot $ids $(if ($b.undo) { 'open' } else { 'ignored' }) -Attempts 0
+            return Send-Json $Ctx @{ ok = $true }
+        }
+        '^POST /api/settings/reset$' {
+            $changed = @(Reset-CCBridgeSettings $State.AppRoot)
+            $keep = @{ port = $State.Config.port; cdpPort = $State.Config.cdpPort }
+            $State.Config = Get-CCBridgeConfig harness $State.AppRoot
+            $State.Config.port = $keep.port; $State.Config.cdpPort = $keep.cdpPort
+            Write-CCBLog info server 'Settings reset to the app defaults' @{ changed = $changed -join ', ' }
+            return Send-Json $Ctx @{ ok = $true; changed = $changed; settings = @(Get-CCBridgeSettings $State.AppRoot) }
+        }
         '^GET /api/settings$' { return Send-Json $Ctx @{ settings = @(Get-CCBridgeSettings $State.AppRoot) } }
         '^POST /api/settings$' {
             $b = Read-JsonBody $Ctx
@@ -434,6 +486,8 @@ function Set-Project($State, [string]$Path) {
     $State.Todos = @()
     $State.NeedNewChat = $State.NeedNewChat -or $State.ChatStarted   # a new project starts a fresh Copilot chat
     Add-AgentEvent $State 'project' @{ name = (Split-Path $Path -Leaf); path = $Path }
+    try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue fix reset' $_ }
+    try { $null = Start-IssueIndexer $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue index' $_ }   # step 1 of the issue cycle, in the background
     try { [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'), $State.ProjectRoot) } catch { }
 }
 

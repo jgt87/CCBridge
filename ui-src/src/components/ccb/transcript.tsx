@@ -2,10 +2,9 @@ import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "l
 import { ClarifyCard, type ClarifyQuestion, PlanCard } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
 import { useEffect, useRef , useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { MarkdownView } from "./markdown-view";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
-import type { AgentEvent, Reference } from "@/lib/api";
+import type { Activity, AgentEvent, Reference } from "@/lib/api";
 import { stripActionBlocks } from "@/lib/diff";
 import { cn } from "@/lib/utils";
 import { ActionCard, type ActionItem } from "./action-card";
@@ -123,11 +122,7 @@ export function buildTranscript(events: AgentEvent[]): TranscriptItem[] {
 // --- Rendering ---------------------------------------------------------------------------
 
 function Markdown({ text }: { text: string }) {
-  return (
-    <div className="ccb-markdown text-sm leading-relaxed">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-    </div>
-  );
+  return <MarkdownView frontMatter={false} text={text} />;
 }
 
 /** Sources Copilot cited: with Work IQ these are emails, Teams chats, meetings and files. */
@@ -299,22 +294,30 @@ function TranscriptRow({
   }
 }
 
-function thinkingTexts(progress: string, stopping: boolean): string[] {
+function activityText(a: Activity): string {
+  return a.total ? `${a.label} (${a.done} of ${a.total} files)` : `${a.label}...`;
+}
+
+function thinkingTexts(progress: string, stopping: boolean, activity: Activity | null): string[] {
   if (stopping) return ["Stopping..."];
+  if (activity?.label) return [activityText(activity)];
   if (progress) return ["Copilot is writing...", "Receiving the reply..."];
   return ["Asking Copilot...", "Waiting for the reply...", "Copilot is thinking..."];
 }
 
-function ThinkingIndicator({ progress, stopping }: { progress: string; stopping: boolean }) {
+function ThinkingIndicator({ progress, stopping, activity }: { progress: string; stopping: boolean; activity: Activity | null }) {
+  // StreamHub's own work (indexing, scanning for issues): the same indicator, its own text.
+  const own = Boolean(activity?.label);
   return (
     <div className="rounded-xl border border-black/10 border-dashed px-3 py-2 dark:border-white/10">
       <AITextLoading
         className="font-semibold text-base"
         containerClassName="justify-start p-0"
         interval={1800}
-        texts={thinkingTexts(progress, stopping)}
+        texts={thinkingTexts(progress, stopping, activity)}
       />
-      {progress && (
+      {own && activity?.current && <div className="mt-1 truncate font-mono text-muted-foreground text-xs">{activity.current}</div>}
+      {progress && !own && (
         <pre className="mt-2 max-h-32 overflow-hidden whitespace-pre-wrap font-mono text-muted-foreground text-xs [mask-image:linear-gradient(to_bottom,transparent,black_40%)]">
           {progress.slice(-700)}
         </pre>
@@ -328,6 +331,7 @@ const rowKey = (it: TranscriptItem) => (it.kind === "action" ? it.item.id : it.s
 export function Transcript({
   items,
   busy,
+  activity = null,
   progress,
   empty,
   stopping = false,
@@ -338,6 +342,8 @@ export function Transcript({
 }: {
   items: TranscriptItem[];
   busy: boolean;
+  /** StreamHub's own work besides Copilot (indexing, scanning for issues). */
+  activity?: Activity | null;
   progress: string;
   empty?: React.ReactNode;
   stopping?: boolean;
@@ -358,14 +364,14 @@ export function Transcript({
   }, [items.length, busy, awaiting, progress.length > 0]);
 
   // A fresh chat shows the welcome view until something happens in it.
-  if (!busy && items.every((i) => i.kind === "note" && i.tone === "info")) return <>{empty}</>;
+  if (!busy && !activity?.label && items.every((i) => i.kind === "note" && i.tone === "info")) return <>{empty}</>;
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-[max(48rem,80%)] flex-col gap-3 px-4 py-6">
       {items.map((it) => (
         <TranscriptRow item={it} key={rowKey(it)} onOpenFile={onOpenFile} onResendAsCoding={onResendAsCoding} onSend={onSend} onUsePrompt={onUsePrompt} />
       ))}
-      {busy && !awaiting && <ThinkingIndicator progress={progress} stopping={stopping} />}
+      {(busy || activity?.label) && !awaiting && <ThinkingIndicator activity={activity} progress={progress} stopping={stopping} />}
       <div ref={endRef} />
     </div>
   );

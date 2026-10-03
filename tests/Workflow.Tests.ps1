@@ -75,7 +75,7 @@ Describe 'Save-TaskEvidence' {
         $t = [IO.File]::ReadAllText((Join-Path $p $rel))
         $t | Should Match 'Fix the total'
         $t | Should Match '`js/app\.js` \+3 -1'
-        $t | Should Match 'Syntax check: passed'
+        $t | Should Match 'File checks \(syntax and structure per file type\): passed'
         $t | Should Match 'Copilot consistency review: done'
         $t | Should Match 'Verify: FAILED \(`npm test`, exit 1\)'
         $t | Should Match 'Copilot messages: 4'
