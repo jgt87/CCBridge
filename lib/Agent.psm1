@@ -39,6 +39,7 @@ function New-AgentState {
         Activity = [hashtable]::Synchronized(@{ label = ''; done = 0; total = 0; current = '' })
         Indexing = [hashtable]::Synchronized(@{ running = $false; label = ''; done = 0; total = 0; current = ''; project = $null; last = $null; error = $null })
         IssueFix = $null; IssueFixHandled = $false
+        SaveHistory = $false   # set by the web app: the chat is kept per project (Save-ChatEvent / Restore-ChatHistory)
     })
 }
 
@@ -60,8 +61,10 @@ function Add-AgentEvent {
     [Threading.Monitor]::Enter($State.Events.SyncRoot)
     try {
         $State.Seq++
-        $Data.seq = $State.Seq; $Data.type = $Type; $Data.time = (Get-Date).ToString('HH:mm:ss')
-        if ($Type -eq 'error') {
+        $Data.seq = $State.Seq; $Data.type = $Type
+        # A restored event keeps its own time (with the date when it was not today).
+        if (-not $Data.restored) { $Data.time = (Get-Date).ToString('HH:mm:ss'); $Data.at = (Get-Date).ToString('s') }
+        if ($Type -eq 'error' -and -not $Data.restored) {
             # For investigation: an id that is also in the log, a category, a hint and the technical detail.
             $rec = $Data.record; [void]$Data.Remove('record')
             if (-not $Data.text -and $rec) { $Data.text = "$($rec.Exception.Message)" }
@@ -84,7 +87,8 @@ function Add-AgentEvent {
             })
         }
         [void]$State.Events.Add($Data)
-        switch ($Type) {
+        # A restored event was logged when it happened.
+        if (-not $Data.restored) { switch ($Type) {
             'error'          { Write-CCBLog info agent "ERROR $($Data.errId) [$($Data.code)] $($Data.text)" @{ hint = $Data.hint; detail = $Data.detail } }
             'human-required' { Write-CCBLog info agent "HUMAN REQUIRED: $($Data.text)" }
             'status'         { Write-CCBLog verbose agent "status: $($Data.text)" }
@@ -102,10 +106,102 @@ function Add-AgentEvent {
             'undo'           { Write-CCBLog info agent "undo: $($Data.text)" }
             'fetch'          { Write-CCBLog info agent "fetched $($Data.name) -> $($Data.path)" }
             'runbook'        { Write-CCBLog info agent "runbook $($Data.name) -> $($Data.path)" }
-        }
+        } }
         # Keep memory bounded; the UI only needs recent history after a reload.
         if ($State.Events.Count -gt 2000) { $State.Events.RemoveRange(0, 500) }
+        if ($State.SaveHistory -and $State.ProjectRoot -and $Type -notin 'project', 'history-cleared' -and -not $Data.restored) {
+            try { Save-ChatEvent $State.ProjectRoot $Data } catch { Write-CCBLogError agent 'chat history' $_ }
+        }
     } finally { [Threading.Monitor]::Exit($State.Events.SyncRoot) }
+}
+
+# --- Chat history: kept per project, back after a restart ------------------------------------
+# One JSON line per event in the project's state folder (%LOCALAPPDATA%\CCBridge\projects\...,
+# not OneDrive: replies can hold Microsoft 365 data, and every event would make OneDrive sync).
+
+$script:HistoryMaxEvents = 1500     # the most a project's history holds: older events are removed past this
+$script:HistoryMaxEventChars = 200000
+$script:HistoryCounts = @{}         # history file -> events in it (counted once, then kept up to date)
+
+function Get-ChatHistoryPath([string]$ProjectRoot) { Join-Path (Get-ProjectStateDir $ProjectRoot) 'chat-history.jsonl' }
+
+function Save-ChatEvent {
+    <# Appends one event to the project's chat history. A very large event (a big file in a change
+       preview) is kept without the file contents, so the card still shows what happened. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][hashtable]$Event)
+    $json = ConvertTo-Json -InputObject $Event -Depth 6 -Compress
+    if ($json.Length -gt $script:HistoryMaxEventChars) {
+        $copy = @{}; foreach ($k in $Event.Keys) { $copy[$k] = $Event[$k] }
+        if ($copy.preview) { $copy.preview = @{ path = $copy.preview.path; exists = $copy.preview.exists; old = $null; new = '(too large to keep in the chat history)' } }
+        foreach ($k in 'output', 'text', 'detail') { if ("$($copy[$k])".Length -gt 50000) { $copy[$k] = "$($copy[$k])".Substring(0, 50000) + "`n... (shortened in the chat history)" } }
+        $json = ConvertTo-Json -InputObject $copy -Depth 6 -Compress
+    }
+    $file = Get-ChatHistoryPath $ProjectRoot
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $file)
+    [IO.File]::AppendAllText($file, $json + "`n", (New-Object Text.UTF8Encoding($false)))
+    # Never more than HistoryMaxEvents: past that, the oldest events are removed.
+    $n = if ($script:HistoryCounts.ContainsKey($file)) { $script:HistoryCounts[$file] + 1 } else { @([IO.File]::ReadAllLines($file) | Where-Object { $_.Trim() }).Count }
+    if ($n -gt $script:HistoryMaxEvents) { $n = Limit-ChatHistory $file }
+    $script:HistoryCounts[$file] = $n
+}
+
+function Limit-ChatHistory([string]$File) {
+    # Keeps the newest HistoryMaxEvents events of a history file; returns how many it holds now.
+    $lines = @([IO.File]::ReadAllLines($File) | Where-Object { $_.Trim() } | Select-Object -Last $script:HistoryMaxEvents)
+    [IO.File]::WriteAllText($File, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
+    $lines.Count
+}
+
+function Reset-ChatHistoryCount([string]$File) { $script:HistoryCounts.Remove($File) }
+
+function Read-ChatHistory {
+    <# The project's saved events, oldest first (at most -Max). Unreadable lines are skipped; a file
+       holding more than HistoryMaxEvents (from before this limit) is trimmed to it. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [int]$Max = $script:HistoryMaxEvents)
+    $file = Get-ChatHistoryPath $ProjectRoot
+    if (-not (Test-Path -LiteralPath $file)) { return @() }
+    $lines = @([IO.File]::ReadAllLines($file) | Where-Object { $_.Trim() })
+    if ($lines.Count -gt $script:HistoryMaxEvents) { $null = Limit-ChatHistory $file; $lines = @($lines | Select-Object -Last $script:HistoryMaxEvents) }
+    $script:HistoryCounts[$file] = $lines.Count
+    foreach ($l in @($lines | Select-Object -Last $Max)) {
+        try { $o = $l | ConvertFrom-Json } catch { continue }
+        if ($o -and $o.type) { $o }
+    }
+}
+
+function ConvertTo-EventHash($Object) {
+    # A saved event (JSON object, also nested) as hashtables, the shape Add-AgentEvent works with.
+    if ($null -eq $Object) { return $null }
+    if ($Object -is [string] -or $Object -is [ValueType]) { return $Object }
+    if ($Object -is [System.Collections.IEnumerable] -and $Object -isnot [System.Management.Automation.PSCustomObject]) { return , @($Object | ForEach-Object { ConvertTo-EventHash $_ }) }
+    $h = @{}; foreach ($p in $Object.PSObject.Properties) { $h[$p.Name] = ConvertTo-EventHash $p.Value }
+    $h
+}
+
+function Restore-ChatHistory {
+    <# Puts the project's earlier conversation back in the chat, after a restart or when the project
+       is opened again. An action that was still waiting for approval or running is marked
+       "interrupted": its task ended with the restart, so it cannot be approved any more. Copilot
+       starts a new chat, so a note says it does not remember the earlier one. Returns the count. #>
+    param($State, [Parameter(Mandatory)][string]$ProjectRoot)
+    $saved = @(Read-ChatHistory $ProjectRoot)
+    if (-not $saved.Count) { return 0 }
+    $final = @{}   # action id -> last status seen
+    foreach ($e in $saved) { if ($e.type -in 'action', 'action-result' -and $e.id -and $e.status) { $final["$($e.id)"] = "$($e.status)" } }
+    $today = (Get-Date).ToString('yyyy-MM-dd')
+    foreach ($e in $saved) {
+        $h = ConvertTo-EventHash $e
+        $type = "$($h.type)"; [void]$h.Remove('type'); [void]$h.Remove('seq')
+        $h.restored = $true
+        if ($h.at -and "$($h.at)".Substring(0, 10) -ne $today) { $h.time = ([datetime]"$($h.at)").ToString('yyyy-MM-dd HH:mm') }
+        Add-AgentEvent $State $type $h
+    }
+    foreach ($id in @($final.Keys | Where-Object { $final[$_] -in 'awaiting', 'running' })) {
+        Add-AgentEvent $State 'action-result' @{ id = $id; status = 'interrupted'; restored = $true; time = (Get-Date).ToString('HH:mm:ss') }
+    }
+    Add-AgentEvent $State 'status' @{ text = 'Above: the earlier conversation in this project. Copilot starts a new chat for your next message and does not remember it; mention what it should build on.'; restored = $true; time = (Get-Date).ToString('HH:mm:ss') }
+    Write-CCBLog info agent 'Chat history restored' @{ project = $ProjectRoot; events = $saved.Count }
+    $saved.Count
 }
 
 function Get-AgentEvents {
@@ -2102,4 +2198,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

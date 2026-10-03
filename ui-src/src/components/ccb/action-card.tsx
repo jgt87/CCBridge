@@ -26,7 +26,7 @@ export interface ActionItem {
   id: string;
   action: string;
   target: string;
-  status: string; // running | awaiting | ok | already applied | failed | rejected | skipped
+  status: string; // running | awaiting | ok | already applied | failed | rejected | skipped | interrupted
   preview?: Preview | null;
   warning?: string | null;
   error?: string;
@@ -69,8 +69,10 @@ function StatusBadge({ status }: { status: string }) {
     failed: "text-rose-500",
     rejected: "text-zinc-500",
     skipped: "text-zinc-500",
+    interrupted: "text-zinc-500",
   };
   const label: Record<string, string> = {
+    interrupted: "interrupted (StreamHub restarted)",
     running: "running",
     awaiting: "needs approval",
     ok: "done",

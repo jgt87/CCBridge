@@ -6,13 +6,19 @@ export function MermaidBlock({ code }: { code: string }) {
   const id = `mmd-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [svg, setSvg] = useState("");
   const [error, setError] = useState("");
+  // Redrawn in the other colours when the theme changes (Settings, or Windows in "system").
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
+  useEffect(() => {
+    const onTheme = () => setDark(document.documentElement.classList.contains("dark"));
+    window.addEventListener("ccb-theme", onTheme);
+    return () => window.removeEventListener("ccb-theme", onTheme);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const { default: mermaid } = await import("mermaid");
-        const dark = document.documentElement.classList.contains("dark");
         // strict: no scripts or click handlers from the diagram text.
         mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "neutral", fontFamily: "inherit" });
         const out = await mermaid.render(id, code);
@@ -28,7 +34,7 @@ export function MermaidBlock({ code }: { code: string }) {
     return () => {
       cancelled = true;
     };
-  }, [code, id]);
+  }, [code, id, dark]);
 
   if (error) {
     return (

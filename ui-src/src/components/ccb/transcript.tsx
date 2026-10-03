@@ -1,7 +1,7 @@
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
 import { ClarifyCard, type ClarifyQuestion, PlanCard } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
-import { useEffect, useRef , useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MarkdownView } from "./markdown-view";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
 import type { Activity, AgentEvent, Reference } from "@/lib/api";
@@ -326,6 +326,18 @@ function ThinkingIndicator({ progress, stopping, activity }: { progress: string;
   );
 }
 
+/** Chat items shown at first, and added each time you scroll up to the oldest one shown. */
+const PAGE = 30;
+
+/** The element that scrolls the chat (the nearest parent with its own scrollbar). */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const y = getComputedStyle(p).overflowY;
+    if (y === "auto" || y === "scroll") return p;
+  }
+  return null;
+}
+
 const rowKey = (it: TranscriptItem) => (it.kind === "action" ? it.item.id : it.seq);
 
 export function Transcript({
@@ -363,12 +375,45 @@ export function Transcript({
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [items.length, busy, awaiting, progress.length > 0]);
 
+  // The newest PAGE items; scrolling up to the oldest one shown loads PAGE more, keeping the place.
+  const [shown, setShown] = useState(PAGE);
+  const firstKey = items.length ? rowKey(items[0]) : "";
+  useEffect(() => setShown(PAGE), [firstKey]); // a new chat, project or cleared history starts over
+  const hidden = Math.max(0, items.length - shown);
+  const visible = hidden ? items.slice(hidden) : items;
+  const topRef = useRef<HTMLDivElement>(null);
+  const keepFromBottom = useRef<number | null>(null);
+  const loadEarlier = () => {
+    const scroller = topRef.current ? scrollParent(topRef.current) : null;
+    if (scroller) keepFromBottom.current = scroller.scrollHeight - scroller.scrollTop;
+    setShown((n) => n + PAGE);
+  };
+  useEffect(() => {
+    const el = topRef.current;
+    if (!hidden || !el) return;
+    const io = new IntersectionObserver(([e]) => e.isIntersecting && loadEarlier(), { root: scrollParent(el), rootMargin: "120px 0px 0px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hidden, shown]);
+  useLayoutEffect(() => {
+    const scroller = topRef.current ? scrollParent(topRef.current) : endRef.current ? scrollParent(endRef.current) : null;
+    if (scroller && keepFromBottom.current !== null) scroller.scrollTop = scroller.scrollHeight - keepFromBottom.current;
+    keepFromBottom.current = null;
+  }, [shown]);
+
   // A fresh chat shows the welcome view until something happens in it.
   if (!busy && !activity?.label && items.every((i) => i.kind === "note" && i.tone === "info")) return <>{empty}</>;
 
   return (
     <div className="mx-auto flex w-full max-w-[max(48rem,80%)] flex-col gap-3 px-4 py-6">
-      {items.map((it) => (
+      {hidden > 0 && (
+        <div className="flex justify-center" ref={topRef}>
+          <button className="rounded-md px-2 py-1 text-muted-foreground text-xs hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5" onClick={loadEarlier} type="button">
+            {hidden} earlier item{hidden === 1 ? "" : "s"}: scroll up or click to show {Math.min(PAGE, hidden)} more
+          </button>
+        </div>
+      )}
+      {visible.map((it) => (
         <TranscriptRow item={it} key={rowKey(it)} onOpenFile={onOpenFile} onResendAsCoding={onResendAsCoding} onSend={onSend} onUsePrompt={onUsePrompt} />
       ))}
       {(busy || activity?.label) && !awaiting && <ThinkingIndicator activity={activity} progress={progress} stopping={stopping} />}

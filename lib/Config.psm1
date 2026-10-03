@@ -85,8 +85,14 @@ $script:SettingDefs = @(
     @{ key = 'issues.enabled'; group = 'Issues'; label = 'Issue detection'; help = 'Keep an index of problems in every project file (file checks, secrets, code health) and scan the changed files after each task.'; type = 'select'; options = @('on', 'off') }
     @{ key = 'issues.autoFix'; group = 'Issues'; label = 'Fix automatically'; help = 'Problems a task adds that StreamHub sends back to Copilot to fix, one file at a time: error (broken syntax, missing files, typos), secret (keys and passwords in code), health (functions that are too complex). The rest is only reported.'; type = 'select'; options = @('error', 'error,secret', 'error,secret,health', 'none') }
     @{ key = 'issues.maxAttempts'; group = 'Issues'; label = 'Fix attempts per file'; help = 'Fix tasks per file before its remaining problems are marked "gave up".'; type = 'number'; min = 1; max = 5 }
+    @{ key = 'startMode'; group = 'Copilot'; label = 'Mode at start'; help = 'The mode StreamHub starts in: ask (approve every change and command), auto (changes apply directly, commands still ask) or plan (read and discuss only). Applies at the next start.'; type = 'select'; options = @('ask', 'auto', 'plan') }
     @{ key = 'appWindow'; group = 'Copilot'; label = 'Open StreamHub'; help = 'copilot-tab: as a tab in the Copilot window, ready for Edge''s Split screen; side-by-side: its own window, with Copilot on the right half of the screen; browser: in your default browser. Applies at the next start.'; type = 'select'; options = @('copilot-tab', 'side-by-side', 'browser') }
     @{ key = 'responseMode'; group = 'Copilot'; label = 'Response mode'; help = 'Copilot''s Auto / Quick response / Think deeper picker: leave = as set on the page.'; type = 'select'; options = @('leave', 'auto', 'quick', 'deep') }
+    @{ key = 'autoApproveCommands'; group = 'Commands'; label = 'Commands that run without asking'; help = 'One per line: a command that starts with one of these runs without asking you, for example npm test. Commands that delete or move files, or touch Microsoft 365, always ask, whatever is listed here.'; type = 'commands' }
+    @{ key = 'chatHistory'; group = 'Privacy'; label = 'Keep chat history'; help = 'Keep each project''s conversation on this computer (not in OneDrive), so it is back after a restart.'; type = 'toggle' }
+    @{ key = 'saveReplyFrames'; group = 'Privacy'; label = 'Keep raw Copilot replies'; help = 'The raw data of the last 30 replies, for diagnostics (in %LOCALAPPDATA%\CCBridge\replies). They can contain Microsoft 365 data.'; type = 'toggle' }
+    @{ key = 'port'; group = 'Ports'; label = 'Web app port'; help = 'Where StreamHub runs (http://localhost:PORT). Moved automatically when another program uses it.'; type = 'info' }
+    @{ key = 'cdpPort'; group = 'Ports'; label = 'Edge port (for Copilot)'; help = 'How StreamHub talks to Copilot in Edge. Moved automatically when another program uses it.'; type = 'info' }
     @{ key = 'resultCharBudget'; group = 'Sizes'; label = 'Results per round (characters)'; help = 'Room for file contents and command output sent back to Copilot in one message.'; type = 'number'; min = 10000; max = 120000 }
     @{ key = 'promptCharBudget'; group = 'Sizes'; label = 'Prompt size (characters)'; help = 'Largest message sent to Copilot (its page accepts up to 128000).'; type = 'number'; min = 20000; max = 125000 }
 )
@@ -97,6 +103,17 @@ function Get-SettingValue($Obj, [string]$Key) {
     $o
 }
 
+function ConvertTo-CommandPattern([string]$Start) {
+    # "npm test" -> a pattern that matches that command and anything after it.
+    '^' + [regex]::Escape($Start.Trim()) + '(\s|$)'
+}
+
+function ConvertFrom-CommandPattern([string]$Pattern) {
+    # The plain command start back from a pattern made above; other patterns are shown as written.
+    $m = [regex]::Match($Pattern, '^\^(.+)\(\\s\|\$\)$')
+    if ($m.Success) { [regex]::Unescape($m.Groups[1].Value) } else { $Pattern }
+}
+
 function Get-CCBridgeSettings {
     <# The adjustable settings with their current value, default and whether this machine changed it. #>
     param([string]$AppRoot)
@@ -105,8 +122,15 @@ function Get-CCBridgeSettings {
     $current = Get-CCBridgeConfig harness $AppRoot
     foreach ($d in $script:SettingDefs) {
         $def = Get-SettingValue $defaults $d.key; $cur = Get-SettingValue $current $d.key
-        $o = [ordered]@{ key = $d.key; group = $d.group; label = $d.label; help = $d.help; type = $d.type; value = $cur; default = $def; custom = ("$cur" -ne "$def") }
-        if ($d.type -eq 'number') { $o.min = $d.min; $o.max = $d.max } else { $o.options = $d.options }
+        if ($d.type -eq 'commands') {
+            $cur = @(@($cur) | Where-Object { $_ } | ForEach-Object { ConvertFrom-CommandPattern "$_" })
+            $def = @(@($def) | Where-Object { $_ } | ForEach-Object { ConvertFrom-CommandPattern "$_" })
+        }
+        if ($d.type -eq 'toggle') { $cur = $(if ($null -eq $cur) { $true } else { [bool]$cur }); $def = $(if ($null -eq $def) { $true } else { [bool]$def }) }
+        $o = [ordered]@{ key = $d.key; group = $d.group; label = $d.label; help = $d.help; type = $d.type; value = $cur; default = $def; custom = ("$(@($cur) -join "`n")" -ne "$(@($def) -join "`n")") }
+        if ($d.type -eq 'commands') { $o.value = @($cur); $o.default = @($def) }
+        if ($d.type -eq 'info') { $o.custom = $false }
+        if ($d.type -eq 'number') { $o.min = $d.min; $o.max = $d.max } elseif ($d.type -eq 'select') { $o.options = $d.options }
         [pscustomobject]$o
     }
 }
@@ -118,7 +142,14 @@ function Set-CCBridgeSetting {
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
     $d = $script:SettingDefs | Where-Object { $_.key -eq $Key } | Select-Object -First 1
     if (-not $d) { throw "Unknown setting '$Key'." }
-    if ($null -ne $Value -and "$Value" -ne '') {
+    if ($d.type -eq 'info') { throw "$($d.label) is set by StreamHub itself." }
+    if ($d.type -eq 'commands') {
+        # A list of command starts (or text with one per line); empty = none run without asking.
+        $starts = @(@($Value) | ForEach-Object { "$_" -split "`r?`n" } | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+        $Value = if ($null -eq $Value) { $null } else { , @($starts | ForEach-Object { ConvertTo-CommandPattern $_ }) }
+    } elseif ($d.type -eq 'toggle') {
+        if ($null -ne $Value) { $Value = "$Value" -in 'true', 'on', '1' }   # as text: "off" -in $true would be true
+    } elseif ($null -ne $Value -and "$Value" -ne '') {
         if ($d.type -eq 'number') {
             $n = 0.0
             if (-not [double]::TryParse("$Value", [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$n)) { throw "$($d.label) must be a number." }
@@ -149,7 +180,8 @@ function Reset-CCBridgeSettings {
     param([string]$AppRoot)
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
     $changed = @(Get-CCBridgeSettings $AppRoot | Where-Object custom | ForEach-Object { $_.key })
-    foreach ($d in $script:SettingDefs) { $null = Set-CCBridgeSetting $d.key $null $AppRoot }
+    # Ports are set by StreamHub itself (moved away from other programs): a reset keeps them.
+    foreach ($d in @($script:SettingDefs | Where-Object { $_.type -ne 'info' })) { $null = Set-CCBridgeSetting $d.key $null $AppRoot }
     $changed
 }
 

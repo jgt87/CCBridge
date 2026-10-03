@@ -11,6 +11,8 @@
   "messagesPerChat": 30,
   "autoApproveCommands": [],
   "workIq": "leave",
+  "startMode": "ask",
+  "chatHistory": true,
   "saveReplyFrames": true,
   "stallSec": 90,
   "actionRetries": 2,

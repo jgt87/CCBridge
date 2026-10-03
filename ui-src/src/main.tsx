@@ -5,9 +5,10 @@ import './styles/markdown.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ccb/error-boundary.tsx'
 import { reportClientError } from './lib/api.ts'
+import { initTheme } from './lib/theme.ts'
 
-// Dark by default; follows the system when it prefers light.
-if (!window.matchMedia('(prefers-color-scheme: light)').matches) document.documentElement.classList.add('dark')
+// Theme from Settings (system / light / dark), before the first render so nothing flashes.
+initTheme()
 
 window.addEventListener('error', (e) => reportClientError(`Page error: ${e.message}`, { stack: (e.error?.stack ?? '').split('\n').slice(0, 6).join(' | ') }))
 window.addEventListener('unhandledrejection', (e) => reportClientError(`Unhandled promise rejection: ${String(e.reason?.message ?? e.reason)}`))

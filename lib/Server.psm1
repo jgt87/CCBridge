@@ -456,6 +456,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $keep = @{ port = $State.Config.port; cdpPort = $State.Config.cdpPort }
             $State.Config = Get-CCBridgeConfig harness $State.AppRoot
             $State.Config.port = $keep.port; $State.Config.cdpPort = $keep.cdpPort
+            $State.SaveHistory = ($State.Config.chatHistory -ne $false -and "$($State.Config.chatHistory)" -ne 'off')
             Write-CCBLog info server 'Settings reset to the app defaults' @{ changed = $changed -join ', ' }
             return Send-Json $Ctx @{ ok = $true; changed = $changed; settings = @(Get-CCBridgeSettings $State.AppRoot) }
         }
@@ -463,6 +464,16 @@ function Invoke-ApiRequest($Ctx, $State) {
             # A one-time hint was shown (it is not shown again, also after a restart).
             $b = Read-JsonBody $Ctx
             Set-UiHintShown $State ([string]$b.name)
+            return Send-Json $Ctx @{ ok = $true }
+        }
+        '^POST /api/history/clear$' {
+            # Settings > Privacy: forget this project's conversation (the chat view empties too).
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $f = Get-ChatHistoryPath $State.ProjectRoot
+            if (Test-Path -LiteralPath $f) { [IO.File]::Delete($f) }
+            Reset-ChatHistoryCount $f
+            Add-AgentEvent $State 'history-cleared' @{ text = 'Chat history of this project cleared.' }
+            Write-CCBLog info server 'Chat history cleared' @{ project = $State.ProjectRoot }
             return Send-Json $Ctx @{ ok = $true }
         }
         '^GET /api/settings$' { return Send-Json $Ctx @{ settings = @(Get-CCBridgeSettings $State.AppRoot) } }
@@ -473,6 +484,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $keep = @{ port = $State.Config.port; cdpPort = $State.Config.cdpPort }   # ports in use stay (also -Port)
             $State.Config = Get-CCBridgeConfig harness $State.AppRoot
             $State.Config.port = $keep.port; $State.Config.cdpPort = $keep.cdpPort
+            $State.SaveHistory = ($State.Config.chatHistory -ne $false -and "$($State.Config.chatHistory)" -ne 'off')
             Write-CCBLog info server "Setting $($b.key) = $(if ($null -eq $b.value) { '(default)' } else { $b.value })"
             return Send-Json $Ctx @{ ok = $true; value = $value; settings = @(Get-CCBridgeSettings $State.AppRoot) }
         }
@@ -523,6 +535,7 @@ function Set-Project($State, [string]$Path) {
     $State.Todos = @()
     $State.NeedNewChat = $State.NeedNewChat -or $State.ChatStarted   # a new project starts a fresh Copilot chat
     Add-AgentEvent $State 'project' @{ name = (Split-Path $Path -Leaf); path = $Path }
+    if ($State.SaveHistory) { try { $null = Restore-ChatHistory $State $State.ProjectRoot } catch { Write-CCBLogError server 'chat history' $_ } }   # the earlier conversation, back in the chat
     try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue fix reset' $_ }
     try { $null = Sync-ProjectSchedules $State -Roots @($State.ProjectRoot) -Force } catch { Write-CCBLogError server 'schedule import' $_ }
     try { $null = Start-IssueIndexer $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue index' $_ }   # step 1 of the issue cycle, in the background

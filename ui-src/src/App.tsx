@@ -185,24 +185,34 @@ export default function App() {
     return idx >= 0 ? events.slice(idx) : events;
   }, [events]);
 
+  // After "Clear chat history" (Settings > Privacy) nothing earlier is shown or recalled; the Changes
+  // tab keeps its change sets (their backups still exist).
+  const keptEvents = useMemo(() => {
+    let idx = -1;
+    projectEvents.forEach((e, i) => {
+      if (e.type === "history-cleared") idx = i;
+    });
+    return idx >= 0 ? projectEvents.slice(idx + 1) : projectEvents;
+  }, [projectEvents]);
+
   // The chat view starts at the last explicit "New chat"; the Changes tab keeps the whole project session.
   const chatEvents = useMemo(() => {
     let idx = -1;
-    projectEvents.forEach((e, i) => {
+    keptEvents.forEach((e, i) => {
       if (e.type === "newchat") idx = i;
     });
-    return idx >= 0 ? projectEvents.slice(idx) : projectEvents;
-  }, [projectEvents]);
+    return idx >= 0 ? keptEvents.slice(idx) : keptEvents;
+  }, [keptEvents]);
   const transcript = useMemo(() => buildTranscript(chatEvents), [chatEvents]);
   // The user's own messages in this project, oldest first, consecutive repeats once (Arrow Up history).
   const promptHistory = useMemo(() => {
     const out: string[] = [];
-    for (const e of projectEvents) {
+    for (const e of keptEvents) {
       const t = e.type === "user" ? (e.text ?? "").trim() : "";
       if (t && out[out.length - 1] !== t) out.push(t);
     }
     return out;
-  }, [projectEvents]);
+  }, [keptEvents]);
 
   const startNewChat = () => {
     setNewChatPending(true);

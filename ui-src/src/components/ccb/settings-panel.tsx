@@ -1,4 +1,6 @@
-import { RotateCcw, X } from "lucide-react";
+import { Monitor, Moon, RotateCcw, Sun, X } from "lucide-react";
+import type React from "react";
+import { getThemeChoice, setThemeChoice, type ThemeChoice } from "@/lib/theme";
 import { ModalBackdrop } from "./modal-backdrop";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Setting } from "@/lib/api";
@@ -6,13 +8,25 @@ import { notifyEnabled, notifySupported, setNotifyEnabled } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 
 /** One setting: a number field or a choice, saved on change, with "reset to default". */
+/** A setting's value as text: a command list one per line, a switch as on/off. */
+function asDraft(v: Setting["value"]): string {
+  if (Array.isArray(v)) return v.join("\n");
+  if (typeof v === "boolean") return v ? "on" : "off";
+  return String(v ?? "");
+}
+
+function defaultText(s: Setting): string {
+  if (s.type === "commands") return Array.isArray(s.default) && s.default.length ? s.default.join(", ") : "none";
+  return asDraft(s.default);
+}
+
 function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => void }) {
-  const [draft, setDraft] = useState(String(s.value ?? ""));
+  const [draft, setDraft] = useState(asDraft(s.value));
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  useEffect(() => setDraft(String(s.value ?? "")), [s.value]);
+  useEffect(() => setDraft(asDraft(s.value)), [s.value]);
 
-  const save = async (value: string | number | null) => {
+  const save = async (value: Setting["value"]) => {
     setError("");
     try {
       const r = await api.setSetting(s.key, value);
@@ -21,22 +35,76 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
       window.setTimeout(() => setSaved(false), 1500);
     } catch (e) {
       setError((e as Error).message);
-      setDraft(String(s.value ?? ""));
+      setDraft(asDraft(s.value));
     }
   };
 
   const field = "w-28 rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+  const resetButton = (
+    <button
+      className={cn("rounded p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5", !s.custom && "invisible")}
+      onClick={() => save(null)}
+      title={`Reset to the default (${defaultText(s)})`}
+      type="button"
+    >
+      <RotateCcw className="h-3.5 w-3.5" />
+    </button>
+  );
+  const savedNote = <span className={cn("w-10 text-muted-foreground text-xs", !saved && "invisible")}>Saved</span>;
+  const about = (
+    <>
+      <div className="text-sm">{s.label}</div>
+      <div className="text-muted-foreground text-xs">
+        {s.help}
+        {s.type !== "info" && ` Default: ${defaultText(s)}.`}
+      </div>
+      {error && <div className="text-rose-500 text-xs">{error}</div>}
+    </>
+  );
+
+  // A list of commands: one per line, under the text, saved when leaving the box.
+  if (s.type === "commands") {
+    return (
+      <div className="py-2">
+        {about}
+        <div className="mt-1.5 flex items-start gap-1">
+          <textarea
+            className={cn(field, "min-h-[4.5rem] w-full flex-1 font-mono text-xs")}
+            onBlur={() => draft !== asDraft(s.value) && save(draft.split("\n").map((l) => l.trim()).filter(Boolean))}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="none (every command asks)"
+            spellCheck={false}
+            value={draft}
+          />
+          {resetButton}
+          {savedNote}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-start gap-3 py-2">
-      <div className="min-w-0 flex-1">
-        <div className="text-sm">{s.label}</div>
-        <div className="text-muted-foreground text-xs">
-          {s.help} Default: {String(s.default)}.
-        </div>
-        {error && <div className="text-rose-500 text-xs">{error}</div>}
-      </div>
+      <div className="min-w-0 flex-1">{about}</div>
       <div className="flex shrink-0 items-center gap-1">
-        {s.type === "select" ? (
+        {s.type === "info" ? (
+          <span className="w-28 px-2 py-1 font-mono text-sm">{asDraft(s.value)}</span>
+        ) : s.type === "toggle" ? (
+          <div className="flex w-28 rounded-md border border-black/10 p-0.5 dark:border-white/10" role="radiogroup">
+            {(["on", "off"] as const).map((o) => (
+              <button
+                aria-checked={draft === o}
+                className={cn("flex-1 rounded px-2 py-0.5 text-xs", draft === o ? "bg-black/10 text-foreground dark:bg-white/15" : "text-muted-foreground hover:text-foreground")}
+                key={o}
+                onClick={() => draft !== o && save(o === "on")}
+                role="radio"
+                type="button"
+              >
+                {o === "on" ? "On" : "Off"}
+              </button>
+            ))}
+          </div>
+        ) : s.type === "select" ? (
           <select className={field} onChange={(e) => save(e.target.value)} value={draft}>
             {(s.options ?? []).map((o) => (
               <option key={o} value={o}>
@@ -57,15 +125,86 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
             value={draft}
           />
         )}
-        <button
-          className={cn("rounded p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5", !s.custom && "invisible")}
-          onClick={() => save(null)}
-          title={`Reset to the default (${s.default})`}
-          type="button"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </button>
-        <span className={cn("w-10 text-muted-foreground text-xs", !saved && "invisible")}>Saved</span>
+        {s.type !== "info" && resetButton}
+        {s.type !== "info" ? savedNote : <span className="w-[4.25rem]" />}
+      </div>
+    </div>
+  );
+}
+
+/** Settings > Privacy: forget the open project's conversation (asks once more first). */
+function ClearHistoryRow() {
+  const [confirm, setConfirm] = useState(false);
+  const [note, setNote] = useState("");
+  const clear = async () => {
+    setConfirm(false);
+    try {
+      await api.clearHistory();
+      setNote("Cleared.");
+    } catch (e) {
+      setNote((e as Error).message);
+    }
+    window.setTimeout(() => setNote(""), 3000);
+  };
+  return (
+    <div className="flex items-start gap-3 py-2">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm">Clear chat history</div>
+        <div className="text-muted-foreground text-xs">Removes the open project's kept conversation from this computer and empties the chat view. Change sets and PLAN.md stay.</div>
+        {note && <div className="text-muted-foreground text-xs">{note}</div>}
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {confirm ? (
+          <>
+            <button className="rounded-md border border-black/10 px-2 py-1 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5" onClick={clear} type="button">
+              Yes, clear
+            </button>
+            <button className="rounded-md px-2 py-1 text-xs hover:bg-black/5 dark:hover:bg-white/5" onClick={() => setConfirm(false)} type="button">
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button className="w-28 rounded-md border border-black/10 px-2 py-1 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5" onClick={() => setConfirm(true)} type="button">
+            Clear
+          </button>
+        )}
+        <span className="w-[4.25rem]" />
+      </div>
+    </div>
+  );
+}
+
+const THEMES: { id: ThemeChoice; label: string; icon: React.ReactNode }[] = [
+  { id: "system", label: "System", icon: <Monitor className="h-3.5 w-3.5" /> },
+  { id: "light", label: "Light", icon: <Sun className="h-3.5 w-3.5" /> },
+  { id: "dark", label: "Dark", icon: <Moon className="h-3.5 w-3.5" /> },
+];
+
+/** Light, dark, or as Windows is set (kept in this browser only; applies right away). */
+function ThemeSetting({ value, onChange }: { value: ThemeChoice; onChange: (t: ThemeChoice) => void }) {
+  return (
+    <div className="flex items-start gap-3 py-2">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm">Theme</div>
+        <div className="text-muted-foreground text-xs">System follows Windows (also when it switches). Default: System.</div>
+      </div>
+      <div className="flex shrink-0 rounded-md border border-black/10 p-0.5 dark:border-white/10" role="radiogroup">
+        {THEMES.map((t) => (
+          <button
+            aria-checked={value === t.id}
+            className={cn(
+              "inline-flex items-center gap-1 rounded px-2 py-1 text-xs",
+              value === t.id ? "bg-black/10 text-foreground dark:bg-white/15" : "text-muted-foreground hover:text-foreground"
+            )}
+            key={t.id}
+            onClick={() => onChange(t.id)}
+            role="radio"
+            type="button"
+          >
+            {t.icon}
+            {t.label}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -81,8 +220,7 @@ function NotificationSetting() {
     setNote(!on && !result ? "The browser blocked notifications; allow them for this page in the browser's site settings." : "");
   };
   return (
-    <div className="pt-2">
-      <div className="mt-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">This browser</div>
+    <div>
       <div className="flex items-start gap-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="text-sm">Desktop notifications</div>
@@ -111,13 +249,21 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     api.settings().then(setSettings, (e) => setError((e as Error).message));
   }, []);
-  const anyCustom = settings.some((s) => s.custom);
+  const [theme, setTheme] = useState<ThemeChoice>(getThemeChoice());
+  const changeTheme = (t: ThemeChoice) => {
+    setThemeChoice(t);
+    setTheme(t);
+  };
+  const anyCustom = settings.some((s) => s.custom) || theme !== "system";
   const resetAll = async () => {
     setConfirmReset(false);
     try {
       const r = await api.resetSettings();
       setSettings(r.settings);
-      setResetNote(r.changed.length ? `${r.changed.length} setting(s) set back to the app defaults.` : "All settings already had the app defaults.");
+      const themeReset = theme !== "system";
+      if (themeReset) changeTheme("system");
+      const n = r.changed.length + (themeReset ? 1 : 0);
+      setResetNote(n ? `${n} setting(s) set back to the app defaults.` : "All settings already had the app defaults.");
       window.setTimeout(() => setResetNote(""), 4000);
     } catch (e) {
       setError((e as Error).message);
@@ -176,13 +322,18 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           {error && <div className="pt-2 text-rose-500 text-sm">{error}</div>}
           {resetNote && <div className="pt-2 text-muted-foreground text-sm">{resetNote}</div>}
-          <NotificationSetting />
+          <div className="pt-2">
+            <div className="mt-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">This browser</div>
+            <ThemeSetting onChange={changeTheme} value={theme} />
+            <NotificationSetting />
+          </div>
           {groups.map(([group, list], i) => (
             <div className={cn("pt-2", i > 0 && "border-black/10 border-t dark:border-white/10")} key={group}>
               <div className="mt-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">{group}</div>
               {list.map((s) => (
                 <SettingRow key={s.key} onSaved={setSettings} s={s} />
               ))}
+              {group === "Privacy" && <ClearHistoryRow />}
             </div>
           ))}
         </div>

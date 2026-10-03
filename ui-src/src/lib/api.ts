@@ -75,7 +75,9 @@ export interface AgentEvent {
     | "kind"
     | "clarify"
     | "plan-ready"
-    | "next-steps";
+    | "next-steps"
+    /** Settings > Privacy > Clear chat history: the chat shows nothing from before it. */
+    | "history-cleared";
   time: string;
   text?: string;
   uncertain?: number;
@@ -343,9 +345,10 @@ export interface Setting {
   group: string;
   label: string;
   help: string;
-  type: "number" | "select";
-  value: string | number | null;
-  default: string | number | null;
+  /** number / select; toggle (on or off); commands (a list, one per line); info (shown, not changeable). */
+  type: "number" | "select" | "toggle" | "commands" | "info";
+  value: string | number | boolean | string[] | null;
+  default: string | number | boolean | string[] | null;
   custom: boolean;
   min?: number;
   max?: number;
@@ -479,11 +482,12 @@ export const api = {
   reindexIssues: (force = false) => call<{ ok: boolean; started: boolean }>("POST", "/api/issues/reindex", { force }),
   fixIssues: (paths: string[], categories: IssueCategory[]) => call<{ ok: boolean; queued: number; issues: number }>("POST", "/api/issues/fix", { paths, categories }),
   ignoreIssues: (ids: string[], undo = false) => call<{ ok: boolean }>("POST", "/api/issues/ignore", { ids, undo }),
+  clearHistory: () => call<{ ok: boolean }>("POST", "/api/history/clear"),
   markHintShown: (name: string) => call<{ ok: boolean }>("POST", "/api/hints", { name }),
   resetSettings: () =>
     call<{ ok: boolean; changed: string[]; settings: Setting[] }>("POST", "/api/settings/reset").then((r) => ({ ...r, changed: asList(r.changed), settings: asList(r.settings) })),
   settings: () => call<{ settings: Setting[] }>("GET", "/api/settings").then((r) => (Array.isArray(r.settings) ? r.settings : [])),
-  setSetting: (key: string, value: string | number | null) =>
+  setSetting: (key: string, value: Setting["value"]) =>
     call<{ ok: boolean; settings: Setting[] }>("POST", "/api/settings", { key, value }).then((r) => ({ ...r, settings: Array.isArray(r.settings) ? r.settings : [] })),
   setWorkIq: (value: "on" | "off" | "leave") => call<{ ok: boolean }>("POST", "/api/workiq", { value }),
   setLogging: (level: "off" | "info" | "verbose" | "trace") => call<{ ok: boolean }>("POST", "/api/logging", { level }),

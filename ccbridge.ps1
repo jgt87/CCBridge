@@ -127,6 +127,8 @@ $state.Build = Get-CCBridgeBuild $root
 # The queue survives restarts and updates (the MCP server's own engine does not save one).
 $state.QueueFile = Join-Path $env:LOCALAPPDATA 'CCBridge\queue.json'
 $null = Restore-AgentQueue $state
+$state.SaveHistory = ($config.chatHistory -ne $false -and "$($config.chatHistory)" -ne 'off')   # the chat is kept per project and comes back after a restart
+if ("$($config.startMode)" -in 'ask', 'auto', 'plan') { $state.Mode = "$($config.startMode)" }   # Settings > Mode at start
 $state.ScheduleFile = Join-Path $env:LOCALAPPDATA 'CCBridge\schedules.json'
 $null = Restore-Schedules $state
 $state.PauseFile = Join-Path $env:LOCALAPPDATA 'CCBridge\queue-pause.json'
