@@ -174,7 +174,7 @@ function Test-ProjectConsistency {
     <# Fixed checks on the given project files (no judgement of the code): JSON parses, PowerShell has
        no syntax errors, and local files referenced from HTML, JavaScript and CSS (href, src, fetch,
        import, url()) exist. Returns one line per problem. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths)
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths, [switch]$SyntaxOnly)
     foreach ($rel in @($Paths)) {
         try { $full = Resolve-ProjectPath $ProjectRoot $rel } catch { continue }
         if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Test-BinaryFile $full)) { continue }
@@ -197,7 +197,7 @@ function Test-ProjectConsistency {
             $null = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$tok, [ref]$errs)
             foreach ($x in @($errs) | Select-Object -First 3) { "${rel}:$($x.Extent.StartLineNumber): $($x.Message)" }
         }
-        if ($ext -in '.html', '.htm', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.mts', '.tsx', '.css', '.scss', '.vue', '.svelte') {
+        if (-not $SyntaxOnly -and $ext -in '.html', '.htm', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.mts', '.tsx', '.css', '.scss', '.vue', '.svelte') {
             $refs = New-Object System.Collections.Generic.List[object]
             $patterns = @(
                 @{ kind = 'ref'; re = '(?i)\b(?:href|src)\s*=\s*["'']([^"''#?]+)' },
@@ -352,9 +352,17 @@ function Invoke-ReadAction {
             $full = Resolve-ProjectPath $ProjectRoot $p
             if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $p`n(file not found)"; continue }
             if (Test-BinaryFile $full) { "### $p`n(binary file, $((Get-Item -LiteralPath $full).Length) bytes - not shown)"; continue }
-            $lines = (Read-TextFile $full).Text.Replace("`r`n", "`n").Split("`n")
+            $raw = (Read-TextFile $full).Text.Replace("`r`n", "`n")
+            $lines = $raw.Split("`n")
             $total = $lines.Length
             $from = [Math]::Min($r.From, [Math]::Max(1, $total)); $to = [Math]::Min($r.To, $total)
+            # A range that cuts through a block is widened to the whole block, so Copilot sees the
+            # code it would change from its first to its last line.
+            $widened = ''
+            if ($from -gt 1 -or $to -lt $total) {
+                $w = Expand-ToWholeBlocks $raw $full $from $to
+                if ($w.from -ne $from -or $w.to -ne $to) { $widened = " - lines $from-$to asked; widened to $($w.from)-$($w.to) so every block in it is complete"; $from = $w.from; $to = $w.to }
+            }
             $sb = New-Object Text.StringBuilder
             $last = $from - 1
             for ($i = $from; $i -le $to; $i++) {
@@ -365,7 +373,7 @@ function Invoke-ReadAction {
                 $last = $i
             }
             $whole = ($from -eq 1 -and $last -eq $total)
-            $head = if ($whole) { "### $p" } else { "### $p (lines $from-$last of $total)" }
+            $head = if ($whole) { "### $p" } else { "### $p (lines $from-$last of $total$widened)" }
             $note = if ($last -lt $to) {
                 $ol = @(Get-FileOutline ($lines -join "`n") $full)
                 "`n(cut to fit: showing lines $from-$last of $total. Read $($p):$($last + 1)-$to for the rest, or only the part you need using this outline.)" +
@@ -639,6 +647,90 @@ function Find-UnbalancedBrace([string]$Text, [string]$Path) {
     $null
 }
 
+function Get-BlockSpans([string]$Text, [string]$Path) {
+    <# Every block as a line span @{ from; to }: { } blocks (by Get-BraceText) and, in markup,
+       <style> and <script> blocks. Unmatched braces make no span. #>
+    $spans = New-Object System.Collections.Generic.List[object]
+    $b = Get-BraceText $Text $Path
+    $stack = New-Object System.Collections.Generic.Stack[int]
+    $line = 1
+    foreach ($ch in $b.ToCharArray()) {
+        if ($ch -eq "`n") { $line++; continue }
+        if ($ch -eq '{') { $stack.Push($line) }
+        elseif ($ch -eq '}' -and $stack.Count) { $o = $stack.Pop(); if ($o -ne $line) { $spans.Add(@{ from = $o; to = $line }) } }
+    }
+    if ($Path -match $script:BraceMarkup) {
+        $t = $Text.Replace("`r`n", "`n")
+        foreach ($m in [regex]::Matches($t, '(?is)<(script|style)\b[^>]*>.*?</\1\s*>')) {
+            $f = ([regex]::Matches($t.Substring(0, $m.Index), "`n")).Count + 1
+            $l = $f + ([regex]::Matches($m.Value, "`n")).Count
+            if ($l -gt $f) { $spans.Add(@{ from = $f; to = $l }) }
+        }
+    }
+    $spans.ToArray()
+}
+
+function Expand-ToWholeBlocks {
+    <# Widens a line range so it does not cut through a block: a block that starts inside the range
+       is shown to its end, a block that ends inside it from its start. A range that lies wholly
+       inside one block stays as it is. At most $MaxExtra lines are added. Returns @{ from; to }. #>
+    param([string]$Text, [string]$Path, [int]$From, [int]$To, [int]$MaxExtra = 600)
+    $spans = @(Get-BlockSpans $Text $Path)
+    $f = $From; $t = $To
+    for ($pass = 0; $pass -lt 20; $pass++) {
+        $changed = $false
+        foreach ($s in $spans) {
+            if ($s.from -lt $f -and $s.to -ge $f -and $s.to -le $t -and ($From - $s.from) + ($t - $To) -le $MaxExtra) { $f = $s.from; $changed = $true }
+            if ($s.from -ge $f -and $s.from -le $t -and $s.to -gt $t -and ($From - $f) + ($s.to - $To) -le $MaxExtra) { $t = $s.to; $changed = $true }
+        }
+        if (-not $changed) { break }
+    }
+    @{ from = $f; to = $t }
+}
+
+# Lines that stand for code left out ("// ... rest of the code unchanged", "<!-- existing content -->",
+# a line with only ...). In a write or a REPLACE they would replace real code with a comment.
+$script:CommentStart = '^(//+|#+|/\*+|\*|<!--|--|;|\{/\*|rem\s|::)\s*'
+$script:Ellipsis = '(\.{3,}|' + [char]0x2026 + ')'
+$script:OmitPhrase = '(?i)\b(rest of (the )?(code|file|content|component|page|styles?|functions?|class|script|markup|html|css|logic)|(existing|previous|original|other|remaining) (code|content|functions?|methods?|styles?|rules|logic|markup|html|css|lines|imports|elements|implementation)\b.*\b(unchanged|here|as before|as is|remains?|stays?|omitted|not shown|same|goes here)|unchanged code|omitted for brevity|for brevity|truncated for|no changes (below|above|here)|same as before|keep (the )?(existing|rest)|code unchanged)\b'
+
+function Find-PlaceholderLine([string]$Old, [string]$New) {
+    <# The first new line that stands for left-out code (not already in the file), or $null.
+       Returns @{ line; text }. #>
+    $had = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($l in "$Old".Replace("`r`n", "`n").Split("`n")) { [void]$had.Add($l.Trim()) }
+    $lines = "$New".Replace("`r`n", "`n").Split("`n")
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        $t = $lines[$i].Trim()
+        if (-not $t -or $had.Contains($t)) { continue }
+        $bare = ($t -replace "(?i)$($script:CommentStart)", '') -replace '\s*(\*/|-->|\*/\})\s*$', ''
+        $isComment = $t -match "(?i)$($script:CommentStart)"
+        $hit = ($bare -match "^$($script:Ellipsis)$") -or
+               ($isComment -and $bare -match $script:Ellipsis -and $bare -match '(?i)\b(existing|rest|remaining|unchanged|other|previous|same|omitted|code|content|here)\b') -or
+               ($isComment -and $bare -match $script:OmitPhrase)
+        if ($hit) { return @{ line = $i + 1; text = $t } }
+    }
+    $null
+}
+
+function Get-ChangedView {
+    <# After an edit: the changed lines as they are now, widened to whole blocks, so Copilot's next
+       edit starts from the current text. At most $MaxLines lines. Returns the text or ''. #>
+    param([string]$Old, [string]$New, [string]$Path, [string]$Shown, [int]$MaxLines = 80)
+    $o = "$Old".Replace("`r`n", "`n").Split("`n"); $n = "$New".Replace("`r`n", "`n").Split("`n")
+    $top = 0
+    while ($top -lt $o.Length -and $top -lt $n.Length -and $o[$top] -ceq $n[$top]) { $top++ }
+    if ($top -ge $n.Length -and $top -ge $o.Length) { return '' }
+    $bo = $o.Length - 1; $bn = $n.Length - 1
+    while ($bo -ge $top -and $bn -ge $top -and $o[$bo] -ceq $n[$bn]) { $bo--; $bn-- }
+    if ($bn -lt $top) { $bn = [Math]::Min($top, $n.Length - 1) }   # only lines removed: show where
+    $w = Expand-ToWholeBlocks ($n -join "`n") $Path ($top + 1) ($bn + 1) 60
+    $from = [Math]::Max(1, $w.from - 1); $to = [Math]::Min($n.Length, $w.to + 1)   # one line of context
+    if ($to - $from + 1 -gt $MaxLines) { $to = $from + $MaxLines - 1; $cut = " (first $MaxLines lines; read more if you need them)" } else { $cut = '' }
+    $fence = '````'
+    "Lines $from-$to of $Shown now$cut (line numbers are not part of the file):`n$fence`n" + ($n[($from - 1)..($to - 1)] -join "`n") + "`n$fence"
+}
+
 function Test-HalfBlock([string]$Old, [string]$New, [string]$Path = 'file.js') {
     <# Whether an edit leaves the file more unbalanced than it was: more unclosed (or unopened)
        { } blocks or <style>/<script> blocks after the edit than before. A file that is already
@@ -772,7 +864,27 @@ function Get-EditResult {
         $after = $hit.start + $replace.Length
     }
     $half = Test-HalfBlock $info.Text $text $full
-    if ($half) { return [pscustomobject]@{ ok = $false; error = "$half. Nothing was changed. Read the lines around it first, then send a corrected edit - or replace the whole file with a write block." } }
+    if ($half) {
+        # Show Copilot the whole block(s) its SEARCH cut into, as they are now, so its next edit can
+        # cover them from start to end without another read.
+        $shown = New-Object System.Collections.Generic.List[string]
+        $orig = $info.Text.Replace("`r`n", "`n")
+        $olines = $orig.Split("`n")
+        $fence = '````'
+        foreach ($e in $Edits) {
+            $hit = Find-EditTarget $orig ($e.search.Replace("`r`n", "`n"))
+            if ($hit.error -or $null -eq $hit.start) { continue }
+            $a = Get-LineNumber $orig $hit.start
+            $z = Get-LineNumber $orig ([Math]::Max($hit.start, $hit.start + $hit.length - 1))
+            $w = Expand-ToWholeBlocks $orig $full $a $z 300
+            if ($w.from -eq $a -and $w.to -eq $z) { continue }
+            $body = ($olines[($w.from - 1)..($w.to - 1)] -join "`n")
+            $shown.Add("Current lines $($w.from)-$($w.to) of $(ConvertTo-RelativePath $ProjectRoot $full) (the whole block your SEARCH starts or ends in; line numbers are not part of the file):`n$fence`n$body`n$fence")
+            if ($shown.Count -ge 2) { break }
+        }
+        $more = if ($shown.Count) { "`n" + ($shown -join "`n") } else { '' }
+        return [pscustomobject]@{ ok = $false; error = "$half. Nothing was changed. Send a corrected edit whose SEARCH covers the whole block from its first to its last line (the current lines are below), or replace the whole file with a write block.$more" }
+    }
     $moveProblem = Test-MoveOrder $ProjectRoot $full $info.Text $text
     if ($moveProblem) { return [pscustomobject]@{ ok = $false; error = $moveProblem } }
     [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; pairs = $n; notes = @($notes)
@@ -977,5 +1089,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

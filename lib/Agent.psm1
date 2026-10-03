@@ -1098,6 +1098,7 @@ function Invoke-AgentAction {
     $needsApproval = $true
     $preview = $null
     $riskWarning = $null
+    $personOnly = $false   # Microsoft 365 commands and deletions: only a person in the app may approve
     if ($Action.type -eq 'write' -or $Action.type -eq 'edit') {
         if (-not $Action.arg) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed' }); return @{ ok = $false; summary = "$($Action.type) without a path"; output = 'error: the block needs a path after the action name' } }
         try { $null = Assert-Writable $root $Action.arg } catch {
@@ -1122,8 +1123,22 @@ function Invoke-AgentAction {
             }
             $preview = @{ path = $Action.arg; exists = $true; old = (Get-PreviewText $er.old); new = (Get-PreviewText $er.new) }
         }
-        # Runbooks have a fixed place, name and header: refuse a file that breaks them.
         $newText = if ($Action.type -eq 'write') { $content } else { $er.new }
+        $oldText = if ($Action.type -eq 'write') { "$($p.old)" } else { "$($er.old)" }
+        # Code left out with a placeholder ("// rest of the code unchanged") would be lost: refuse.
+        $ph = Find-PlaceholderLine $oldText $newText
+        if ($ph) {
+            $how = if ($Action.type -eq 'write') { 'A write block replaces the whole file, so the code that line stands for would be lost. Send the complete file, or use edit blocks for only the parts that change.' } else { 'The REPLACE text replaces the SEARCH lines completely, so the code that line stands for would be lost. Put the real lines in REPLACE, or make the SEARCH smaller so it covers only what changes.' }
+            Write-CCBLog info agent "Placeholder line refused in $($Action.arg)" @{ line = $ph.line }
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "left-out code: line $($ph.line) '$($ph.text)'" })
+            return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (left-out code)"; output = "error: not written: line $($ph.line) of the new text, '$($ph.text)', stands for code that was left out. $how" }
+        }
+        # A write that makes an existing file much shorter needs a person, also in auto mode.
+        if ($Action.type -eq 'write' -and $oldText.Length -gt 3000 -and $newText.Length -lt $oldText.Length * 0.4) {
+            $oldLines = $oldText.Split("`n").Length; $newLines = "$newText".Split("`n").Length
+            $riskWarning = "This write makes $($Action.arg) much shorter ($oldLines -> $newLines lines). If Copilot left code out, it would be lost. Approve only if that is what you want."
+        }
+        # Runbooks have a fixed place, name and header: refuse a file that breaks them.
         $rbProblems = @(Test-RunbookFile $Action.arg $newText ("$($State.TurnText)" -match '(?i)\b(runbooks?|draaiboek(en)?)\b'))
         if ($rbProblems.Count) {
             $why = $rbProblems -join '; '
@@ -1131,7 +1146,7 @@ function Invoke-AgentAction {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "runbook: $why" })
             return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (runbook rules)"; output = "error: not written: $why. A runbook is one file runbooks/NAME.runbook.md that starts with the template's header block; send the complete file again with a write block." }
         }
-        $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0)
+        $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0) -or [bool]$riskWarning
     } elseif ($Action.type -eq 'run') {
         $evt.target = $Action.body.Trim()
         # Hard boundary: deleting or moving files only inside the project. Not even a person can
@@ -1153,6 +1168,7 @@ function Invoke-AgentAction {
             }
             $needsApproval = $true
             $riskWarning = "Human in the loop: this command $why. Only approve it if you want exactly this to happen."
+            $personOnly = $true
         }
     }
 
@@ -1180,7 +1196,7 @@ function Invoke-AgentAction {
         if ($riskWarning) { $warn = $riskWarning }
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; preview = $preview; warning = $warn })
         $waitWatch = [Diagnostics.Stopwatch]::StartNew()
-        $d = Wait-Approval $State $Id ([bool]$riskWarning)
+        $d = Wait-Approval $State $Id $personOnly
         Write-CCBLog verbose agent "approval ${Id}: $($d.decision) by $($d.by) after $($waitWatch.ElapsedMilliseconds) ms"
         if ($d.decision -ne 'approve') {
             Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }
@@ -1194,8 +1210,14 @@ function Invoke-AgentAction {
 
     try {
         switch ($Action.type) {
-            'write' { $out = Invoke-WriteAction $root $Action.arg $Action.body $Checkpoint; return @{ ok = $true; summary = $out; output = $out; changed = $true } }
-            'edit'  { $out = Invoke-EditAction $root $Action.arg $Action.edits $Checkpoint; return @{ ok = $true; summary = $out; output = $out; changed = $true } }
+            'write' { $out = Invoke-WriteAction $root $Action.arg $Action.body $Checkpoint; return @{ ok = $true; summary = $out; output = $out; changed = $true; path = $Action.arg } }
+            'edit'  {
+                $before = try { (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text } catch { '' }
+                $out = Invoke-EditAction $root $Action.arg $Action.edits $Checkpoint
+                # The changed lines as they are now, so the next edit starts from the current text.
+                $view = try { $now = (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text; Get-ChangedView $before $now (Resolve-ProjectPath $root $Action.arg) $Action.arg } catch { '' }
+                return @{ ok = $true; summary = $out; output = $(if ($view) { "$out`n$view" } else { $out }); changed = $true; path = $Action.arg }
+            }
             'run'   {
                 $r = Invoke-RunAction $root $evt.target -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
                 $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
@@ -1246,6 +1268,7 @@ function Invoke-AgentTurn {
 
         $nudges = 0   # times this message was sent again because Copilot explained instead of acting
         $failSeen = @{}; $stopLoop = $false   # the same step failing the same way: warn at 2, stop at 3
+        $syntaxNudges = 0   # times "done" was refused because a changed file has a syntax error
         $lastReply = ''; $doneText = ''   # for the suggested next steps after the turn
         $reviewed = $false   # the consistency review after a big change happens once per message
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
@@ -1314,6 +1337,14 @@ function Invoke-AgentTurn {
                 $a = $actions[$k]
                 if ($a.type -eq 'done') { $isDone = $true; $doneText = $a.body.Trim(); Add-AgentEvent $State 'done' @{ text = $doneText }; continue }
                 $id = "$($State.Seq)-$k"
+                if ($a.type -in 'write', 'edit', 'run' -and -not $a.closed -and $k -eq $actions.Count - 1) {
+                    # The reply ended inside this block (no closing fence): it may be cut off. Applying
+                    # half a file or half a command could do damage, so it waits for the full block.
+                    Write-CCBLog info agent "Unclosed last block not applied: $($a.type) $($a.arg)"
+                    Add-AgentEvent $State 'action' @{ id = $id; action = $a.type; target = $(if ($a.arg) { $a.arg } else { $a.body.Split("`n")[0] }); status = 'skipped'; error = 'the reply ended inside this block (it may be cut off)' }
+                    $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = "not applied: your reply ended inside this $($a.type) block (no closing fence), so it may be cut off. Send this block again, complete, with its closing fence." })
+                    continue
+                }
                 $res = Invoke-AgentAction $State $a $id $checkpoint $r.Uncertain
                 if (-not $res.reported) {
                     $result = @{ id = $id; ok = $res.ok; status = $(if ($res.ok) { 'ok' } else { 'failed' }); summary = $res.summary; output = (Limit-Text $res.output 4000); changed = [bool]$res.changed }
@@ -1334,8 +1365,20 @@ function Invoke-AgentTurn {
                         Add-AgentEvent $State 'error' @{ text = "The same $($a.type) of $($a.arg) failed $times times in a row with: $(("$($res.output)" -split "`n")[0] -replace '^error:\s*', ''). Stopped this message so it does not loop."; code = 'STEP-LOOP'; hint = 'Ask Copilot to rewrite the whole file with a write block, or make this change by hand; then continue.' }
                     }
                 }
-                $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = $out; readPaths = $res.readPaths })
+                $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = $out; readPaths = $res.readPaths; changedPath = $(if ($res.ok -and $res.changed) { $res.path } else { $null }) })
                 if ($stopLoop) { break }
+            }
+            # Syntax check of the files this round changed (JSON, PowerShell, JavaScript), so a broken
+            # file is fixed in the next round, before more edits build on it.
+            $roundChanged = @($results | ForEach-Object { $_.changedPath } | Where-Object { $_ } | Select-Object -Unique)
+            if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
+                $syntax = @(@(Test-ProjectConsistency $State.ProjectRoot $roundChanged -SyntaxOnly) + @(if ("$($State.Config.pageCheck)" -ne 'off') { Test-ScriptSyntax $State $roundChanged }))
+                if ($syntax.Count) {
+                    Write-CCBLog info agent 'Syntax problems after this round' @{ count = $syntax.Count }
+                    Add-AgentEvent $State 'status' @{ text = "Syntax check: $($syntax.Count) problem(s) in the changed files; Copilot is asked to fix them." }
+                    $results.Add(@{ head = '### Syntax check of the files changed in this reply'; output = (($syntax | ForEach-Object { "- $_" }) -join "`n") + "`nFix these first: the file does not work as it is." })
+                    if ($isDone -and $syntaxNudges -lt 2) { $isDone = $false; $syntaxNudges++ }
+                }
             }
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
             if ($stopLoop) { break }
