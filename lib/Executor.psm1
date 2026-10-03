@@ -173,12 +173,112 @@ function Save-CheckpointFile($Checkpoint, [string]$ProjectRoot, [string]$FullPat
     } else {
         $Checkpoint.Files[$rel] = 'new'
     }
+    Save-CheckpointManifest $Checkpoint
+}
+
+# --- Commands in the change set: what a run command changes is backed up too --------------
+# Before a run command, the project's files are listed (size and time) and the ones not yet in
+# the change set are copied aside (prerun\, once per step). After the command, every file it
+# changed or deleted gets its old copy in the change set, and every file it created is marked new,
+# so Undo restores them like a write or an edit. source/ is left out (its own restore covers it).
+
+$script:SnapshotMaxFileBytes = 20MB
+$script:SnapshotMaxTotalBytes = 300MB
+
+function Get-FileState([string]$ProjectRoot) {
+    # rel path -> "size|time" of the project's files (ignored folders such as node_modules left out).
+    $h = @{}
+    foreach ($f in @(Get-ProjectFiles $ProjectRoot -MaxFiles 20000)) {
+        if ($f.path -like 'source/*') { continue }
+        $fi = New-Object IO.FileInfo (Join-Path $ProjectRoot ($f.path.Replace('/', '\')))
+        if ($fi.Exists) { $h[$f.path] = "$($fi.Length)|$($fi.LastWriteTimeUtc.Ticks)" }
+    }
+    $h
+}
+
+function Save-CheckpointManifest($Checkpoint) {
     $Checkpoint.Files | ConvertTo-Json | Set-Content (Join-Path $Checkpoint.Dir 'manifest.json') -Encoding UTF8
 }
 
+function Start-RunSnapshot {
+    <# Before a run command: copies aside the files not yet in the change set (skipping very large
+       ones). Returns the snapshot to hand to Complete-RunSnapshot, with what could not be copied. #>
+    param([Parameter(Mandatory)]$Checkpoint, [Parameter(Mandatory)][string]$ProjectRoot)
+    if (-not $Checkpoint.PSObject.Properties['Staged']) { $Checkpoint | Add-Member -NotePropertyName Staged -NotePropertyValue @{} }
+    $stage = Join-Path $Checkpoint.Dir 'prerun'
+    $before = Get-FileState $ProjectRoot
+    $skipped = New-Object System.Collections.Generic.List[string]
+    $total = 0L
+    foreach ($rel in $before.Keys) {
+        if ($Checkpoint.Files.ContainsKey($rel)) { continue }                       # already backed up in this step
+        if ($Checkpoint.Staged[$rel] -eq $before[$rel]) { continue }                # copied before, unchanged since
+        $size = [int64]($before[$rel] -split '\|')[0]
+        if ($size -gt $script:SnapshotMaxFileBytes -or $total + $size -gt $script:SnapshotMaxTotalBytes) { $skipped.Add($rel); continue }
+        $dest = Join-Path $stage ($rel.Replace('/', '\'))
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest)
+        [IO.File]::Copy((Join-Path $ProjectRoot ($rel.Replace('/', '\'))), $dest, $true)
+        $Checkpoint.Staged[$rel] = $before[$rel]
+        $total += $size
+    }
+    @{ before = $before; stage = $stage; skipped = $skipped.ToArray() }
+}
+
+function Complete-RunSnapshot {
+    <# After a run command: puts every file it changed, deleted or created into the change set.
+       Returns @{ changed = rel paths; notBackedUp = changed files that were too large to copy }. #>
+    param([Parameter(Mandatory)]$Checkpoint, [Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)]$Snapshot)
+    $after = Get-FileState $ProjectRoot
+    $changed = New-Object System.Collections.Generic.List[string]
+    $lost = New-Object System.Collections.Generic.List[string]
+    foreach ($rel in $Snapshot.before.Keys) {
+        if ($after[$rel] -eq $Snapshot.before[$rel] -or $Checkpoint.Files.ContainsKey($rel)) { continue }
+        $copy = Join-Path $Snapshot.stage ($rel.Replace('/', '\'))
+        if (Test-Path -LiteralPath $copy) {
+            $dest = Join-Path $Checkpoint.Dir ($rel.Replace('/', '\'))
+            $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest)
+            [IO.File]::Copy($copy, $dest, $true)
+            $Checkpoint.Files[$rel] = 'existed'
+        } else { $lost.Add($rel) }
+        $changed.Add($rel)
+    }
+    foreach ($rel in $after.Keys) {
+        if ($Snapshot.before.ContainsKey($rel) -or $Checkpoint.Files.ContainsKey($rel)) { continue }
+        $Checkpoint.Files[$rel] = 'new'
+        $changed.Add($rel)
+    }
+    if ($changed.Count) { Save-CheckpointManifest $Checkpoint }
+    @{ changed = $changed.ToArray(); notBackedUp = $lost.ToArray() }
+}
+
+function Clear-RunSnapshot($Checkpoint) {
+    # At the end of a step: the copies set aside are no longer needed (the change set has its own).
+    $stage = Join-Path $Checkpoint.Dir 'prerun'
+    if (Test-Path -LiteralPath $stage) { [IO.Directory]::Delete($stage, $true) }
+}
+
+function Get-UndoFileChange([string]$Full, [string]$Backup, [string]$Rel, [bool]$WasNew) {
+    <# What undoing does to one file, measured before it happens: the lines that come back (added)
+       and the lines that go (removed), and a preview (old = now, new = after the undo). Binary
+       files get no line counts. #>
+    $now = if (Test-Path -LiteralPath $Full -PathType Leaf) { $Full } else { $null }
+    $after = if ($WasNew) { $null } else { $Backup }
+    $text = { param($p) if ($p -and -not (Test-BinaryFile $p)) { (Read-TextFile $p).Text } else { $null } }
+    $binary = ($now -and (Test-BinaryFile $now)) -or ($after -and (Test-Path -LiteralPath $after) -and (Test-BinaryFile $after))
+    $o = [ordered]@{ path = $Rel; deleted = $WasNew; added = 0; removed = 0; binary = [bool]$binary; preview = $null }
+    if (-not $binary) {
+        $old = "$(& $text $now)"; $new = "$(& $text $after)"
+        $m = Measure-LineChanges $old $new
+        $o.added = $m.added; $o.removed = $m.removed
+        $cap = 200000
+        $o.preview = @{ path = $Rel; exists = [bool]$now; old = $(if ($old.Length -le $cap) { $old } else { $null }); new = $(if ($new.Length -le $cap) { $new } else { '(too large to show)' }) }
+    }
+    [pscustomobject]$o
+}
+
 function Undo-LastCheckpoint {
-    <# Restores the files of the newest checkpoint that has changes, then removes it. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot)
+    <# Restores the files of the newest checkpoint that has changes, then removes it. Returns the
+       restored paths; with -Detailed, per file what the undo changed (Get-UndoFileChange). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [switch]$Detailed)
     $base = Join-Path (Get-ProjectStateDir $ProjectRoot) 'backups'
     if (-not (Test-Path $base)) { return @() }
     foreach ($cp in Get-ChildItem -Directory $base | Sort-Object Name -Descending) {
@@ -189,9 +289,14 @@ function Undo-LastCheckpoint {
         foreach ($p in $files.PSObject.Properties) {
             # Resolve-ProjectPath refuses paths outside the project, also through links.
             $full = try { Resolve-ProjectPath $ProjectRoot $p.Name } catch { Write-CCBLog info exec "Undo skipped $($p.Name): $($_.Exception.Message)"; continue }
+            $backup = Join-Path $cp.FullName ($p.Name.Replace('/', '\'))
+            $detail = if ($Detailed) { try { Get-UndoFileChange $full $backup $p.Name ($p.Value -eq 'new') } catch { [pscustomobject]@{ path = $p.Name; deleted = ($p.Value -eq 'new'); added = 0; removed = 0; binary = $true; preview = $null } } }
             if ($p.Value -eq 'new') { if (Test-Path -LiteralPath $full -PathType Leaf) { Remove-Item -LiteralPath $full -Force } }
-            else { Copy-Item -LiteralPath (Join-Path $cp.FullName ($p.Name.Replace('/', '\'))) -Destination $full -Force }
-            $restored += $p.Name
+            else {
+                $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $full)   # a folder a command removed
+                Copy-Item -LiteralPath $backup -Destination $full -Force
+            }
+            $restored += $(if ($Detailed) { $detail } else { $p.Name })
         }
         Remove-Item $cp.FullName -Recurse -Force
         return $restored
@@ -1246,5 +1351,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

@@ -4,7 +4,8 @@ import type { ChatOptions } from "@/lib/api";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MarkdownView } from "./markdown-view";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
-import type { Activity, AgentEvent, Reference } from "@/lib/api";
+import type { Activity, AgentEvent, Reference, UndoChange } from "@/lib/api";
+import { UndoCard } from "./undo-card";
 import { stripActionBlocks } from "@/lib/diff";
 import { cn } from "@/lib/utils";
 import { ActionCard, type ActionItem } from "./action-card";
@@ -16,6 +17,7 @@ export type TranscriptItem =
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[] }
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string }
+  | { kind: "undo"; seq: number; text: string; changes: UndoChange[] }
   | { kind: "next"; seq: number; steps: string[] }
   | { kind: "clarify"; seq: number; request: string; questions: ClarifyQuestion[]; summary?: string; planId?: string }
   | { kind: "plan"; seq: number; request: string; plan: string; planId?: string }
@@ -40,6 +42,13 @@ const NOTE_EVENTS: Partial<Record<AgentEvent["type"], { tone: NoteTone; fallback
   review: { tone: "done", fallback: "Code review finished." },
   "human-required": { tone: "human", fallback: "" },
 };
+
+/** An undo with per-file details becomes a card; an older one without them stays a note. */
+function addUndo(e: AgentEvent, ctx: BuildContext) {
+  const changes = Array.isArray(e.changes) ? e.changes : e.changes ? [e.changes] : [];
+  if (!changes.length) return addNote(e, ctx);
+  ctx.items.push({ kind: "undo", seq: e.seq, text: e.text ?? "Undid the last change set", changes });
+}
 
 function addNote(e: AgentEvent, ctx: BuildContext) {
   const note = NOTE_EVENTS[e.type];
@@ -109,6 +118,7 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
     ctx.items.push({ kind: "assistant", seq: e.seq, text: e.text ?? "", uncertain: e.uncertain ?? 0, references: e.references ?? [] }),
   action: mergeAction,
   "action-result": mergeActionResult,
+  undo: addUndo,
 };
 
 /** Folds the event stream into transcript items; action + action-result events merge by id. */
@@ -283,6 +293,8 @@ function TranscriptRow({
       return <ActionCard item={item.item} />;
     case "note":
       return <NoteLine text={item.text} tone={item.tone} />;
+    case "undo":
+      return <UndoCard changes={item.changes} text={item.text} />;
     case "next":
       return <NextSteps onUse={onUsePrompt} steps={item.steps} />;
     case "clarify":

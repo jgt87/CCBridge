@@ -240,10 +240,15 @@ export default function App() {
     [state.schedules, projectKey]
   );
 
-  const changes = useMemo(
-    () => projectEvents.filter((e) => e.type === "checkpoint").map((e) => ({ seq: e.seq, time: e.time, files: e.files ?? [] })),
-    [projectEvents]
-  );
+  // The change sets that can still be undone: an undo takes the newest one off the list.
+  const changes = useMemo(() => {
+    const list: { seq: number; time: string; files: string[] }[] = [];
+    for (const e of projectEvents) {
+      if (e.type === "checkpoint") list.push({ seq: e.seq, time: e.time, files: e.files ?? [] });
+      else if (e.type === "undo" && (e.files ?? []).length) list.pop();
+    }
+    return list;
+  }, [projectEvents]);
 
   const send = async (text: string) => {
     try {

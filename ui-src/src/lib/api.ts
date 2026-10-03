@@ -53,6 +53,18 @@ export interface TodoItem {
   text: string;
 }
 
+/** One file an undo restored: the lines that came back (added) and went (removed), and its diff. */
+export interface UndoChange {
+  path: string;
+  /** The step had created the file, so the undo removed it. */
+  deleted?: boolean;
+  added?: number;
+  removed?: number;
+  /** Not a text file: restored without line counts. */
+  binary?: boolean;
+  preview?: Preview | null;
+}
+
 export interface AgentEvent {
   seq: number;
   type:
@@ -112,6 +124,8 @@ export interface AgentEvent {
   version?: string;
   name?: string;
   path?: string;
+  /** undo: per file what came back and what went. */
+  changes?: UndoChange[] | UndoChange;
 }
 
 export interface AppState {

@@ -1624,15 +1624,26 @@ function Invoke-AgentAction {
                 return @{ ok = $true; summary = $out; output = $(if ($view) { "$out`n$view" } else { $out }); changed = $true; path = $Action.arg }
             }
             'run'   {
+                # What the command changes joins this step's change set, so Undo restores it.
+                $snap = if ($Checkpoint) { try { Start-RunSnapshot $Checkpoint $root } catch { Write-CCBLogError agent 'run snapshot' $_; $null } }
                 $r = Invoke-RunAction $root $evt.target -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
                 $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
                 $out = "$status`n~~~~`n$($r.output)`n~~~~"
+                $runChanged = @()
+                if ($snap) {
+                    try {
+                        $done = Complete-RunSnapshot $Checkpoint $root $snap
+                        $runChanged = @($done.changed)
+                        if (@($done.notBackedUp).Count) { Add-AgentEvent $State 'status' @{ text = "This command changed files too large to back up, so Undo cannot restore them: $(@($done.notBackedUp) -join ', ')" } }
+                    } catch { Write-CCBLogError agent 'run snapshot' $_ }
+                }
                 $fixed = @(Restore-SourceData $root)
                 if ($fixed.Count) {
                     Add-AgentEvent $State 'status' @{ text = "Source data is read-only; StreamHub undid what the command did to it: " + ($fixed -join '; ') }
                     $out += "`nNote: source/ is the user's read-only source data. This command changed it, so it was put back: " + ($fixed -join '; ') + '. Work on copies outside source/.'
                 }
-                return @{ ok = (-not $r.timedOut -and -not $r.cancelled -and $r.exitCode -eq 0); summary = "ran: $status"; output = $out }
+                if ($runChanged.Count) { $out += "`nFiles this command changed: " + ($runChanged -join ', ') }
+                return @{ ok = (-not $r.timedOut -and -not $r.cancelled -and $r.exitCode -eq 0); summary = "ran: $status"; output = $out; changed = [bool]$runChanged.Count }
             }
         }
     } catch {
@@ -2022,6 +2033,7 @@ function Invoke-AgentTurn {
             $fixed = @(Restore-SourceData $State.ProjectRoot)
             if ($fixed.Count) { Add-AgentEvent $State 'status' @{ text = 'Source data is read-only; StreamHub undid changes to it: ' + ($fixed -join '; ') } }
         } catch { Add-AgentEvent $State 'error' @{ text = "Could not verify source data: $($_.Exception.Message)" } }
+        try { Clear-RunSnapshot $checkpoint } catch { Write-CCBLogError agent 'run snapshot' $_ }
         if (-not $checkpoint.Files.Count) { Remove-Item $checkpoint.Dir -Recurse -Force -ErrorAction SilentlyContinue }
         if ($checkpoint.Files.Count -and "$($State.Config.evidence)" -ne 'off' -and $State.Mode -ne 'plan') {
             try {
@@ -2152,9 +2164,12 @@ function Start-AgentWorker {
                     Add-AgentEvent $State 'newchat' @{ text = 'New Copilot chat started.' }
                 }
                 'undo' {
-                    $files = @(Undo-LastCheckpoint $State.ProjectRoot)
+                    $details = @(Undo-LastCheckpoint $State.ProjectRoot -Detailed)
+                    $files = @($details | ForEach-Object { $_.path })
                     $text = if ($files.Count) { 'Undid the last change set: ' + ($files -join ', ') } else { 'Nothing to undo.' }
-                    Add-AgentEvent $State 'undo' @{ files = $files; text = $text }
+                    # Per file: the lines the undo brought back and took away, with a preview.
+                    $changes = @($details | ForEach-Object { @{ path = $_.path; deleted = [bool]$_.deleted; added = [int]$_.added; removed = [int]$_.removed; binary = [bool]$_.binary; preview = $_.preview } })
+                    Add-AgentEvent $State 'undo' @{ files = $files; text = $text; changes = $changes }
                 }
             }
         } catch {
