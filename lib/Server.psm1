@@ -95,9 +95,34 @@ function Get-StateSnapshot($State) {
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
         workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
         activity = (Get-ActivityView $State)
+        appWindow = [string]$State.Config.appWindow   # where the app opened (the Split screen hint is for copilot-tab)
+        hints = (Get-UiHints $State)
         previewBase = "/preview/$($State.PreviewToken)/"   # images in Markdown files (read-only project files)
         issueStamp = $(if ($State.ProjectRoot) { $p = Get-IssueIndexPath $State.ProjectRoot; if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTimeUtc.Ticks.ToString() } else { '' } } else { '' })
     }
+}
+
+$script:HintsFile = Join-Path $env:LOCALAPPDATA 'CCBridge\ui-hints.json'
+
+function Get-UiHints($State) {
+    <# One-time hints already shown (e.g. splitView), kept in the data folder so they stay shown
+       after a restart, an update or cleared browser data. Read once, then kept in $State. #>
+    if ($null -eq $State.Hints) {
+        $h = @{}
+        if (Test-Path -LiteralPath $script:HintsFile) {
+            try { foreach ($p in @(([IO.File]::ReadAllText($script:HintsFile) | ConvertFrom-Json).PSObject.Properties)) { $h[$p.Name] = "$($p.Value)" } } catch { }
+        }
+        $State.Hints = $h
+    }
+    $State.Hints
+}
+
+function Set-UiHintShown($State, [string]$Name) {
+    if ($Name -notmatch '^[A-Za-z][\w-]{0,40}$') { throw 'Unknown hint.' }
+    $h = Get-UiHints $State
+    $h[$Name] = (Get-Date).ToString('s')
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $script:HintsFile)
+    [IO.File]::WriteAllText($script:HintsFile, (ConvertTo-Json -InputObject $h -Compress), (New-Object Text.UTF8Encoding($false)))
 }
 
 function Get-ActivityView($State) {
@@ -427,6 +452,12 @@ function Invoke-ApiRequest($Ctx, $State) {
             $State.Config.port = $keep.port; $State.Config.cdpPort = $keep.cdpPort
             Write-CCBLog info server 'Settings reset to the app defaults' @{ changed = $changed -join ', ' }
             return Send-Json $Ctx @{ ok = $true; changed = $changed; settings = @(Get-CCBridgeSettings $State.AppRoot) }
+        }
+        '^POST /api/hints$' {
+            # A one-time hint was shown (it is not shown again, also after a restart).
+            $b = Read-JsonBody $Ctx
+            Set-UiHintShown $State ([string]$b.name)
+            return Send-Json $Ctx @{ ok = $true }
         }
         '^GET /api/settings$' { return Send-Json $Ctx @{ settings = @(Get-CCBridgeSettings $State.AppRoot) } }
         '^POST /api/settings$' {

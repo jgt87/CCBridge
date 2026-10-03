@@ -140,6 +140,10 @@ export interface AppState {
   activity?: Activity | null;
   /** Where the project is served read-only (images in Markdown), e.g. /preview/TOKEN/. */
   previewBase?: string;
+  /** Where the app opened: copilot-tab (a tab in the Copilot window), side-by-side or browser. */
+  appWindow?: string;
+  /** One-time hints already shown, by name (e.g. splitView), with when. */
+  hints?: Record<string, string>;
   /** Changes when the project's issue details change (reload the Issues panel). */
   issueStamp?: string;
 }
@@ -449,6 +453,7 @@ export const api = {
   reindexIssues: (force = false) => call<{ ok: boolean; started: boolean }>("POST", "/api/issues/reindex", { force }),
   fixIssues: (paths: string[], categories: IssueCategory[]) => call<{ ok: boolean; queued: number; issues: number }>("POST", "/api/issues/fix", { paths, categories }),
   ignoreIssues: (ids: string[], undo = false) => call<{ ok: boolean }>("POST", "/api/issues/ignore", { ids, undo }),
+  markHintShown: (name: string) => call<{ ok: boolean }>("POST", "/api/hints", { name }),
   resetSettings: () =>
     call<{ ok: boolean; changed: string[]; settings: Setting[] }>("POST", "/api/settings/reset").then((r) => ({ ...r, changed: asList(r.changed), settings: asList(r.settings) })),
   settings: () => call<{ settings: Setting[] }>("GET", "/api/settings").then((r) => (Array.isArray(r.settings) ? r.settings : [])),

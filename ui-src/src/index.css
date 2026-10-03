@@ -155,3 +155,18 @@
 }
 *::-webkit-scrollbar-thumb:hover { background-color: color-mix(in oklab, var(--foreground) 35%, transparent); }
 *::-webkit-scrollbar-corner { background: transparent; }
+
+/* Copilot status: connecting -> connected (copilot-status.tsx). Only the step to connected animates:
+   the ring closes, then the check draws, then a small pulse. */
+.ccb-connect-done circle { transition: stroke-dasharray 0.35s ease-out; }
+.ccb-connect-done path { transition: stroke-dashoffset 0.3s ease-out 0.3s, opacity 0.05s linear 0.3s; }
+.ccb-connect-done { animation: ccb-connect-pulse 0.35s ease-out 0.6s; transform-origin: center; }
+@keyframes ccb-connect-pulse { 50% { transform: scale(1.25); } }
+@media (prefers-reduced-motion: reduce) {
+  .ccb-connect-done circle, .ccb-connect-done path { transition: none; }
+  .ccb-connect-done { animation: none; }
+}
+
+/* First-time Split screen hint: a small upward nudge toward Edge's toolbar (split-view-hint.tsx). */
+@keyframes ccb-hint-nudge { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { [class*="ccb-hint-nudge"] { animation: none; } }

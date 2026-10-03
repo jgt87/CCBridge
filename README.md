@@ -494,6 +494,7 @@ stateDiagram-v2
 | `%LOCALAPPDATA%\CCBridge\replies` | Raw data of the last 30 Copilot replies (`saveReplyFrames`) |
 | `%LOCALAPPDATA%\CCBridge\session-token.txt` | Token that protects the local web API |
 | `%LOCALAPPDATA%\CCBridge\issue-index.json` | The app-wide issue index: one summary per project, imported from each project's `.streamhub\issues.json` |
+| `%LOCALAPPDATA%\CCBridge\ui-hints.json` | One-time hints already shown (such as how to use Edge's Split screen), so they do not come back |
 | `%LOCALAPPDATA%\CCBridge\queue.json`, `queue-pause.json`, `schedules.json` | The queue, the daily-limit pause and the schedules, kept across restarts |
 
 ---

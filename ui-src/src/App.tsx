@@ -28,6 +28,7 @@ import { SidePanel } from "@/components/ccb/side-panel";
 import type { ScheduleTarget } from "@/components/ccb/schedule-form";
 import { SchedulesModal } from "@/components/ccb/schedules-modal";
 import { FileViewer } from "@/components/ccb/file-viewer";
+import { SplitViewHint } from "@/components/ccb/split-view-hint";
 import { BACKDROP, ModalBackdrop } from "@/components/ccb/modal-backdrop";
 import { notifyEvents, notifyQueue } from "@/lib/notify";
 import type { ChatOptions } from "@/lib/api";
@@ -594,6 +595,8 @@ export default function App() {
       )}
 
       {/* File viewer */}
+      {/* Once, on first use in Edge: how to put StreamHub and Copilot side by side. */}
+      {state.copilot === "ready" && <SplitViewHint appWindow={state.appWindow} shownBefore={Boolean(state.hints?.splitView)} />}
       {viewer && <FileViewer file={viewer} onClose={() => setViewer(null)} onOpenFile={openFile} previewBase={state.previewBase} />}
     </div>
   );
