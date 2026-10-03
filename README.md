@@ -485,6 +485,7 @@ stateDiagram-v2
 | `<project>\PLAN.md` | Every decision of Clarify-first requests: questions, answers, plan versions, approval, result |
 | `<project>\evidence\` | Per task: what was asked, what changed, which checks passed |
 | `<project>\reviews\` | Code review reports (`.md`) and their findings (`.json`) |
+| `<project>\.streamhub\schedules.json` | The project's schedules (what runs, when, last and next run); read at every start, and changes made outside the app (by hand, or synced by OneDrive) are picked up within a minute |
 | `<project>\.streamhub\issues.json` | The project's issue details: every problem found per file, with its status (open, fixing, gave up, ignored) |
 | `<project>\runbooks\`, `exports\`, `fetch\` | Runbooks and their JSON exports; fetch prompts and their answers |
 | `%LOCALAPPDATA%\Programs\CCBridge` | The installed application |
@@ -495,7 +496,7 @@ stateDiagram-v2
 | `%LOCALAPPDATA%\CCBridge\session-token.txt` | Token that protects the local web API |
 | `%LOCALAPPDATA%\CCBridge\issue-index.json` | The app-wide issue index: one summary per project, imported from each project's `.streamhub\issues.json` |
 | `%LOCALAPPDATA%\CCBridge\ui-hints.json` | One-time hints already shown (such as how to use Edge's Split screen), so they do not come back |
-| `%LOCALAPPDATA%\CCBridge\queue.json`, `queue-pause.json`, `schedules.json` | The queue, the daily-limit pause and the schedules, kept across restarts |
+| `%LOCALAPPDATA%\CCBridge\queue.json`, `queue-pause.json` | The queue and the daily-limit pause, kept across restarts |
 
 ---
 

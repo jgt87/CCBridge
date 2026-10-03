@@ -2,6 +2,7 @@ import { CalendarClock, ChevronRight, Plus, X } from "lucide-react";
 import { ModalBackdrop } from "./modal-backdrop";
 import { useEffect, useState } from "react";
 import type { FetchItem, FileInfo, RunbookItem, ScheduleItem, ScheduleSpec } from "@/lib/api";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ScheduleForm, type ScheduleTarget } from "./schedule-form";
 import { formatWhen, SchedulesList } from "./schedules-panel";
@@ -51,6 +52,7 @@ export function SchedulesModal({
   onClose: () => void;
 }) {
   const [target, setTarget] = useState<ScheduleTarget | null>(initial);
+  const [editing, setEditing] = useState<ScheduleItem | null>(null);
   useEffect(() => setTarget(initial), [initial]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && onClose();
@@ -70,7 +72,7 @@ export function SchedulesModal({
             <div className="text-muted-foreground text-xs">Messages, fetches and runbooks that run on set days and times while StreamHub is open.</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {!target && (
+            {!target && !editing && (
               <button
                 className="inline-flex items-center gap-1 rounded-md border border-black/10 px-2 py-1 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
                 onClick={() => setTarget({ kind: runbooks.length ? "runbook" : "chat", name: runbooks[0]?.name })}
@@ -85,7 +87,21 @@ export function SchedulesModal({
           </div>
         </div>
         <div className={cn("min-h-0 flex-1 overflow-y-auto p-4")}>
-          {target ? (
+          {editing ? (
+            <ScheduleForm
+              existing={editing}
+              fetchItems={fetchItems}
+              files={files}
+              initial={{ kind: editing.kind, name: editing.name, text: editing.text }}
+              key={editing.id}
+              onCancel={() => setEditing(null)}
+              onSave={async (spec) => {
+                await api.editSchedule(editing.id, spec);
+                setEditing(null);
+              }}
+              runbooks={runbooks}
+            />
+          ) : target ? (
             <ScheduleForm
               fetchItems={fetchItems}
               files={files}
@@ -99,7 +115,7 @@ export function SchedulesModal({
               runbooks={runbooks}
             />
           ) : (
-            <SchedulesList schedules={schedules} />
+            <SchedulesList onEdit={setEditing} schedules={schedules} />
           )}
         </div>
       </div>

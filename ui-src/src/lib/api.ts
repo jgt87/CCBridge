@@ -264,6 +264,8 @@ export interface ScheduleItem {
   title: string;
   kind: "chat" | "fetch" | "runbook";
   name: string;
+  /** The message, for a scheduled message. */
+  text?: string;
   repeat: "once" | "daily" | "weekdays" | "weekly";
   times: string[];
   at: string;
@@ -439,6 +441,7 @@ export const api = {
     })),
   fixFindings: (id: string, ids: string[]) => call<{ ok: boolean; tasks: number }>("POST", "/api/reviews/fix", { id, ids }),
   createSchedule: (spec: ScheduleSpec) => call<{ ok: boolean; id: string }>("POST", "/api/schedules", spec),
+  editSchedule: (id: string, spec: ScheduleSpec) => call<{ ok: boolean }>("POST", "/api/schedules/edit", { id, ...spec }),
   updateSchedule: (id: string, change: { enabled?: boolean }) => call<{ ok: boolean }>("POST", "/api/schedules/update", { id, ...change }),
   deleteSchedule: (id: string) => call<{ ok: boolean }>("POST", "/api/schedules/delete", { id }),
   runSchedule: (id: string) => call<{ ok: boolean }>("POST", "/api/schedules/run", { id }),

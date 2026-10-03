@@ -63,10 +63,13 @@ Describe 'Invoke-DueSchedules' {
     $config = Get-CCBridgeConfig harness $root
     $file = Join-Path $env:TEMP ('ccb-sched-' + [guid]::NewGuid().ToString('N') + '.json')
 
+    $proj = Join-Path $env:TEMP ('ccb-sched-proj-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $null = New-Item -ItemType Directory -Force -Path $proj
+
     It 'queues due schedules, notes missed runs, continues repeats from now and saves' {
         $s = New-AgentState -Config $config -AppRoot $root
         $s.ScheduleFile = $file
-        $s.ProjectRoot = 'C:\Projects\demo'
+        $s.ProjectRoot = $proj
         $daily = New-AgentSchedule $s @{ kind = 'runbook'; name = 'meetings'; repeat = 'daily'; times = @('08:00') }
         $once = New-AgentSchedule $s @{ kind = 'chat'; text = 'Update the report'; repeat = 'once'; at = '2026-10-02T09:58' }
         $daily.nextRun = '2026-10-01T08:00:00'   # missed while closed
@@ -81,11 +84,84 @@ Describe 'Invoke-DueSchedules' {
         $once.nextRun | Should BeNullOrEmpty
         Invoke-DueSchedules $s $fri -Force | Should Be 0
 
+        # Saved in the project, not in the app's data folder.
+        Test-Path (Join-Path $proj '.streamhub\schedules.json') | Should Be $true
+        Test-Path $file | Should Be $false
+
         $r = New-AgentState -Config $config -AppRoot $root
         $r.ScheduleFile = $file
+        $r.ProjectRoot = $proj
         Restore-Schedules $r | Should Be 2
         (@($r.Schedules) | Where-Object { $_.id -eq $daily.id }).times -join ',' | Should Be '08:00'
     }
+
+    It 'edits a schedule in place: same id and project, new time, saved in the project' {
+        $s = New-AgentState -Config $config -AppRoot $root
+        $s.ScheduleFile = $file
+        $s.ProjectRoot = $proj
+        $null = Restore-Schedules $s
+        $x = New-AgentSchedule $s @{ kind = 'chat'; text = 'Weekly summary'; repeat = 'weekly'; days = @(1); times = @('09:00') }
+        $y = Update-AgentSchedule $s $x.id @{ kind = 'chat'; text = 'Weekly summary for the team'; title = 'Team summary'; repeat = 'weekly'; days = @(5); times = @('16:30') }
+        $y.id | Should Be $x.id
+        $y.projectRoot | Should Be $x.projectRoot
+        $y.title | Should Be 'Team summary'
+        ($y.days -join ',') + ' ' + ($y.times -join ',') | Should Be '5 16:30'
+        ([datetime]$y.nextRun).DayOfWeek | Should Be 'Friday'
+        [IO.File]::ReadAllText((Join-Path $proj '.streamhub\schedules.json')) | Should Match 'Team summary'
+        { Update-AgentSchedule $s 's-nothere' @{ kind = 'chat'; text = 'x'; repeat = 'daily'; times = @('08:00') } } | Should Throw
+        # A finished one-time schedule given a new time in the future runs again.
+        $once = New-AgentSchedule $s @{ kind = 'chat'; text = 'Once'; repeat = 'once'; at = (Get-Date).AddHours(1).ToString('yyyy-MM-ddTHH:mm') }
+        $once.enabled = $false
+        $later = (Get-Date).AddDays(1).ToString('yyyy-MM-ddTHH:mm')
+        (Update-AgentSchedule $s $once.id @{ kind = 'chat'; text = 'Once'; repeat = 'once'; at = $later }).enabled | Should Be $true
+        foreach ($id in $x.id, $once.id) { $s.Schedules.Remove((@($s.Schedules) | Where-Object { $_.id -eq $id })[0]) }
+        Save-Schedules $s
+    }
+
+    It 'picks up a changed or removed project file' {
+        $r = New-AgentState -Config $config -AppRoot $root
+        $r.ScheduleFile = $file
+        $r.ProjectRoot = $proj
+        $null = Restore-Schedules $r
+        $pf = Join-Path $proj '.streamhub\schedules.json'
+        # Edited outside the app (by hand, or synced from another machine): one schedule left.
+        $all = [IO.File]::ReadAllText($pf) | ConvertFrom-Json; $one = @($all)[0]
+        $one.title = 'Edited elsewhere'
+        [IO.File]::WriteAllText($pf, (ConvertTo-Json -InputObject @($one) -Depth 5))
+        (Get-Item $pf).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(1)
+        Sync-ProjectSchedules $r -Force | Should Be 1
+        @($r.Schedules).Count | Should Be 1
+        @($r.Schedules)[0].title | Should Be 'Edited elsewhere'
+        Remove-Item -LiteralPath $pf
+        $null = Sync-ProjectSchedules $r -Force
+        @($r.Schedules).Count | Should Be 0
+    }
+
+    It 'moves schedules from the old app-wide file into their projects once' {
+        $old = Join-Path $env:TEMP ('ccb-old-sched-' + [guid]::NewGuid().ToString('N') + '.json')
+        $item = @{ id = 's-old12345'; title = 'Old one'; kind = 'chat'; text = 'hi'; name = ''; projectRoot = $proj; repeat = 'daily'; times = @('07:30'); at = ''; days = @(); enabled = $true; created = '2026-10-01T10:00:00'; lastRun = $null; lastQueueId = $null; nextRun = $null }
+        [IO.File]::WriteAllText($old, (ConvertTo-Json -InputObject @($item) -Depth 5))
+        $r = New-AgentState -Config $config -AppRoot $root
+        $r.ScheduleFile = $old
+        $null = Restore-Schedules $r
+        @($r.Schedules | Where-Object { $_.id -eq 's-old12345' }).Count | Should Be 1
+        Test-Path $old | Should Be $false
+        Test-Path "$old.moved-to-projects" | Should Be $true
+        ([IO.File]::ReadAllText((Join-Path $proj '.streamhub\schedules.json'))) | Should Match 's-old12345'
+        Remove-Item -LiteralPath "$old.moved-to-projects"
+    }
+
+    It 'runs a project schedule where the project is now (another machine, another path)' {
+        $moved = "$proj-moved"
+        Copy-Item -LiteralPath $proj -Destination $moved -Recurse
+        $r = New-AgentState -Config $config -AppRoot $root
+        $r.ScheduleFile = $file
+        $r.ProjectRoot = $moved
+        $null = Restore-Schedules $r
+        @($r.Schedules | Where-Object { $_.id -eq 's-old12345' })[0].projectRoot | Should Be $moved
+        Remove-Item -LiteralPath $moved -Recurse -Force
+    }
+    Remove-Item -LiteralPath $proj -Recurse -Force
 
     It 'pauses and resumes the queue' {
         $s = New-AgentState -Config $config -AppRoot $root

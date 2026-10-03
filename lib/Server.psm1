@@ -25,7 +25,7 @@ function Get-QueueView($State, [int]$Max = 40) {
 function Get-ScheduleView($State) {
     <# Schedules for the app, soonest first; finished one-time schedules last. #>
     $list = foreach ($s in @($State.Schedules)) {
-        [pscustomobject]@{ id = $s.id; title = $s.title; kind = $s.kind; name = $s.name; repeat = $s.repeat; times = @(Get-ScheduleTimes $s); at = $s.at; days = @($s.days)
+        [pscustomobject]@{ id = $s.id; title = $s.title; kind = $s.kind; name = $s.name; text = "$($s.text)"; repeat = $s.repeat; times = @(Get-ScheduleTimes $s); at = $s.at; days = @($s.days)
             when = (Format-ScheduleWhen $s); enabled = [bool]$s.enabled; nextRun = $s.nextRun; lastRun = $s.lastRun; lastQueueId = $s.lastQueueId
             project = $(if ($s.projectRoot) { Split-Path $s.projectRoot -Leaf } else { $null }) }
     }
@@ -232,6 +232,12 @@ function Invoke-ApiRequest($Ctx, $State) {
             $spec = @{ kind = [string]$b.kind; text = [string]$b.text; name = [string]$b.name; title = [string]$b.title; repeat = [string]$b.repeat; times = @($b.times | Where-Object { $_ }); at = [string]$b.at; days = @($b.days) }
             $sch = New-AgentSchedule $State $spec
             return Send-Json $Ctx @{ ok = $true; id = $sch.id }
+        }
+        '^POST /api/schedules/edit$' {
+            $b = Read-JsonBody $Ctx
+            $spec = @{ kind = [string]$b.kind; text = [string]$b.text; name = [string]$b.name; title = [string]$b.title; repeat = [string]$b.repeat; times = @($b.times | Where-Object { $_ }); at = [string]$b.at; days = @($b.days) }
+            $null = Update-AgentSchedule $State ([string]$b.id) $spec
+            return Send-Json $Ctx @{ ok = $true; schedules = @(Get-ScheduleView $State) }
         }
         '^POST /api/schedules/(update|delete|run)$' {
             $op = $Matches[1]
@@ -518,6 +524,7 @@ function Set-Project($State, [string]$Path) {
     $State.NeedNewChat = $State.NeedNewChat -or $State.ChatStarted   # a new project starts a fresh Copilot chat
     Add-AgentEvent $State 'project' @{ name = (Split-Path $Path -Leaf); path = $Path }
     try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue fix reset' $_ }
+    try { $null = Sync-ProjectSchedules $State -Roots @($State.ProjectRoot) -Force } catch { Write-CCBLogError server 'schedule import' $_ }
     try { $null = Start-IssueIndexer $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue index' $_ }   # step 1 of the issue cycle, in the background
     try { [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'), $State.ProjectRoot) } catch { }
 }

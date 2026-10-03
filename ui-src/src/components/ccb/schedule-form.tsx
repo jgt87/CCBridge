@@ -1,6 +1,6 @@
 import { AtSign, FileText, Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { FetchItem, FileInfo, RunbookItem, ScheduleSpec } from "@/lib/api";
+import type { FetchItem, FileInfo, RunbookItem, ScheduleItem, ScheduleSpec } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const flatButton =
@@ -48,6 +48,7 @@ export function repeatFor(days: number[]): "daily" | "weekdays" | "weekly" {
 /** Schedule a message, fetch or runbook: once at a date and time, or on chosen days at one or more times. */
 export function ScheduleForm({
   initial,
+  existing,
   fetchItems,
   runbooks,
   files = [],
@@ -55,6 +56,8 @@ export function ScheduleForm({
   onCancel,
 }: {
   initial: ScheduleTarget;
+  /** Editing this schedule: the form opens with its settings. */
+  existing?: ScheduleItem;
   fetchItems: FetchItem[];
   runbooks: RunbookItem[];
   /** Project files for the @ picker: a runbook from runbooks/ runs as a runbook, any other file is attached to the message. */
@@ -64,12 +67,22 @@ export function ScheduleForm({
 }) {
   const [target, setTarget] = useState(initial.kind === "chat" ? "chat" : `${initial.kind}:${initial.name ?? ""}`);
   const [text, setText] = useState(initial.text ?? "");
-  const [mode, setMode] = useState<"once" | "repeat">("repeat");
-  const [at, setAt] = useState(nextHour());
-  const [days, setDays] = useState<number[]>(WEEKDAYS);
-  const [times, setTimes] = useState<string[]>(["08:00"]);
+  const [mode, setMode] = useState<"once" | "repeat">(existing?.repeat === "once" ? "once" : "repeat");
+  const [at, setAt] = useState(existing?.repeat === "once" && existing.at ? existing.at.slice(0, 16) : nextHour());
+  const [days, setDays] = useState<number[]>(() => {
+    if (!existing || existing.repeat === "once") return WEEKDAYS;
+    if (existing.repeat === "daily") return DAYS.map((d) => d.value);
+    if (existing.repeat === "weekdays") return WEEKDAYS;
+    return existing.days?.length ? existing.days : WEEKDAYS;
+  });
+  const [times, setTimes] = useState<string[]>(existing?.times?.length ? existing.times : ["08:00"]);
   const [newTime, setNewTime] = useState("");
-  const [title, setTitle] = useState("");
+  // A title the user typed; one made up from the message or name is not kept as a custom title.
+  const [title, setTitle] = useState(() => {
+    if (!existing) return "";
+    const auto = existing.kind === "chat" ? (existing.text ?? "").replace(/\s+/g, " ").trim() : `${existing.kind}: ${existing.name}`;
+    return existing.title === auto || existing.title === auto.slice(0, 117) + "..." ? "" : existing.title;
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [picking, setPicking] = useState(false);
@@ -141,7 +154,7 @@ export function ScheduleForm({
 
   return (
     <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
-      <div className="font-medium text-sm">Schedule</div>
+      <div className="font-medium text-sm">{existing ? "Edit schedule" : "Schedule"}</div>
       <div className="space-y-1">
         <span className="text-muted-foreground text-xs">What runs</span>
         <div className="flex gap-1">
@@ -283,7 +296,7 @@ export function ScheduleForm({
           Cancel
         </button>
         <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={saving || !valid} onClick={save} title={valid ? undefined : `Still needed: ${missing.join(", ")}`} type="button">
-          {saving ? "Saving..." : "Schedule"}
+          {saving ? "Saving..." : existing ? "Save changes" : "Schedule"}
         </button>
       </div>
     </div>

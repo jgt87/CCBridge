@@ -24,6 +24,9 @@ function New-AgentState {
         CurrentQueueId = $null; MessagesSent = 0; NoCommands = $false
         QueueFile = $null   # set by the web app: the queue survives restarts (Save-AgentQueue / Restore-AgentQueue)
         Schedules = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList)); ScheduleFile = $null; NextScheduleCheck = $null
+        # Schedules live in each project (<project>\.streamhub\schedules.json); per project root the
+        # file time last read or written, so edits from outside (by hand, OneDrive) are picked up.
+        ScheduleRoots = [hashtable]::Synchronized(@{}); NextScheduleSync = $null
         Held = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList))   # tasks put back after the daily limit: they run first
         PausedUntil = $null; PauseReason = $null; LastLimitAt = $null; PauseFile = $null   # the web app saves the pause (Save-QueuePause)
         ResponseMode = $(if ($Config.responseMode) { [string]$Config.responseMode } else { 'leave' }); ResponseModeActual = $null   # Auto / Quick / Think deeper
@@ -358,33 +361,157 @@ function Resume-AgentQueue {
     Add-AgentEvent $State 'status' @{ text = "The queue continues ($Why)." }
 }
 
+function Get-ProjectScheduleFile([string]$ProjectRoot) { Join-Path $ProjectRoot '.streamhub\schedules.json' }
+
+function Get-ScheduleKey([string]$ProjectRoot) { $ProjectRoot.TrimEnd('\').ToLowerInvariant() }
+
+function ConvertTo-ScheduleItem($Object, [string]$ProjectRoot) {
+    # A saved schedule as the synchronized hashtable the worker uses. The project is where the file
+    # was found (on another machine the same project may sit at another path).
+    $h = [hashtable]::Synchronized((ConvertTo-PlainHash $Object))
+    $h.days = @($Object.days | Where-Object { $null -ne $_ } | ForEach-Object { [int]$_ })
+    $h.times = @(Get-ScheduleTimes $h)
+    if ($ProjectRoot) { $h.projectRoot = $ProjectRoot.TrimEnd('\') }
+    if ($h.enabled -and -not $h.nextRun) { $n = Get-NextRun $h (Get-Date); $h.nextRun = if ($n) { $n.ToString('s') } else { $null } }
+    $h
+}
+
 function Save-Schedules {
-    param($State)
+    <# Writes each project's schedules to <project>\.streamhub\schedules.json (only projects whose
+       folder exists; a project whose last schedule was removed gets an empty list). Nothing is
+       saved when $State.ScheduleFile is not set (the MCP server's own engine). #>
+    param($State, [string[]]$Roots)
     if (-not $State.ScheduleFile) { return }
     [Threading.Monitor]::Enter($State.Schedules.SyncRoot)
     try {
-        $list = foreach ($s in @($State.Schedules)) { $copy = @{}; foreach ($k in @($s.Keys)) { $copy[$k] = $s[$k] }; $copy }
-        $tmp = "$($State.ScheduleFile).tmp"
-        $null = New-Item -ItemType Directory -Force -Path (Split-Path $State.ScheduleFile)
-        [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject @($list) -Depth 5 -Compress), (New-Object Text.UTF8Encoding($false)))
-        if (Test-Path -LiteralPath $State.ScheduleFile) { [IO.File]::Replace($tmp, $State.ScheduleFile, [NullString]::Value) } else { [IO.File]::Move($tmp, $State.ScheduleFile) }
-    } catch { Write-CCBLogError agent 'Could not save the schedules' $_ }
-    finally { [Threading.Monitor]::Exit($State.Schedules.SyncRoot) }
+        $byRoot = @{}
+        foreach ($s in @($State.Schedules)) {
+            if (-not $s.projectRoot) { continue }
+            $k = Get-ScheduleKey $s.projectRoot
+            if (-not $byRoot[$k]) { $byRoot[$k] = @{ root = "$($s.projectRoot)".TrimEnd('\'); list = New-Object System.Collections.ArrayList } }
+            $copy = @{}; foreach ($key in @($s.Keys)) { $copy[$key] = $s[$key] }; $copy.Remove('projectRoot')
+            [void]$byRoot[$k].list.Add($copy)
+        }
+        foreach ($k in @($State.ScheduleRoots.Keys)) { if (-not $byRoot[$k]) { $byRoot[$k] = @{ root = $State.ScheduleRoots[$k].root; list = @() } } }
+        $only = @{}; foreach ($r in @($Roots | Where-Object { $_ })) { $only[(Get-ScheduleKey $r)] = $true }
+        foreach ($k in $byRoot.Keys) {
+            if ($only.Count -and -not $only.ContainsKey($k)) { continue }
+            $root = $byRoot[$k].root
+            if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+            $file = Get-ProjectScheduleFile $root
+            if (-not @($byRoot[$k].list).Count -and -not (Test-Path -LiteralPath $file)) { continue }
+            try {
+                $null = New-Item -ItemType Directory -Force -Path (Split-Path $file)
+                $tmp = "$file.tmp"
+                [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject @($byRoot[$k].list) -Depth 5), (New-Object Text.UTF8Encoding($false)))
+                if (Test-Path -LiteralPath $file) { [IO.File]::Replace($tmp, $file, [NullString]::Value) } else { [IO.File]::Move($tmp, $file) }
+                # Our own write is not an outside change.
+                $State.ScheduleRoots[$k] = @{ root = $root; ticks = (Get-Item -LiteralPath $file).LastWriteTimeUtc.Ticks }
+            } catch { Write-CCBLogError agent "Could not save the schedules of $root" $_ }
+        }
+    } finally { [Threading.Monitor]::Exit($State.Schedules.SyncRoot) }
+}
+
+function Import-ProjectSchedules {
+    <# Reads one project's schedules file and replaces that project's schedules with it. A project
+       folder that exists without the file has no schedules (the file was removed). #>
+    param($State, [Parameter(Mandatory)][string]$ProjectRoot)
+    $root = $ProjectRoot.TrimEnd('\'); $k = Get-ScheduleKey $root
+    $file = Get-ProjectScheduleFile $root
+    $items = @()
+    $ticks = 0
+    if (Test-Path -LiteralPath $file) {
+        $ticks = (Get-Item -LiteralPath $file).LastWriteTimeUtc.Ticks
+        # Assigned first: in PowerShell 5.1 ConvertFrom-Json hands a JSON array on as one object.
+        $parsed = try { [IO.File]::ReadAllText($file) | ConvertFrom-Json } catch { Write-CCBLogError agent "Could not read $file" $_; return }
+        $items = @(foreach ($o in $parsed) { if ($o -and $o.id) { ConvertTo-ScheduleItem $o $root } })
+    }
+    [Threading.Monitor]::Enter($State.Schedules.SyncRoot)
+    try {
+        foreach ($old in @($State.Schedules | Where-Object { $_.projectRoot -and (Get-ScheduleKey $_.projectRoot) -eq $k })) { $State.Schedules.Remove($old) }
+        foreach ($i in $items) { [void]$State.Schedules.Add($i) }
+        if ($ticks) { $State.ScheduleRoots[$k] = @{ root = $root; ticks = $ticks } } else { $State.ScheduleRoots.Remove($k) }
+    } finally { [Threading.Monitor]::Exit($State.Schedules.SyncRoot) }
+    Write-CCBLog verbose agent 'Project schedules imported' @{ project = $root; count = $items.Count }
+    $items.Count
+}
+
+function Sync-ProjectSchedules {
+    <# Imports the schedules of every known project whose file is new or changed (at most once a
+       minute unless -Force): the projects in the OneDrive projects folder, the open project, and
+       projects that had schedules. Returns how many projects were imported. #>
+    param($State, [string[]]$Roots, [switch]$Force)
+    if (-not $State.ScheduleFile) { return 0 }
+    if (-not $Force -and $State.NextScheduleSync -and (Get-Date) -lt [datetime]$State.NextScheduleSync) { return 0 }
+    $State.NextScheduleSync = (Get-Date).AddSeconds(60).ToString('s')
+    $candidates = @($Roots | Where-Object { $_ })
+    if (-not $candidates.Count) {
+        $candidates = @($State.ScheduleRoots.Values | ForEach-Object { $_.root }) + @($State.ProjectRoot) + @($State.Schedules | ForEach-Object { $_.projectRoot })
+        try { $candidates += @(Get-CCBridgeProjects | ForEach-Object { $_.path }) } catch { }
+    }
+    $done = 0; $seen = @{}
+    foreach ($r in @($candidates | Where-Object { $_ })) {
+        $k = Get-ScheduleKey $r
+        if ($seen.ContainsKey($k)) { continue }; $seen[$k] = $true
+        if (-not (Test-Path -LiteralPath $r -PathType Container)) { continue }   # offline or moved: keep what we have
+        $file = Get-ProjectScheduleFile $r
+        $known = $State.ScheduleRoots[$k]
+        $ticks = if (Test-Path -LiteralPath $file) { (Get-Item -LiteralPath $file).LastWriteTimeUtc.Ticks } else { 0 }
+        $hasItems = @($State.Schedules | Where-Object { $_.projectRoot -and (Get-ScheduleKey $_.projectRoot) -eq $k }).Count
+        $changed = if ($ticks) { -not $known -or $known.ticks -ne $ticks } else { [bool]$hasItems }
+        if ($changed) { $null = Import-ProjectSchedules $State $r; $done++ }
+    }
+    $done
 }
 
 function Restore-Schedules {
+    <# At start: moves schedules from the old app-wide file (%LOCALAPPDATA%\CCBridge\schedules.json,
+       before v0.1.44) into their projects once, then imports every project's schedules. #>
     param($State)
-    if (-not $State.ScheduleFile -or -not (Test-Path -LiteralPath $State.ScheduleFile)) { return 0 }
-    $saved = try { @(([IO.File]::ReadAllText($State.ScheduleFile)) | ConvertFrom-Json) } catch { Write-CCBLogError agent 'Could not read the schedules' $_; @() }
-    foreach ($s in $saved) {
-        if (-not $s -or -not $s.id) { continue }
-        $h = [hashtable]::Synchronized((ConvertTo-PlainHash $s))
-        $h.days = @($s.days | Where-Object { $null -ne $_ } | ForEach-Object { [int]$_ })
-        $h.times = @(Get-ScheduleTimes $h)
-        [void]$State.Schedules.Add($h)
+    if (-not $State.ScheduleFile) { return 0 }
+    if (Test-Path -LiteralPath $State.ScheduleFile) {
+        $saved = try { @(([IO.File]::ReadAllText($State.ScheduleFile)) | ConvertFrom-Json) } catch { Write-CCBLogError agent 'Could not read the schedules' $_; @() }
+        $roots = @()
+        foreach ($s in $saved) {
+            if (-not $s -or -not $s.id -or -not $s.projectRoot) { continue }
+            if (-not (Test-Path -LiteralPath "$($s.projectRoot)" -PathType Container)) { continue }
+            $h = ConvertTo-ScheduleItem $s "$($s.projectRoot)"
+            # Keep a schedule the project file already has (moved before); add the others.
+            $existing = @()
+            $pf = Get-ProjectScheduleFile $h.projectRoot
+            if (Test-Path -LiteralPath $pf) { $j = try { [IO.File]::ReadAllText($pf) | ConvertFrom-Json } catch { $null }; $existing = @(foreach ($o in $j) { $o.id }) }
+            if ($existing -contains $h.id) { continue }
+            $null = Import-ProjectSchedules $State $h.projectRoot
+            [void]$State.Schedules.Add($h)
+            $roots += $h.projectRoot
+        }
+        if ($roots.Count) { Save-Schedules $State -Roots $roots }
+        try { [IO.File]::Move($State.ScheduleFile, "$($State.ScheduleFile).moved-to-projects") } catch { Write-CCBLogError agent 'Could not rename the old schedules file' $_ }
+        Write-CCBLog info agent 'Schedules moved into their projects' @{ count = $roots.Count }
     }
-    Write-CCBLog info agent 'Schedules restored' @{ count = $State.Schedules.Count }
+    $null = Sync-ProjectSchedules $State -Force
+    Write-CCBLog info agent 'Schedules restored' @{ count = $State.Schedules.Count; projects = $State.ScheduleRoots.Count }
     $State.Schedules.Count
+}
+
+function Update-AgentSchedule {
+    <# Changes an existing schedule from the app (what it runs, when, its title); keeps its id,
+       project and history. A finished one-time schedule given a new time runs again. #>
+    param($State, [Parameter(Mandatory)][string]$Id, [hashtable]$Spec)
+    Test-ScheduleSpec $Spec
+    $s = @($State.Schedules) | Where-Object { $_.id -eq $Id } | Select-Object -First 1
+    if (-not $s) { throw "Unknown schedule '$Id'" }
+    $title = if ("$($Spec.title)".Trim()) { "$($Spec.title)".Trim() } elseif ($Spec.kind -eq 'chat') { ("$($Spec.text)" -replace '\s+', ' ').Trim() } else { "$($Spec.kind): $($Spec.name)" }
+    if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
+    $s.title = $title; $s.kind = $Spec.kind; $s.text = "$($Spec.text)"; $s.name = "$($Spec.name)"
+    $s.repeat = $Spec.repeat; $s.times = @(Get-ScheduleTimes $Spec); $s.at = "$($Spec.at)"; $s.days = @($Spec.days | ForEach-Object { [int]$_ })
+    $next = Get-NextRun $s (Get-Date)
+    $s.nextRun = if ($next) { $next.ToString('s') } else { $null }
+    if ($s.repeat -eq 'once') { $s.enabled = [bool]$next }
+    $s.updated = (Get-Date).ToString('s')
+    Save-Schedules $State -Roots @($s.projectRoot)
+    Write-CCBLog info agent "Schedule $Id changed" @{ title = $title; repeat = $s.repeat }
+    $s
 }
 
 function New-AgentSchedule {
@@ -423,6 +550,7 @@ function Invoke-DueSchedules {
     <# Puts due schedules in the queue (checked at most every 15 seconds). A run that was missed while
        StreamHub was closed runs once, with a note; repeats then continue from now. #>
     param($State, [datetime]$Now = (Get-Date), [switch]$Force)
+    try { $null = Sync-ProjectSchedules $State } catch { Write-CCBLogError agent 'schedule import' $_ }
     if (-not $State.Schedules.Count) { return 0 }
     if (-not $Force -and $State.NextScheduleCheck -and $Now -lt [datetime]$State.NextScheduleCheck) { return 0 }
     $State.NextScheduleCheck = $Now.AddSeconds(15).ToString('s')
@@ -1974,4 +2102,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

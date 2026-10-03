@@ -29,7 +29,7 @@ import type { ScheduleTarget } from "@/components/ccb/schedule-form";
 import { SchedulesModal } from "@/components/ccb/schedules-modal";
 import { FileViewer } from "@/components/ccb/file-viewer";
 import { SplitViewHint } from "@/components/ccb/split-view-hint";
-import { BACKDROP, ModalBackdrop } from "@/components/ccb/modal-backdrop";
+import { ModalBackdrop } from "@/components/ccb/modal-backdrop";
 import { notifyEvents, notifyQueue } from "@/lib/notify";
 import type { ChatOptions } from "@/lib/api";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
@@ -380,9 +380,8 @@ export default function App() {
       ) : (
         <div className="flex min-h-0 flex-1">
           {/* Side panel (left) */}
-          {!wide && drawerOpen && (
-            <div aria-hidden className={`fixed inset-0 top-14 z-30 ${BACKDROP}`} onClick={() => setDrawerOpen(false)} />
-          )}
+          {/* The chat is not dimmed: a click beside the open panel only closes it. */}
+          {!wide && drawerOpen && <div aria-hidden className="fixed inset-0 top-14 z-30" onClick={() => setDrawerOpen(false)} />}
           <aside
             className={
               wide

@@ -48,13 +48,13 @@ export function SplitViewHint({ appWindow, shownBefore }: { appWindow?: string; 
   if (!open) return null;
   // Its own layer on top of everything, the app's top bar included.
   return createPortal(
-    // In the page's top-right corner, its pointer in the card's top-right corner, right under
-    // Edge's menu button (...), where Split screen is chosen.
+    // In the page's top-right corner. The pointer sits under Edge's menu button (...), which is just
+    // left of Edge's own Copilot button at the far right, so about 60 px from the right edge.
     <div className="fixed top-3.5 right-2 z-[100] w-[22rem] animate-[ccb-hint-nudge_1.6s_ease-in-out_3]" role="dialog" aria-label="Use Split screen in Edge">
       {/* Inverted against the app (light on the dark app, dark on the light one), still without
           color, so it reads as a hint and not as part of the page. */}
       <div className="relative w-full rounded-xl bg-foreground p-4 text-background text-sm shadow-[0_0_0_4px_color-mix(in_oklab,var(--foreground)_18%,transparent),0_18px_50px_rgba(0,0,0,0.55)]">
-        <span aria-hidden className="absolute -top-[7px] right-5 h-4 w-4 rotate-45 rounded-tl-sm bg-foreground" />
+        <span aria-hidden className="absolute -top-[7px] right-12 h-4 w-4 rotate-45 rounded-tl-sm bg-foreground" />
         <div className="mb-2 flex items-start gap-2">
           <Columns2 className="mt-0.5 h-4 w-4 shrink-0 opacity-70" />
           <div className="flex-1">

@@ -1,4 +1,4 @@
-import { CalendarClock, Pause, Play, Trash2 } from "lucide-react";
+import { CalendarClock, Pause, Pencil, Play, Trash2 } from "lucide-react";
 import type { ScheduleItem } from "@/lib/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ export function formatWhen(iso: string | null): string {
 }
 
 /** Scheduled messages, fetches and runbooks, with the next run and pause, run-now and delete. */
-export function SchedulesList({ schedules }: { schedules: ScheduleItem[] }) {
+export function SchedulesList({ schedules, onEdit }: { schedules: ScheduleItem[]; onEdit?: (s: ScheduleItem) => void }) {
   return (
     <div className="space-y-1.5">
       {schedules.length === 0 && <p className="text-muted-foreground text-sm">Nothing scheduled yet. Use New schedule, or the calendar button in the message box.</p>}
@@ -51,6 +51,11 @@ export function SchedulesList({ schedules }: { schedules: ScheduleItem[] }) {
                   : "paused"}
             </div>
             <div className="mt-1 flex flex-wrap gap-0.5 pl-4">
+              {onEdit && (
+                <button className={flatButton} onClick={() => onEdit(s)} title="Change what it runs, when, or its title" type="button">
+                  <Pencil className="h-3 w-3" /> Edit
+                </button>
+              )}
               <button className={flatButton} onClick={() => api.runSchedule(s.id)} title="Add it to the queue now (the schedule stays as it is)" type="button">
                 <Play className="h-3 w-3" /> Run now
               </button>
