@@ -29,6 +29,7 @@ Automating Copilot Chat may be subject to your organisation's policies; check be
 - [Configuration](#configuration)
 - [Logging and diagnostics](#logging-and-diagnostics)
 - [Troubleshooting](#troubleshooting)
+- [How it works](#how-it-works) (diagrams)
 - [Where StreamHub keeps its data](#where-streamhub-keeps-its-data)
 - [Development](#development)
 
@@ -331,23 +332,166 @@ The same run measures speed. For every step it records the exact time (`HH:mm:ss
 
 ---
 
+## How it works
+
+StreamHub has no language model of its own: Copilot is the only intelligence. Everything StreamHub decides (what kind of task a message is, which instructions to send, whether an edit is safe, when a task is done) is a fixed, tested rule. The diagrams show the current flows.
+
+### The big picture
+
+```mermaid
+flowchart LR
+    U["You<br/>(web app on localhost:8765)"] --> Q
+    M["MCP client<br/>(e.g. Claude Code)"] -->|tasks, through the app| Q
+    S["Schedules"] --> Q
+    Q["Queue<br/>(one task at a time,<br/>saved across restarts)"] --> W["Worker<br/>(agent loop)"]
+    W -->|"prompt: request + instructions<br/>+ project context"| B["Copilot bridge<br/>(Edge DevTools)"]
+    B -->|types and sends| C["Microsoft 365 Copilot Chat<br/>(Edge, your sign-in)"]
+    C -->|"reply stream<br/>(Chathub / StreamHub,<br/>or the page itself)"| B
+    B -->|"reply text, repaired"| W
+    W -->|"action blocks:<br/>read, grep, find, edit,<br/>write, run, remember"| X["Executor"]
+    X <-->|"files"| P[("Project folder<br/>OneDrive\CCBridge\project")]
+    X -->|"backups before each change"| L[("%LOCALAPPDATA%\CCBridge<br/>undo, queue, logs")]
+    W -->|"events: replies, actions,<br/>approvals, results"| U
+```
+
+### One task, from request to result
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor You
+    participant App as StreamHub
+    participant Cop as Copilot Chat
+    participant Files as Project folder
+    You->>App: "Make the header sticky"
+    App->>App: task kind (fixed rules: words, project files)
+    App->>Cop: request + instructions + file list (only parts this chat has not had)
+    Cop-->>App: read blocks
+    App->>Files: read (ranges widened to whole blocks)
+    App->>Cop: results
+    Cop-->>App: edit / write blocks
+    App->>App: checks (see "How files change")
+    opt ask mode, or a risky change
+        App->>You: approval card with the diff
+        You-->>App: approve
+    end
+    App->>Files: back up, then apply
+    App->>App: syntax check of changed files
+    App->>Cop: results, with the changed lines as they are now
+    Cop-->>App: done block
+    App->>App: page check, consistency review (big change), your verify command
+    App->>Files: evidence/task-date.md
+    App-->>You: result, changed files, next steps
+```
+
+### How a reply is read
+
+```mermaid
+flowchart TD
+    Send["Prompt typed into Copilot's message box<br/>and sent (one sender at a time)"] --> Which{Which connection<br/>carries the reply?}
+    Which -->|Chathub| H["SignalR records<br/>writeAtCursor chunks + snapshots"]
+    Which -->|StreamHub| SH["Stream items<br/>chunks, snapshots, end marker"]
+    Which -->|"neither (some tenants)"| PG["The page itself:<br/>Stop gone, Copy button shown,<br/>text from the page's state"]
+    H --> R["Rebuild the reply from the raw chunks<br/>(Copilot's link filter removes text like [name]: from its final text)"]
+    SH --> R
+    PG --> T
+    R --> T["Reply text"]
+    T --> Lim{Daily limit?}
+    Lim -->|yes| Pause["Queue pauses until the reset time,<br/>the task waits and runs first after it"]
+    Lim -->|no| Parse["Parse action blocks<br/>(tolerant: missing markers, HTML entities, bare fences)"]
+    Parse --> Cut{Last block cut off?}
+    Cut -->|yes| Ask["Not applied: Copilot is asked<br/>to send that block again"]
+    Cut -->|no| Act["Carry out the actions"]
+```
+
+### How files are created, edited and merged
+
+Copilot never touches files itself. It writes `write` blocks (a whole file) and `edit` blocks (SEARCH/REPLACE pairs); StreamHub checks each one and applies it, or refuses it with a reason Copilot can act on.
+
+```mermaid
+flowchart TD
+    A["write block (whole file)<br/>edit block (SEARCH / REPLACE pairs)<br/>remember block (note for AGENTS.md)"] --> P1{"Path inside the project?<br/>not source/? no link outside?"}
+    P1 -->|no| X1["Refused"]
+    P1 -->|yes| E{Edit?}
+    E -->|yes| F["Find each SEARCH in the file, in order:<br/>exact, then ignoring indentation (re-indented),<br/>or a shortened SEARCH with ...<br/>several matches: the next one after the previous change"]
+    F --> NF{Found?}
+    NF -->|no| AA{"Already in the file?"}
+    AA -->|yes| OK1["Reported as already applied (with evidence)"]
+    AA -->|no| X2["Refused: the closest lines are shown<br/>(same failure 3 times: the message stops)"]
+    NF -->|yes| M["Merge all pairs in memory:<br/>all pairs apply, or nothing is written"]
+    E -->|no| C
+    M --> C
+    C{"Checks on the new text"}
+    C -->|"placeholder for left-out code<br/>(// rest unchanged, ...)"| X3["Refused"]
+    C -->|"a { } or style/script block<br/>left half open"| X4["Refused, with the line and<br/>the whole block shown"]
+    C -->|"runbook in the wrong place<br/>or without a header"| X5["Refused, with the right path"]
+    C -->|"moved code removed before<br/>the new file exists"| X6["Refused"]
+    C -->|passed| AP{"Needs approval?<br/>ask mode, repaired reply,<br/>file shrinks a lot, remember"}
+    AP -->|yes| You["Approval card with the diff"]
+    AP -->|no| W
+    You -->|approve| W["Back up the old file (change set),<br/>write, keeping BOM and line endings"]
+    You -->|reject| X7["Not written; Copilot is told why"]
+    W --> V["Copilot gets the changed lines as they are now;<br/>JSON / PowerShell / JavaScript syntax check"]
+```
+
+### Change sets, undo and read-only source data
+
+```mermaid
+flowchart LR
+    T["One message<br/>= one change set"] --> B["Before the first change to a file,<br/>its old content is copied to<br/>%LOCALAPPDATA%\CCBridge\projects\...\backups"]
+    B --> CH["Changes are written<br/>to the project"]
+    CH --> U{Undo?}
+    U -->|yes| R["Edited files restored,<br/>files the task created removed<br/>(inside the project only)"]
+    SRC["source/ (your data)"] -.->|"a copy is kept"| V[("vault in %LOCALAPPDATA%")]
+    CMD["Every command"] -->|"afterwards"| CHK["source/ compared with the vault<br/>and restored if anything changed"]
+```
+
+### Clarify first, plan, then build
+
+```mermaid
+stateDiagram-v2
+    [*] --> Questions: message with Clarify first
+    Questions --> Answers: Copilot asks (at most 5)
+    Questions --> Planning: no questions needed
+    Answers --> Planning: you answer, or skip
+    Planning --> Approval: plan (read-only turn)
+    Approval --> Planning: change the plan
+    Approval --> Building: approve and build
+    Building --> Done: done, checks passed
+    Building --> Building: syntax or verify failure goes back to Copilot
+    Done --> [*]
+    note right of Approval
+        Every step is written to PLAN.md:
+        questions, answers, each plan version,
+        changes asked for, approval, result
+    end note
+```
+
+---
+
 ## Where StreamHub keeps its data
 
 | Location | Content |
 |---|---|
 | `OneDrive\CCBridge\<project>` | Web-app projects (your files; `source/` = read-only source data) |
+| `<project>\AGENTS.md` | Project notes sent to Copilot with each new chat; `verify:` line; "## Learned" notes |
+| `<project>\PLAN.md` | Every decision of Clarify-first requests: questions, answers, plan versions, approval, result |
+| `<project>\evidence\` | Per task: what was asked, what changed, which checks passed |
+| `<project>\reviews\` | Code review reports (`.md`) and their findings (`.json`) |
+| `<project>\runbooks\`, `exports\`, `fetch\` | Runbooks and their JSON exports; fetch prompts and their answers |
 | `%LOCALAPPDATA%\Programs\CCBridge` | The installed application |
 | `%LOCALAPPDATA%\CCBridge\edge-profile` | The Edge profile StreamHub uses for Copilot (your sign-in) |
 | `%LOCALAPPDATA%\CCBridge\projects\…` | Undo backups and the source-data copy per project (not synced) |
 | `%LOCALAPPDATA%\CCBridge\logs` | Diagnostic logs (14 days) |
 | `%LOCALAPPDATA%\CCBridge\replies` | Raw data of the last 30 Copilot replies (`saveReplyFrames`) |
 | `%LOCALAPPDATA%\CCBridge\session-token.txt` | Token that protects the local web API |
+| `%LOCALAPPDATA%\CCBridge\queue.json`, `queue-pause.json`, `schedules.json` | The queue, the daily-limit pause and the schedules, kept across restarts |
 
 ---
 
 ## Development
 
-- Backend: `lib/*.psm1` (Cdp, CopilotBridge, Workspace, Protocol, Executor, Agent, Server, Config, Log) and `mcp/ccbridge-mcp.ps1`. The running web app keeps modules in memory: restart it after backend changes.
+- Backend: `lib/*.psm1` (Cdp, CopilotBridge, Workspace, Protocol, Executor, Agent, Server, Config, Log, Prompts, Fetch, Runbook, Schedule, Review, PlanFile, AppWindow) and `mcp/ccbridge-mcp.ps1`; the diagrams in [How it works](#how-it-works) show how they connect. The running web app keeps modules in memory: restart it after backend changes.
 - Interface: React + Vite + Tailwind with Kokonut UI components (adapted in `ui-src/src/components/kokonutui`); `npm run build` in `ui-src` writes the committed `ui/` folder.
 - Tests: `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Pester .\tests"` (Pester 3.4, ships with Windows; run under Windows PowerShell 5.1).
 - Release: `tools\build-release.ps1 -Version vX.Y.Z` builds `dist\CCBridge-vX.Y.Z.zip`; publish it as a GitHub Release asset.
