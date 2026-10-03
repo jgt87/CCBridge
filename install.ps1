@@ -27,7 +27,11 @@ Write-Status $(if ($psOk) { 'OK' } else { 'FAIL' }) 'Windows PowerShell' "$($PSV
 $langOk = $ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage'
 Write-Status $(if ($langOk) { 'OK' } else { 'FAIL' }) 'Language mode' "$($ExecutionContext.SessionState.LanguageMode)"
 if (-not $langOk) { throw 'Constrained Language mode (AppLocker or WDAC) blocks StreamHub. Ask IT whether scripts may run in Full Language mode.' }
-if (-not $psOk) { Write-Host '  Run this installer in Windows PowerShell 5.1 (powershell.exe), as shown in the README.' -ForegroundColor Red; return }
+if (-not $psOk) {
+    Write-Host '  Run this installer in Windows PowerShell 5.1 (powershell.exe), as shown in the README.' -ForegroundColor Red
+    Write-Host '  Older Windows without 5.1: install Windows Management Framework 5.1 from https://www.microsoft.com/download/details.aspx?id=54616' -ForegroundColor Red
+    return
+}
 Write-Host ''
 
 Write-Host "Installing StreamHub into $dir" -ForegroundColor Cyan

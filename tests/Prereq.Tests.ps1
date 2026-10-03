@@ -42,3 +42,49 @@ Describe 'Invoke-SafeCheck' {
         $r.detail | Should Match 'could not check: module could not load'
     }
 }
+Describe 'Repair-PrereqChecks' {
+    $app = Join-Path $env:TEMP ('ccb-prereq-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $null = New-Item -ItemType Directory -Force -Path (Join-Path $app 'config')
+    Copy-Item (Join-Path $root 'config\harness.json') (Join-Path $app 'config\harness.json')
+    $local = Join-Path $app 'config\harness.local.json'
+    # A port held by "another program" (this test).
+    $hold = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback, 0); $hold.Start()
+    $busy = ([Net.IPEndPoint]$hold.LocalEndpoint).Port
+
+    It 'moves a busy web port to a free one and saves it' {
+        $checks = @(Get-PrereqChecks -WebPort $busy -CdpPort 1 | Where-Object { $_.name -like 'Port*web*' })
+        $checks[0].status | Should Be 'WARN'
+        $checks[0].fix | Should Be 'port'
+        $fixed = @(Repair-PrereqChecks $checks -AppRoot $app -WebPort $busy -CdpPort 1)
+        $fixed[0].status | Should Be 'OK'
+        $fixed[0].detail | Should Match 'fixed: .* now uses port (\d+)'
+        $new = [int]([regex]::Match($fixed[0].detail, 'port (\d+)').Groups[1].Value)
+        $new | Should Not Be $busy
+        ([IO.File]::ReadAllText($local) | ConvertFrom-Json).port | Should Be $new
+    }
+    It 'keeps a port that was given with -Port' {
+        $checks = @(Get-PrereqChecks -WebPort $busy -CdpPort 1 | Where-Object { $_.name -like 'Port*web*' })
+        @(Repair-PrereqChecks $checks -AppRoot $app -KeepWebPort -WebPort $busy)[0].status | Should Be 'WARN'
+    }
+    It 'moves a busy Edge port too, away from the web port' {
+        $checks = @(Get-PrereqChecks -WebPort 1 -CdpPort $busy | Where-Object { $_.name -like 'Port*Edge*' })
+        $checks[0].fix | Should Be 'cdpPort'
+        $fixed = @(Repair-PrereqChecks $checks -AppRoot $app -WebPort ($busy + 1) -CdpPort $busy)
+        $fixed[0].status | Should Be 'OK'
+        ([IO.File]::ReadAllText($local) | ConvertFrom-Json).cdpPort | Should Not Be ($busy + 1)
+    }
+    It 'leaves OneDrive alone with -NoLaunch, and never touches policies' {
+        $od = [pscustomobject]@{ name = 'OneDrive'; status = 'WARN'; detail = 'not signed in'; hint = 'Sign in.'; link = ''; fix = 'onedrive' }
+        $pol = [pscustomobject]@{ name = 'Edge remote debugging'; status = 'FAIL'; detail = 'blocked by policy'; hint = 'ask IT'; link = ''; fix = '' }
+        $r = @(Repair-PrereqChecks @($od, $pol) -AppRoot $app -NoLaunch)
+        $r[0].detail | Should Be 'not signed in'
+        $r[1].status | Should Be 'FAIL'
+    }
+    It 'prints where to download what is missing' {
+        $edge = [pscustomobject]@{ name = 'Microsoft Edge'; status = 'FAIL'; detail = 'msedge.exe not found'; hint = 'Install Edge.'; link = 'https://www.microsoft.com/edge/download'; fix = '' }
+        $out = (Write-PrereqReport @($edge) 6>&1 | Out-String)
+        $out | Should Match 'Download: https://www\.microsoft\.com/edge/download'
+    }
+    $hold.Stop()
+    Remove-Item -LiteralPath $app -Recurse -Force
+}

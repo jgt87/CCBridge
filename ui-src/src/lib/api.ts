@@ -284,6 +284,8 @@ export interface ScheduleItem {
   lastRun: string | null;
   lastQueueId: string | null;
   project: string | null;
+  /** The project's folder (the app shows the schedules of the open project). */
+  projectRoot?: string | null;
 }
 
 export interface ScheduleSpec {
@@ -305,6 +307,8 @@ export interface QueueEntry {
   source: string;
   status: "queued" | "running" | "awaiting" | "done" | "failed" | "cancelled";
   project: string | null;
+  /** The project's folder (the app shows the queue of the open project). */
+  projectRoot?: string | null;
   created: string;
   started: string | null;
   finished: string | null;

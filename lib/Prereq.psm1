@@ -2,12 +2,22 @@
 # Windows PowerShell 5.1 in full language mode, .NET Framework, Edge and its policies, a local web
 # server, free ports, OneDrive, a writable data folder, and (optional) GitHub and Copilot reachable.
 # Every check is quick and read-only. Status: OK, WARN (works, with a limitation) or FAIL (StreamHub
-# cannot work until it is fixed).
+# cannot work until it is fixed). A check can name where to get what is missing (link) and a safe
+# repair (fix) that Repair-PrereqChecks carries out: only what needs no admin rights and is not a
+# company policy (a busy port, OneDrive sign-in). Policies always stay "ask IT".
 
 $ErrorActionPreference = 'Stop'
 
-function New-Check([string]$Name, [string]$Status, [string]$Detail, [string]$Hint = '') {
-    [pscustomobject]@{ name = $Name; status = $Status; detail = $Detail; hint = $Hint }
+# Official pages to get what is missing (all from Microsoft).
+$script:Links = @{
+    powershell = 'https://www.microsoft.com/download/details.aspx?id=54616'
+    dotnet     = 'https://dotnet.microsoft.com/download/dotnet-framework/net48'
+    edge       = 'https://www.microsoft.com/edge/download'
+    onedrive   = 'https://www.microsoft.com/microsoft-365/onedrive/download'
+}
+
+function New-Check([string]$Name, [string]$Status, [string]$Detail, [string]$Hint = '', [string]$Link = '', [string]$Fix = '') {
+    [pscustomobject]@{ name = $Name; status = $Status; detail = $Detail; hint = $Hint; link = $Link; fix = $Fix }
 }
 
 function Get-EdgeExePath {
@@ -31,6 +41,23 @@ function Get-DotNetVersionText([int]$Release) {
     'older than 4.5'
 }
 
+function Get-OneDriveExePath {
+    foreach ($p in @("$env:LOCALAPPDATA\Microsoft\OneDrive\OneDrive.exe", "$env:ProgramFiles\Microsoft OneDrive\OneDrive.exe", "${env:ProgramFiles(x86)}\Microsoft OneDrive\OneDrive.exe")) {
+        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+    }
+    $null
+}
+
+function Test-StreamHubPort([int]$Port) {
+    <# Whether StreamHub's web app answers on this port (its page carries the session-token tag). #>
+    try { (Invoke-WebRequest "http://localhost:$Port/" -UseBasicParsing -TimeoutSec 2).Content -match 'name="ccb-token"' } catch { $false }
+}
+
+function Find-FreePort([int]$From, [int]$To, [int[]]$Avoid = @()) {
+    for ($p = $From; $p -le $To; $p++) { if ($Avoid -notcontains $p -and -not (Test-PortListening $p)) { return $p } }
+    $null
+}
+
 function Test-PortListening([int]$Port) {
     @([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object { $_.Port -eq $Port }).Count -gt 0
 }
@@ -51,7 +78,7 @@ function Get-PrereqChecks {
         $v = $PSVersionTable.PSVersion
         if ($PSVersionTable.PSEdition -eq 'Desktop' -and $v.Major -eq 5 -and $v.Minor -ge 1) { New-Check 'Windows PowerShell' 'OK' "$v" }
         elseif ($PSVersionTable.PSEdition -eq 'Core') { New-Check 'Windows PowerShell' 'WARN' "running in PowerShell $v" 'StreamHub is made for Windows PowerShell 5.1: start it with start.cmd.' }
-        else { New-Check 'Windows PowerShell' 'FAIL' "$v" 'Windows PowerShell 5.1 is needed (part of Windows 10 and 11).' }
+        else { New-Check 'Windows PowerShell' 'FAIL' "$v" 'Windows PowerShell 5.1 is needed (part of Windows 10 and 11; older Windows: install Windows Management Framework 5.1).' $script:Links.powershell }
     }))
 
     $out.Add((Invoke-SafeCheck 'Language mode' {
@@ -75,14 +102,14 @@ function Get-PrereqChecks {
         $rel = try { [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction Stop).Release } catch { 0 }
         $dn = Get-DotNetVersionText $rel
         if ($rel -ge 461808) { New-Check '.NET Framework' 'OK' $dn }
-        elseif ($rel -ge 378389) { New-Check '.NET Framework' 'WARN' $dn 'Windows Update brings .NET Framework 4.8; older versions may fail on secure connections.' }
-        else { New-Check '.NET Framework' 'FAIL' $dn '.NET Framework 4.5 or newer is needed (Windows Update).' }
+        elseif ($rel -ge 378389) { New-Check '.NET Framework' 'WARN' $dn 'Windows Update brings .NET Framework 4.8 (or install it yourself); older versions may fail on secure connections.' $script:Links.dotnet }
+        else { New-Check '.NET Framework' 'FAIL' $dn '.NET Framework 4.5 or newer is needed: run Windows Update, or install .NET Framework 4.8.' $script:Links.dotnet }
     }))
 
     $out.Add((Invoke-SafeCheck 'Microsoft Edge' {
         $edge = Get-EdgeExePath
         if ($edge) { New-Check 'Microsoft Edge' 'OK' "$((Get-Item -LiteralPath $edge).VersionInfo.ProductVersion)" }
-        else { New-Check 'Microsoft Edge' 'FAIL' 'msedge.exe not found' 'StreamHub drives Copilot in Microsoft Edge; install or repair Edge.' }
+        else { New-Check 'Microsoft Edge' 'FAIL' 'msedge.exe not found' 'StreamHub drives Copilot in Microsoft Edge; install or repair Edge (no admin rights needed).' $script:Links.edge }
     }))
 
     $out.Add((Invoke-SafeCheck 'Edge remote debugging' {
@@ -104,10 +131,15 @@ function Get-PrereqChecks {
     $out.Add((Invoke-SafeCheck "Port $WebPort (web app)" {
         $pidFile = Join-Path $env:LOCALAPPDATA 'CCBridge\server.pid'
         $ours = $false
-        if (Test-Path -LiteralPath $pidFile) { $id = ([IO.File]::ReadAllText($pidFile) -split '\|')[0]; $ours = [bool](Get-Process -Id ([int]$id) -ErrorAction SilentlyContinue) }
+        if (Test-Path -LiteralPath $pidFile) {
+            $id = [int](([IO.File]::ReadAllText($pidFile) -split '\|')[0])
+            # Ours only when StreamHub is running and this port answers with StreamHub's page (the
+            # web server runs on Windows' HTTP service, so the port's owner shows as System).
+            $ours = [bool](Get-Process -Id $id -ErrorAction SilentlyContinue) -and (Test-StreamHubPort $WebPort)
+        }
         if (-not (Test-PortListening $WebPort)) { New-Check "Port $WebPort (web app)" 'OK' 'free' }
         elseif ($ours) { New-Check "Port $WebPort (web app)" 'OK' 'used by StreamHub, which is running (a new start replaces it)' }
-        else { New-Check "Port $WebPort (web app)" 'WARN' 'in use by another program' "Set another port: ""port"" in config\harness.local.json, or start with -Port." }
+        else { New-Check "Port $WebPort (web app)" 'WARN' 'in use by another program' "Set another port: ""port"" in config\harness.local.json, or start with -Port." '' 'port' }
     }))
 
     $out.Add((Invoke-SafeCheck "Port $CdpPort (Edge for Copilot)" {
@@ -116,13 +148,14 @@ function Get-PrereqChecks {
         if ($cdpUp) { try { $isEdge = [bool](Invoke-RestMethod "http://127.0.0.1:$CdpPort/json/version" -TimeoutSec 2).Browser } catch { } }
         if (-not $cdpUp) { New-Check "Port $CdpPort (Edge for Copilot)" 'OK' 'free' }
         elseif ($isEdge) { New-Check "Port $CdpPort (Edge for Copilot)" 'OK' "StreamHub's Edge is already running" }
-        else { New-Check "Port $CdpPort (Edge for Copilot)" 'WARN' 'in use by another program' 'Set another port: "cdpPort" in config\harness.local.json.' }
+        else { New-Check "Port $CdpPort (Edge for Copilot)" 'WARN' 'in use by another program' 'Set another port: "cdpPort" in config\harness.local.json.' '' 'cdpPort' }
     }))
 
     $out.Add((Invoke-SafeCheck 'OneDrive' {
         if ($env:OneDriveCommercial -and (Test-Path -LiteralPath $env:OneDriveCommercial)) { New-Check 'OneDrive' 'OK' "work or school: $env:OneDriveCommercial" }
         elseif ($env:OneDrive -and (Test-Path -LiteralPath $env:OneDrive)) { New-Check 'OneDrive' 'OK' "$env:OneDrive" }
-        else { New-Check 'OneDrive' 'WARN' 'not found' 'The web app keeps projects in OneDrive; sign in to OneDrive. (The MCP server works without it.)' }
+        elseif (Get-OneDriveExePath) { New-Check 'OneDrive' 'WARN' 'not signed in' 'The web app keeps projects in OneDrive; sign in to OneDrive. (The MCP server works without it.)' '' 'onedrive' }
+        else { New-Check 'OneDrive' 'WARN' 'not installed' 'The web app keeps projects in OneDrive; install OneDrive and sign in. (The MCP server works without it.)' $script:Links.onedrive }
     }))
 
     $out.Add((Invoke-SafeCheck 'Data folder' {
@@ -153,6 +186,44 @@ function Get-PrereqChecks {
     }
     $out.ToArray()
 }
+function Repair-PrereqChecks {
+    <# Carries out the safe repairs the checks name and returns the checks as they are now:
+       - port / cdpPort in use: a free port is picked and saved in config\harness.local.json
+         (not when the port was given with -Port: -KeepWebPort);
+       - OneDrive installed but not signed in: OneDrive is opened so you can sign in (-NoLaunch skips).
+       Nothing that needs admin rights or changes a company policy is ever touched. #>
+    param([Parameter(Mandatory)]$Checks, [string]$AppRoot, [switch]$KeepWebPort, [switch]$NoLaunch, [int]$WebPort = 8765, [int]$CdpPort = 9333)
+    if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
+    Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
+    foreach ($c in @($Checks)) {
+        if ($c.status -eq 'OK' -or -not $c.fix) { $c; continue }
+        try {
+            switch ($c.fix) {
+                'port' {
+                    if ($KeepWebPort) { $c; break }
+                    $free = Find-FreePort ($WebPort + 1) ($WebPort + 40) @($CdpPort)
+                    if (-not $free) { $c; break }
+                    Set-CCBridgeLocalSetting harness port $free $AppRoot
+                    New-Check $c.name 'OK' "fixed: was in use by another program; StreamHub now uses port $free (saved in config\harness.local.json)"
+                }
+                'cdpPort' {
+                    $free = Find-FreePort ($CdpPort + 1) ($CdpPort + 40) @($WebPort)
+                    if (-not $free) { $c; break }
+                    Set-CCBridgeLocalSetting harness cdpPort $free $AppRoot
+                    New-Check $c.name 'OK' "fixed: was in use by another program; Edge for Copilot now uses port $free (saved in config\harness.local.json)"
+                }
+                'onedrive' {
+                    $exe = Get-OneDriveExePath
+                    if ($NoLaunch -or -not $exe) { $c; break }
+                    Start-Process -FilePath $exe
+                    New-Check $c.name 'WARN' 'not signed in; OneDrive was opened so you can sign in' 'Sign in to OneDrive, then start StreamHub again.'
+                }
+                default { $c }
+            }
+        } catch { New-Check $c.name $c.status $c.detail ("$($c.hint) (Could not fix this automatically: $($_.Exception.Message.Split("`n")[0]))") $c.link }
+    }
+}
+
 function Write-PrereqReport {
     <# Prints the checks as "[OK] name  detail" with the status word in colour, and the hint below
        anything that is not OK. Returns $true when nothing failed. #>
@@ -168,8 +239,9 @@ function Write-PrereqReport {
         Write-Host $c.name.PadRight($w + 2) -NoNewline
         Write-Host $c.detail -ForegroundColor DarkGray
         if ($c.hint -and $c.status -ne 'OK') { Write-Host ((' ' * ($w + 11)) + $c.hint) -ForegroundColor $color }
+        if ($c.link -and $c.status -ne 'OK') { Write-Host ((' ' * ($w + 11)) + "Download: $($c.link)") -ForegroundColor $color }
     }
     -not @($Checks | Where-Object { $_.status -eq 'FAIL' }).Count
 }
 
-Export-ModuleMember -Function Get-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText
+Export-ModuleMember -Function Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText

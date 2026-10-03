@@ -80,6 +80,7 @@ export default function App() {
   const pauseSeen = useRef<string | null | undefined>(undefined);
   const [palette, setPalette] = useState<null | "commands" | "attach">(null);
   const [viewer, setViewer] = useState<{ path: string; text: string } | null>(null);
+  const [queuedNote, setQueuedNote] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ text: string; path?: string } | null>(null);
@@ -217,6 +218,18 @@ export default function App() {
     setStopping(true);
     api.stop().catch(() => setStopping(false));
   };
+  // The side panel shows the open project only: its queue and schedules (items without a project,
+  // such as a new chat, belong to every project).
+  const projectKey = (state.project?.path ?? "").replace(/\\+$/, "").toLowerCase();
+  const queueHere = useMemo(
+    () => (state.queue ?? []).filter((q) => !q.projectRoot || q.projectRoot.replace(/\\+$/, "").toLowerCase() === projectKey),
+    [state.queue, projectKey]
+  );
+  const schedulesHere = useMemo(
+    () => (state.schedules ?? []).filter((s) => !s.projectRoot || s.projectRoot.replace(/\\+$/, "").toLowerCase() === projectKey),
+    [state.schedules, projectKey]
+  );
+
   const changes = useMemo(
     () => projectEvents.filter((e) => e.type === "checkpoint").map((e) => ({ seq: e.seq, time: e.time, files: e.files ?? [] })),
     [projectEvents]
@@ -226,6 +239,11 @@ export default function App() {
     try {
       await api.chat(text, { clarify: clarifyFirst });
       setDraft("");
+      // Sent while busy = queued: say when it runs (only while StreamHub stays open).
+      if (state.busy) {
+        setQueuedNote(true);
+        window.setTimeout(() => setQueuedNote(false), 8000);
+      }
     } catch (e) {
       setError((e as Error).message);
     }
@@ -391,6 +409,7 @@ export default function App() {
           >
             <div className="min-h-0 flex-1">
               <SidePanel
+                key={state.project?.path ?? "none"}
                 busy={state.busy}
                 changes={changes}
                 fetchItems={fetchItems}
@@ -410,8 +429,8 @@ export default function App() {
                 }}
                 onRunRunbook={(name) => api.runRunbook(name).catch((e) => setError((e as Error).message))}
                 project={state.project}
-                queue={state.queue ?? []}
-                schedules={state.schedules ?? []}
+                queue={queueHere}
+                schedules={schedulesHere}
                 reviewTick={reviewTick}
                 issueStamp={state.issueStamp ?? ""}
                 activity={state.activity ?? null}
@@ -496,7 +515,7 @@ export default function App() {
                       if (spec.kind === "chat" && spec.text === draft) setDraft("");
                     }}
                     runbooks={runbooks}
-                    schedules={state.schedules ?? []}
+                    schedules={schedulesHere}
                   />
                 )}
                 <AI_Prompt
@@ -505,9 +524,15 @@ export default function App() {
                   focusKey={focusKey}
                   history={promptHistory}
                   headerLeft={
-                    <span className="truncate">
-                      {state.project?.name} · {MODES.find((m) => m.id === state.mode)?.description}
-                    </span>
+                    queuedNote ? (
+                      <span className="truncate font-medium" title="Waiting tasks run while StreamHub is open; if you close it, they continue at the next start.">
+                        Queued: runs after the current task, while StreamHub stays open.
+                      </span>
+                    ) : (
+                      <span className="truncate">
+                        {state.project?.name} · {MODES.find((m) => m.id === state.mode)?.description}
+                      </span>
+                    )
                   }
                   headerRight={
                     <span className="flex items-center gap-2">

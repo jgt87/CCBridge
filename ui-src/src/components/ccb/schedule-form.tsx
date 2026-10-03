@@ -2,6 +2,7 @@ import { AtSign, FileText, Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { FetchItem, FileInfo, RunbookItem, ScheduleItem, ScheduleSpec } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { KeepOpenNote, SCHEDULE_NOTE } from "./keep-open-note";
 
 const flatButton =
   "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
@@ -288,7 +289,7 @@ export function ScheduleForm({
       )}
 
       <input className={field} onChange={(e) => setTitle(e.target.value)} placeholder="Name (optional)" value={title} />
-      <p className="text-muted-foreground text-xs">Runs in this project while StreamHub is open; a run missed while it was closed runs once at the next start.</p>
+      <KeepOpenNote>{SCHEDULE_NOTE}</KeepOpenNote>
       {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
       <div className="flex items-center justify-end gap-1">
         {!valid && <span className="mr-auto text-muted-foreground text-xs">To schedule it: {missing.join(", ")}.</span>}

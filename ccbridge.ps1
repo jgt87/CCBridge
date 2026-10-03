@@ -34,6 +34,8 @@ if (-not $NoCheck) {
     $cfgCheck = Get-CCBridgeConfig harness $root
     $checkPort = if ($Port) { $Port } elseif ($cfgCheck.port) { [int]$cfgCheck.port } else { 8765 }
     $checks = Get-PrereqChecks -WebPort $checkPort -CdpPort ([int]$cfgCheck.cdpPort)
+    # Safe repairs (a busy port, OneDrive sign-in); a port given with -Port is kept.
+    $checks = @(Repair-PrereqChecks $checks -AppRoot $root -KeepWebPort:([bool]$Port) -WebPort $checkPort -CdpPort ([int]$cfgCheck.cdpPort))
     $checksOk = Write-PrereqReport $checks
     Write-Host ''
     if (-not $checksOk) {
@@ -105,7 +107,8 @@ if ($stopped.Count) {
 # Still answering (for example another user's instance)? Then just open it instead of failing on the busy port.
 try {
     $page = Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 3
-    if ($page.Content -match '<title>(CCBridge|StreamHub)</title>') {
+    # StreamHub's page carries its session-token tag (the title changed over versions).
+    if ($page.Content -match 'name="ccb-token"|<title>(CCBridge|StreamHub)') {
         Write-Host "StreamHub is already running at $url - opening it."
         if (-not $NoBrowser) { Start-Process $url }
         return

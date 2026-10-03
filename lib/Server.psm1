@@ -16,7 +16,7 @@ function Get-QueueView($State, [int]$Max = 40) {
     $list = @($State.Queue)
     [array]::Reverse($list)
     foreach ($e in ($list | Select-Object -First $Max)) {
-        [pscustomobject]@{ id = $e.id; kind = $e.kind; title = $e.title; source = $e.source; status = $e.status; project = $e.project
+        [pscustomobject]@{ id = $e.id; kind = $e.kind; title = $e.title; source = $e.source; status = $e.status; project = $e.project; projectRoot = $e.projectRoot
             created = $e.created; started = $e.started; finished = $e.finished; messages = [int]$e.messages; summary = $e.summary; error = $e.error
             errId = $e.errId; resultPath = $e.resultPath; changed = @($e.changed | Where-Object { $_ }); jobId = $e.jobId; note = $e.note }
     }
@@ -27,7 +27,7 @@ function Get-ScheduleView($State) {
     $list = foreach ($s in @($State.Schedules)) {
         [pscustomobject]@{ id = $s.id; title = $s.title; kind = $s.kind; name = $s.name; text = "$($s.text)"; repeat = $s.repeat; times = @(Get-ScheduleTimes $s); at = $s.at; days = @($s.days)
             when = (Format-ScheduleWhen $s); enabled = [bool]$s.enabled; nextRun = $s.nextRun; lastRun = $s.lastRun; lastQueueId = $s.lastQueueId
-            project = $(if ($s.projectRoot) { Split-Path $s.projectRoot -Leaf } else { $null }) }
+            project = $(if ($s.projectRoot) { Split-Path $s.projectRoot -Leaf } else { $null }); projectRoot = $s.projectRoot }
     }
     @($list | Sort-Object @{ Expression = { if ($_.enabled -and $_.nextRun) { 0 } else { 1 } } }, @{ Expression = { "$($_.nextRun)" } })
 }

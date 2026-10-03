@@ -2,6 +2,7 @@ import { Bot, CalendarClock, CircleCheck, CircleDashed, CircleX, Clock, FileText
 import type { QueueEntry } from "@/lib/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { KeepOpenNote, QUEUE_NOTE } from "./keep-open-note";
 
 const STATUS: Record<QueueEntry["status"], { label: string; icon: React.ReactNode }> = {
   queued: { label: "queued", icon: <Clock className="h-3.5 w-3.5" /> },
@@ -41,9 +42,11 @@ export function QueuePanel({ queue, onOpen, pausedUntil }: { queue: QueueEntry[]
         <p className="text-muted-foreground text-sm">Tasks you send, fetches, runbooks, scheduled tasks and tasks from MCP clients appear here.</p>
       </div>
     );
+  const waiting = queue.some((e) => e.status === "queued" || e.status === "running" || e.status === "awaiting");
   return (
     <div className="space-y-1.5">
       {paused}
+      {waiting && <KeepOpenNote>{QUEUE_NOTE}</KeepOpenNote>}
       {queue.map((e) => {
         const st = STATUS[e.status] ?? STATUS.queued;
         const active = e.status === "queued" || e.status === "running" || e.status === "awaiting";
