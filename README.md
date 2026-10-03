@@ -180,6 +180,8 @@ With a Microsoft 365 Copilot licence and **Work IQ** on, Copilot can use your Ou
 
 ## Install and updates
 
+Installing, every start and `check.cmd` show a **system check**: Windows PowerShell 5.1 and its language mode, the execution policy, .NET Framework, Microsoft Edge and its policies, the local web server, the ports, OneDrive and the data folder (`check.cmd` and the installer also test GitHub and Copilot's site). Each line reads [OK], [WARN] or [FAIL] with what to do; a FAIL stops the start with the reason.
+
 **Install** (no admin rights; into `%LOCALAPPDATA%\Programs\CCBridge`, with desktop and Start menu shortcuts):
 
 ```powershell
@@ -328,6 +330,7 @@ The same run measures speed. For every step it records the exact time (`HH:mm:ss
 | A reply is marked as repaired / "check this change carefully" | Copilot's filter removed text and StreamHub had to guess part of it; review the diff before approving |
 | "Work IQ could not be switched" | Run `capture.cmd` on a licensed machine and configure the toggle selector |
 | A fix is announced but you still see the old behaviour | Close StreamHub and start it again (or run `update.cmd`), then reload the browser tab (F5) |
+| Something missing on this computer? | Run `check.cmd`: every part StreamHub needs, with [OK] / [WARN] / [FAIL] and what to do (also shown at every start and after installing) |
 | Anything else | Turn on verbose logging, reproduce, run `diagnostics.cmd` |
 
 ---

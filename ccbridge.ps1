@@ -18,6 +18,7 @@ param(
     [switch]$NoBrowser,
     [int]$Port,
     [switch]$NoUpdate,
+    [switch]$NoCheck,
     [ValidateSet('off', 'info', 'verbose', 'trace')][string]$LogLevel
 )
 
@@ -25,6 +26,21 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Update before anything is loaded (GitHub; skipped offline, for local edits or "autoUpdate": false).
 if (-not $NoUpdate) { & (Join-Path $root 'tools\update.ps1') }
+
+# What this computer has, every start (quick and read-only; check.cmd also tests GitHub and Copilot).
+if (-not $NoCheck) {
+    Import-Module (Join-Path $root 'lib\Prereq.psm1') -Force
+    Import-Module (Join-Path $root 'lib\Config.psm1') -Force
+    $cfgCheck = Get-CCBridgeConfig harness $root
+    $checkPort = if ($Port) { $Port } elseif ($cfgCheck.port) { [int]$cfgCheck.port } else { 8765 }
+    $checks = Get-PrereqChecks -WebPort $checkPort -CdpPort ([int]$cfgCheck.cdpPort)
+    $checksOk = Write-PrereqReport $checks
+    Write-Host ''
+    if (-not $checksOk) {
+        Write-Host 'StreamHub cannot start until the FAIL items above are fixed (check.cmd tests again).' -ForegroundColor Red
+        exit 1
+    }
+}
 
 if ($Ping) {
     Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force

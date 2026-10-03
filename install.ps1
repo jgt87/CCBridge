@@ -13,6 +13,23 @@ $dir = if ($env:CCBRIDGE_DIR) { $env:CCBRIDGE_DIR } else { Join-Path $env:LOCALA
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 if ([Net.WebRequest]::DefaultWebProxy) { [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials }
 
+# The two things the installer itself needs; the full check runs after the files are in place.
+function Write-Status([string]$Status, [string]$Name, [string]$Detail) {
+    Write-Host '  [' -NoNewline
+    Write-Host $Status -ForegroundColor $(switch ($Status) { 'OK' { 'Green' } 'WARN' { 'Yellow' } default { 'Red' } }) -NoNewline
+    Write-Host ']' -NoNewline
+    Write-Host ((' ' * (5 - $Status.Length)) + $Name.PadRight(22)) -NoNewline
+    Write-Host $Detail -ForegroundColor DarkGray
+}
+Write-Host 'Before installing'
+$psOk = $PSVersionTable.PSEdition -eq 'Desktop' -and $PSVersionTable.PSVersion.Major -eq 5
+Write-Status $(if ($psOk) { 'OK' } else { 'FAIL' }) 'Windows PowerShell' "$($PSVersionTable.PSVersion)"
+$langOk = $ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage'
+Write-Status $(if ($langOk) { 'OK' } else { 'FAIL' }) 'Language mode' "$($ExecutionContext.SessionState.LanguageMode)"
+if (-not $langOk) { throw 'Constrained Language mode (AppLocker or WDAC) blocks StreamHub. Ask IT whether scripts may run in Full Language mode.' }
+if (-not $psOk) { Write-Host '  Run this installer in Windows PowerShell 5.1 (powershell.exe), as shown in the README.' -ForegroundColor Red; return }
+Write-Host ''
+
 Write-Host "Installing StreamHub into $dir" -ForegroundColor Cyan
 $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'CCBridge-installer' }
 $asset = @($release.assets | Where-Object { $_.name -like 'CCBridge-*.zip' }) | Select-Object -First 1
@@ -53,9 +70,13 @@ foreach ($lnkPath in $targets) {
 }
 
 Write-Host ''
+# Everything StreamHub needs on this computer, with GitHub and Copilot reachability.
+try { & (Join-Path $dir 'tools\check.ps1') } catch { Write-Host "The system check could not run: $($_.Exception.Message)" -ForegroundColor Yellow }
+Write-Host ''
 Write-Host "StreamHub $($release.tag_name) is installed." -ForegroundColor Green
 Write-Host '  Start it:  StreamHub shortcut on the desktop or in the Start menu'
 Write-Host '  Updates:   automatic each time StreamHub starts (turn off with "autoUpdate": false in config\harness.local.json)'
+Write-Host '  Check:     check.cmd in the StreamHub folder shows what this computer has (also at every start)'
 Write-Host '  MCP:       register in your MCP client with'
 Write-Host "             powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$dir\mcp\ccbridge-mcp.ps1`""
 if (Get-Command claude -ErrorAction SilentlyContinue) {
