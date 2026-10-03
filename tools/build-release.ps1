@@ -16,10 +16,19 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
+function Invoke-Native([string]$Exe, [string[]]$Arguments) {
+    # git and gh write progress and "not found" answers to stderr; with 'Stop' PowerShell 5.1 would
+    # turn that into a terminating error, so stderr is read as text here and only the exit code counts.
+    # Returns @{ code; lines } (lines always an array).
+    $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $out = @(& $Exe @Arguments 2>&1 | ForEach-Object { "$_" }) } finally { $ErrorActionPreference = $saved }
+    @{ code = $LASTEXITCODE; lines = $out }
+}
+
 function Invoke-Git {
-    $out = & git -C $root @args 2>&1
-    if ($LASTEXITCODE) { throw "git $($args -join ' ') failed: $(@($out) -join ' ')" }
-    @($out | ForEach-Object { "$_" })
+    $r = Invoke-Native 'git' (@('-C', $root) + $args)
+    if ($r.code) { throw "git $($args -join ' ') failed: $($r.lines -join ' ')" }
+    $r.lines   # callers wrap the call in @(): one line stays one string, not its first letter
 }
 
 if (-not $NoPublish) {
@@ -36,8 +45,7 @@ if (-not $NoPublish) {
         $at = @(Invoke-Git rev-list -n 1 $Version)[0]
         if ($at -ne $head) { throw "Tag $Version already exists on another commit ($($at.Substring(0, 7))). Choose the next version." }
     }
-    $null = & gh release view $Version --json tagName 2>&1
-    if (-not $LASTEXITCODE) { throw "Release $Version already exists on GitHub. Choose the next version." }
+    if (-not (Invoke-Native 'gh' @('release', 'view', $Version, '--json', 'tagName')).code) { throw "Release $Version already exists on GitHub. Choose the next version." }
     if ($NotesFile -and -not (Test-Path -LiteralPath $NotesFile)) { throw "Notes file not found: $NotesFile" }
 }
 
@@ -87,6 +95,7 @@ $null = Invoke-Git push origin "refs/tags/$Version"
 # The release on that tag, with the zip.
 $ghArgs = @('release', 'create', $Version, $zip, '--verify-tag', '--title', "StreamHub $Version")
 if ($NotesFile) { $ghArgs += @('--notes-file', $NotesFile) } else { $ghArgs += '--generate-notes' }
-$out = & gh @ghArgs 2>&1
-if ($LASTEXITCODE) { throw "gh release create failed: $(@($out) -join ' ')" }
-"Released: $(@($out) | Select-Object -Last 1)"
+$r = Invoke-Native 'gh' $ghArgs
+if ($r.code) { throw "gh release create failed: $($r.lines -join ' ')" }
+"Released: $($r.lines | Select-Object -Last 1)"
+$null = Invoke-Git fetch --tags origin   # the local copy knows the new tag right away
