@@ -484,6 +484,7 @@ export default function App() {
                 items={transcript}
                 onResendAsCoding={(text) => api.chat(text, { asCoding: true }).catch((e) => setError((e as Error).message))}
                 onSend={(text: string, opts: ChatOptions) => api.chat(text, opts).catch((e) => setError((e as Error).message))}
+                onOpenFile={openFile}
                 onUsePrompt={(text) => {
                   setDraft(text);
                   setFocusKey((k) => k + 1);

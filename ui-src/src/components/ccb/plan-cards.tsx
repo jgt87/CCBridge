@@ -1,4 +1,4 @@
-import { ClipboardCheck, MessageCircleQuestion } from "lucide-react";
+import { ClipboardCheck, FileText, MessageCircleQuestion } from "lucide-react";
 import { useState } from "react";
 import type { ChatOptions } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -14,16 +14,30 @@ export interface ClarifyQuestion {
 }
 
 /** Clarify first: Copilot's questions as a short form; the answers start a plan. */
+/** "Open PLAN.md": every decision of this request is collected there. */
+function PlanLink({ onOpenFile }: { onOpenFile?: (path: string) => void }) {
+  if (!onOpenFile) return null;
+  return (
+    <button className={flatButton} onClick={() => onOpenFile("PLAN.md")} title="Every question, answer, plan version and approval of this request" type="button">
+      <FileText className="h-3 w-3" /> PLAN.md
+    </button>
+  );
+}
+
 export function ClarifyCard({
   request,
   questions,
   summary,
+  planId,
   onSend,
+  onOpenFile,
 }: {
   request: string;
   questions: ClarifyQuestion[];
   summary?: string;
+  planId?: string;
   onSend: (text: string, opts: ChatOptions) => void;
+  onOpenFile?: (path: string) => void;
 }) {
   const [answers, setAnswers] = useState<string[]>(questions.map(() => ""));
   const [sent, setSent] = useState(false);
@@ -32,7 +46,12 @@ export function ClarifyCard({
   const submit = (withAnswers: boolean) => {
     setSent(true);
     const lines = questions.map((q, i) => `${i + 1}. ${q.question}\n   Answer: ${answers[i].trim() || "(no preference)"}`).join("\n");
-    onSend(withAnswers ? `${request}\n\nMy answers to your questions:\n${lines}` : request, { planFirst: true, request });
+    onSend(withAnswers ? `${request}\n\nMy answers to your questions:\n${lines}` : request, {
+      planFirst: true,
+      request,
+      planId,
+      ...(withAnswers ? { answers: questions.map((q, i) => ({ question: q.question, answer: answers[i].trim() })) } : { skipped: true }),
+    });
   };
 
   return (
@@ -68,6 +87,7 @@ export function ClarifyCard({
         ))}
       </div>
       <div className="mt-3 flex flex-wrap justify-end gap-1">
+        {planId && <span className="mr-auto"><PlanLink onOpenFile={onOpenFile} /></span>}
         <button className={flatButton} disabled={sent} onClick={() => submit(false)} title="Plan with Copilot's own assumptions" type="button">
           Skip questions
         </button>
@@ -80,18 +100,30 @@ export function ClarifyCard({
 }
 
 /** Plan first: Copilot's plan to approve (then it builds) or to change. */
-export function PlanCard({ request, plan, onSend }: { request: string; plan: string; onSend: (text: string, opts: ChatOptions) => void }) {
+export function PlanCard({
+  request,
+  plan,
+  planId,
+  onSend,
+  onOpenFile,
+}: {
+  request: string;
+  plan: string;
+  planId?: string;
+  onSend: (text: string, opts: ChatOptions) => void;
+  onOpenFile?: (path: string) => void;
+}) {
   const [changing, setChanging] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [sent, setSent] = useState<"" | "build" | "change">("");
 
   const build = () => {
     setSent("build");
-    onSend(`Build this now, following the approved plan below. Change files with action blocks.\n\nRequest: ${request}\n\nApproved plan:\n${plan}`, { asCoding: true });
+    onSend(`Build this now, following the approved plan below. Change files with action blocks.\n\nRequest: ${request}\n\nApproved plan:\n${plan}`, { asCoding: true, planId, approve: true });
   };
   const change = () => {
     setSent("change");
-    onSend(`Change the plan: ${feedback.trim()}\n\nRequest: ${request}\n\nCurrent plan:\n${plan}`, { planFirst: true, request });
+    onSend(`Change the plan: ${feedback.trim()}\n\nRequest: ${request}\n\nCurrent plan:\n${plan}`, { planFirst: true, request, planId, feedback: feedback.trim() });
   };
 
   return (
@@ -104,6 +136,7 @@ export function PlanCard({ request, plan, onSend }: { request: string; plan: str
         <textarea className={cn(field, "mt-2 min-h-16 resize-y")} onChange={(e) => setFeedback(e.target.value)} placeholder="What should be different?" value={feedback} />
       )}
       <div className="mt-3 flex flex-wrap justify-end gap-1">
+        {planId && <span className="mr-auto"><PlanLink onOpenFile={onOpenFile} /></span>}
         {changing ? (
           <button className={flatButton} disabled={Boolean(sent) || !feedback.trim()} onClick={change} type="button">
             {sent === "change" ? "Sent" : "Send the change"}

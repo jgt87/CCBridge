@@ -158,6 +158,12 @@ export interface ChatOptions {
   /** The original request, when the text adds answers or plan feedback to it. */
   request?: string;
   thinkDeeper?: boolean;
+  /** The request's section in PLAN.md, and what to record there. */
+  planId?: string;
+  answers?: { question: string; answer: string }[];
+  skipped?: boolean;
+  feedback?: string;
+  approve?: boolean;
 }
 
 /** A saved code review (reviews/<id>.json) in the list. */

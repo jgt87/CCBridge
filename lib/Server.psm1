@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -318,6 +318,14 @@ function Invoke-ApiRequest($Ctx, $State) {
             # While Copilot is busy the message waits in the queue.
             $task = @{ kind = 'chat'; text = [string]$b.text }
             $title = ''
+            # The request's section in PLAN.md, when this message belongs to a clarify-first flow.
+            $planId = if ($b.planId -and (Test-PlanId ([string]$b.planId))) { [string]$b.planId } else { $null }
+            if ($planId) { $task.planId = $planId }
+            $planNote = {
+                param($Heading, $Body, $Status)
+                if (-not $planId -or -not $State.ProjectRoot) { return }
+                try { Add-PlanSection $State.ProjectRoot $planId $Heading $Body $Status } catch { Write-CCBLogError server 'PLAN.md' $_ }
+            }
             if ($b.asCoding) { $task.forceKind = 'coding' }
             if ($b.clarify) { $task.clarify = $true; $task.request = [string]$b.text }
             elseif ($b.planFirst) {
@@ -326,6 +334,14 @@ function Invoke-ApiRequest($Ctx, $State) {
                 $task.request = if ($b.request) { [string]$b.request } else { [string]$b.text }
                 $task.text = (Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + [string]$b.text
                 $title = "Plan: $($task.request)"
+                if (@($b.answers).Count) { & $planNote 'Your answers' (Format-PlanAnswers @($b.answers)) 'planning' }
+                elseif ($b.skipped) { & $planNote 'Your answers' 'Skipped: Copilot plans with its own assumptions.' 'planning' }
+                if ("$($b.feedback)".Trim()) { & $planNote 'Change requested' ([string]$b.feedback) 'planning' }
+            }
+            if ($b.approve -and $planId) {
+                & $planNote 'Approved' "Approved on $((Get-Date).ToString('yyyy-MM-dd HH:mm')); building started." 'building'
+                $task.planBuild = $true
+                $task.text += "`n`nEvery decision for this task (questions, answers, plan versions) is in PLAN.md, in the section marked plan:$planId. Read it if you need it."
             }
             if ($b.thinkDeeper) { $task.responseMode = 'deep' }
             $entry = Submit-AgentTask $State $task 'user' $title

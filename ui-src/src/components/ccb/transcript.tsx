@@ -18,8 +18,8 @@ export type TranscriptItem =
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string }
   | { kind: "next"; seq: number; steps: string[] }
-  | { kind: "clarify"; seq: number; request: string; questions: ClarifyQuestion[]; summary?: string }
-  | { kind: "plan"; seq: number; request: string; plan: string }
+  | { kind: "clarify"; seq: number; request: string; questions: ClarifyQuestion[]; summary?: string; planId?: string }
+  | { kind: "plan"; seq: number; request: string; plan: string; planId?: string }
   | { kind: "error"; seq: number; text: string; time: string; errId?: string; code?: string; hint?: string; detail?: string; version?: string };
 
 // --- Building the transcript from events ------------------------------------------------
@@ -95,13 +95,13 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
   error: (e, ctx) =>
     ctx.items.push({ kind: "error", seq: e.seq, text: e.text ?? "", time: e.time, errId: e.errId, code: e.code, hint: e.hint, detail: e.detail, version: e.version }),
   clarify: (e, ctx) => {
-    const x = e as AgentEvent & { request?: string; questions?: ClarifyQuestion[] | ClarifyQuestion; summary?: string };
+    const x = e as AgentEvent & { request?: string; questions?: ClarifyQuestion[] | ClarifyQuestion; summary?: string; planId?: string };
     const qs = (Array.isArray(x.questions) ? x.questions : x.questions ? [x.questions] : []).map((q) => ({ question: q.question, options: Array.isArray(q.options) ? q.options : q.options ? [q.options as unknown as string] : [] }));
-    if (qs.length) ctx.items.push({ kind: "clarify", seq: e.seq, request: x.request ?? "", questions: qs, summary: x.summary });
+    if (qs.length) ctx.items.push({ kind: "clarify", seq: e.seq, request: x.request ?? "", questions: qs, summary: x.summary, planId: x.planId || undefined });
   },
   "plan-ready": (e, ctx) => {
-    const x = e as AgentEvent & { request?: string; plan?: string };
-    if (x.plan) ctx.items.push({ kind: "plan", seq: e.seq, request: x.request ?? "", plan: x.plan });
+    const x = e as AgentEvent & { request?: string; plan?: string; planId?: string };
+    if (x.plan) ctx.items.push({ kind: "plan", seq: e.seq, request: x.request ?? "", plan: x.plan, planId: x.planId || undefined });
   },
   "next-steps": (e, ctx) => {
     if (e.steps?.length) ctx.items.push({ kind: "next", seq: e.seq, steps: e.steps });
@@ -271,11 +271,13 @@ function TranscriptRow({
   onUsePrompt,
   onResendAsCoding,
   onSend,
+  onOpenFile,
 }: {
   item: TranscriptItem;
   onUsePrompt?: (text: string) => void;
   onResendAsCoding?: (text: string) => void;
   onSend?: (text: string, opts: ChatOptions) => void;
+  onOpenFile?: (path: string) => void;
 }) {
   switch (item.kind) {
     case "user":
@@ -289,9 +291,9 @@ function TranscriptRow({
     case "next":
       return <NextSteps onUse={onUsePrompt} steps={item.steps} />;
     case "clarify":
-      return onSend ? <ClarifyCard onSend={onSend} questions={item.questions} request={item.request} summary={item.summary} /> : null;
+      return onSend ? <ClarifyCard onOpenFile={onOpenFile} onSend={onSend} planId={item.planId} questions={item.questions} request={item.request} summary={item.summary} /> : null;
     case "plan":
-      return onSend ? <PlanCard onSend={onSend} plan={item.plan} request={item.request} /> : null;
+      return onSend ? <PlanCard onOpenFile={onOpenFile} onSend={onSend} plan={item.plan} planId={item.planId} request={item.request} /> : null;
     case "error":
       return <ErrorNote item={item} />;
   }
@@ -332,6 +334,7 @@ export function Transcript({
   onUsePrompt,
   onResendAsCoding,
   onSend,
+  onOpenFile,
 }: {
   items: TranscriptItem[];
   busy: boolean;
@@ -344,6 +347,8 @@ export function Transcript({
   onResendAsCoding?: (text: string) => void;
   /** Sends a message with options (answers to questions, plan approval). */
   onSend?: (text: string, opts: ChatOptions) => void;
+  /** Opens a project file (PLAN.md from the plan cards). */
+  onOpenFile?: (path: string) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const awaiting = items.some((i) => i.kind === "action" && i.item.status === "awaiting");
@@ -358,7 +363,7 @@ export function Transcript({
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-6">
       {items.map((it) => (
-        <TranscriptRow item={it} key={rowKey(it)} onResendAsCoding={onResendAsCoding} onSend={onSend} onUsePrompt={onUsePrompt} />
+        <TranscriptRow item={it} key={rowKey(it)} onOpenFile={onOpenFile} onResendAsCoding={onResendAsCoding} onSend={onSend} onUsePrompt={onUsePrompt} />
       ))}
       {busy && !awaiting && <ThinkingIndicator progress={progress} stopping={stopping} />}
       <div ref={endRef} />

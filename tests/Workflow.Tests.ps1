@@ -6,6 +6,7 @@ Import-Module (Join-Path $root 'lib\Workspace.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
+Import-Module (Join-Path $root 'lib\PlanFile.psm1') -Force
 
 function New-Proj([hashtable]$Files) {
     $p = Join-Path $env:TEMP ('ccb-wf-' + [guid]::NewGuid().ToString('N'))
@@ -115,6 +116,10 @@ Describe 'Invoke-ClarifyStep (Copilot mocked)' {
         @($e[0].questions).Count | Should Be 2
         @($e[0].questions)[0].options -join ',' | Should Be 'Header,Settings'
         $e[0].summary | Should Be 'Add a dark mode toggle.'
+        $e[0].planId | Should Match '^\d{8}-\d{4}-add-dark-mode$'
+        $plan = [IO.File]::ReadAllText((Join-Path $p 'PLAN.md'))
+        $plan | Should Match '(?s)## \d{4}-\d\d-\d\d \d\d:\d\d - Add dark mode\n<!-- plan:\d{8}-\d{4}-add-dark-mode -->\n\nStatus: waiting for your answers'
+        $plan | Should Match '(?s)### Copilot''s questions\n\n1\. Where should the toggle go\?\n   Suggested answers: Header / Settings'
     }
     It 'plans right away when Copilot has no questions, and offers the plan' {
         $global:ccbClarifyNone = $true
@@ -127,6 +132,9 @@ Describe 'Invoke-ClarifyStep (Copilot mocked)' {
         $plan.Count | Should Be 1
         $plan[0].plan | Should Match 'header'
         $plan[0].request | Should Be 'Add dark mode'
+        $md = [IO.File]::ReadAllText((Join-Path $p 'PLAN.md'))
+        $md | Should Match '(?s)### Copilot''s questions\n\nNone: the request was clear\..*### Plan \(version 1\)\n\nAdd a toggle in the header'
+        $md | Should Match 'Status: waiting for approval'
     }
     cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
 }
@@ -151,6 +159,47 @@ Describe 'Format-ProjectTree with one file' {
     It 'lists the single file instead of calling the project empty' {
         $p = New-Proj @{ 'index.html' = '<p>hi</p>' }
         Format-ProjectTree $p | Should Match '^index\.html \(\d+ B\)$'
+        cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
+    }
+}
+Describe 'PLAN.md' {
+    It 'keeps every decision of each request in its own section' {
+        $p = New-Proj @{ 'a.txt' = 'x' }
+        $t1 = Get-Date -Year 2026 -Month 10 -Day 3 -Hour 9 -Minute 15
+        $a = New-PlanEntry $p 'Add dark mode' $t1
+        $b = New-PlanEntry $p 'Export to CSV' $t1.AddMinutes(5)
+        $a | Should Be '20261003-0915-add-dark-mode'
+        Add-PlanSection $p $a "Copilot's questions" (Format-PlanQuestions @(@{ question = 'Where?'; options = @('Header', 'Footer') }) 'A toggle.') 'waiting for your answers'
+        Add-PlanSection $p $b 'Plan (version 1)' "1. Add a button" 'waiting for approval'
+        Add-PlanSection $p $a 'Your answers' (Format-PlanAnswers @(@{ question = 'Where?'; answer = 'Header' })) 'planning'
+        Add-PlanSection $p $a "Plan (version $((Get-PlanVersionCount $p $a) + 1))" "1. Toggle in the header" 'waiting for approval'
+        Add-PlanSection $p $a 'Change requested' 'Also remember the choice' 'planning'
+        Add-PlanSection $p $a "Plan (version $((Get-PlanVersionCount $p $a) + 1))" "1. Toggle in the header`n2. Store it" 'waiting for approval'
+        Add-PlanSection $p $a 'Approved' 'Approved; building started.' 'building'
+        $md = [IO.File]::ReadAllText((Join-Path $p 'PLAN.md'))
+        $md | Should Match '^# PLAN\n'
+        # dark mode first, then CSV; each with its own steps in order
+        $md | Should Match "(?s)## 2026-10-03 09:15 - Add dark mode\n<!-- plan:$a -->\n\nStatus: building\n\n### Request\n\nAdd dark mode\n\n### Copilot's questions.*### Your answers\n\n1\. Where\?\n   Answer: Header\n\n### Plan \(version 1\).*### Change requested\n\nAlso remember the choice\n\n### Plan \(version 2\)\n\n1\. Toggle in the header\n2\. Store it\n\n### Approved.*\n## 2026-10-03 09:20 - Export to CSV\n<!-- plan:$b -->\n\nStatus: waiting for approval\n\n### Request\n\nExport to CSV\n\n### Plan \(version 1\)\n\n1\. Add a button\n$"
+        Get-PlanVersionCount $p $a | Should Be 2
+        Get-PlanVersionCount $p $b | Should Be 1
+        { Add-PlanSection $p 'nope-id' 'X' 'y' } | Should Throw 'no section'
+        { Add-PlanSection $p '../evil' 'X' 'y' } | Should Throw 'Not a plan id'
+        cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
+    }
+    It 'writes the result of the build' {
+        $p = New-Proj @{ 'a.txt' = 'x' }
+        $config = Get-CCBridgeConfig harness $root
+        $s = New-AgentState -Config $config -AppRoot $root
+        $s.ProjectRoot = $p
+        $id = New-PlanEntry $p 'Add dark mode'
+        $from = [int]$s.Seq
+        Add-AgentEvent $s 'done' @{ text = 'Added the toggle.' }
+        Add-AgentEvent $s 'checkpoint' @{ files = @('css/theme.css', 'js/app.js') }
+        Add-AgentEvent $s 'status' @{ text = 'Evidence saved: evidence/task-20261003-091500.md' }
+        & (Get-Module Agent) { param($st, $i, $f) Write-PlanResult $st $i $f } $s $id $from
+        $md = [IO.File]::ReadAllText((Join-Path $p 'PLAN.md'))
+        $md | Should Match 'Status: done'
+        $md | Should Match '(?s)### Result \(\d{4}-\d\d-\d\d \d\d:\d\d\)\n\nAdded the toggle\.\n\nFiles changed: `css/theme\.css`, `js/app\.js`\n\nEvidence: evidence/task-20261003-091500\.md'
         cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
     }
 }

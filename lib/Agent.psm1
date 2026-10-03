@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -465,6 +465,24 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     if ($changed) { $Entry.changed = @($changed) }
 }
 
+function Write-PlanResult {
+    <# The result of an approved build in PLAN.md: Copilot's summary, the files changed and the
+       evidence file. #>
+    param($State, [string]$PlanId, [int]$FromSeq)
+    try {
+        $events = @(Get-AgentEvents $State $FromSeq)
+        $done = @($events | Where-Object { $_.type -eq 'done' } | Select-Object -Last 1)
+        $files = @($events | Where-Object { $_.type -eq 'checkpoint' } | ForEach-Object { $_.files } | Where-Object { $_ } | Select-Object -Unique)
+        $evidence = @($events | Where-Object { $_.type -eq 'status' -and "$($_.text)" -like 'Evidence saved: *' } | Select-Object -Last 1)
+        $failed = @($events | Where-Object { $_.type -eq 'error' } | Select-Object -Last 1)
+        $body = New-Object System.Collections.Generic.List[string]
+        $body.Add($(if ($done.Count) { "$($done[0].text)".Trim() } elseif ($failed.Count) { "Not finished: $($failed[0].text)" } else { 'Copilot did not report the task as done.' }))
+        if ($files.Count) { $body.Add(''); $body.Add('Files changed: ' + (($files | ForEach-Object { "``$_``" }) -join ', ')) }
+        if ($evidence.Count) { $body.Add(''); $body.Add('Evidence: ' + ("$($evidence[0].text)" -replace '^Evidence saved: ', '')) }
+        Add-PlanSection $State.ProjectRoot $PlanId "Result ($((Get-Date).ToString('yyyy-MM-dd HH:mm')))" ($body -join "`n") $(if ($done.Count) { 'done' } else { 'not finished' })
+    } catch { Write-CCBLogError agent 'PLAN.md result' $_ }
+}
+
 function Publish-PlanReady {
     <# After a plan-first turn: the plan (Copilot's todo list and done summary) for the user to
        approve or change in the app. #>
@@ -477,7 +495,12 @@ function Publish-PlanReady {
     $summary = if ($done.Count) { "$($done[0].text)" } elseif ($last.Count) { ("$($last[0].text)" -replace '(?s)```+.*?```+', '').Trim() } else { '' }
     $plan = (@($steps, $summary) | Where-Object { $_ }) -join "`n`n"
     if (-not $plan) { Add-AgentEvent $State 'status' @{ text = 'Copilot did not write a plan. Send the request again, or build without a plan.' }; return }
-    Add-AgentEvent $State 'plan-ready' @{ request = "$($Task.request)"; plan = $plan }
+    $planId = "$($Task.planId)"
+    if ($planId) {
+        try { Add-PlanSection $State.ProjectRoot $planId "Plan (version $((Get-PlanVersionCount $State.ProjectRoot $planId) + 1))" $plan 'waiting for approval' }
+        catch { Write-CCBLogError agent 'PLAN.md' $_ }
+    }
+    Add-AgentEvent $State 'plan-ready' @{ request = "$($Task.request)"; plan = $plan; planId = $planId }
 }
 
 function Invoke-ClarifyStep {
@@ -505,8 +528,15 @@ function Invoke-ClarifyStep {
             $questions = @($data.questions | Where-Object { $_ -and "$($_.question)".Trim() } | Select-Object -First 5 | ForEach-Object {
                 @{ question = "$($_.question)".Trim(); options = @($_.options | Where-Object { "$_".Trim() } | Select-Object -First 4 | ForEach-Object { "$_".Trim() }) } })
         } catch { Write-CCBLog info agent 'Clarify: no readable questions in the reply' }
+        # PLAN.md: one section per request, with every decision.
+        $planId = "$($Task.planId)"
+        try {
+            if (-not $planId) { $planId = New-PlanEntry $State.ProjectRoot $request }
+            if ($questions.Count) { Add-PlanSection $State.ProjectRoot $planId "Copilot's questions" (Format-PlanQuestions $questions $summary) 'waiting for your answers' }
+            else { Add-PlanSection $State.ProjectRoot $planId "Copilot's questions" ("None: the request was clear." + $(if ($summary) { "`n`nCopilot understood: $summary" } else { '' })) 'planning' }
+        } catch { Write-CCBLogError agent 'PLAN.md' $_ }
         if ($questions.Count) {
-            Add-AgentEvent $State 'clarify' @{ request = $request; questions = $questions; summary = $summary }
+            Add-AgentEvent $State 'clarify' @{ request = $request; questions = $questions; summary = $summary; planId = $planId }
             return
         }
         Add-AgentEvent $State 'status' @{ text = "Copilot has no questions$(if ($summary) { " ($summary)" }); making a plan." }
@@ -514,7 +544,7 @@ function Invoke-ClarifyStep {
     $fromSeq = [int]$State.Seq
     $State.Mode = 'plan'
     Invoke-AgentTurn $State ((Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + $request) 'coding'
-    Publish-PlanReady $State @{ request = $request } $fromSeq
+    Publish-PlanReady $State @{ request = $request; planId = $planId } $fromSeq
 }
 
 function Get-ProjectVerify([string]$ProjectRoot) {
@@ -1680,6 +1710,7 @@ function Start-AgentWorker {
                     } else {
                         Invoke-AgentTurn $State $task.text $force
                         if ($task.planFirst) { Publish-PlanReady $State $task $fromSeq }
+                        if ($task.planBuild -and $task.planId) { Write-PlanResult $State "$($task.planId)" $fromSeq }
                     }
                 }
                 'fetch' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-FetchJob $State $task.name }
