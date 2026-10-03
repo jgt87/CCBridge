@@ -27,13 +27,13 @@ if (-not $NoPublish) {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'The GitHub CLI (gh) is needed to publish; use -NoPublish to only build.' }
     if (@(Invoke-Git status --porcelain --untracked-files=no).Count) { throw 'There are uncommitted changes: commit them first, so the tag matches the release.' }
     $null = Invoke-Git fetch --tags origin
-    $head = (Invoke-Git rev-parse HEAD)[0]
-    $branch = (Invoke-Git rev-parse --abbrev-ref HEAD)[0]
+    $head = @(Invoke-Git rev-parse HEAD)[0]
+    $branch = @(Invoke-Git rev-parse --abbrev-ref HEAD)[0]
     $remote = @(Invoke-Git ls-remote origin "refs/heads/$branch") | Select-Object -First 1
     if (-not $remote -or $remote.Split("`t")[0] -ne $head) { throw "Push $branch first: the release commit must be on GitHub." }
     $existing = @(Invoke-Git tag --list $Version)
     if ($existing.Count) {
-        $at = (Invoke-Git rev-list -n 1 $Version)[0]
+        $at = @(Invoke-Git rev-list -n 1 $Version)[0]
         if ($at -ne $head) { throw "Tag $Version already exists on another commit ($($at.Substring(0, 7))). Choose the next version." }
     }
     $null = & gh release view $Version --json tagName 2>&1
