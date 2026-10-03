@@ -13,6 +13,10 @@
     "onValue": "true",
     "note": "Fill in from capture-report.json (capture.cmd on a Microsoft 365 Copilot licence). Empty toggle = Work IQ control unavailable."
   },
+  "responseMode": {
+    "button": "#gptModeSwitcher",
+    "note": "Copilot's response mode picker (Auto / Quick response / Think deeper). Items are matched by text, else by position (0, 1, 2)."
+  },
   "regenerateButton": "button[aria-label*='Regenerate' i]",
   "replyContainer": "[data-testid='copilot-message-reply-div']",
   "copyReplyButton": "[data-testid='CopyButtonTestId'], button[aria-label='Copy Response' i], button[aria-label='Copy' i]"

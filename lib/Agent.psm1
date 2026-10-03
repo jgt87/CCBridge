@@ -26,6 +26,7 @@ function New-AgentState {
         Schedules = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList)); ScheduleFile = $null; NextScheduleCheck = $null
         Held = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList))   # tasks put back after the daily limit: they run first
         PausedUntil = $null; PauseReason = $null; LastLimitAt = $null; PauseFile = $null   # the web app saves the pause (Save-QueuePause)
+        ResponseMode = $(if ($Config.responseMode) { [string]$Config.responseMode } else { 'leave' }); ResponseModeActual = $null   # Auto / Quick / Think deeper
         ReviewByCaller = $false   # MCP tasks: the calling model checks the result, so no Copilot review round
         NextConnectAttempt = $null
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
@@ -157,6 +158,9 @@ function Reset-Bridge($State) {
 function Send-ToCopilot {
     param($State, [string]$Message)
     $bridge = Get-Bridge $State
+    if ($State.ResponseMode -in 'auto', 'quick', 'deep') {
+        try { $State.ResponseModeActual = Set-CopilotResponseMode $bridge $State.ResponseMode } catch { Write-CCBLogError agent 'Response mode' $_ }
+    }
     $State.MessagesSent = [int]$State.MessagesSent + 1
     if ($State.WorkIq -eq 'on' -or $State.WorkIq -eq 'off') {
         $State.WorkIqActual = Set-CopilotWorkIq $bridge ($State.WorkIq -eq 'on')
@@ -459,6 +463,95 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     if ($done.Count -and $done[0].path) { $Entry.resultPath = "$($done[0].path)" }
     $changed = @($events | Where-Object { $_.type -eq 'checkpoint' } | ForEach-Object { $_.files }) | Select-Object -Unique
     if ($changed) { $Entry.changed = @($changed) }
+}
+
+function Publish-PlanReady {
+    <# After a plan-first turn: the plan (Copilot's todo list and done summary) for the user to
+       approve or change in the app. #>
+    param($State, $Task, [int]$FromSeq)
+    $events = @(Get-AgentEvents $State $FromSeq)
+    $done = @($events | Where-Object { $_.type -eq 'done' } | Select-Object -Last 1)
+    $last = @($events | Where-Object { $_.type -eq 'assistant' } | Select-Object -Last 1)
+    $todos = @($State.Todos | Where-Object { $_ })
+    $steps = if ($todos.Count) { (($todos | ForEach-Object -Begin { $i = 0 } -Process { $i++; "$i. $($_.text)" }) -join "`n") } else { '' }
+    $summary = if ($done.Count) { "$($done[0].text)" } elseif ($last.Count) { ("$($last[0].text)" -replace '(?s)```+.*?```+', '').Trim() } else { '' }
+    $plan = (@($steps, $summary) | Where-Object { $_ }) -join "`n`n"
+    if (-not $plan) { Add-AgentEvent $State 'status' @{ text = 'Copilot did not write a plan. Send the request again, or build without a plan.' }; return }
+    Add-AgentEvent $State 'plan-ready' @{ request = "$($Task.request)"; plan = $plan }
+}
+
+function Invoke-ClarifyStep {
+    <# Clarify first: Copilot asks at most 5 questions (as JSON, with likely answers) before any
+       work. The app shows them as a form; the answers come back as a plan-first task. With no
+       questions it plans right away. #>
+    param($State, $Task)
+    $request = "$($Task.request)"
+    Add-AgentEvent $State 'user' @{ text = $request }
+    Add-AgentEvent $State 'kind' @{ taskKind = 'clarify' }
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
+    $State.Busy = $true
+    try {
+        if (Test-OtherSender) { $State.NeedNewChat = $true }
+        if ($State.NeedNewChat) { Start-NewChat $State }
+        $ctx = Get-ProjectContext $State
+        $msg = (Get-PromptPart $State.AppRoot 'role:coding') + "`n`n" + $ctx.Full + "`n`n" + (Get-PromptPart $State.AppRoot 'clarify') + "`n`nRequest: $request"
+        $r = Send-ToCopilot $State $msg
+        if ($r.Cancelled) { return }
+        if ($r.Result -and $r.Result -ne 'Success') { Add-AgentEvent $State 'error' @{ text = "Copilot answered with '$($r.Result)': $($r.ResultMessage)" }; return }
+        $questions = @(); $summary = ''
+        try {
+            $data = (Get-JsonFromReply $r.Text) | ConvertFrom-Json
+            $summary = "$($data.summary)".Trim()
+            $questions = @($data.questions | Where-Object { $_ -and "$($_.question)".Trim() } | Select-Object -First 5 | ForEach-Object {
+                @{ question = "$($_.question)".Trim(); options = @($_.options | Where-Object { "$_".Trim() } | Select-Object -First 4 | ForEach-Object { "$_".Trim() }) } })
+        } catch { Write-CCBLog info agent 'Clarify: no readable questions in the reply' }
+        if ($questions.Count) {
+            Add-AgentEvent $State 'clarify' @{ request = $request; questions = $questions; summary = $summary }
+            return
+        }
+        Add-AgentEvent $State 'status' @{ text = "Copilot has no questions$(if ($summary) { " ($summary)" }); making a plan." }
+    } finally { $State.Busy = $false }
+    $fromSeq = [int]$State.Seq
+    $State.Mode = 'plan'
+    Invoke-AgentTurn $State ((Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + $request) 'coding'
+    Publish-PlanReady $State @{ request = $request } $fromSeq
+}
+
+function Get-ProjectVerify([string]$ProjectRoot) {
+    <# The project's own check, from a "verify: COMMAND" line in AGENTS.md, or $null. #>
+    $f = Join-Path $ProjectRoot 'AGENTS.md'
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    $m = [regex]::Match([IO.File]::ReadAllText($f), '(?im)^\s*[-*]?\s*verify\s*:\s*`?([^`\r\n]+?)`?\s*$')
+    if ($m.Success -and $m.Groups[1].Value.Trim()) { return $m.Groups[1].Value.Trim() }
+    $null
+}
+
+function Save-TaskEvidence {
+    <# evidence/task-<stamp>.md in the project: what was asked, what changed, which checks ran and
+       their results, Copilot's summary. Returns the relative path. #>
+    param($State, [string]$Request, $Changes, $Ev, [string]$Done, [int]$Messages)
+    $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+    $rel = "evidence/task-$stamp.md"
+    $sb = New-Object Text.StringBuilder
+    [void]$sb.AppendLine("# Task evidence $((Get-Date).ToString('yyyy-MM-dd HH:mm'))").AppendLine()
+    [void]$sb.AppendLine('## Request').AppendLine().AppendLine($Request.Trim()).AppendLine()
+    [void]$sb.AppendLine('## Result').AppendLine().AppendLine($(if ($Done) { $Done.Trim() } else { '(Copilot did not report the task as done)' })).AppendLine()
+    [void]$sb.AppendLine('## Files changed').AppendLine()
+    foreach ($c in @($Changes)) { [void]$sb.AppendLine("- ``$($c.path)`` +$($c.added) -$($c.removed)$(if ($c.created) { ' (new)' } elseif ($c.deleted) { ' (deleted)' })") }
+    [void]$sb.AppendLine().AppendLine('## Checks').AppendLine()
+    $syn = if ($null -eq $Ev.syntaxLast) { 'not needed (no JSON, PowerShell or JavaScript changed)' } elseif (@($Ev.syntaxLast).Count) { "$(@($Ev.syntaxLast).Count) problem(s) left: " + (@($Ev.syntaxLast) -join '; ') } else { 'passed' }
+    [void]$sb.AppendLine("- Syntax check: $syn")
+    $pg = if ($null -eq $Ev.page) { 'not run' } elseif (@($Ev.page).Count) { "$(@($Ev.page).Count) problem(s): " + (@($Ev.page) -join '; ') } else { 'passed' }
+    [void]$sb.AppendLine("- Page check: $pg")
+    [void]$sb.AppendLine("- Copilot consistency review: $(if ($Ev.reviewed) { 'done' } else { 'not needed' })")
+    $vf = if (-not $Ev.verify) { 'not configured (add a "verify: COMMAND" line to AGENTS.md)' } elseif ($Ev.verify.skipped) { "not run: $($Ev.verify.skipped)" } elseif ($Ev.verify.passed) { "passed (``$($Ev.verify.command)``)" } else { "FAILED (``$($Ev.verify.command)``, exit $($Ev.verify.exit))" }
+    [void]$sb.AppendLine("- Verify: $vf")
+    if ($Ev.verify -and $Ev.verify.tail) { [void]$sb.AppendLine().AppendLine('Verify output (end):').AppendLine('```').AppendLine($Ev.verify.tail).AppendLine('```') }
+    [void]$sb.AppendLine().AppendLine("Copilot messages: $Messages")
+    $full = Join-Path $State.ProjectRoot ($rel.Replace('/', '\'))
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $full)
+    [IO.File]::WriteAllText($full, $sb.ToString(), (New-Object Text.UTF8Encoding($false)))
+    $rel
 }
 
 function Get-ReviewScope {
@@ -1084,6 +1177,11 @@ function Invoke-AgentAction {
             $evt.target = $pat; Add-AgentEvent $State 'action' $evt
             return @{ ok = $true; summary = "searched $pat"; output = (Invoke-GrepAction $root $pat $glob) }
         }
+        'find' {
+            $name = if ($Action.arg) { $Action.arg } else { "$($Action.body)".Split("`n")[0].Trim() }
+            $evt.target = $name; Add-AgentEvent $State 'action' $evt
+            return @{ ok = $true; summary = "found $name"; output = (Find-SymbolDefinition $root $name) }
+        }
         'todo' {
             $State.Todos = @(Get-TodoItems $Action.body)
             Add-AgentEvent $State 'todos' @{ items = $State.Todos }
@@ -1099,7 +1197,19 @@ function Invoke-AgentAction {
     $preview = $null
     $riskWarning = $null
     $personOnly = $false   # Microsoft 365 commands and deletions: only a person in the app may approve
-    if ($Action.type -eq 'write' -or $Action.type -eq 'edit') {
+    if ($Action.type -eq 'remember') {
+        # A lasting project note: added to AGENTS.md (## Learned) only after approval, also in auto mode.
+        $body = if ("$($Action.body)".Trim()) { $Action.body } else { $Action.arg }
+        if (-not "$body".Trim()) { return @{ ok = $false; summary = 'remember without text'; output = 'error: put the fact to remember inside the block' } }
+        $notesPath = Join-Path $root 'AGENTS.md'
+        $oldNotes = if (Test-Path -LiteralPath $notesPath) { (Read-TextFile $notesPath).Text } else { '' }
+        $Action | Add-Member -NotePropertyName newNotes -NotePropertyValue (Get-LearnedNotes $oldNotes $body) -Force
+        $evt.target = 'AGENTS.md'
+        $preview = @{ path = 'AGENTS.md'; exists = [bool]$oldNotes; old = (Get-PreviewText $oldNotes); new = (Get-PreviewText $Action.newNotes) }
+        $needsApproval = $true
+        $riskWarning = 'Copilot wants to add this to the project notes (AGENTS.md), which go with every new chat. Approve only if it is right and lasting.'
+    }
+    elseif ($Action.type -eq 'write' -or $Action.type -eq 'edit') {
         if (-not $Action.arg) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed' }); return @{ ok = $false; summary = "$($Action.type) without a path"; output = 'error: the block needs a path after the action name' } }
         try { $null = Assert-Writable $root $Action.arg } catch {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = $_.Exception.Message })
@@ -1211,6 +1321,7 @@ function Invoke-AgentAction {
     try {
         switch ($Action.type) {
             'write' { $out = Invoke-WriteAction $root $Action.arg $Action.body $Checkpoint; return @{ ok = $true; summary = $out; output = $out; changed = $true; path = $Action.arg } }
+            'remember' { $null = Invoke-WriteAction $root 'AGENTS.md' $Action.newNotes $Checkpoint; return @{ ok = $true; summary = 'added to the project notes (AGENTS.md)'; output = 'saved to the project notes (AGENTS.md, ## Learned)'; changed = $true; path = 'AGENTS.md' } }
             'edit'  {
                 $before = try { (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text } catch { '' }
                 $out = Invoke-EditAction $root $Action.arg $Action.edits $Checkpoint
@@ -1269,6 +1380,9 @@ function Invoke-AgentTurn {
         $nudges = 0   # times this message was sent again because Copilot explained instead of acting
         $failSeen = @{}; $stopLoop = $false   # the same step failing the same way: warn at 2, stop at 3
         $syntaxNudges = 0   # times "done" was refused because a changed file has a syntax error
+        $verifyNudges = 0   # times "done" was refused because the project's verify command failed
+        $ev = @{ syntaxLast = $null; page = $null; reviewed = $false; verify = $null }   # for the evidence file
+        $msgStart = [int]$State.MessagesSent
         $lastReply = ''; $doneText = ''   # for the suggested next steps after the turn
         $reviewed = $false   # the consistency review after a big change happens once per message
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
@@ -1373,6 +1487,7 @@ function Invoke-AgentTurn {
             $roundChanged = @($results | ForEach-Object { $_.changedPath } | Where-Object { $_ } | Select-Object -Unique)
             if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
                 $syntax = @(@(Test-ProjectConsistency $State.ProjectRoot $roundChanged -SyntaxOnly) + @(if ("$($State.Config.pageCheck)" -ne 'off') { Test-ScriptSyntax $State $roundChanged }))
+                if (@($roundChanged | Where-Object { $_ -match '(?i)\.(json|ps1|psm1|psd1|m?js|cjs)$' }).Count) { $ev.syntaxLast = @($syntax) }
                 if ($syntax.Count) {
                     Write-CCBLog info agent 'Syntax problems after this round' @{ count = $syntax.Count }
                     Add-AgentEvent $State 'status' @{ text = "Syntax check: $($syntax.Count) problem(s) in the changed files; Copilot is asked to fix them." }
@@ -1383,6 +1498,28 @@ function Invoke-AgentTurn {
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
             if ($stopLoop) { break }
             if ($isDone) {
+                # The project's own check (verify: in AGENTS.md) after a task that changed files.
+                $verifyCmd = Get-ProjectVerify $State.ProjectRoot
+                if ($verifyCmd -and $checkpoint.Files.Count -and $State.Mode -ne 'plan') {
+                    $risk = Get-CommandRisk $verifyCmd
+                    $why = Test-DeleteScope $State.ProjectRoot $verifyCmd
+                    if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { $ev.verify = @{ command = $verifyCmd; skipped = 'commands are not allowed for this task' } }
+                    elseif ($why -or $risk.m365 -or $risk.destructive) { $ev.verify = @{ command = $verifyCmd; skipped = 'the command deletes files or works with Microsoft 365, so it only runs by hand' } }
+                    else {
+                        Add-AgentEvent $State 'status' @{ text = "Verify: running ``$verifyCmd``..." }
+                        $vr = Invoke-RunAction $State.ProjectRoot $verifyCmd ([int]$State.Config.commandTimeoutSec) 6000 { $State.Cancel }
+                        $passed = ($vr.exitCode -eq 0)
+                        $tail = ("$($vr.output)".Split("`n") | Select-Object -Last 25) -join "`n"
+                        $ev.verify = @{ command = $verifyCmd; passed = $passed; exit = $vr.exitCode; tail = $tail }
+                        Add-AgentEvent $State 'status' @{ text = "Verify: ``$verifyCmd`` $(if ($passed) { 'passed' } elseif ($vr.timedOut) { 'timed out' } else { "failed (exit $($vr.exitCode))" })." }
+                        if (-not $passed -and $verifyNudges -lt 2 -and -not $State.Cancel) {
+                            $verifyNudges++
+                            $fence = '```'
+                            $message = "The project's check failed, so the task is not finished. Command: $verifyCmd (exit $($vr.exitCode)). Output (end):`n$fence`n$tail`n$fence`nFix the cause, then send done again."
+                            continue
+                        }
+                    }
+                }
                 # After a big change: one consistency review by Copilot (dead code, broken references).
                 if (-not $reviewed) {
                     $changes = @(Get-CheckpointChanges $State.ProjectRoot $checkpoint)
@@ -1396,6 +1533,7 @@ function Invoke-AgentTurn {
                         if ($pages.Count) {
                             Add-AgentEvent $State 'status' @{ text = "Checking $($pages -join ', ') in a browser tab for JavaScript errors and files that fail to load..." }
                             $pageIssues = @(Test-WebPage $State $pages)
+                            $ev.page = @($pageIssues)
                             if (-not $pageIssues.Count) { Add-AgentEvent $State 'status' @{ text = "Page check: $($pages -join ', ') loaded without errors." } }
                         }
                     }
@@ -1418,6 +1556,7 @@ function Invoke-AgentTurn {
                     }
                     if ($pageIssues.Count -or (Test-NeedsReview $State $changes)) {
                         $reviewed = $true
+                        $ev.reviewed = $true
                         $issues = @(@(Test-ProjectConsistency $State.ProjectRoot @($changes | ForEach-Object { $_.path })) + @($pageIssues | ForEach-Object { "page check: $_" }))
                         Write-CCBLog info agent 'Asking Copilot for a consistency review' @{ files = $changes.Count; issues = $issues.Count }
                         Add-AgentEvent $State 'status' @{ text = "Big change: asking Copilot to review $(@($changes).Count) changed file(s) for leftovers, dead code and broken references$(if ($issues.Count) { " ($($issues.Count) problem(s) found by the local checks)" })." }
@@ -1446,11 +1585,20 @@ function Invoke-AgentTurn {
             if ($fixed.Count) { Add-AgentEvent $State 'status' @{ text = 'Source data is read-only; StreamHub undid changes to it: ' + ($fixed -join '; ') } }
         } catch { Add-AgentEvent $State 'error' @{ text = "Could not verify source data: $($_.Exception.Message)" } }
         if (-not $checkpoint.Files.Count) { Remove-Item $checkpoint.Dir -Recurse -Force -ErrorAction SilentlyContinue }
-        elseif ($State.ReviewByCaller) {
+        if ($checkpoint.Files.Count -and "$($State.Config.evidence)" -ne 'off' -and $State.Mode -ne 'plan') {
+            try {
+                $chg = @(Get-CheckpointChanges $State.ProjectRoot $checkpoint | Where-Object { $_.added -or $_.removed -or $_.created -or $_.deleted })
+                if ($chg.Count) {
+                    $evPath = Save-TaskEvidence $State $Text $chg $ev $doneText ([int]$State.MessagesSent - $msgStart)
+                    Add-AgentEvent $State 'status' @{ text = "Evidence saved: $evPath" }
+                }
+            } catch { Write-CCBLogError agent 'evidence' $_ }
+        }
+        if ($checkpoint.Files.Count -and $State.ReviewByCaller) {
             $contents = @(try { Get-ChangeSetContents $State.ProjectRoot $checkpoint } catch { Write-CCBLogError agent 'change set contents' $_ })
             Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys); contents = $contents }
         }
-        else { Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys) } }
+        elseif ($checkpoint.Files.Count) { Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys) } }
         $State.Busy = $false; $State.Cancel = $false
     }
 }
@@ -1496,7 +1644,8 @@ function Start-AgentWorker {
         if ($entry) { $entry.status = 'running'; $entry.started = (Get-Date).ToString('s'); $State.CurrentQueueId = $entry.id; Save-AgentQueue $State }
         # A task from another program can bring its own mode, project and command rule; the app's
         # own settings come back afterwards.
-        $saved = @{ Mode = $State.Mode; ProjectRoot = $State.ProjectRoot; NoCommands = $State.NoCommands; ReviewByCaller = $State.ReviewByCaller }
+        $saved = @{ Mode = $State.Mode; ProjectRoot = $State.ProjectRoot; NoCommands = $State.NoCommands; ReviewByCaller = $State.ReviewByCaller; ResponseMode = $State.ResponseMode }
+        if ($task.responseMode) { $State.ResponseMode = $task.responseMode }
         $State.ReviewByCaller = [bool]$task.reviewByCaller
         $foreign = $task.source -and $task.source -ne 'user'
         if ($task.mode) { $State.Mode = $task.mode }
@@ -1526,8 +1675,11 @@ function Start-AgentWorker {
                         Add-AgentEvent $State 'user' @{ text = $task.text }
                         $which = if (@($runReq.names).Count) { 'Which runbook should run? Name one of: ' + (@($runReq.names) -join ', ') + '. Or press Run on it in the Fetch tab.' } else { 'This project has no runbooks yet. Create one with "New runbook from a template" in the Fetch tab (or ask Copilot to create one), then run it.' }
                         Add-AgentEvent $State 'status' @{ text = $which }
+                    } elseif ($task.clarify) {
+                        Invoke-ClarifyStep $State $task
                     } else {
                         Invoke-AgentTurn $State $task.text $force
+                        if ($task.planFirst) { Publish-PlanReady $State $task $fromSeq }
                     }
                 }
                 'fetch' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-FetchJob $State $task.name }
@@ -1586,7 +1738,7 @@ function Start-AgentWorker {
                 Save-AgentQueue $State
             }
             $State.CurrentQueueId = $null
-            $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller
+            $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller; $State.ResponseMode = $saved.ResponseMode
             if ($foreign -and $saved.ProjectRoot -and $State.ProjectRoot -ne $saved.ProjectRoot) {
                 $State.ProjectRoot = $saved.ProjectRoot; $State.NeedNewChat = $true
                 Add-AgentEvent $State 'status' @{ text = "Back to $($saved.ProjectRoot)." }
@@ -1596,4 +1748,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

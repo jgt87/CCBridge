@@ -51,7 +51,10 @@ function Get-CdpPageTarget {
     $pages = @((Invoke-RestMethod "http://127.0.0.1:$Port/json/list") | Where-Object { $_.type -eq 'page' })
     if (-not $pages) { throw "no page targets on port $Port" }
     $match = $pages | Where-Object { $_.url -like $UrlLike } | Select-Object -First 1
-    if ($match) { $match } else { $pages[0] }
+    if ($match) { return $match }
+    # Never a local page (the StreamHub app can be a tab in this window).
+    $other = @($pages | Where-Object { "$($_.url)" -notmatch '^(?i)https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(/|$)' })
+    if ($other.Count) { $other[0] } else { $pages[0] }
 }
 
 function Connect-Cdp {

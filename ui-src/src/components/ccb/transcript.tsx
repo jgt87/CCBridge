@@ -1,4 +1,6 @@
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
+import { ClarifyCard, type ClarifyQuestion, PlanCard } from "./plan-cards";
+import type { ChatOptions } from "@/lib/api";
 import { useEffect, useRef , useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -16,6 +18,8 @@ export type TranscriptItem =
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string }
   | { kind: "next"; seq: number; steps: string[] }
+  | { kind: "clarify"; seq: number; request: string; questions: ClarifyQuestion[]; summary?: string }
+  | { kind: "plan"; seq: number; request: string; plan: string }
   | { kind: "error"; seq: number; text: string; time: string; errId?: string; code?: string; hint?: string; detail?: string; version?: string };
 
 // --- Building the transcript from events ------------------------------------------------
@@ -90,6 +94,15 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
   },
   error: (e, ctx) =>
     ctx.items.push({ kind: "error", seq: e.seq, text: e.text ?? "", time: e.time, errId: e.errId, code: e.code, hint: e.hint, detail: e.detail, version: e.version }),
+  clarify: (e, ctx) => {
+    const x = e as AgentEvent & { request?: string; questions?: ClarifyQuestion[] | ClarifyQuestion; summary?: string };
+    const qs = (Array.isArray(x.questions) ? x.questions : x.questions ? [x.questions] : []).map((q) => ({ question: q.question, options: Array.isArray(q.options) ? q.options : q.options ? [q.options as unknown as string] : [] }));
+    if (qs.length) ctx.items.push({ kind: "clarify", seq: e.seq, request: x.request ?? "", questions: qs, summary: x.summary });
+  },
+  "plan-ready": (e, ctx) => {
+    const x = e as AgentEvent & { request?: string; plan?: string };
+    if (x.plan) ctx.items.push({ kind: "plan", seq: e.seq, request: x.request ?? "", plan: x.plan });
+  },
   "next-steps": (e, ctx) => {
     if (e.steps?.length) ctx.items.push({ kind: "next", seq: e.seq, steps: e.steps });
   },
@@ -257,10 +270,12 @@ function TranscriptRow({
   item,
   onUsePrompt,
   onResendAsCoding,
+  onSend,
 }: {
   item: TranscriptItem;
   onUsePrompt?: (text: string) => void;
   onResendAsCoding?: (text: string) => void;
+  onSend?: (text: string, opts: ChatOptions) => void;
 }) {
   switch (item.kind) {
     case "user":
@@ -273,6 +288,10 @@ function TranscriptRow({
       return <NoteLine text={item.text} tone={item.tone} />;
     case "next":
       return <NextSteps onUse={onUsePrompt} steps={item.steps} />;
+    case "clarify":
+      return onSend ? <ClarifyCard onSend={onSend} questions={item.questions} request={item.request} summary={item.summary} /> : null;
+    case "plan":
+      return onSend ? <PlanCard onSend={onSend} plan={item.plan} request={item.request} /> : null;
     case "error":
       return <ErrorNote item={item} />;
   }
@@ -312,6 +331,7 @@ export function Transcript({
   stopping = false,
   onUsePrompt,
   onResendAsCoding,
+  onSend,
 }: {
   items: TranscriptItem[];
   busy: boolean;
@@ -322,6 +342,8 @@ export function Transcript({
   onUsePrompt?: (text: string) => void;
   /** Sends a message again as a coding task (when it went as plain chat or project work). */
   onResendAsCoding?: (text: string) => void;
+  /** Sends a message with options (answers to questions, plan approval). */
+  onSend?: (text: string, opts: ChatOptions) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const awaiting = items.some((i) => i.kind === "action" && i.item.status === "awaiting");
@@ -336,7 +358,7 @@ export function Transcript({
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-4 py-6">
       {items.map((it) => (
-        <TranscriptRow item={it} key={rowKey(it)} onResendAsCoding={onResendAsCoding} onUsePrompt={onUsePrompt} />
+        <TranscriptRow item={it} key={rowKey(it)} onResendAsCoding={onResendAsCoding} onSend={onSend} onUsePrompt={onUsePrompt} />
       ))}
       {busy && !awaiting && <ThinkingIndicator progress={progress} stopping={stopping} />}
       <div ref={endRef} />

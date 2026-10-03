@@ -166,7 +166,8 @@ function Get-ProjectFiles {
 function Format-ProjectTree {
     <# Compact file listing for prompts: one path per line with size. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [int]$MaxChars = 8000)
-    $files = Get-ProjectFiles $ProjectRoot
+    # @(): with one file PowerShell 5.1 returns a single object, which has no Count.
+    $files = @(Get-ProjectFiles $ProjectRoot)
     if (-not $files.Count) { return '(empty project)' }
     $sb = New-Object Text.StringBuilder
     foreach ($f in $files) {

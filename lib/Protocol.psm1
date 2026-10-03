@@ -2,7 +2,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$script:ActionTypes = @('read', 'glob', 'grep', 'write', 'edit', 'run', 'todo', 'done')
+$script:ActionTypes = @('read', 'glob', 'grep', 'find', 'write', 'edit', 'run', 'remember', 'todo', 'done')
 $script:PlainInfo = @('', 'text', 'txt', 'plaintext', 'plain', 'none')
 
 function Get-ActionBlocks {

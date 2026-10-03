@@ -12,7 +12,7 @@ Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Executor.psm1')
 
 $script:ReviewExt = '(?i)\.(ps1|psm1|psd1|py|pyw|js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|html?|css|scss|less|json|cs|java|kt|go|rs|rb|php|sh|bash|cmd|bat|sql|ya?ml|toml|ini|xml|c|cpp|h|hpp|swift|dart|lua|r)$'
-$script:ReviewSkipPath = '(?i)(^|/)(source|reviews|exports|fetch|runbooks|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.next|\.venv|venv|__pycache__)/|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|poetry\.lock)$|\.min\.(js|css)$|\.map$'
+$script:ReviewSkipPath = '(?i)(^|/)(source|reviews|evidence|exports|fetch|runbooks|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.next|\.venv|venv|__pycache__)/|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|poetry\.lock)$|\.min\.(js|css)$|\.map$'
 $script:Severity = @{ high = 0; medium = 1; low = 2 }
 
 function Get-ReviewFiles {

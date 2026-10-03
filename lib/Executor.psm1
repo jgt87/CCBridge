@@ -731,6 +731,57 @@ function Get-ChangedView {
     "Lines $from-$to of $Shown now$cut (line numbers are not part of the file):`n$fence`n" + ($n[($from - 1)..($to - 1)] -join "`n") + "`n$fence"
 }
 
+function Find-SymbolDefinition {
+    <# Where a function, class, method, CSS class/id or HTML id is defined in the project:
+       "PATH:LINE  line" plus the block's lines to read. At most $Max hits. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [int]$Max = 20)
+    $n = $Name.Trim().TrimStart('.', '#').Trim('`', '"', "'")
+    if ($n -notmatch '^[\w$-]{2,80}$') { return "find: give one name (letters, digits, _ - $), for example a function or class name" }
+    $e = [regex]::Escape($n)
+    $byExt = @(
+        @{ ext = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte)$'; re = "(?i)\bfunction\s*\*?\s*$e\b|\bclass\s+$e\b|\b(const|let|var)\s+$e\s*=|^\s*(export\s+)?(default\s+)?(interface|type|enum)\s+$e\b|^\s*(public\s+|private\s+|protected\s+|static\s+|async\s+)*$e\s*\([^)]*\)\s*\{|\b$e\s*:\s*(async\s*)?(function\b|\()" }
+        @{ ext = '(?i)\.(ps1|psm1)$'; re = "(?i)^\s*(function|filter|class|enum)\s+$e\b" }
+        @{ ext = '(?i)\.pyw?$'; re = "^\s*(async\s+)?def\s+$e\b|^\s*class\s+$e\b|^$e\s*=" }
+        @{ ext = '(?i)\.(css|scss|less)$'; re = "[.#]$e\b[^{};]*\{|[.#]$e\b[^{};]*,\s*$" }
+        @{ ext = '(?i)\.(html?|xhtml)$'; re = "(?i)\bid\s*=\s*[""']$e[""']|\bclass\s*=\s*[""'][^""']*\b$e\b" }
+        @{ ext = '(?i)\.(cs|java|kt|go|rs|php|swift|dart|c|cpp|h|hpp)$'; re = "\b(class|interface|enum|struct|record|trait|fn|func|def)\s+$e\b|\b\w[\w<>\[\],]*\s+$e\s*\([^;]*\)\s*(\{|$)" }
+    )
+    $hits = New-Object System.Collections.Generic.List[string]
+    foreach ($f in @(Get-ProjectFiles $ProjectRoot)) {
+        if ($hits.Count -ge $Max) { break }
+        $rule = $byExt | Where-Object { $f.path -match $_.ext } | Select-Object -First 1
+        if (-not $rule -or [int64]$f.size -gt 1MB -or $f.path -match '(?i)^(source|node_modules|dist|build)/') { continue }
+        $full = Resolve-ProjectPath $ProjectRoot $f.path
+        $text = (Read-TextFile $full).Text.Replace("`r`n", "`n")
+        $lines = $text.Split("`n")
+        for ($i = 0; $i -lt $lines.Length -and $hits.Count -lt $Max; $i++) {
+            if ($lines[$i] -notmatch $rule.re) { continue }
+            $w = Expand-ToWholeBlocks $text $full ($i + 1) ($i + 1) 400
+            $read = if ($w.to -gt $w.from) { "  (block: read $($f.path):$($w.from)-$($w.to))" } else { '' }
+            $t = $lines[$i].Trim(); if ($t.Length -gt 140) { $t = $t.Substring(0, 137) + '...' }
+            $hits.Add("$($f.path):$($i + 1)  $t$read")
+        }
+    }
+    if (-not $hits.Count) { return "find ${n}: no definition found (try grep for uses)" }
+    "find ${n}:`n" + ($hits -join "`n")
+}
+
+function Get-LearnedNotes {
+    <# AGENTS.md with new lines added to its "## Learned" section (made when missing): each line
+       of $Body becomes "- LINE (DATE)". Returns the new text. #>
+    param([AllowEmptyString()][string]$Old, [string]$Body, [string]$Date = (Get-Date).ToString('yyyy-MM-dd'))
+    $items = @("$Body".Replace("`r`n", "`n").Split("`n") | ForEach-Object { ($_ -replace '^\s*[-*]\s*', '').Trim() } | Where-Object { $_ } | ForEach-Object { "- $_ ($Date)" })
+    if (-not $items.Count) { return $Old }
+    $t = "$Old".Replace("`r`n", "`n").TrimEnd("`n")
+    if (-not $t.Trim()) { return "# Project notes`n`n## Learned`n" + ($items -join "`n") + "`n" }
+    $m = [regex]::Match($t, '(?m)^## Learned\s*$')
+    if (-not $m.Success) { return "$t`n`n## Learned`n" + ($items -join "`n") + "`n" }
+    $next = [regex]::Match($t.Substring($m.Index + $m.Length), '(?m)^## ')
+    $end = if ($next.Success) { $m.Index + $m.Length + $next.Index } else { $t.Length }
+    $before = $t.Substring(0, $end).TrimEnd("`n"); $after = $t.Substring($end)
+    "$before`n" + ($items -join "`n") + "`n" + $(if ($after) { "`n$after`n" } else { '' })
+}
+
 function Test-HalfBlock([string]$Old, [string]$New, [string]$Path = 'file.js') {
     <# Whether an edit leaves the file more unbalanced than it was: more unclosed (or unopened)
        { } blocks or <style>/<script> blocks after the edit than before. A file that is already
@@ -1089,5 +1140,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

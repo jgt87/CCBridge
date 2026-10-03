@@ -27,12 +27,17 @@ function Test-CopilotUrl([string]$Url, $Selectors) {
 }
 
 function Get-CopilotTarget {
-    <# The Edge tab with Copilot (on any of its hosts), else the first tab. #>
+    <# The Edge tab with Copilot (on any of its hosts), else the first tab that is not a local page
+       (sign-in pages lead back to Copilot). The StreamHub app may be a tab in the same window: it
+       is never taken; without another tab a new Copilot tab is opened. #>
     param([int]$Port = 9333, [Parameter(Mandatory)]$Selectors)
     $pages = @((Invoke-RestMethod "http://127.0.0.1:$Port/json/list") | Where-Object { $_.type -eq 'page' })
     if (-not $pages) { throw "no page targets on port $Port" }
     $match = $pages | Where-Object { Test-CopilotUrl $_.url $Selectors } | Select-Object -First 1
-    if ($match) { $match } else { $pages[0] }
+    if ($match) { return $match }
+    $other = @($pages | Where-Object { "$($_.url)" -notmatch '^(?i)https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(/|$)' })
+    if ($other.Count) { return $other[0] }
+    Invoke-RestMethod -Method Put "http://127.0.0.1:$Port/json/new?$($Selectors.chatUrl)"
 }
 
 function Connect-Copilot {
@@ -335,6 +340,35 @@ function Set-CopilotWorkIq {
     $state = Use-CopilotLock { Invoke-CdpEval $Bridge.Session $js }
     Write-CCBLog verbose bridge "Work IQ requested $(if ($On) { 'on' } else { 'off' }), page reports $state"
     $state
+}
+
+function Set-CopilotResponseMode {
+    <# Picks Copilot's response mode: auto, quick (Quick response) or deep (Think deeper). Opens the
+       picker only when the mode shown differs. Items are matched by their text, else by position.
+       Returns the mode shown afterwards, or 'unavailable'. #>
+    param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)][ValidateSet('auto', 'quick', 'deep')][string]$Mode)
+    $btn = if ($Bridge.Selectors.responseMode -and $Bridge.Selectors.responseMode.button) { $Bridge.Selectors.responseMode.button } else { '#gptModeSwitcher' }
+    $idx = @{ auto = 0; quick = 1; deep = 2 }[$Mode]
+    $re = @{ auto = '^auto'; quick = '^quick'; deep = '^think' }[$Mode]
+    $js = @"
+(async () => {
+  const b = document.querySelector($(ConvertTo-JsString $btn));
+  if (!b) return 'unavailable';
+  const re = new RegExp($(ConvertTo-JsString $re), 'i');
+  if (re.test((b.innerText || '').trim())) return (b.innerText || '').trim();
+  b.click();
+  await new Promise(r => setTimeout(r, 700));
+  const items = [...document.querySelectorAll('[role=menuitem],[role=menuitemradio]')];
+  const it = items.find(e => re.test((e.innerText || '').trim())) || (items.length === 3 ? items[$idx] : null);
+  if (!it) { b.click(); return 'unavailable'; }
+  it.click();
+  await new Promise(r => setTimeout(r, 400));
+  return (b.innerText || '').trim();
+})()
+"@
+    $shown = Use-CopilotLock { Invoke-CdpEval $Bridge.Session $js }
+    Write-CCBLog verbose bridge "Response mode requested $Mode, page shows $shown"
+    $shown
 }
 
 function Get-CopilotInputLength {
@@ -1421,4 +1455,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

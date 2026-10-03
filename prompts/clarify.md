@@ -1,0 +1,3 @@
+CLARIFY FIRST
+Before any work: what do you need to know to do this task right that you cannot find out by reading the project (goals, choices between approaches, scope, look and feel, data)? Ask the user at most 5 short questions, each with 2-4 likely answers where you can. If the request is already clear, ask nothing. Do not start the task and write no action blocks now.
+Answer with only one ```json code block: {"questions": [{"question": "TEXT", "options": ["TEXT"]}], "summary": "one sentence: what you understood the task to be"}

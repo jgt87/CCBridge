@@ -2,6 +2,7 @@ import { RotateCcw, X } from "lucide-react";
 import { ModalBackdrop } from "./modal-backdrop";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Setting } from "@/lib/api";
+import { notifyEnabled, notifySupported, setNotifyEnabled } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 
 /** One setting: a number field or a choice, saved on change, with "reset to default". */
@@ -70,6 +71,37 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
   );
 }
 
+/** Desktop notifications from this browser (kept in this browser only). */
+function NotificationSetting() {
+  const [on, setOn] = useState(notifyEnabled());
+  const [note, setNote] = useState("");
+  const toggle = async () => {
+    const result = await setNotifyEnabled(!on);
+    setOn(result);
+    setNote(!on && !result ? "The browser blocked notifications; allow them for this page in the browser's site settings." : "");
+  };
+  return (
+    <div className="pt-2">
+      <div className="mt-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">This browser</div>
+      <div className="flex items-start gap-3 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm">Desktop notifications</div>
+          <div className="text-muted-foreground text-xs">While this tab is in the background: approvals needed, Copilot's questions, a plan to approve, tasks done or failed, and the daily-limit pause.</div>
+          {note && <div className="text-rose-500 text-xs">{note}</div>}
+        </div>
+        <button
+          className="w-28 shrink-0 rounded-md border border-black/10 px-2 py-1 text-sm hover:bg-black/5 disabled:opacity-40 dark:border-white/10 dark:hover:bg-white/5"
+          disabled={!notifySupported()}
+          onClick={toggle}
+          type="button"
+        >
+          {on ? "On" : "Off"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Settings for this computer (saved in config\harness.local.json; kept across updates). */
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [settings, setSettings] = useState<Setting[]>([]);
@@ -106,6 +138,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           {error && <div className="pt-2 text-rose-500 text-sm">{error}</div>}
+          <NotificationSetting />
           {groups.map(([group, list], i) => (
             <div className={cn("pt-2", i > 0 && "border-black/10 border-t dark:border-white/10")} key={group}>
               <div className="mt-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">{group}</div>

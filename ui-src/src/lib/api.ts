@@ -65,6 +65,8 @@ export interface AgentEvent {
     | "runbook"
     | "review"
     | "kind"
+    | "clarify"
+    | "plan-ready"
     | "next-steps";
   time: string;
   text?: string;
@@ -122,6 +124,11 @@ export interface AppState {
   version: string;
   /** Every task, newest first, whatever started it (you, an MCP client, ...). */
   queue?: QueueEntry[];
+  /** Copilot's response mode: leave (page setting), auto, quick or deep (Think deeper). */
+  responseMode?: string;
+  responseModeActual?: string | null;
+  /** The project's own check from "verify:" in AGENTS.md, if any. */
+  verify?: string | null;
   /** Scheduled messages, fetches and runbooks. */
   schedules?: ScheduleItem[];
   /** Set while the queue waits for Copilot's daily limit to reset (local time). */
@@ -141,6 +148,16 @@ export interface ProjectInfo {
   name: string;
   path: string;
   modified: string;
+}
+
+/** How a message is sent: as a coding task, clarify first, plan first, with Think deeper. */
+export interface ChatOptions {
+  asCoding?: boolean;
+  clarify?: boolean;
+  planFirst?: boolean;
+  /** The original request, when the text adds answers or plan feedback to it. */
+  request?: string;
+  thinkDeeper?: boolean;
 }
 
 /** A saved code review (reviews/<id>.json) in the list. */
@@ -331,7 +348,8 @@ export const api = {
   files: () => call<{ files: FileInfo[] }>("GET", "/api/files"),
   file: (path: string) =>
     call<{ path: string; text: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),
-  chat: (text: string, asCoding = false) => call<{ ok: boolean }>("POST", "/api/chat", { text, asCoding }),
+  chat: (text: string, opts: ChatOptions = {}) => call<{ ok: boolean }>("POST", "/api/chat", { text, ...opts }),
+  setResponseMode: (value: string) => call<{ ok: boolean }>("POST", "/api/response-mode", { value }),
   fetchList: () => call<{ items: FetchItem[] }>("GET", "/api/fetch").then((r) => (Array.isArray(r.items) ? r.items : [])),
   saveFetch: (name: string, prompt: string) => call<{ ok: boolean; item: FetchItem }>("POST", "/api/fetch", { name, prompt }),
   runFetch: (name: string) => call<{ ok: boolean }>("POST", "/api/fetch/run", { name }),

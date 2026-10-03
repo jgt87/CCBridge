@@ -67,6 +67,8 @@ function Get-PromptModules {
     $web = ($traits -contains 'web') -or ($Text -match $script:WebPattern)
     $ids = New-Object System.Collections.Generic.List[string]
     if ($traits -notcontains 'nocommands') { $ids.Add('actions:run') }
+    # find and remember: only useful once the project has files.
+    if (@($Context.Paths | Where-Object { $_ }).Count -or $traits -contains 'code') { $ids.Add('actions:project') }
     if ($web) { $ids.Add('rules:web') }
     if ($web -or ($Text -match $script:MovePattern)) { $ids.Add('rules:moving') }
     if (($traits -contains 'python') -or ($Text -match $script:PythonPattern)) { $ids.Add('rules:python') }
@@ -130,6 +132,7 @@ function Get-PromptPart {
         }
         '^rules:(.+)$' { return Read-PromptPart $AppRoot "rules\$($Matches[1]).md" }
         '^actions:run$' { return Read-PromptPart $AppRoot 'actions-run.md' }
+        '^actions:project$' { return Read-PromptPart $AppRoot 'actions-project.md' }
         '^m365$'      { return Read-PromptPart $AppRoot 'm365.md' }
         '^save$'      { return Read-PromptPart $AppRoot 'save.md' }
         '^fetch$'     { return Read-PromptPart $AppRoot 'fetch.md' }
@@ -137,6 +140,8 @@ function Get-PromptPart {
         '^review$'    { return Read-PromptPart $AppRoot 'review.md' }
         '^review-(code|cross)$' { return Read-PromptPart $AppRoot "review-$($Matches[1]).md" }
         '^runbook$'   { return Read-PromptPart $AppRoot 'runbook.md' }
+        '^clarify$'   { return Read-PromptPart $AppRoot 'clarify.md' }
+        '^plan-first$' { return Read-PromptPart $AppRoot 'plan-first.md' }
         '^location$'  { return [string]$Context.Location }
         '^project$'   { return [string]$Context.Full }
     }

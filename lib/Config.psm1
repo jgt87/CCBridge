@@ -81,6 +81,9 @@ $script:SettingDefs = @(
     @{ key = 'reviewAfterChanges'; group = 'Checks'; label = 'Review after changes'; help = 'Ask Copilot to review changed files for leftovers, dead code and broken references.'; type = 'select'; options = @('big', 'always', 'off') }
     @{ key = 'reviewMinLines'; group = 'Checks'; label = 'Big change from (lines)'; help = 'Changed lines from which a change counts as big.'; type = 'number'; min = 5; max = 1000 }
     @{ key = 'pageCheck'; group = 'Checks'; label = 'Page check'; help = 'After web files change, open the page in a browser tab and report JavaScript errors and files that fail to load.'; type = 'select'; options = @('on', 'off') }
+    @{ key = 'evidence'; group = 'Checks'; label = 'Evidence per task'; help = 'After a task that changed files, save what was asked, what changed and which checks passed to evidence/ in the project.'; type = 'select'; options = @('on', 'off') }
+    @{ key = 'appWindow'; group = 'Copilot'; label = 'Open StreamHub'; help = 'copilot-tab: as a tab in the Copilot window, ready for Edge''s Split screen; side-by-side: its own window, with Copilot on the right half of the screen; browser: in your default browser. Applies at the next start.'; type = 'select'; options = @('copilot-tab', 'side-by-side', 'browser') }
+    @{ key = 'responseMode'; group = 'Copilot'; label = 'Response mode'; help = 'Copilot''s Auto / Quick response / Think deeper picker: leave = as set on the page.'; type = 'select'; options = @('leave', 'auto', 'quick', 'deep') }
     @{ key = 'resultCharBudget'; group = 'Sizes'; label = 'Results per round (characters)'; help = 'Room for file contents and command output sent back to Copilot in one message.'; type = 'number'; min = 10000; max = 120000 }
     @{ key = 'promptCharBudget'; group = 'Sizes'; label = 'Prompt size (characters)'; help = 'Largest message sent to Copilot (its page accepts up to 128000).'; type = 'number'; min = 20000; max = 125000 }
 )

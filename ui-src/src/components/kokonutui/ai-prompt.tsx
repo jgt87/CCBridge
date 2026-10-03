@@ -13,7 +13,7 @@
  * the paperclip attaches a project file as @path, and the value is controlled by the parent.
  */
 
-import { ArrowRight, AtSign, CalendarClock, Check, ChevronDown, Square } from "lucide-react";
+import { ArrowRight, AtSign, CalendarClock, Check, ChevronDown, MessageCircleQuestion, Square } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,9 @@ interface AIPromptProps {
   onAttach?: () => void;
   /** CCBridge: schedule the typed message instead of sending it now. */
   onSchedule?: (value: string) => void;
+  /** CCBridge: "Clarify first" (Copilot asks questions, then plans, before building). */
+  clarify?: boolean;
+  onToggleClarify?: () => void;
   onStop?: () => void;
   busy?: boolean;
   disabled?: boolean;
@@ -65,6 +68,8 @@ export default function AI_Prompt({
   onSubmit,
   onAttach,
   onSchedule,
+  clarify = false,
+  onToggleClarify,
   onStop,
   busy = false,
   disabled = false,
@@ -228,6 +233,22 @@ export default function AI_Prompt({
                   >
                     <AtSign className="h-4 w-4 transition-colors" />
                   </button>
+                  {onToggleClarify && (
+                    <button
+                      aria-label="Clarify first"
+                      aria-pressed={clarify}
+                      className={cn(
+                        "cursor-pointer rounded-lg p-2",
+                        "hover:bg-black/10 focus-visible:ring-1 focus-visible:ring-zinc-400 focus-visible:ring-offset-0 dark:hover:bg-white/10",
+                        clarify ? "bg-black/15 text-black dark:bg-white/20 dark:text-white" : "bg-black/5 text-black/40 hover:text-black dark:bg-white/5 dark:text-white/40 dark:hover:text-white"
+                      )}
+                      onClick={onToggleClarify}
+                      title={clarify ? "Clarify first is on: Copilot asks its questions and makes a plan for you to approve before it builds" : "Clarify first: Copilot asks its questions and makes a plan for you to approve before it builds"}
+                      type="button"
+                    >
+                      <MessageCircleQuestion className="h-4 w-4 transition-colors" />
+                    </button>
+                  )}
                   {onSchedule && (
                     <button
                       aria-label="Schedule this message"

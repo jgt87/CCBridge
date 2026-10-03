@@ -16,6 +16,9 @@
   "actionRetries": 2,
   "reviewAfterChanges": "big",
   "reviewMinLines": 40,
+  "appWindow": "copilot-tab",
+  "responseMode": "leave",
+  "evidence": "on",
   "pageCheck": "on",
   "pacing": {
     "newChatSettleSec": 3,

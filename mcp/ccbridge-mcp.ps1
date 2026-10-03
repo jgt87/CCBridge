@@ -315,7 +315,7 @@ function Invoke-RemoteTool([string]$Name, $ToolArgs, $App) {
         'copilot_ask' {
             $prompt = [string](Get-Arg $ToolArgs 'prompt' '')
             if (-not $prompt.Trim()) { throw 'prompt is required' }
-            $s = Invoke-App $App POST '/api/jobs' @{ kind = 'ask'; text = $prompt; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); workIq = $wiq; source = 'mcp' }
+            $s = Invoke-App $App POST '/api/jobs' @{ kind = 'ask'; text = $prompt; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); workIq = $wiq; thinkDeeper = [bool](Get-Arg $ToolArgs 'think_deeper' $false); source = 'mcp' }
             $script:LastJobId = $s.job.id
             $r = Wait-AppJob $App $s.job.id ([int](Get-Arg $ToolArgs 'timeout_sec' 240))
             $j = $r.job
@@ -336,7 +336,7 @@ function Invoke-RemoteTool([string]$Name, $ToolArgs, $App) {
             if (-not $task.Trim()) { throw 'task is required' }
             $mode = [string](Get-Arg $ToolArgs 'mode' 'auto')
             $allow = [bool](Get-Arg $ToolArgs 'allow_commands' $false)
-            $s = Invoke-App $App POST '/api/jobs' @{ kind = 'task'; text = $task; projectPath = $path; mode = $mode; allowCommands = $allow; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); copilotReview = [bool](Get-Arg $ToolArgs 'copilot_review' $false); workIq = $wiq; source = 'mcp' }
+            $s = Invoke-App $App POST '/api/jobs' @{ kind = 'task'; text = $task; projectPath = $path; mode = $mode; allowCommands = $allow; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); copilotReview = [bool](Get-Arg $ToolArgs 'copilot_review' $false); workIq = $wiq; thinkDeeper = [bool](Get-Arg $ToolArgs 'think_deeper' $false); source = 'mcp' }
             $script:LastJobId = $s.job.id
             return @{ text = "Queued $($s.job.id) in the StreamHub app for $($s.job.project) (mode $mode, commands $(if ($allow) { 'allowed' } else { 'not allowed' })). The user sees it in the app's queue and chat.`nPoll with copilot_task_status; get the full report with copilot_task_result." }
         }
@@ -414,7 +414,7 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
             Set-WorkIqFromArgs $ToolArgs
             $job = New-BridgeJob 'ask'
             $job.queuedSeq = $State.Seq
-            $State.Tasks.Enqueue(@{ kind = 'ask'; jobId = $job.id; text = $prompt; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false) })
+            $State.Tasks.Enqueue(@{ kind = 'ask'; jobId = $job.id; text = $prompt; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); responseMode = $(if ([bool](Get-Arg $ToolArgs 'think_deeper' $false)) { 'deep' } else { $null }) })
             Wait-BridgeJob $job ([int](Get-Arg $ToolArgs 'timeout_sec' 240))
             if ($job.status -eq 'finished') {
                 $note = if ($job.uncertain) { "`n`n(StreamHub note: parts of this reply were repaired after Copilot's link filter removed text; check code carefully.)" } else { '' }
@@ -444,7 +444,7 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
             $State.Busy = $true
             $job = New-BridgeJob 'task' @{ project = $full; mode = $mode; allowCommands = $allow; task = $task }
             $job.queuedSeq = $State.Seq
-            $State.Tasks.Enqueue(@{ kind = 'chat'; forceKind = 'work'; jobId = $job.id; text = $task; projectRoot = $full; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); reviewByCaller = (-not [bool](Get-Arg $ToolArgs 'copilot_review' $false)) })
+            $State.Tasks.Enqueue(@{ kind = 'chat'; forceKind = 'work'; jobId = $job.id; text = $task; projectRoot = $full; newChat = [bool](Get-Arg $ToolArgs 'new_chat' $false); reviewByCaller = (-not [bool](Get-Arg $ToolArgs 'copilot_review' $false)); responseMode = $(if ([bool](Get-Arg $ToolArgs 'think_deeper' $false)) { 'deep' } else { $null }) })
             Wait-BridgeJob $job 3
             return @{ text = "Started $($job.id) in $full (mode $mode, commands $(if ($allow) { 'allowed' } else { 'not allowed' })).`nPoll with copilot_task_status (it waits up to wait_sec for progress); get the full report with copilot_task_result." }
         }
@@ -543,6 +543,7 @@ $tools = @(
            allow_commands = @{ type = 'boolean'; description = 'true lets Copilot run commands such as builds and tests in the project folder. Default false.' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation (default false; a different project always starts fresh).' }
            work_iq = @{ type = 'boolean'; description = 'true: Copilot may use the user''s Microsoft 365 data (Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files). Omit to keep the current setting.' }
+           think_deeper = @{ type = 'boolean'; description = 'true: use Copilot''s Think deeper mode for this request (slower, for hard problems). Default: the app''s setting.' }
            wait_sec = @{ type = 'integer'; description = 'How long to wait for the result (default 600, max 1800). If it is not finished by then, call copilot_task_status.' }
            copilot_review = @{ type = 'boolean'; description = 'true: after big changes Copilot also reviews its own work (costs extra Copilot messages). Default false: you review the diffs in the report yourself.' } } } }
     @{ name = 'copilot_ask'
@@ -551,6 +552,7 @@ $tools = @(
            prompt = @{ type = 'string'; description = 'The full prompt. Copilot sees nothing else, so include any code or context it needs (up to about 75,000 characters).' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation first (default false: continue the current one).' }
            work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' }
+           think_deeper = @{ type = 'boolean'; description = 'true: use Copilot''s Think deeper mode for this request (slower, for hard problems). Default: the app''s setting.' }
            timeout_sec = @{ type = 'integer'; description = 'Seconds to wait for the reply (default 240).' } } } }
     @{ name = 'copilot_start_task'
        description = 'Like copilot_run_task, but returns at once with a job id; then call copilot_task_status until it is finished. Use copilot_run_task instead unless you want to do other work meanwhile. Safety: paths stay inside the project, source/ is read-only user data, every task is one undoable change set.'
@@ -561,7 +563,8 @@ $tools = @(
            allow_commands = @{ type = 'boolean'; description = 'Allow Copilot to run shell commands (cmd.exe) in the project folder, e.g. builds and tests. Default false.' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation (default false; a different project always starts fresh).' }
            copilot_review = @{ type = 'boolean'; description = 'true: after big changes Copilot also reviews its own work (costs extra Copilot messages). Default false: you review the diffs in the report yourself.' }
-           work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' } } } }
+           work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' }
+           think_deeper = @{ type = 'boolean'; description = 'true: use Copilot''s Think deeper mode for this request (slower, for hard problems). Default: the app''s setting.' } } } }
     @{ name = 'copilot_review'
        description = 'Full code review by Copilot of a project folder (or chosen files/folders), read-only: the code goes to Copilot in batches, every finding must quote real lines from the file (findings that do not are left out), plus one pass across the whole project. Returns the checked findings with severity, file:line, problem and suggested fix; also saved as reviews/review-<date>.md in the project. Large projects take many Copilot messages. Review the findings yourself before fixing them.'
        inputSchema = @{ type = 'object'; required = @('project_path'); properties = @{

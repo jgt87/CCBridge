@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -85,6 +85,9 @@ function Get-StateSnapshot($State) {
         logLevel = (Get-CCBLogLevel)
         version = [string]$State.Version
         queue = @(Get-QueueView $State 40)
+        responseMode = [string]$State.ResponseMode
+        responseModeActual = $State.ResponseModeActual
+        verify = $(if ($State.ProjectRoot) { Get-ProjectVerify $State.ProjectRoot } else { $null })
         schedules = @(Get-ScheduleView $State)
         pausedUntil = $State.PausedUntil
         release = $(if ($State.Build) { [string]$State.Build.version } else { [string]$State.Version })
@@ -134,6 +137,15 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ path = $req.QueryString['path']; text = (Read-TextFile $full).Text }
         }
         '^GET /api/queue$' { return Send-Json $Ctx @{ queue = @(Get-QueueView $State 100); pausedUntil = $State.PausedUntil } }
+        '^POST /api/response-mode$' {
+            $b = Read-JsonBody $Ctx
+            $v = [string]$b.value
+            if (@('leave', 'auto', 'quick', 'deep') -notcontains $v) { throw 'value must be leave, auto, quick or deep' }
+            $State.ResponseMode = $v
+            $null = Set-CCBridgeSetting 'responseMode' $v $State.AppRoot
+            $State.Config.responseMode = $v
+            return Send-Json $Ctx @{ ok = $true }
+        }
         '^POST /api/queue/resume$' { Resume-AgentQueue $State 'resumed by you'; return Send-Json $Ctx @{ ok = $true } }
         '^POST /api/reviews/estimate$' {
             $b = Read-JsonBody $Ctx
@@ -220,10 +232,11 @@ function Invoke-ApiRequest($Ctx, $State) {
             $id = 'job-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
             $job = [hashtable]::Synchronized(@{ id = $id; kind = [string]$b.kind; status = 'queued'; created = (Get-Date).ToString('s'); queuedSeq = $State.Seq })
             if ($null -ne $b.workIq) { $State.WorkIq = $(if ([bool]$b.workIq) { 'on' } else { 'off' }); $State.WorkIqWarned = $false }
+            $deep = [bool]$b.thinkDeeper
             $task = switch ([string]$b.kind) {
                 'ask' {
                     if (-not "$($b.text)".Trim()) { throw 'text is required' }
-                    @{ kind = 'ask'; jobId = $id; text = [string]$b.text; newChat = [bool]$b.newChat; source = $source }
+                    @{ kind = 'ask'; jobId = $id; text = [string]$b.text; newChat = [bool]$b.newChat; source = $source; responseMode = $(if ($deep) { 'deep' } else { $null }) }
                 }
                 'task' {
                     $p = [string]$b.projectPath
@@ -234,7 +247,7 @@ function Invoke-ApiRequest($Ctx, $State) {
                     $full = [IO.Path]::GetFullPath($p).TrimEnd('\')
                     if (-not (Test-Path -LiteralPath $full)) { $null = New-Item -ItemType Directory -Path $full }
                     $job.project = $full; $job.mode = $mode; $job.allowCommands = [bool]$b.allowCommands; $job.task = [string]$b.text
-                    @{ kind = 'chat'; jobId = $id; text = [string]$b.text; projectRoot = $full; newChat = [bool]$b.newChat; mode = $mode; noCommands = (-not [bool]$b.allowCommands); source = $source; reviewByCaller = (-not [bool]$b.copilotReview) }
+                    @{ kind = 'chat'; jobId = $id; text = [string]$b.text; projectRoot = $full; newChat = [bool]$b.newChat; mode = $mode; noCommands = (-not [bool]$b.allowCommands); source = $source; reviewByCaller = (-not [bool]$b.copilotReview); responseMode = $(if ($deep) { 'deep' } else { $null }) }
                 }
                 'undo' {
                     $p = [string]$b.projectPath
@@ -304,8 +317,18 @@ function Invoke-ApiRequest($Ctx, $State) {
             if (-not $b.text -or -not $b.text.Trim()) { throw 'Empty message' }
             # While Copilot is busy the message waits in the queue.
             $task = @{ kind = 'chat'; text = [string]$b.text }
+            $title = ''
             if ($b.asCoding) { $task.forceKind = 'coding' }
-            $entry = Submit-AgentTask $State $task 'user'
+            if ($b.clarify) { $task.clarify = $true; $task.request = [string]$b.text }
+            elseif ($b.planFirst) {
+                # Plan first: read-only turn that ends with a plan to approve in the app.
+                $task.planFirst = $true; $task.mode = 'plan'; $task.forceKind = 'coding'
+                $task.request = if ($b.request) { [string]$b.request } else { [string]$b.text }
+                $task.text = (Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + [string]$b.text
+                $title = "Plan: $($task.request)"
+            }
+            if ($b.thinkDeeper) { $task.responseMode = 'deep' }
+            $entry = Submit-AgentTask $State $task 'user' $title
             return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
         }
         '^POST /api/approve$' {
@@ -475,7 +498,13 @@ function Start-CCBridgeServer {
     Write-Host "Log: $(Get-CCBLogDir) (level $(Get-CCBLogLevel))"
     Write-CCBLog info server "Web app started on $url" (Get-CCBridgeEnvironment $appRoot)
     $State.PreviewPort = $port   # the page check can open project pages through this server
-    if (-not $NoBrowser) { Start-Process $url }
+    if (-not $NoBrowser) {
+        # In the Copilot window (default), side by side with it, or in the default browser.
+        $mode = if ($State.Config.appWindow) { "$($State.Config.appWindow)" } else { 'copilot-tab' }
+        $edgePath = try { Get-EdgePath } catch { $null }
+        try { Start-AppWindow -Url $url -Mode $mode -AppPort ([int]$State.Config.port) -CdpPort ([int]$State.Config.cdpPort) -EdgePath $edgePath }
+        catch { Write-CCBLogError server 'Opening the app window' $_; Start-Process $url }
+    }
 
     try {
         $pending = $listener.GetContextAsync()

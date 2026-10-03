@@ -1,0 +1,1 @@
+PLAN FIRST: do not change any files yet. Read what you need, then answer with a todo block listing the steps in order and a done block that summarises the approach, the files you will create or change, and how to check the result. The user approves the plan before you build it.

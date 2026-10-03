@@ -29,6 +29,8 @@ import { SidePanel } from "@/components/ccb/side-panel";
 import type { ScheduleTarget } from "@/components/ccb/schedule-form";
 import { SchedulesModal } from "@/components/ccb/schedules-modal";
 import { BACKDROP, ModalBackdrop } from "@/components/ccb/modal-backdrop";
+import { notifyEvents, notifyQueue } from "@/lib/notify";
+import type { ChatOptions } from "@/lib/api";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
 import { type AgentEvent, type AppState, api, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
@@ -56,6 +58,25 @@ export default function App() {
   // Schedules modal: closed (null), the list ({ target: null }) or a form for a target.
   const [scheduling, setScheduling] = useState<{ target: ScheduleTarget | null } | null>(null);
   const [reviewTick, setReviewTick] = useState(0);
+  // Clarify first: remembered in this browser.
+  const [clarifyFirst, setClarifyFirst] = useState(() => {
+    try {
+      return localStorage.getItem("ccb.clarify") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleClarify = () =>
+    setClarifyFirst((on) => {
+      try {
+        localStorage.setItem("ccb.clarify", on ? "0" : "1");
+      } catch {
+        /* storage blocked: only this session */
+      }
+      return !on;
+    });
+  const queueSeen = useRef(new Map<string, string>());
+  const pauseSeen = useRef<string | null | undefined>(undefined);
   const [palette, setPalette] = useState<null | "commands" | "attach">(null);
   const [viewer, setViewer] = useState<{ path: string; text: string } | null>(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -118,9 +139,19 @@ export default function App() {
         const r = await api.poll(lastSeq.current);
         setState(r.state);
         if (!r.state.busy) setStopping(false);
+        // Desktop notifications for queue changes (the first poll only records the current state).
+        const q = r.state.queue ?? [];
+        if (pauseSeen.current === undefined) {
+          queueSeen.current = new Map(q.map((x) => [x.id, x.status]));
+          pauseSeen.current = r.state.pausedUntil ?? null;
+        } else {
+          queueSeen.current = notifyQueue(queueSeen.current, q, pauseSeen.current, r.state.pausedUntil);
+          pauseSeen.current = r.state.pausedUntil ?? null;
+        }
         if (r.events.length) {
           lastSeq.current = r.events[r.events.length - 1].seq;
           setEvents((prev) => [...prev, ...r.events]);
+          notifyEvents(r.events);
           if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || e.type === "runbook" || e.type === "review" || (e.type === "action-result" && e.changed))) refreshFiles();
           if (r.events.some((e) => e.type === "review" || e.type === "project" || (e.type === "action-result" && e.changed))) setReviewTick((t) => t + 1);
           if (r.events.some((e) => e.type === "newchat" || e.type === "error")) setNewChatPending(false);
@@ -204,7 +235,7 @@ export default function App() {
 
   const send = async (text: string) => {
     try {
-      await api.chat(text);
+      await api.chat(text, { clarify: clarifyFirst });
       setDraft("");
     } catch (e) {
       setError((e as Error).message);
@@ -407,7 +438,7 @@ export default function App() {
             </div>
             {state.version && (
               <div
-                className="flex shrink-0 items-center gap-2 px-1 pt-2 text-muted-foreground text-xs"
+                className="flex shrink-0 items-center justify-center gap-2 px-1 pt-2 text-muted-foreground text-xs"
                 title="Installed StreamHub release and the commit it was built from; updates install automatically at start (or run update.cmd)"
               >
                 <span>StreamHub {state.release || state.version}</span>
@@ -451,7 +482,8 @@ export default function App() {
                   </div>
                 }
                 items={transcript}
-                onResendAsCoding={(text) => api.chat(text, true).catch((e) => setError((e as Error).message))}
+                onResendAsCoding={(text) => api.chat(text, { asCoding: true }).catch((e) => setError((e as Error).message))}
+                onSend={(text: string, opts: ChatOptions) => api.chat(text, opts).catch((e) => setError((e as Error).message))}
                 onUsePrompt={(text) => {
                   setDraft(text);
                   setFocusKey((k) => k + 1);
@@ -498,6 +530,17 @@ export default function App() {
                           Work IQ {state.workIq === "on" ? "on" : state.workIq === "off" ? "off" : "(page setting)"}
                         </button>
                       )}
+                      <select
+                        className="rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                        onChange={(e) => api.setResponseMode(e.target.value).catch((err) => setError((err as Error).message))}
+                        title={`Copilot's response mode (Auto / Quick response / Think deeper)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
+                        value={state.responseMode ?? "leave"}
+                      >
+                        <option value="leave">Response: page setting</option>
+                        <option value="auto">Response: Auto</option>
+                        <option value="quick">Response: Quick</option>
+                        <option value="deep">Response: Think deeper</option>
+                      </select>
                       {state.credits && state.credits.remaining <= 10 && (
                         <span
                           className={state.credits.remaining === 0 ? "text-rose-500" : "text-muted-foreground"}
@@ -529,6 +572,8 @@ export default function App() {
                   modes={MODES}
                   onAttach={() => setPalette("attach")}
                   onSchedule={(text) => setScheduling({ target: { kind: "chat", text } })}
+                  clarify={clarifyFirst}
+                  onToggleClarify={toggleClarify}
                   onModeChange={(m) => api.setMode(m as Mode)}
                   onStop={stop}
                   onSubmit={send}
