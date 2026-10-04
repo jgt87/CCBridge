@@ -1,6 +1,6 @@
 import { AtSign, CalendarClock, FileText, Plus, RefreshCw } from "lucide-react";
 import { useState } from "react";
-import type { FetchItem } from "@/lib/api";
+import type { FetchItem, FetchWeb } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /** "12 min ago", "3 h ago", "2 days ago" or "never fetched". */
@@ -12,6 +12,21 @@ export function fetchedAge(iso: string | null, now = Date.now()): string {
   const h = Math.round(min / 60);
   if (h < 48) return `${h} h ago`;
   return `${Math.round(h / 24)} days ago`;
+}
+
+const field =
+  "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-xs outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+
+/** "web only Â· nodejs.org Â· 1 page": the web fields of a saved prompt, or "" when it has none. */
+export function webSummary(it: Pick<FetchItem, "sources" | "sites" | "pages">): string {
+  const parts: string[] = [];
+  if (it.sources === "web") parts.push("web only");
+  else if (it.sources === "work") parts.push("work data only");
+  else if (it.sources === "both") parts.push("work data and web");
+  if (it.sites?.trim()) parts.push(it.sites.trim());
+  const n = (it.pages ?? "").split(/[\s,;]+/).filter((p) => /^https?:\/\//i.test(p)).length;
+  if (n) parts.push(n === 1 ? "1 page" : `${n} pages`);
+  return parts.join(" \u00b7 ");
 }
 
 const flatButton =
@@ -31,13 +46,16 @@ export function FetchPanel({
   items: FetchItem[];
   busy: boolean;
   onRun: (name: string) => void;
-  onSave: (name: string, prompt: string) => Promise<void>;
+  onSave: (name: string, prompt: string, web: FetchWeb) => Promise<void>;
   onAttach: (path: string) => void;
   onOpen: (path: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [sources, setSources] = useState<FetchWeb["sources"]>("");
+  const [sites, setSites] = useState("");
+  const [pages, setPages] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -45,9 +63,12 @@ export function FetchPanel({
     setSaving(true);
     setError("");
     try {
-      await onSave(name, prompt);
+      await onSave(name, prompt, { sources, sites, pages });
       setName("");
       setPrompt("");
+      setSources("");
+      setSites("");
+      setPages("");
       setAdding(false);
     } catch (e) {
       setError((e as Error).message);
@@ -76,6 +97,19 @@ export function FetchPanel({
             placeholder="Prompt, e.g. List my meetings for today with times, attendees and the agenda."
             value={prompt}
           />
+          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1 text-xs">
+            <span className="text-muted-foreground">Sources</span>
+            <select aria-label="Sources" className={field} onChange={(e) => setSources(e.target.value as FetchWeb["sources"])} value={sources}>
+              <option value="">As the prompt says</option>
+              <option value="web">Web only</option>
+              <option value="work">Work data only</option>
+              <option value="both">Work data and the web</option>
+            </select>
+            <span className="text-muted-foreground">Sites</span>
+            <input aria-label="Only these websites" className={field} onChange={(e) => setSites(e.target.value)} placeholder="Optional: only these websites, e.g. nodejs.org, python.org" value={sites} />
+            <span className="text-muted-foreground">Pages</span>
+            <input aria-label="Pages to read" className={field} onChange={(e) => setPages(e.target.value)} placeholder="Optional: pages to read exactly, e.g. https://nodejs.org/en/about/previous-releases" value={pages} />
+          </div>
           {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
           <div className="flex justify-end gap-1">
             <button className={flatButton} onClick={() => setAdding(false)} type="button">
@@ -107,6 +141,7 @@ export function FetchPanel({
           <p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs" title={it.prompt}>
             {it.prompt}
           </p>
+          {webSummary(it) && <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={it.pages || undefined}>{webSummary(it)}</p>}
           <div className="mt-1.5 flex gap-1">
             <button className={flatButton} onClick={() => onRun(it.name)} title={busy ? "Add it to the queue; the answer is saved when it runs" : "Ask Copilot now and save the answer"} type="button">
               <RefreshCw className="h-3 w-3" /> {it.fetchedAt ? "Refresh" : "Run"}

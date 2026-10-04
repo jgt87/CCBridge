@@ -9,6 +9,7 @@
 # Parts already sent in the current chat are not repeated; a later request only adds what it needs.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'WebFetch.psm1')
 
 # Signals for the kind of task (English and common Dutch words).
 $script:CodingPattern = '(?i)\b(code|coding|codebase|script|scripts|program|programming|programma|function|functie|class|method|bug|bugs|debug|refactor|compile|build|builds|unit tests?|tests?|api|endpoint|database|sql|html|css|javascript|typescript|python|powershell|c#|java|react|vue|node|npm|dotnet|\.net|app|apps|application|applicatie|repo|repository|git|commit|module|library|package|deploy|cli|component|frontend|backend|server|json|yaml|regex|dashboard|website|webpage|implement|implementeer)\b|\.(ps1|psm1|py|js|ts|tsx|jsx|cs|java|go|rs|html|css|json|ya?ml|sql|sh|cmd|bat)\b'
@@ -21,6 +22,8 @@ $script:MovePattern = '(?i)\b(move|moving|split|extract|separate|refactor|offloa
 $script:PythonPattern = '(?i)\b(python|pip|django|flask|pandas|pytest)\b|\.pyw?\b'
 $script:PowerShellPattern = '(?i)\b(powershell|pester|cmdlets?)\b|\.ps[md]?1\b'
 $script:RunbookPattern = '(?i)\b(runbooks?|draaiboek(en)?)\b'
+# Requests for online information (with Get-NamedSites: a website or address in the request).
+$script:WebLookupPattern = '(?i)\b(online|on the (web|internet)|internet|websites?|web ?pages?|web ?sites?|look (it |this |that )?up|latest (version|release)s?|release notes|documentation|docs (for|of)|price ?lists?|pricing|exchange rates?|news (about|on)|wikipedia)\b|https?://|\bwww\.'
 
 # In a project with code, these make a request work on the code even without a coding word
 # (English and Dutch): asking for a change, naming a part of an app, reporting an error, or asking
@@ -76,6 +79,8 @@ function Get-PromptModules {
     if (($traits -contains 'powershell') -or ($Text -match $script:PowerShellPattern)) { $ids.Add('rules:powershell') }
     if ($traits -contains 'source') { $ids.Add('rules:source') }
     if ($Text -match $script:RunbookPattern) { $ids.Add('rules:runbook') }
+    # Online information: how to use web sources, and the web action for the exact text of a page.
+    if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }
     $ids.ToArray()
 }
 
@@ -134,6 +139,7 @@ function Get-PromptPart {
         '^rules:(.+)$' { return Read-PromptPart $AppRoot "rules\$($Matches[1]).md" }
         '^actions:run$' { return Read-PromptPart $AppRoot 'actions-run.md' }
         '^actions:project$' { return Read-PromptPart $AppRoot 'actions-project.md' }
+        '^actions:web$' { return Read-PromptPart $AppRoot 'actions-web.md' }
         '^m365$'      { return Read-PromptPart $AppRoot 'm365.md' }
         '^save$'      { return Read-PromptPart $AppRoot 'save.md' }
         '^fetch$'     { return Read-PromptPart $AppRoot 'fetch.md' }

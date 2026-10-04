@@ -390,6 +390,17 @@ export interface FetchItem {
   output: string;
   fetchedAt: string | null;
   outputSize: number;
+  /** Optional header: web, work or both; the only websites to use; pages read and added as data. */
+  sources?: string;
+  sites?: string;
+  pages?: string;
+}
+
+/** The web fields of a fetch prompt when it is saved. */
+export interface FetchWeb {
+  sources: "" | "web" | "work" | "both";
+  sites: string;
+  pages: string;
 }
 
 export interface FileInfo {
@@ -466,7 +477,7 @@ export const api = {
   chat: (text: string, opts: ChatOptions = {}) => call<{ ok: boolean }>("POST", "/api/chat", { text, ...opts }),
   setResponseMode: (value: string) => call<{ ok: boolean }>("POST", "/api/response-mode", { value }),
   fetchList: () => call<{ items: FetchItem[] }>("GET", "/api/fetch").then((r) => (Array.isArray(r.items) ? r.items : [])),
-  saveFetch: (name: string, prompt: string) => call<{ ok: boolean; item: FetchItem }>("POST", "/api/fetch", { name, prompt }),
+  saveFetch: (name: string, prompt: string, web?: FetchWeb) => call<{ ok: boolean; item: FetchItem }>("POST", "/api/fetch", { name, prompt, ...(web ?? {}) }),
   runFetch: (name: string) => call<{ ok: boolean }>("POST", "/api/fetch/run", { name }),
   runbooks: () =>
     call<{ runbooks: RunbookItem[]; templates: RunbookTemplate[] }>("GET", "/api/runbooks").then((r) => ({

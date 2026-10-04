@@ -50,7 +50,7 @@ function Get-JsMask([string]$Text) {
     $sb = New-Object Text.StringBuilder $Text.Length
     $issues = New-Object System.Collections.Generic.List[string]
     $state = 'code'; $start = 0; $line = 1; $stack = New-Object System.Collections.Generic.Stack[int]   # brace depth per open ${
-    $depth = 0; $prev = [char]0
+    $depth = 0; $prev = [char]0; $prev2 = [char]0
     $n = $Text.Length
     for ($i = 0; $i -lt $n; $i++) {
         $ch = $Text[$i]; $nx = if ($i + 1 -lt $n) { $Text[$i + 1] } else { [char]0 }
@@ -59,14 +59,23 @@ function Get-JsMask([string]$Text) {
             'code' {
                 if ($ch -eq '/' -and $nx -eq '/') { $state = 'line'; [void]$sb.Append(' '); continue }
                 if ($ch -eq '/' -and $nx -eq '*') { $state = 'block'; $start = $line; [void]$sb.Append(' '); continue }
-                if ($ch -eq '/' -and "$prev" -match '^[\x00(,=:\[!&|?{;+\-*%~^]$') { $state = 'regex'; [void]$sb.Append(' '); continue }
+                # A / starts a regular expression after an operator or bracket, after => (an arrow
+                # function's body) and after keywords such as return; elsewhere it divides.
+                $regexStart = "$prev" -match '^[\x00(,=:\[!&|?{;+\-*%~^]$' -or ($prev -eq '>' -and $prev2 -eq '=')
+                if (-not $regexStart -and $ch -eq '/' -and $nx -ne '/' -and $nx -ne '*' -and [char]::IsLetter($prev)) {
+                    $k = $i - 1; while ($k -ge 0 -and [char]::IsWhiteSpace($Text[$k])) { $k-- }
+                    $e = $k; while ($k -ge 0 -and [char]::IsLetter($Text[$k])) { $k-- }
+                    $word = $Text.Substring($k + 1, $e - $k)
+                    $regexStart = $word -in 'return', 'typeof', 'case', 'in', 'of', 'void', 'delete', 'new', 'throw', 'yield', 'await', 'else', 'do'
+                }
+                if ($ch -eq '/' -and $regexStart) { $state = 'regex'; [void]$sb.Append(' '); continue }
                 if ($ch -eq '"' -or $ch -eq "'") { $state = $ch; $start = $line; [void]$sb.Append(' '); continue }
                 if ($ch -eq '`') { $state = 'tpl'; $start = $line; [void]$sb.Append(' '); continue }
                 if ($stack.Count) {
                     if ($ch -eq '{') { $depth++ }
                     elseif ($ch -eq '}') { if ($depth -eq 0) { $depth = $stack.Pop(); $state = 'tpl'; [void]$sb.Append(' '); continue } else { $depth-- } }
                 }
-                [void]$sb.Append($ch); if (-not [char]::IsWhiteSpace($ch)) { $prev = $ch }
+                [void]$sb.Append($ch); if (-not [char]::IsWhiteSpace($ch)) { $prev2 = $prev; $prev = $ch }
             }
             'line' { if ($ch -eq "`n") { $state = 'code'; [void]$sb.Append($ch) } else { [void]$sb.Append(' ') } }
             'block' { if ($ch -eq '*' -and $nx -eq '/') { $state = 'code'; [void]$sb.Append('  '); $i++ } else { [void]$sb.Append($(if ($ch -eq "`n") { $ch } else { ' ' })) } }

@@ -6,6 +6,20 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.53] - 2026-10-04
+
+### Added
+
+- Data from the web:
+  - requests about online information, or that name websites, get instructions for web sources: only the named sites, a link and date for each fact, exact numbers, no guessing;
+  - a `web` action: StreamHub reads a public page and gives Copilot its text, as data. Sites your message names are read at once, other sites need your approval, and local or intranet addresses are never read. Setting: Settings > Web > *Read web pages*;
+  - fetch prompts and runbooks take `sources`, `sites` and `pages` header fields: which data to use, the only websites to use (sources outside them are noted), and pages read up front for exact figures. The *New fetch prompt* form has fields for them;
+  - a runbook template *Data from web pages*.
+
+### Fixed
+
+- The JavaScript file check read a regular expression after `=>` or `return` (for example `(p) => /^https?:\/\//.test(p)`) as a comment and reported a bracket problem that was not there.
+
 ## [v0.1.52] - 2026-10-04
 
 ### Added
@@ -606,7 +620,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.52...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.53...HEAD
+[v0.1.53]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.53
 [v0.1.52]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.52
 [v0.1.51]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.51
 [v0.1.50]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.50

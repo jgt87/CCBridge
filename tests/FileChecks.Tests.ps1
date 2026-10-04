@@ -304,6 +304,7 @@ Describe 'No false alarms on real-world code' {
     $cases = @{
         'nested.ts' = 'const close = new RegExp(' + $tick + '^\\s{0,3}${fence[0] === "' + $tick + '" ? "' + $tick + '" : "~"}{${n},}' + $tick + ');'
         'regex.js' = "const q = s.replace(/[""']/g, '');`nconst ok = /\/\*/.test(x);"
+        'arrow-regex.ts' = "const n = (s ?? '').split(/[\s,;]+/).filter((p) => /^https?:\/\//i.test(p)).length;`nfunction f(x) { return /a\/\/b/.test(x); }`nconst half = total / 2 / count;"
         'view.tsx' = "export const V = () => (`n  <div>`n    {a && <Sources refs={r} />}`n    <p>Don't stop</p>`n  </div>`n);"
         'tsconfig.json' = "{`n  // comment`n  ""compilerOptions"": { ""strict"": true, },`n}"
         'package-lock.json' = '{ "packages": { "": { "name": "x" } } }'

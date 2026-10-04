@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -988,10 +988,12 @@ function Invoke-RunbookJob {
         Add-AgentEvent $State 'status' @{ text = "Running runbook '$($item.title)' (read-only) ..." }
         Write-CCBLog info agent "Runbook $Name" @{ chars = $body.Length; output = $item.output }
         Start-NewChat $State   # a runbook never mixes with the conversation
-        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind 'runbook' -Text $body -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
+        $spec = Get-WebSourceSpec $rb.meta
+        $web = Get-WebSourcePrompt $State $spec
+        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind 'runbook' -Text "$body$(if ($web.text) { "`n`n$($web.text)" })" -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
         $check = $null
         for ($attempt = 1; $attempt -le 2; $attempt++) {
-            $r = Send-ToCopilot $State $message
+            $r = Send-WithSources $State $spec $message
             if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "Runbook '$($item.title)' stopped; $($item.output) was left unchanged." }; return }
             if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
                 Add-AgentEvent $State 'error' @{ text = "Runbook '$($item.title)' got no usable answer ($($r.Result): $($r.ResultMessage)); $($item.output) was left unchanged." }
@@ -1012,6 +1014,8 @@ function Invoke-RunbookJob {
         }
         $saved = Save-RunbookOutput $State.ProjectRoot $Name $item.output $json
         $note = if ($check.truncated) { ' Copilot marked it as truncated: not every item fitted. Narrow the period or the sources.' } else { '' }
+        $siteNotes = @(@($web.notes) + @(Get-SourceSiteNotes $spec $r.References))
+        if ($siteNotes.Count) { $note += ' Note: ' + ($siteNotes -join '; ') + '.' }
         Add-AgentEvent $State 'runbook' @{ name = $Name; path = $saved.output; text = "Runbook '$($item.title)': saved $($check.count) item(s) to $($saved.output) (copy in $($saved.history)).$note Attach it with @$($saved.output)." }
     } catch {
         Write-CCBLogError agent "Runbook $Name failed" $_
@@ -1020,6 +1024,31 @@ function Invoke-RunbookJob {
         $State.NeedNewChat = $true
         $State.Busy = $false; $State.Cancel = $false
     }
+}
+
+function Get-WebSourcePrompt($State, $Spec) {
+    # The text a fetch prompt or runbook adds for its web fields (pages read here, as data).
+    if (-not $Spec.any) { return [pscustomobject]@{ text = ''; notes = @() } }
+    if (@($Spec.pages).Count) { Add-AgentEvent $State 'status' @{ text = "Reading $(@($Spec.pages).Count) web page(s) named in the header..." } }
+    $per = [Math]::Max(4000, [int]([int]$State.Config.resultCharBudget / [Math]::Max(1, @($Spec.pages).Count)))
+    New-WebSourceBlock $Spec -PageChars $per
+}
+
+function Send-WithSources($State, $Spec, [string]$Message) {
+    # Sends with the Work/Web switch set for the header's sources (web: off, work or both: on),
+    # only when StreamHub manages the switch (workIq on or off); it is set back afterwards.
+    $old = $State.WorkIq
+    if ($Spec.sources -and $old -in 'on', 'off') { $State.WorkIq = $(if ($Spec.sources -eq 'web') { 'off' } else { 'on' }) }
+    try { Send-ToCopilot $State $Message } finally { $State.WorkIq = $old }
+}
+
+function Get-SourceSiteNotes($Spec, $References) {
+    # A note when Copilot cited pages outside the allowed sites, or cited nothing at all.
+    if (-not @($Spec.sites).Count) { return }
+    $refs = @($References | Where-Object { $_ -and $_.url })
+    if (-not $refs.Count) { return "no sources were cited, so it is not shown that the answer comes from $(@($Spec.sites) -join ', ')" }
+    $out = @(Test-SourceSites $refs $Spec.sites)
+    if ($out.Count) { "$($out.Count) source(s) are outside the allowed sites: $($out -join ', ')" }
 }
 
 function Invoke-FetchJob {
@@ -1035,17 +1064,20 @@ function Invoke-FetchJob {
         Add-AgentEvent $State 'status' @{ text = "Fetching '$Name' from Copilot..." }
         Write-CCBLog info agent "Fetch $Name" @{ promptChars = $item.prompt.Length }
         Start-NewChat $State   # a fetch never mixes with the conversation
+        $spec = Get-WebSourceSpec $item
         $tk = Get-TaskKind $item.prompt
-        $kind = if ($tk -eq 'assistant' -or $tk -eq 'mixed') { 'fetch-m365' } else { 'fetch' }
+        $kind = if ($spec.sources -eq 'web') { 'fetch' } elseif ($spec.sources -in 'work', 'both') { 'fetch-m365' } elseif ($tk -eq 'assistant' -or $tk -eq 'mixed') { 'fetch-m365' } else { 'fetch' }
+        $web = Get-WebSourcePrompt $State $spec
         $sent = New-Object 'System.Collections.Generic.HashSet[string]'
-        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $item.prompt -Sent $sent
-        $r = Send-ToCopilot $State $message
+        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text "$($item.prompt)$(if ($web.text) { "`n`n$($web.text)" })" -Sent $sent
+        $r = Send-WithSources $State $spec $message
         if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "Fetch '$Name' stopped; $($item.output) was left unchanged." }; return }
         if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
             Add-AgentEvent $State 'error' @{ text = "Fetch '$Name' got no usable answer ($($r.Result): $($r.ResultMessage)); $($item.output) was left unchanged." }
             return
         }
-        $content = Format-FetchResult -Name $Name -Reply $r.Text -References @($r.References)
+        $notes = @($web.notes) + @(Get-SourceSiteNotes $spec $r.References)
+        $content = Format-FetchResult -Name $Name -Reply $r.Text -References @($r.References) -Notes $notes
         $path = Save-FetchResult $State.ProjectRoot $Name $content
         Add-AgentEvent $State 'fetch' @{ name = $Name; path = $path; text = "Saved the answer to $path. Attach it with @$path." }
     } catch {
@@ -1460,6 +1492,31 @@ function Invoke-AgentAction {
             $name = if ($Action.arg) { $Action.arg } else { "$($Action.body)".Split("`n")[0].Trim() }
             $evt.target = $name; Add-AgentEvent $State 'action' $evt
             return @{ ok = $true; summary = "found $name"; output = (Find-SymbolDefinition $root $name) }
+        }
+        'web' {
+            # Reads public web pages for Copilot. Sites named in the request are read at once;
+            # others need a person's approval (setting webRead), so no project data can leave
+            # through an address Copilot made up. Local and intranet addresses are never read.
+            $urls = @(@("$($Action.arg)") + @("$($Action.body)".Split("`n")) | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^(?i)https?://\S+$' } | Select-Object -Unique -First 3)
+            $evt.target = $urls -join ', '
+            if (-not $urls.Count) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed' }); return @{ ok = $false; summary = 'web without an address'; output = 'error: put one full address (https://...) per line in the web block' } }
+            $policy = if ($State.Config.webRead) { "$($State.Config.webRead)" } else { 'named-sites' }
+            if ($policy -eq 'off') { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = 'reading web pages is off' }); return @{ ok = $false; summary = 'web pages are off'; output = 'error: reading web pages is turned off in the settings; use your own web search instead.' } }
+            $named = @(Get-NamedSites "$($State.TurnText)")
+            $unnamed = @($urls | Where-Object { $policy -eq 'always-ask' -or -not (Test-HostMatch ([Uri]$_).Host $named) })
+            if ($unnamed.Count) {
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; warning = "Copilot wants to read $($unnamed -join ', '). The address is sent to that site; approve only if it is a site you trust and the address holds no project data." })
+                $d = Wait-Approval $State $Id $false
+                if ($d.decision -ne 'approve') {
+                    Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }
+                    return @{ ok = $false; summary = 'web rejected'; output = "rejected by the user.$(if ($d.note) { " The user said: $($d.note)" })"; reported = $true }
+                }
+                Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $true; status = 'running'; decidedBy = $d.by }
+            } else { Add-AgentEvent $State 'action' $evt }
+            $per = [Math]::Max(4000, [int]([int]$State.Config.resultCharBudget / ($urls.Count + 1)))
+            $parts = foreach ($u in $urls) { Format-WebResult (Invoke-WebFetch $u -MaxChars $per) }
+            $okCount = @($parts | Where-Object { $_ -notmatch '^error:' }).Count
+            return @{ ok = ($okCount -gt 0); summary = "read $okCount of $($urls.Count) web page(s)"; output = ($parts -join "`n`n") }
         }
         'todo' {
             $State.Todos = @(Get-TodoItems $Action.body)

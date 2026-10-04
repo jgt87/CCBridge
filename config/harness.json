@@ -15,6 +15,7 @@
   "chatHistory": true,
   "saveReplyFrames": true,
   "autoUpdate": true,
+  "webRead": "named-sites",
   "stallSec": 90,
   "actionRetries": 2,
   "reviewAfterChanges": "big",

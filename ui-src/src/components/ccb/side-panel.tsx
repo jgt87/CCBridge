@@ -6,7 +6,7 @@ import GradientButton from "@/components/kokonutui/gradient-button";
 import { api } from "@/lib/api";
 import { ChangePill } from "./change-pill";
 import SmoothTab from "@/components/kokonutui/smooth-tab";
-import type { FetchItem, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
+import type { FetchItem, FetchWeb, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
 import { FetchPanel } from "./fetch-panel";
 import { RunbooksPanel } from "./runbooks-panel";
 import { QueuePanel } from "./queue-panel";
@@ -415,7 +415,7 @@ export function SidePanel({
   busy: boolean;
   fetchItems: FetchItem[];
   onRunFetch: (name: string) => void;
-  onSaveFetch: (name: string, prompt: string) => Promise<void>;
+  onSaveFetch: (name: string, prompt: string, web: FetchWeb) => Promise<void>;
   onAttach: (path: string) => void;
   project?: { name: string; path: string; location?: string[] } | null;
   runbooks: RunbookItem[];

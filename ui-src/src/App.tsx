@@ -462,8 +462,8 @@ export default function App() {
                 onAttach={attachPath}
                 onOpenFile={openFile}
                 onRunFetch={(name) => api.runFetch(name).catch((e) => setError((e as Error).message))}
-                onSaveFetch={async (name, prompt) => {
-                  await api.saveFetch(name, prompt);
+                onSaveFetch={async (name, prompt, web) => {
+                  await api.saveFetch(name, prompt, web);
                   refreshFiles();
                 }}
                 onUndo={() => api.undo()}

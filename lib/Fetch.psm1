@@ -4,6 +4,8 @@
 #   Runbooks/<name>.prompt.md   the prompt (plain text, editable)
 #   Runbooks/Exports/<name>.md  the latest answer, with a short header (when, from which prompt)
 #   History/<name>-<stamp>.md   earlier answers (Layout.psm1 has the folders)
+# A prompt may start with a header between --- lines: sources (web, work, both), sites (only these
+# websites) and pages (addresses the helper reads itself and adds as data); see WebFetch.psm1.
 
 $ErrorActionPreference = 'Stop'
 foreach ($m in 'Workspace', 'Executor', 'Layout') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
@@ -32,6 +34,19 @@ function Get-FetchedAt([string]$File) {
     (Get-Item -LiteralPath $File).LastWriteTime
 }
 
+function Split-FetchPrompt {
+    <# The header (sources, sites, pages) and the prompt text of a fetch prompt file. #>
+    param([AllowEmptyString()][string]$Text)
+    $t = "$Text".Replace("`r`n", "`n")
+    $meta = @{}
+    $m = [regex]::Match($t, '^\s*---\s*\n(.*?)\n---\s*(\n|$)', 'Singleline')
+    if ($m.Success) {
+        foreach ($l in $m.Groups[1].Value.Split("`n")) { if ($l -match '^\s*(sources|sites|pages)\s*:\s*(.*)$') { $meta[$Matches[1].ToLowerInvariant()] = $Matches[2].Trim() } }
+        $t = $t.Substring($m.Length)
+    }
+    @{ meta = $meta; body = $t.Trim() }
+}
+
 function Get-FetchPrompts {
     <# The project's saved fetch prompts with the state of their answer files. #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
@@ -41,9 +56,13 @@ function Get-FetchPrompts {
         $name = $f.Name.Substring(0, $f.Name.Length - '.prompt.md'.Length)
         $out = Join-Path $ProjectRoot ("$($script:AnswerDir)/$name.md".Replace('/', '\'))
         $at = Get-FetchedAt $out
+        $sp = Split-FetchPrompt ([IO.File]::ReadAllText($f.FullName))
         [pscustomobject]@{
             name = $name
-            prompt = ([IO.File]::ReadAllText($f.FullName)).Trim()
+            prompt = $sp.body
+            sources = "$($sp.meta['sources'])"
+            sites = "$($sp.meta['sites'])"
+            pages = "$($sp.meta['pages'])"
             promptPath = "$($script:FetchDir)/$name.prompt.md"
             output = "$($script:AnswerDir)/$name.md"
             fetchedAt = $(if ($at) { $at.ToString('s') } else { $null })
@@ -54,8 +73,12 @@ function Get-FetchPrompts {
 
 function Save-FetchPrompt {
     <# Creates or replaces Runbooks/<name>.prompt.md. Returns the saved prompt. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][AllowEmptyString()][string]$Prompt)
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][AllowEmptyString()][string]$Prompt,
+        [string]$Sources = '', [string]$Sites = '', [string]$Pages = '')
     if (-not $Prompt.Trim()) { throw 'The fetch prompt is empty.' }
+    if ($Sources -and $Sources -notin 'web', 'work', 'both') { throw "Sources must be web, work or both." }
+    $head = @(); if ($Sources) { $head += "sources: $Sources" }; if ($Sites.Trim()) { $head += "sites: $($Sites.Trim())" }; if ($Pages.Trim()) { $head += "pages: $($Pages.Trim())" }
+    if ($head.Count) { $Prompt = "---`n$($head -join "`n")`n---`n" + (Split-FetchPrompt $Prompt).body }
     $slug = ConvertTo-FetchName $Name
     $full = Assert-Writable $ProjectRoot "$($script:FetchDir)/$slug.prompt.md"
     $dir = Split-Path $full
@@ -67,10 +90,11 @@ function Save-FetchPrompt {
 function Format-FetchResult {
     <# The answer file: a title, when it was fetched and from which prompt, the answer, its sources.
        It is sent to Copilot when attached, so it does not name the helper program. #>
-    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Reply, [datetime]$When = (Get-Date), $References = @())
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Reply, [datetime]$When = (Get-Date), $References = @(), [string[]]$Notes = @())
     $sb = New-Object Text.StringBuilder
     [void]$sb.AppendLine("# $Name").AppendLine()
     [void]$sb.AppendLine("_Fetched $($When.ToString('yyyy-MM-dd HH:mm')) (local time) with the prompt in ``$($script:FetchDir)/$Name.prompt.md``. Run it again for newer data._").AppendLine()
+    foreach ($n in @($Notes | Where-Object { $_ })) { [void]$sb.AppendLine("_Note: $($n)_").AppendLine() }
     [void]$sb.AppendLine($Reply.Trim())
     $refs = @($References | Where-Object { $_ -and ($_.title -or $_.url) })
     if ($refs.Count) {
@@ -98,4 +122,4 @@ function Save-FetchResult {
     $rel
 }
 
-Export-ModuleMember -Function ConvertTo-FetchName, Get-FetchPrompts, Save-FetchPrompt, Format-FetchResult, Save-FetchResult
+Export-ModuleMember -Function Split-FetchPrompt, ConvertTo-FetchName, Get-FetchPrompts, Save-FetchPrompt, Format-FetchResult, Save-FetchResult

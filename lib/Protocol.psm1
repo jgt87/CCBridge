@@ -2,7 +2,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$script:ActionTypes = @('read', 'glob', 'grep', 'find', 'write', 'edit', 'run', 'remember', 'todo', 'done')
+$script:ActionTypes = @('read', 'glob', 'grep', 'find', 'web', 'write', 'edit', 'run', 'remember', 'todo', 'done')
 $script:PlainInfo = @('', 'text', 'txt', 'plaintext', 'plain', 'none')
 
 function Get-ActionBlocks {
@@ -28,7 +28,7 @@ function Get-ActionBlocks {
         # Copilot sometimes leaves the info string empty (or "text") and writes the action as the
         # first line of the block: "read index.html". Take the action from that line.
         if ($script:PlainInfo -contains $type -and -not $arg -and $j -lt $lines.Length) {
-            $first = [regex]::Match($lines[$j], '^\s*(read|glob|grep|write|edit|run|todo|done)\b[:\s]*(.*)$')
+            $first = [regex]::Match($lines[$j], '^\s*(read|glob|grep|web|write|edit|run|todo|done)\b[:\s]*(.*)$')
             if ($first.Success) { $type = $first.Groups[1].Value.ToLowerInvariant(); $arg = $first.Groups[2].Value.Trim(); $j++ }
         }
         # In an edit block, code fences inside a SEARCH/REPLACE section are file content
