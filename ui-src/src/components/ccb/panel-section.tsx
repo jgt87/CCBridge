@@ -5,6 +5,15 @@ import { cn } from "@/lib/utils";
 
 const storageKey = (id: string) => `ccb.section.${id}`;
 
+/** Opens a section (remembered as open) before it is shown, for links that lead to it. */
+export function openSection(id: string) {
+  try {
+    localStorage.setItem(storageKey(id), "1");
+  } catch {
+    /* storage blocked */
+  }
+}
+
 function readOpen(id: string, fallback: boolean) {
   try {
     const v = localStorage.getItem(storageKey(id));
@@ -58,7 +67,7 @@ export function PanelSection({
   };
 
   return (
-    <section className={cn("border-black/10 border-t first:border-t-0 dark:border-white/10", className)}>
+    <section className={cn("scroll-mt-2 border-black/10 border-t first:border-t-0 dark:border-white/10", className)} id={`section-${id}`}>
       <div className="flex h-9 items-center gap-1 px-2">
         <button
           aria-expanded={open}

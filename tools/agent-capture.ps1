@@ -19,7 +19,7 @@
     -Seconds N stops after N seconds and -NoPicker skips the @ step (for unattended tests).
 
     -Agent Researcher|Analyst runs the test by itself, the way StreamHub will: a new chat, the
-    agent mentioned in the message box (@ + name, picked from the list), a fixed harmless test
+    prompt starting with "@Name" (-PickFromList picks the agent from the @ list), a fixed harmless test
     prompt (Analyst: a made-up CSV is attached), Send, one automatic answer if the agent first
     asks questions or shows a plan, and stop when the run has finished (or -RunMinutes).
     Every step goes to run.log (no reply text), and the zip includes it. -AgentName sets the
@@ -32,7 +32,8 @@
 #>
 param([string]$Label = 'agent', [int]$MaxMinutes = 90, [string]$OutRoot = 'C:\temp', [switch]$KeepStepText, [int]$Seconds = 0, [switch]$NoPicker,
     [ValidateSet('', 'Researcher', 'Analyst')][string]$Agent = '', [string]$AgentName = '', [int]$RunMinutes = 40,
-    [switch]$SkipMention)   # test aid: the same run in a plain chat, without the agent
+    [switch]$SkipMention,   # test aid: the same run in a plain chat, without the agent
+    [switch]$PickFromList)  # pick the agent from the @ list instead of typing "@Name" in the prompt
 if ($Agent) { $Label = $Agent; if (-not $AgentName) { $AgentName = $Agent }; $MaxMinutes = $RunMinutes }
 
 $ErrorActionPreference = 'Stop'
@@ -235,25 +236,62 @@ function Invoke-Mention([string]$Name) {
     Write-Run ('after typing @: ' + (Invoke-CdpEval $s $listJs))
     $null = Invoke-Cdp $s 'Input.insertText' @{ text = $Name }
     $n = ($Name -replace "'", "\'")
-    $pickJs = "(() => { const lb = document.querySelector('[id^=peek-listbox], [role=listbox]'); if (!lb) return ''; const o = [...lb.querySelectorAll('[role=option], [role=menuitem], [role=menuitemradio]')].find(x => (x.innerText || x.getAttribute('aria-label') || '').trim().toLowerCase().startsWith('$n'.toLowerCase())); if (!o) return ''; o.scrollIntoView({ block: 'nearest' }); o.click(); return o.getAttribute('role') + '|' + (o.getAttribute('data-testid') || '') })()"
-    $picked = ''
-    for ($i = 0; $i -lt 40 -and -not $picked; $i++) { Start-Sleep -Milliseconds 250; $picked = Invoke-CdpEval $s $pickJs }
-    if (-not $picked) {
-        # Never press Enter here: in Copilot's message box Enter sends the message.
-        Write-Run ("after typing @${Name}: " + (Invoke-CdpEval $s $listJs)) 'Yellow'
-        Write-Run "no item named $Name in the @ list (agent not available to this account, or shown under another name: use -AgentName)" 'Red'
-        Send-Key 'Escape' 'Escape' 27
-        $null = Clear-Editor
-        return $false
+    # The list's entries do not carry a standard role, so the entry is found by its visible name:
+    # the innermost visible element whose first text line is the name, outside the message box,
+    # preferring the suggestion pop-up. Returns its centre and its structure (for the log).
+    $findJs = @"
+(() => {
+  const want = '$n'.toLowerCase();
+  const editor = document.querySelector('$editorSel');
+  const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const first = (e) => ((e.innerText || '').trim().split('\n')[0] || '').trim().toLowerCase();
+  const all = [...document.querySelectorAll('body *')].filter(e => !(editor && (editor === e || editor.contains(e))) && vis(e) && first(e) === want);
+  const inner = all.filter(e => !all.some(o => o !== e && e.contains(o)));
+  if (!inner.length) return '';
+  const inPopup = (e) => !!e.closest('[id^=peek-listbox], [role=listbox], [role=dialog], [role=menu], [data-portal-node], .fui-Popover, [class*=popover i], [class*=suggest i]');
+  const er = editor ? editor.getBoundingClientRect() : null;
+  const dist = (e) => { if (!er) return 0; const r = e.getBoundingClientRect(); return Math.abs((r.top + r.bottom) / 2 - (er.top + er.bottom) / 2); };
+  inner.sort((a, b) => (inPopup(b) - inPopup(a)) || (dist(a) - dist(b)));
+  const el = inner[0];
+  const hit = el.closest('[role=option], [role=menuitem], [role=menuitemradio], [role=button], button, li, [tabindex], [data-testid]') || el;
+  hit.scrollIntoView({ block: 'nearest' });
+  const r = hit.getBoundingClientRect();
+  const chain = []; for (let p = hit, i = 0; p && i < 6; p = p.parentElement, i++) chain.push(p.tagName.toLowerCase() + (p.getAttribute('role') ? '[role=' + p.getAttribute('role') + ']' : '') + (p.getAttribute('data-testid') ? '[testid=' + p.getAttribute('data-testid') + ']' : '') + (p.id ? '#' + p.id.replace(/_r_[a-z0-9]+_?/i, '*') : ''));
+  const box = hit.parentElement || hit;
+  const items = [...box.children].slice(0, 10).map(x => x.tagName.toLowerCase() + (x.getAttribute('role') ? '[role=' + x.getAttribute('role') + ']' : '') + ' "' + ((x.innerText || '').trim().split('\n')[0] || '').slice(0, 30) + '"');
+  return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2, matches: inner.length, inPopup: inPopup(el), chain, siblings: items });
+})()
+"@
+    $found = $null
+    for ($i = 0; $i -lt 40 -and -not $found; $i++) {
+        Start-Sleep -Milliseconds 250
+        $j = Invoke-CdpEval $s $findJs
+        if ($j) { $found = $j | ConvertFrom-Json }
     }
+    if (-not $found) {
+        # The agents are assumed to be there: the test goes on with "@Name" as typed. Never press
+        # Enter here (in Copilot's message box Enter sends the message).
+        Write-Run ("after typing @${Name}: " + (Invoke-CdpEval $s $listJs)) 'Yellow'
+        Write-Run "no entry named $Name found in the @ list; going on with '@$Name' as typed (the agent is assumed to be there)" 'Yellow'
+        return $true
+    }
+    Write-Run ("list entry for ${Name}: " + (@{ matches = $found.matches; inPopup = $found.inPopup; chain = @($found.chain) -join ' < '; siblings = @($found.siblings) -join ' | ' } | ConvertTo-Json -Compress))
+    # A real mouse click on the entry (some lists ignore a scripted click).
+    foreach ($t in 'mouseMoved', 'mousePressed', 'mouseReleased') {
+        $ev = @{ type = $t; x = [double]$found.x; y = [double]$found.y; button = 'left'; clickCount = 1 }
+        if ($t -eq 'mouseMoved') { $ev.button = 'none'; $ev.clickCount = 0 }
+        $null = Invoke-Cdp $s 'Input.dispatchMouseEvent' $ev
+        Start-Sleep -Milliseconds 60
+    }
+    $picked = 'mouse click'
     Write-Run "clicked the list item for $Name ($picked)"
     Start-Sleep -Milliseconds 1200
     $shape = Get-EditorShape $Name
     Write-Run "message box after the mention: $shape"
     $plain = Invoke-CdpEval $s "(() => { const e = document.querySelector('$editorSel'); return !!e && [...e.querySelectorAll('[data-lexical-text=true]')].some(x => /@$n/i.test(x.innerText || '')) })()"
     $ok = -not $plain -and (Get-EditorLength) -ge 0
-    Write-Run $(if ($ok) { "mention inserted (no plain '@$Name' text left)" } else { "mention NOT inserted: '@$Name' is still plain text" }) $(if ($ok) { 'Green' } else { 'Red' })
-    $ok
+    Write-Run $(if ($ok) { "mention inserted (no plain '@$Name' text left)" } else { "the mention still looks like plain '@$Name' text; going on anyway (the agent is assumed to be there)" }) $(if ($ok) { 'Green' } else { 'Yellow' })
+    $true
 }
 function Invoke-Send {
     for ($i = 0; $i -lt 40; $i++) {
@@ -304,7 +342,11 @@ if ($Agent) {
     if ($stable -lt 6) { Write-Run 'the message box did not appear; is this window signed in?' 'Red' }
     Start-Sleep -Seconds 2
     $pageLog.Add('Agent links on the page: ' + (Invoke-CdpEval $s $agentsJs))
-    $mentioned = if ($SkipMention) { Write-Run 'mention skipped (-SkipMention): plain chat'; $true } else { Invoke-Mention $AgentName }
+    # "@Name" at the start of the prompt invokes the agent; -PickFromList uses the @ list instead.
+    $prefix = ''
+    $mentioned = if ($SkipMention) { Write-Run 'mention skipped (-SkipMention): plain chat'; $true }
+        elseif ($PickFromList) { Invoke-Mention $AgentName }
+        else { $prefix = "@$AgentName"; $null = Clear-Editor; Write-Run "the prompt starts with '@$AgentName' (typed as text)"; $true }
     if (-not $mentioned) { Write-Run 'stopped without sending anything' 'Red' }
     if ($mentioned -and $key -eq 'analyst') {
         if (-not (Add-FileUpload (Join-Path $out 'sample-sales.csv'))) {
@@ -314,7 +356,7 @@ if ($Agent) {
         }
     }
     if ($mentioned) {
-        $null = Invoke-Cdp $s 'Input.insertText' @{ text = ' ' + $prompts[$key] }
+        $null = Invoke-Cdp $s 'Input.insertText' @{ text = "$prefix " + $prompts[$key] }
         Start-Sleep -Milliseconds 800
         Write-Run "prompt typed ($($prompts[$key].Length) chars); message box: $(Get-EditorShape $AgentName); length $(Get-EditorLength)"
         if (Invoke-Send) { Write-Run 'sent' 'Green' } else { Write-Run 'the Send button never became clickable' 'Red' }
@@ -448,6 +490,22 @@ while ($clock.Elapsed.TotalSeconds -lt $deadline) {
 }
 if ($stopSince) { $stopWindows.Add(('{0:N1}s-(still showing)' -f $stopSince)) }
 try { $pageLog.Add(''); $pageLog.Add('Agent links on the page at the end: ' + (Invoke-CdpEval $s $agentsJs)) } catch { }
+$wantName = $AgentName.ToLowerInvariant()
+# Whether the agent's name shows next to the last reply (read before disconnecting).
+$agentPageSays = $false
+if ($Agent -and -not $SkipMention) {
+    $agentPageSays = $false
+    try {
+        $agentPageSays = [bool](Invoke-CdpEval $s @"
+(() => { const rs = document.querySelectorAll('$replySel'); const last = rs[rs.length - 1]; if (!last) return false;
+  const want = '$($wantName -replace "'", "\'")';
+  let p = last; for (let i = 0; i < 5 && p.parentElement; i++) p = p.parentElement;
+  const around = (p.innerText || '').replace(last.innerText || '', '');
+  return around.toLowerCase().split('\n').some(l => l.trim() === want || l.trim().startsWith(want + ' '));
+})()
+"@)
+    } catch { }
+}
 try { Disconnect-Cdp $s } catch { }
 $framesW.Close()
 
@@ -466,6 +524,15 @@ foreach ($w in ($stats.words.GetEnumerator() | Sort-Object Name)) { $sum.Add("  
 [IO.File]::WriteAllLines((Join-Path $out 'summary.txt'), [string[]]$sum)
 [IO.File]::WriteAllLines((Join-Path $out 'timeline.txt'), [string[]]$timeline)
 [IO.File]::WriteAllLines((Join-Path $out 'page.txt'), [string[]]$pageLog)
+if ($Agent -and -not $SkipMention) {
+    # Did the agent answer? Words in the reply stream that name it, and its name next to the reply.
+    $want = $AgentName.ToLowerInvariant()
+    $wire = @($stats.words.Keys | Where-Object { $_.ToLowerInvariant() -match [regex]::Escape($want) -or $_ -match '(?i)research|analyst|deep.?reason' })
+    $pageSays = [bool]$agentPageSays
+    $verdict = if ($wire.Count -or $pageSays) { "the agent answered" } else { "no sign that $AgentName answered (it may have been plain Copilot)" }
+    $runLog.Add("$(T)  agent check: stream words naming it: $(if ($wire.Count) { $wire -join ', ' } else { 'none' }); name shown with the reply: $(if ($pageSays) { 'yes' } else { 'no' }) => $verdict")
+    Write-Host "  agent check: $verdict" -ForegroundColor $(if ($wire.Count -or $pageSays) { 'Green' } else { 'Yellow' })
+}
 if ($Agent) {
     $runLog.Insert(0, "StreamHub agent test: $Agent mentioned as @$AgentName, $(Get-Date -Format 'yyyy-MM-dd HH:mm'). Steps and counts only, no reply text.")
     if (-not ($auto -and $auto.finished)) { $runLog.Add("$(T)  stopped before the run had clearly finished (Enter, time limit or lost connection)") }

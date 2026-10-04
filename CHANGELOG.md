@@ -6,6 +6,22 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.56] - 2026-10-04
+
+### Added
+
+- Settings > Retention: how many and for how many days StreamHub keeps what it generates per project: earlier versions in `History/` (per runbook or fetch prompt; default 20 / 90 days), evidence per task (100 / 90 days), code review reports (20 / 180 days), undo change sets (100 / 30 days, the newest always stays) and chat history events (1500). 0 = no limit. Old items are removed when a project opens and after each task; `source/`, `Logs/` and other project files are never touched. At every start, StreamHub also applies the undo and chat history limits to all projects' state folders, so projects that are not opened any more do not keep growing.
+- When a project opens, the import index is brought up to date in the background together with the issue index, so "Used by" and broken-link checks work before the first task.
+
+### Changed
+
+- Files tab > Index: the line "N file(s) with issues" has a Beta tag and leads to the issues overview: it opens the Changes tab with its Issues section unfolded and in view. When nothing was found, the line only says when the project was indexed.
+- Changes tab: the Issues heading shows the number of open issues, like Change sets shows its count.
+
+### Fixed
+
+- `agent-test.cmd` reported Researcher and Analyst as not available although they were: Copilot's `@` list does not use the standard list roles. The test now starts the prompt with `@Researcher` / `@Analyst` (`-PickFromList` finds the entry by its name and clicks it), never stops on a check, and ends with an agent check: whether the reply stream or the page shows that the agent answered.
+
 ## [v0.1.55] - 2026-10-04
 
 ### Changed
@@ -651,7 +667,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.55...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.56...HEAD
+[v0.1.56]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.56
 [v0.1.55]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.55
 [v0.1.54]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.54
 [v0.1.53]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.53

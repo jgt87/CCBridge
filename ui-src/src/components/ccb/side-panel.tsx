@@ -13,7 +13,7 @@ import { QueuePanel } from "./queue-panel";
 import { SchedulesSummary } from "./schedules-modal";
 import { BetaTag } from "./beta-tag";
 import { IssuesPanel } from "./issues-panel";
-import { PanelSection, SectionButton, SectionCount } from "./panel-section";
+import { openSection, PanelSection, SectionButton, SectionCount } from "./panel-section";
 import { ReviewPanel } from "./review-panel";
 import type { Activity, QueueEntry, ScheduleItem } from "@/lib/api";
 import type { ScheduleTarget } from "./schedule-form";
@@ -104,18 +104,40 @@ function IssueBadge({ path }: { path: string }) {
 }
 
 /** The issue index of the project: a bar that runs left to right while it indexes, and a short status line. */
-function IndexBar({ activity, files, withIssues, updated }: { activity: Activity | null; files: number; withIssues: number; updated: string | null }) {
+function IndexBar({
+  activity,
+  files,
+  withIssues,
+  updated,
+  onShowIssues,
+}: { activity: Activity | null; files: number; withIssues: number; updated: string | null; onShowIssues?: () => void }) {
   const running = Boolean(activity?.label);
   const pct = running && activity?.total ? Math.min(100, Math.round((activity.done / activity.total) * 100)) : null;
   const when = updated ? new Date(updated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
   return (
     <div>
-      <div className="truncate text-muted-foreground text-xs">
-        {running
-          ? activity?.label.replace(/ for issues.*$/, "") + "..."
-          : files
-            ? `Indexed${when ? ` at ${when}` : ""}${withIssues ? `, ${withIssues} file(s) with issues` : ", no issues"}`
-            : "Not indexed yet"}
+      <div className="flex min-w-0 items-center gap-1 text-muted-foreground text-xs">
+        {running ? (
+          <span className="truncate">{`${activity?.label.replace(/ for issues.*$/, "")}...`}</span>
+        ) : files && !withIssues ? (
+          // Nothing found: only when it was indexed, no issue text.
+          <span className="truncate">{`Indexed${when ? ` at ${when}` : ""}`}</span>
+        ) : files ? (
+          <>
+            <span className="shrink-0">{`Indexed${when ? ` at ${when}` : ""},`}</span>
+            {onShowIssues ? (
+              // The issue count leads to the issues overview (Changes tab > Issues).
+              <button className="min-w-0 truncate underline-offset-2 hover:text-foreground hover:underline" onClick={onShowIssues} title="Show the issues (Changes tab)" type="button">
+                {`${withIssues} file(s) with issues`}
+              </button>
+            ) : (
+              <span className="truncate">{`${withIssues} file(s) with issues`}</span>
+            )}
+            <BetaTag title="Beta: still being refined. The checks run without a language model and can miss problems or report ones that are not real." />
+          </>
+        ) : (
+          <span className="truncate">Not indexed yet</span>
+        )}
       </div>
       {/* The bar only while an index run is busy. */}
       {running && (
@@ -255,6 +277,7 @@ function FilesPanel({
   activity,
   issueStamp,
   refreshing = false,
+  onShowIssues,
 }: {
   files: FileInfo[];
   onOpenFile: (path: string) => void;
@@ -263,6 +286,7 @@ function FilesPanel({
   activity: Activity | null;
   issueStamp: string;
   refreshing?: boolean;
+  onShowIssues?: () => void;
 }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const folders = useClosedFolders(project?.path);
@@ -335,7 +359,7 @@ function FilesPanel({
           id="files.index"
           title="Index"
         >
-          <IndexBar activity={activity} files={index.files} updated={index.updated} withIssues={index.counts.size} />
+          <IndexBar activity={activity} files={index.files} onShowIssues={onShowIssues} updated={index.updated} withIssues={index.counts.size} />
         </PanelSection>
       )}
       <PanelSection
@@ -424,8 +448,30 @@ export function SidePanel({
   onRunRunbook: (name: string) => void;
   queue: QueueEntry[];
 }) {
+  // "N file(s) with issues" on the Files tab leads to Changes > Issues: the section is opened,
+  // the tab switched, and the section scrolled into view once it is shown.
+  const [tabRequest, setTabRequest] = useState<{ id: string; n: number } | null>(null);
+  // Open issues (not ignored) for the count next to the Issues heading; reloaded like the index line.
+  const [openIssues, setOpenIssues] = useState(0);
+  const issuesBusy = Boolean(activity?.label);
+  useEffect(() => {
+    if (!project) {
+      setOpenIssues(0);
+      return;
+    }
+    const load = () => api.issues().then((r) => setOpenIssues(r.items.filter((i) => i.status !== "ignored").length), () => undefined);
+    load();
+    if (!issuesBusy) return;
+    const t = window.setInterval(load, 3000);
+    return () => window.clearInterval(t);
+  }, [project, issueStamp, issuesBusy]);
+  const showIssues = () => {
+    openSection("changes.issues");
+    setTabRequest((r) => ({ id: "changes", n: (r?.n ?? 0) + 1 }));
+    window.setTimeout(() => document.getElementById("section-changes.issues")?.scrollIntoView({ behavior: "smooth", block: "start" }), 450);
+  };
   const filesPanel = (
-    <FilesPanel activity={activity} files={files} issueStamp={issueStamp} refreshing={filesRefreshing} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
+    <FilesPanel activity={activity} files={files} issueStamp={issueStamp} onShowIssues={showIssues} refreshing={filesRefreshing} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
   );
 
   const tasksPanel = (
@@ -496,7 +542,12 @@ export function SidePanel({
       </div>
       </PanelSection>
       <PanelSection
-        badge={<BetaTag title="Beta: still being refined. The checks run without a language model and can miss problems or report ones that are not real; use Ignore for those." />}
+        badge={
+          <>
+            {openIssues > 0 && <SectionCount n={openIssues} />}
+            <BetaTag title="Beta: still being refined. The checks run without a language model and can miss problems or report ones that are not real; use Ignore for those." />
+          </>
+        }
         id="changes.issues"
         title="Issues"
       >
@@ -515,6 +566,7 @@ export function SidePanel({
   return (
     <SmoothTab
       columns={2}
+      request={tabRequest}
       defaultTabId={lastTab()}
       onChange={(id) => {
         try {

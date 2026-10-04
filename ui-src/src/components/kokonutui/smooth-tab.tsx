@@ -133,6 +133,8 @@ interface SmoothTabProps {
   className?: string;
   activeColor?: string;
   onChange?: (tabId: string) => void;
+  /** CCBridge: switch to a tab from outside; a new `n` switches again (also to the same tab). */
+  request?: { id: string; n: number } | null;
 }
 
 const slideVariants = {
@@ -171,6 +173,7 @@ export default function SmoothTab({
   activeColor = "bg-[#1F9CFE]",
   onChange,
   columns,
+  request,
 }: SmoothTabProps & { columns?: number }) {
   const [selected, setSelected] = React.useState<string>(defaultTabId);
   const [direction, setDirection] = React.useState(0);
@@ -228,6 +231,11 @@ export default function SmoothTab({
     setSelected(tabId);
     onChange?.(tabId);
   };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new request switches the tab
+  React.useEffect(() => {
+    if (request && request.id !== selected && items.some((i) => i.id === request.id)) handleTabClick(request.id);
+  }, [request?.n]);
 
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLButtonElement>,

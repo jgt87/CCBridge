@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -110,6 +110,8 @@ function Add-AgentEvent {
         # Keep memory bounded; the UI only needs recent history after a reload.
         if ($State.Events.Count -gt 2000) { $State.Events.RemoveRange(0, 500) }
         if ($State.SaveHistory -and $State.ProjectRoot -and $Type -notin 'project', 'history-cleared' -and -not $Data.restored) {
+        $keep = 0; if ($State.Config -and $State.Config.retention) { $keep = [int]$State.Config.retention.chatEvents }
+        if ($keep -ge 100) { $script:HistoryMaxEvents = $keep }   # Settings > Retention > Chat history
             try { Save-ChatEvent $State.ProjectRoot $Data } catch { Write-CCBLogError agent 'chat history' $_ }
         }
     } finally { [Threading.Monitor]::Exit($State.Events.SyncRoot) }
@@ -1864,6 +1866,8 @@ function Start-IssueIndexer {
             Import-Module (Join-Path $Lib 'Issues.psm1')
             $r = Update-IssueIndex $Root -Progress $Progress -Force:$Force
             $Progress.last = @{ project = $Root; files = $r.files; scanned = $r.scanned; ms = $r.ms; at = (Get-Date).ToString('s') }
+            # The import index too, so "Used by" and broken-link checks have data before the first task.
+            try { Import-Module (Join-Path $Lib 'Imports.psm1'); $null = Update-ImportIndex $Root } catch { }
         } catch { $Progress.error = $_.Exception.Message } finally { $Progress.label = ''; $Progress.running = $false }
     }).AddArgument($PSScriptRoot).AddArgument($ProjectRoot).AddArgument($ix).AddArgument([bool]$Force)
     $null = $ps.BeginInvoke()
@@ -2312,6 +2316,8 @@ function Start-AgentWorker {
                 Write-CCBLog info agent "Queue $($entry.id) $($entry.status)" @{ messages = $entry.messages }
                 Save-AgentQueue $State
             }
+            # Retention: old History/, evidence/, reviews/ and undo backups of the project go now.
+            if ($State.ProjectRoot -and $task.kind -ne 'connect') { try { $null = Invoke-ProjectRetention $State.ProjectRoot $State.Config } catch { Write-CCBLogError agent 'retention' $_ } }
             $State.CurrentQueueId = $null
             $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller; $State.ResponseMode = $saved.ResponseMode
             if ($foreign -and $saved.ProjectRoot -and $State.ProjectRoot -ne $saved.ProjectRoot) {

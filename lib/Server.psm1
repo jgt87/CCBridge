@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -562,13 +562,16 @@ function Set-Project($State, [string]$Path) {
         $moved = @(Move-ProjectLayout $State.ProjectRoot)
         if ($moved.Count) { Add-AgentEvent $State 'status' @{ text = "Project folders tidied to the new layout: fetch prompts and runbooks are in Runbooks/, their data in Runbooks/Exports/, earlier versions in History/ ($($moved.Count) item(s) moved)." } }
     } catch { Write-CCBLogError server 'project layout' $_ }
+    try { $null = Invoke-ProjectRetention $State.ProjectRoot $State.Config } catch { Write-CCBLogError server 'retention' $_ }
     $mark = $State.Seq
     if ($State.SaveHistory) { try { $null = Restore-ChatHistory $State $State.ProjectRoot } catch { Write-CCBLogError server 'chat history' $_ } }   # the earlier conversation, back in the chat
     # Line counts and "new" marks in the Files tab cover the change sets in the restored chat too.
     try { $State.SessionSince = Get-ChangeCountStart $State $mark ([string]$State.SessionSince) } catch { Write-CCBLogError server 'change counts' $_ }
     try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue fix reset' $_ }
     try { $null = Sync-ProjectSchedules $State -Roots @($State.ProjectRoot) -Force } catch { Write-CCBLogError server 'schedule import' $_ }
-    try { $null = Start-IssueIndexer $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue index' $_ }   # step 1 of the issue cycle, in the background
+    $indexing = $false
+    try { $indexing = Start-IssueIndexer $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue index' $_ }   # step 1 of the issue cycle, in the background (with the import index)
+    if (-not $indexing) { try { $null = Update-ImportIndex $State.ProjectRoot } catch { Write-CCBLogError server 'import index' $_ } }   # issues off: the import index alone
     try { [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'), $State.ProjectRoot) } catch { }
 }
 
@@ -635,6 +638,8 @@ function Start-CCBridgeServer {
     [void]$worker.AddScript("`$ErrorActionPreference = 'Stop'; Import-Module '$(Join-Path $appRoot 'lib\Agent.psm1')'; Start-AgentWorker -State `$State")
     $handle = $worker.BeginInvoke()
     $State.Tasks.Enqueue(@{ kind = 'connect' })
+    # Instance start: undo backups and chat history of every project get the retention limits.
+    try { $null = Invoke-StateRetention $State.Config } catch { Write-CCBLogError server 'state retention' $_ }
     $last = Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'
     if (Test-Path $last) {
         $lp = [IO.File]::ReadAllText($last).Trim()

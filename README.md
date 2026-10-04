@@ -372,12 +372,13 @@ The same run measures speed. For every step it records the exact time (`HH:mm:ss
 **Reply format of your tenant (`stream-shape.cmd`).** Writes the structure of Copilot's recent replies (field names, types, lengths and status words; no answer text) to `C:\temp\CCBridge-stream-shape-<date>.txt`. Sending that file lets StreamHub support your tenant's reply format (for example StreamHub) directly, which is faster and gives back the chat message count and remaining credits.
 
 **Researcher and Analyst test (`agent-test.cmd`).** Runs Copilot's Researcher and then its Analyst agent the way StreamHub will invoke them:
-- a new chat, with the agent mentioned in the message box (`@` plus the name, picked from the list);
+- a new chat, with the prompt starting with `@Researcher` or `@Analyst` (`-PickFromList` picks the agent from the `@` list instead);
 - a fixed, harmless test prompt (web sources only for Researcher; for Analyst, a made-up `sample-sales.csv` is attached);
 - one automatic answer if the agent first asks questions or shows a plan;
-- a stop once the run has finished, or after 40 minutes.
+- a stop once the run has finished, or after 40 minutes;
+- a check whether the agent really answered: words in the reply stream that name it, and its name shown with the reply (un.log, "agent check").
 
-This uses up to 2 runs of your monthly agent allowance. If an agent is not in the `@` list, nothing is sent for it. Each run writes a folder in `C:\temp` with a zip to send: `run.log` (every step), `summary.txt`, `timeline.txt`, `page.txt` and `shape.txt`, which hold steps, timings and structure but no reply text. `frames.jsonl` next to the zip holds the full replies; share it only if you are fine with its content.
+This uses up to 2 runs of your monthly agent allowance. Each run writes a folder in `C:\temp` with a zip to send: `run.log` (every step), `summary.txt`, `timeline.txt`, `page.txt` and `shape.txt`, which hold steps, timings and structure but no reply text. `frames.jsonl` next to the zip holds the full replies; share it only if you are fine with its content.
 
 To test one agent: `agent-test.cmd Researcher`. If the agent has another name in your language: `agent-test.cmd Researcher -AgentName "NAME"`. To record a run you do by hand: `agent-capture.cmd -Label researcher`.
 
@@ -628,6 +629,8 @@ Edge and Chrome block some things on a page opened straight from disk (`file://`
 | `%LOCALAPPDATA%\CCBridge\queue.json`, `queue-pause.json` | The queue and the daily-limit pause, kept across restarts |
 
 ---
+
+How long generated items are kept is set in **Settings > Retention**: earlier versions in `History/`, evidence, code review reports, undo change sets and chat history, each with a number to keep and a number of days (0 = no limit). StreamHub cleans up when a project opens, after each task and, for undo and chat history of all projects, at every start. It never removes `source/`, `Logs/` or other project files.
 
 ## Tech stack
 
