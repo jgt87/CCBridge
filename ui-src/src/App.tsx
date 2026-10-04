@@ -24,6 +24,7 @@ import { LimitationsNote } from "@/components/ccb/limitations-note";
 import { ErrorBoundary } from "@/components/ccb/error-boundary";
 import { CopilotStatus } from "@/components/ccb/copilot-status";
 import { SettingsPanel } from "@/components/ccb/settings-panel";
+import { prefetchSettings } from "@/lib/settings-cache";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
 import type { ScheduleTarget } from "@/components/ccb/schedule-form";
@@ -118,6 +119,12 @@ export default function App() {
     return () => mq.removeEventListener("change", onChange);
   }, []);
   const sideVisible = wide || drawerOpen;
+
+  // Settings opens complete: what it shows is loaded once in the background, a little after start.
+  useEffect(() => {
+    const t = window.setTimeout(() => void prefetchSettings(), 4000);
+    return () => window.clearTimeout(t);
+  }, []);
 
   // The file tree: a refresh after a change shows a bar in the Files tab (at least 600 ms, so it is
   // seen); the background refresh while StreamHub works is silent ({ quiet: true }).
@@ -637,7 +644,12 @@ export default function App() {
                     <span className="flex items-center gap-2">
                       {state.workIqAvailable && (
                         <button
-                          className="rounded-md bg-black/5 px-2 py-0.5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                          aria-pressed={state.workIq === "on"}
+                          className={
+                            state.workIq === "on"
+                              ? "rounded-md bg-black px-2 py-0.5 font-medium text-white shadow-sm hover:bg-black/85 dark:bg-white dark:text-black dark:hover:bg-white/85"
+                              : "rounded-md bg-black/5 px-2 py-0.5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                          }
                           onClick={() => api.setWorkIq(state.workIq === "on" ? "off" : "on")}
                           title="Work IQ lets Copilot use your Microsoft 365 data: Outlook, Teams, calendar, OneDrive and SharePoint"
                           type="button"

@@ -6,6 +6,13 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.68] - 2026-10-04
+
+### Changed
+
+- An option that is on stands out next to the message box: Clarify first turns solid (black, or white in dark mode) and shows its name, and Work IQ does the same when it is on.
+- Settings opens complete instead of filling in piece by piece: the settings, the single sign-on status and the size of Edge's cache are loaded in the background a few seconds after the app starts, shown at once when Settings opens and refreshed quietly while it is open.
+
 ## [v0.1.67] - 2026-10-04
 
 ### Added
@@ -792,7 +799,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.67...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.68...HEAD
+[v0.1.68]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.68
 [v0.1.67]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.67
 [v0.1.66]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.66
 [v0.1.65]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.65

@@ -8,6 +8,7 @@ import { api, type EdgeCacheInfo, type Setting } from "@/lib/api";
 import { formatBytes } from "@/lib/project-overview";
 import { notifyEnabled, notifySupported, setNotifyEnabled } from "@/lib/notify";
 import { cn } from "@/lib/utils";
+import { cachedEdgeCache, cachedSettings, loadEdgeCache, loadSettings, rememberEdgeCache, rememberSettings } from "@/lib/settings-cache";
 
 /** A setting's value as text: a command list one per line, a switch as on/off. */
 function asDraft(v: Setting["value"]): string {
@@ -185,11 +186,15 @@ function ClearHistoryRow() {
 
 /** Settings > Privacy: Edge's caches in StreamHub's own profile; the Copilot sign-in stays. */
 function ClearEdgeCacheRow() {
-  const [info, setInfo] = useState<EdgeCacheInfo | null>(null);
+  const [info, setInfoState] = useState<EdgeCacheInfo | null>(cachedEdgeCache());
+  const setInfo = (i: EdgeCacheInfo) => {
+    rememberEdgeCache(i);
+    setInfoState(i);
+  };
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    api.edgeCache().then(setInfo, () => {});
+    loadEdgeCache().then(setInfoState, () => {});
   }, []);
   const clear = async () => {
     setBusy(true);
@@ -248,19 +253,24 @@ function NotificationSetting() {
 
 /** Settings for this computer (saved in config\harness.local.json; kept across updates). */
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
-  const [settings, setSettings] = useState<Setting[]>([]);
+  // Shown at once from what was loaded in the background; refreshed quietly while open.
+  const [settings, setSettingsState] = useState<Setting[] | null>(cachedSettings());
+  const setSettings = (list: Setting[]) => {
+    rememberSettings(list);
+    setSettingsState(list);
+  };
   const [error, setError] = useState("");
   const [confirmReset, setConfirmReset] = useState(false);
   const [resetNote, setResetNote] = useState("");
   useEffect(() => {
-    api.settings().then(setSettings, (e) => setError((e as Error).message));
+    loadSettings().then(setSettingsState, (e) => setError((e as Error).message));
   }, []);
   const [theme, setTheme] = useState<ThemeChoice>(getThemeChoice());
   const changeTheme = (t: ThemeChoice) => {
     setThemeChoice(t);
     setTheme(t);
   };
-  const anyCustom = settings.some((s) => s.custom) || theme !== "system";
+  const anyCustom = (settings ?? []).some((s) => s.custom) || theme !== "system";
   const resetAll = async () => {
     setConfirmReset(false);
     try {
@@ -282,7 +292,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, [onClose]);
   const groups = useMemo(() => {
     const m = new Map<string, Setting[]>();
-    for (const s of settings) if (s.group !== "Sign-in") m.set(s.group, [...(m.get(s.group) ?? []), s]);
+    for (const s of settings ?? []) if (s.group !== "Sign-in") m.set(s.group, [...(m.get(s.group) ?? []), s]);
     return [...m.entries()];
   }, [settings]);
 
@@ -327,6 +337,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 [scrollbar-gutter:stable_both-edges]">
           {error && <div className="pt-2 text-rose-500 text-sm">{error}</div>}
+          {/* The first time, before the background load: everything at once, not group by group. */}
+          {!settings && !error && <div className="pt-4 text-muted-foreground text-sm">Loading settings...</div>}
+          {settings && (
+            <>
           {resetNote && <div className="pt-2 text-muted-foreground text-sm">{resetNote}</div>}
           <SettingsGroup first title="This browser">
             <SettingLine
@@ -348,6 +362,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               {group === "Privacy and retention" && <ClearEdgeCacheRow />}
             </SettingsGroup>
           ))}
+            </>
+          )}
         </div>
       </div>
     </ModalBackdrop>

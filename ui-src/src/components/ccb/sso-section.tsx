@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type SsoStatus } from "@/lib/api";
+import { cachedSso, loadSso, rememberSso } from "@/lib/settings-cache";
 import { ssoStateText, ssoStatusRows } from "@/lib/sso-text";
 import { Segmented, SettingLine, smallButtonClass } from "./settings-ui";
 
@@ -9,7 +10,14 @@ import { Segmented, SettingLine, smallButtonClass } from "./settings-ui";
  * normal Edge profile are not touched.
  */
 export function SsoSection() {
-  const [status, setStatus] = useState<SsoStatus | null>(null);
+  // Shown at once from the background load; checked again quietly when Settings opens.
+  const [status, setStatusState] = useState<SsoStatus | null>(cachedSso());
+  const setStatus = (next: SsoStatus | null | ((s: SsoStatus | null) => SsoStatus | null)) =>
+    setStatusState((cur) => {
+      const v = typeof next === "function" ? next(cur) : next;
+      rememberSso(v);
+      return v;
+    });
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
@@ -27,7 +35,8 @@ export function SsoSection() {
   };
   const check = () => run("Checking...", async () => setStatus(await api.ssoStatus()));
   useEffect(() => {
-    check();
+    if (cachedSso()) loadSso().then(setStatusState, () => {});
+    else check();
     // biome-ignore lint/correctness/useExhaustiveDependencies: checked once when Settings opens
   }, []);
 

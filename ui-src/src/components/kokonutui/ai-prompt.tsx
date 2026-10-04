@@ -136,24 +136,37 @@ function ToolButton({
   title,
   onClick,
   pressed,
+  showLabelWhenOn,
   children,
 }: {
   label: string;
   title: string;
   onClick?: () => void;
   pressed?: boolean;
+  /** CCBridge: an option that is on stands out: filled, with its name next to the icon. */
+  showLabelWhenOn?: boolean;
   children: React.ReactNode;
 }) {
+  const prominent = pressed && showLabelWhenOn;
   return (
     <button
       aria-label={label}
       aria-pressed={pressed}
-      className={cn("cursor-pointer rounded-lg p-2", BAR_BUTTON, pressed ? "bg-black/15 text-black dark:bg-white/20 dark:text-white" : TOOL_IDLE)}
+      className={cn(
+        "flex cursor-pointer items-center gap-1.5 rounded-lg p-2",
+        BAR_BUTTON,
+        prominent
+          ? "bg-black px-2.5 font-medium text-white text-xs shadow-sm hover:bg-black/85 dark:bg-white dark:text-black dark:hover:bg-white/85"
+          : pressed
+            ? "bg-black/15 text-black dark:bg-white/20 dark:text-white"
+            : TOOL_IDLE
+      )}
       onClick={onClick}
       title={title}
       type="button"
     >
       {children}
+      {prominent && <span>{label}</span>}
     </button>
   );
 }
@@ -306,6 +319,7 @@ export default function AI_Prompt({
                       label="Clarify first"
                       onClick={onToggleClarify}
                       pressed={clarify}
+                      showLabelWhenOn
                       title={clarify ? "Clarify first is on: Copilot asks its questions and makes a plan for you to approve before it builds" : "Clarify first: Copilot asks its questions and makes a plan for you to approve before it builds"}
                     >
                       <MessageCircleQuestion className="h-4 w-4 transition-colors" />
