@@ -590,6 +590,16 @@ function Test-ProjectConsistency {
     }
 }
 
+function Get-LastChangeSetId {
+    <# The id of the newest change set (checkpoint with a manifest) of a project, or '' when there
+       is none. Line counts "per change" start there. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot)
+    $base = Join-Path (Get-ProjectStateDir $ProjectRoot) 'backups'
+    if (-not (Test-Path -LiteralPath $base)) { return '' }
+    $last = @(Get-ChildItem -LiteralPath $base -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'manifest.json') } | Sort-Object Name -Descending) | Select-Object -First 1
+    if ($last) { $last.Name } else { '' }
+}
+
 function Get-SessionChangeStats {
     <# Per changed file: lines added/removed since $SinceId (a checkpoint id, yyyyMMdd-HHmmss-fff),
        measured against the version before the first change in that period (from the undo backups).
@@ -1513,5 +1523,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-LastChangeSetId, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

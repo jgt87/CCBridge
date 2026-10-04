@@ -3,8 +3,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * The building blocks every Settings row uses, so labels, controls, the reset button and the
- * "Saved" note line up across the whole window: text on the left, a control column of one fixed
- * width, and one fixed side column on the right (empty when a row has no reset).
+ * "Saved" note line up across the whole window: text on the left, then one fixed side column
+ * (reset and Saved, empty when a row has none), then the control column of one fixed width, which
+ * ends at the window's right padding.
  */
 
 /** Width of every control (fields, choices, switches, buttons). */
@@ -52,15 +53,15 @@ export function SettingLine({
   below?: React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto_4.5rem] items-start gap-x-3 py-2.5">
+    <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto] items-start gap-x-3 py-2.5">
       <div className="min-w-0">
         <div className="text-sm">{title}</div>
         {help && <div className="text-muted-foreground text-xs">{help}</div>}
         {notes}
       </div>
+      <div className="flex h-8 items-center justify-end gap-1">{side}</div>
       <div className={cn(CONTROL_W, "flex justify-end")}>{control}</div>
-      <div className="flex h-8 items-center gap-1">{side}</div>
-      {below && <div className="col-span-2 mt-2">{below}</div>}
+      {below && <div className="col-span-3 mt-2">{below}</div>}
     </div>
   );
 }

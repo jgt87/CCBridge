@@ -20,3 +20,14 @@ createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </StrictMode>,
 )
+
+// Every web link in the app opens in a new tab (also links without target="_blank"), so the app
+// itself never navigates away. Links within the page (#...) and file links handled by the app stay.
+function openLinksInNewTab(e: MouseEvent) {
+  if (e.defaultPrevented || e.button !== 0) return;
+  const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+  if (!a || !/^https?:/i.test(a.href) || a.origin === window.location.origin) return;
+  e.preventDefault();
+  window.open(a.href, "_blank", "noopener,noreferrer");
+}
+document.addEventListener("click", openLinksInNewTab);

@@ -307,14 +307,14 @@ function FilesPanel({
     <p className="p-2 text-muted-foreground text-sm">No files yet. Ask Copilot to create some.</p>
   );
   return (
-    // Dragging a file over the panel opens the source data section, so drag-and-drop works while it is folded.
+    // Dragging a file over the panel opens the Add data section, so drag-and-drop works while it is folded.
     <div onDragEnter={() => setUploadOpen(true)}>
       <PanelSection
         id="files.source"
         onOpenChange={setUploadOpen}
         open={uploadOpen}
         summary="Read-only files for Copilot, in source/. Drop files here."
-        title="Source data"
+        title="Add data"
       >
         <FileUpload
           className="max-w-none p-0"

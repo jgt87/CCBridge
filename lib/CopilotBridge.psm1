@@ -40,13 +40,60 @@ function Get-CopilotTarget {
     Invoke-RestMethod -Method Put "http://127.0.0.1:$Port/json/new?$($Selectors.chatUrl)"
 }
 
+function Use-BrowserSession([int]$Port, [scriptblock]$Body) {
+    # A short connection to Edge itself (not a tab), for the browser-wide CDP commands.
+    $ver = Invoke-RestMethod "http://127.0.0.1:$Port/json/version"
+    $b = Connect-Cdp $ver.webSocketDebuggerUrl
+    try { & $Body $b } finally { Disconnect-Cdp $b }
+}
+
+function Get-PrivateCopilotTarget {
+    <# The Copilot tab in a private session (a separate browser context in StreamHub's Edge, like an
+       InPrivate window): Edge's automatic sign-in with the Windows account is not used there, and
+       nothing is kept after Edge closes. Reuses an open private Copilot tab, else opens one in a new
+       window (in an existing private session, or a new one). #>
+    param([int]$Port = 9333, [Parameter(Mandatory)]$Selectors)
+    $id = Use-BrowserSession $Port {
+        param($b)
+        $contexts = @((Invoke-Cdp $b 'Target.getBrowserContexts').browserContextIds)
+        $pages = @((Invoke-Cdp $b 'Target.getTargets').targetInfos | Where-Object { $_.type -eq 'page' -and $contexts -contains $_.browserContextId })
+        $hit = $pages | Where-Object { Test-CopilotUrl $_.url $Selectors } | Select-Object -First 1
+        if ($hit) { return $hit.targetId }
+        $ctx = if ($contexts.Count) { $contexts[0] } else { (Invoke-Cdp $b 'Target.createBrowserContext' @{ disposeOnDetach = $false }).browserContextId }
+        Write-CCBLog info bridge 'Opening Copilot in a private session (single sign-on off)'
+        (Invoke-Cdp $b 'Target.createTarget' @{ url = $Selectors.chatUrl; browserContextId = $ctx; newWindow = $true }).targetId
+    }
+    for ($i = 0; $i -lt 40; $i++) {
+        $t = @((Invoke-RestMethod "http://127.0.0.1:$Port/json/list") | Where-Object { $_.id -eq $id }) | Select-Object -First 1
+        if ($t -and $t.webSocketDebuggerUrl) { return $t }
+        Start-Sleep -Milliseconds 250
+    }
+    throw 'the private Copilot window did not open'
+}
+
+function Close-PrivateCopilotSessions([int]$Port = 9333) {
+    <# Closes the private sessions (single sign-on is on again): their windows close and their
+       sign-in is forgotten. Returns how many were closed. #>
+    if (-not (Test-CdpEndpoint $Port)) { return 0 }
+    Use-BrowserSession $Port {
+        param($b)
+        $n = 0
+        foreach ($c in @((Invoke-Cdp $b 'Target.getBrowserContexts').browserContextIds)) { try { $null = Invoke-Cdp $b 'Target.disposeBrowserContext' @{ browserContextId = $c }; $n++ } catch { } }
+        if ($n) { Write-CCBLog info bridge "Closed $n private Copilot session(s) (single sign-on on)" }
+        $n
+    }
+}
+
 function Connect-Copilot {
-    <# Starts (or reuses) Edge on the Copilot page and returns a bridge object. #>
+    <# Starts (or reuses) Edge on the Copilot page and returns a bridge object. -SignIn private opens
+       Copilot in a private session (single sign-on off: you sign in yourself, once per Edge start);
+       single-sign-on uses StreamHub's Edge profile and closes private sessions left from before. #>
     param(
         [int]$Port = 9333,
         [string]$SelectorsPath,
         [int]$SignInTimeoutSec = 300,
-        [bool]$SaveReplyFrames = $true
+        [bool]$SaveReplyFrames = $true,
+        [ValidateSet('single-sign-on', 'private')][string]$SignIn = 'single-sign-on'
     )
     $sel = if ($SelectorsPath) { Get-Content $SelectorsPath -Raw | ConvertFrom-Json } else { Get-CCBridgeConfig selectors (Split-Path -Parent $script:ModuleDir) }
     # The Copilot tab is recognised by its host (chatUrl and chatHosts in selectors.json).
@@ -58,7 +105,11 @@ function Connect-Copilot {
             # Edge may still be starting, or may replace the tab (first start, sign-in redirects):
             # every attempt looks for the current Copilot tab again.
             $null = Start-CdpEdge -Port $Port -Url $sel.chatUrl
-            $target = Get-CopilotTarget -Port $Port -Selectors $sel
+            if ($SignIn -eq 'private') { $target = Get-PrivateCopilotTarget -Port $Port -Selectors $sel }
+            else {
+                if ($attempt -eq 1) { try { $null = Close-PrivateCopilotSessions $Port } catch { Write-CCBLog verbose bridge "closing private sessions failed: $($_.Exception.Message)" } }
+                $target = Get-CopilotTarget -Port $Port -Selectors $sel
+            }
             $session = Connect-Cdp $target.webSocketDebuggerUrl
             $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; SaveFrames = $SaveReplyFrames
         Pacing = (Get-CopilotPacing); LastReplyAt = $null }
@@ -1455,4 +1506,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

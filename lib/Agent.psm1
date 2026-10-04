@@ -249,7 +249,8 @@ function Get-Bridge($State) {
     $State.CopilotMessage = 'Opening Copilot in Edge. Sign in there if asked.'
     try {
         $save = if ($null -ne $State.Config.saveReplyFrames) { [bool]$State.Config.saveReplyFrames } else { $true }
-        $script:Bridge = Connect-Copilot -Port $State.Config.cdpPort -SaveReplyFrames $save
+        $signIn = if ("$($State.Config.signIn)" -eq 'private') { 'private' } else { 'single-sign-on' }
+            $script:Bridge = Connect-Copilot -Port $State.Config.cdpPort -SaveReplyFrames $save -SignIn $signIn
         $State.Copilot = 'ready'; $State.CopilotMessage = ''
         # Page health check: the parts CCBridge relies on are where selectors.json says.
         try {

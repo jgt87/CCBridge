@@ -30,6 +30,8 @@ if (-not $NoUpdate) { & (Join-Path $root 'tools\update.ps1') }
 # What this computer has, every start (quick and read-only; check.cmd also tests GitHub and Copilot).
 if (-not $NoCheck) {
     Import-Module (Join-Path $root 'lib\Prereq.psm1') -Force
+# Shortcuts from before the rename are called StreamHub from now on (also after an automatic update).
+try { foreach ($s in @(Rename-AppShortcuts)) { Write-Host "Renamed the shortcut to $s" } } catch { }
     Import-Module (Join-Path $root 'lib\Config.psm1') -Force
     $cfgCheck = Get-CCBridgeConfig harness $root
     $checkPort = if ($Port) { $Port } elseif ($cfgCheck.port) { [int]$cfgCheck.port } else { 8765 }

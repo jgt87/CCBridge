@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type SsoStatus } from "@/lib/api";
-import { copilotText, ssoStateText } from "@/lib/sso-text";
+import { ssoStateText, ssoStatusRows } from "@/lib/sso-text";
 import { Segmented, SettingLine, smallButtonClass } from "./settings-ui";
 
 /**
@@ -31,13 +31,20 @@ export function SsoSection() {
     // biome-ignore lint/correctness/useExhaustiveDependencies: checked once when Settings opens
   }, []);
 
+  // On: StreamHub's Edge profile (and Edge's own switch, when it offers one and it is off).
+  // Off: Copilot in a private session, where the Windows account is not used. From the next start.
   const switchTo = (on: boolean) =>
     run(on ? "Turning on..." : "Turning off...", async () => {
-      const r = await api.setSso(on);
-      setStatus(r.status);
-      setNote(r.result.startsWith("turned") ? `Single sign-on ${r.result.replace("turned ", "")}. Applies after StreamHub restarts.` : `Not changed: ${r.result}.`);
-    });
-  const setup = () =>
+      await api.setSetting("signIn", on ? "single-sign-on" : "private");
+      let edge = "";
+      if (on && status?.profileSso === "off") edge = (await api.setSso(true)).result;
+      setStatus(await api.ssoStatus());
+      setNote(
+        on
+          ? `Single sign-on on${edge ? ` (Edge's switch: ${edge})` : ""}. Applies at the next StreamHub start.`
+          : "Single sign-on off: from the next StreamHub start, Copilot opens in a private session where you sign in yourself."
+      );
+    });  const setup = () =>
     run("Running setup...", async () => {
       const r = await api.ssoSetup();
       setStatus((s) => ({ ...(s ?? r.status), ...r.status, profileSso: r.result === "turned on" || r.result === "already on" ? "on" : (s?.profileSso ?? r.status.profileSso) }));
@@ -49,10 +56,10 @@ export function SsoSection() {
     setNote("Edge's profile settings are open in StreamHub's Edge window.");
   });
 
-  const canSwitch = !busy && status !== null && (status.profileSso === "on" || status.profileSso === "off");
-  const on = status?.profileSso === "on";
+  // The switch works whenever there is something to sign in with, and always to come back from a private session.
+  const canSwitch = !busy && status !== null && (status.workAccount || status.signIn === "private");
+  const on = status?.signIn !== "private";
 
-  const accountText = status?.profileAccount === "work" ? "a work account" : status?.profileAccount === "personal" ? "a personal account" : status?.profileAccount === "none" ? "no account" : "unknown";
   return (
     <SettingLine
       below={
@@ -77,18 +84,25 @@ export function SsoSection() {
             { id: "on", label: "On" },
             { id: "off", label: "Off" },
           ]}
-          value={canSwitch ? (on ? "on" : "off") : null}
+          // Turned on by Edge itself (or by the work account): shown as on, but StreamHub cannot change it.
+          value={status ? (on ? "on" : "off") : null}
         />
       }
       help="Copilot signs in by itself after a restart, with the work account Windows already holds. No password is stored, and only StreamHub's own Edge profile is changed."
       notes={
         <>
-          <div className="mt-1 text-muted-foreground text-xs">{busy || ssoStateText(status)}</div>
-          {status && (
-            <div className="text-muted-foreground text-xs">
-              Work account on this PC: {status.workAccount ? "yes" : "no"}. Edge profile signed in with: {accountText}. Copilot: {copilotText(status.copilot)}.
-            </div>
+          {status && !busy && (
+            <ul className="mt-1.5 space-y-0.5 text-xs">
+              {ssoStatusRows(status).map((r) => (
+                <li className="flex gap-1.5" key={r.label}>
+                  <span className="text-muted-foreground">&bull;</span>
+                  <span className="text-muted-foreground">{r.label}:</span>
+                  <span>{r.value}</span>
+                </li>
+              ))}
+            </ul>
           )}
+          <div className="mt-1 text-muted-foreground text-xs">{busy || ssoStateText(status)}</div>
           {note && <div className="text-muted-foreground text-xs">{note}</div>}
           {error && <div className="text-rose-500 text-xs">{error}</div>}
         </>

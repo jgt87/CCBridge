@@ -60,6 +60,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
   const side =
     s.type === "info" ? null : (
       <>
+        <span className={cn("text-muted-foreground text-xs", !saved && "invisible")}>Saved</span>
         <button
           className={cn("rounded p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5", !s.custom && "invisible")}
           onClick={() => save(null)}
@@ -68,7 +69,6 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </button>
-        <span className={cn("text-muted-foreground text-xs", !saved && "invisible")}>Saved</span>
       </>
     );
   const help = (
@@ -235,7 +235,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, [onClose]);
   const groups = useMemo(() => {
     const m = new Map<string, Setting[]>();
-    for (const s of settings) m.set(s.group, [...(m.get(s.group) ?? []), s]);
+    for (const s of settings) if (s.group !== "Sign-in") m.set(s.group, [...(m.get(s.group) ?? []), s]);
     return [...m.entries()];
   }, [settings]);
 
@@ -246,7 +246,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header stays in place; only the settings below it scroll. */}
-        <div className="flex shrink-0 items-center justify-between border-black/10 border-b px-5 py-3 dark:border-white/10">
+        <div className="flex shrink-0 items-center justify-between overflow-hidden border-black/10 border-b px-5 py-3 [scrollbar-gutter:stable_both-edges] dark:border-white/10">
           <div>
             <div className="font-semibold">Settings</div>
             <div className="text-muted-foreground text-xs">For this computer; changes apply right away and are kept across updates.</div>
@@ -278,7 +278,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 [scrollbar-gutter:stable_both-edges]">
           {error && <div className="pt-2 text-rose-500 text-sm">{error}</div>}
           {resetNote && <div className="pt-2 text-muted-foreground text-sm">{resetNote}</div>}
           <SettingsGroup first title="This browser">

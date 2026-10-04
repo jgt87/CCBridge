@@ -162,7 +162,10 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^GET /api/files$' {
             if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ files = @() } }
-            $stats = Get-SessionChangeStats $State.ProjectRoot ([string]$State.SessionSince)
+            # Line counts for the whole session, or only for the last change (setting fileChangeCounts).
+            $since = [string]$State.SessionSince
+            if ("$($State.Config.fileChangeCounts)" -eq 'last-change') { $last = Get-LastChangeSetId $State.ProjectRoot; $since = $(if ($last) { $last } else { '99999999' }) }
+            $stats = Get-SessionChangeStats $State.ProjectRoot $since
             $files = @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object {
                 $s = $stats[$_.path]
                 if ($s) { [pscustomobject]@{ path = $_.path; size = $_.size; added = $s.added; removed = $s.removed; created = [bool]$s.created } } else { $_ }
@@ -462,7 +465,9 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^GET /api/sso$' {
             # Settings > Sign-in: work account on this PC, the profile switch, the Copilot tab.
-            return Send-Json $Ctx @{ status = (Get-SsoStatus -Port ([int]$State.Config.cdpPort)) }
+            $st = Get-SsoStatus -Port ([int]$State.Config.cdpPort)
+            $st.signIn = $(if ("$($State.Config.signIn)" -eq 'private') { 'private' } else { 'single-sign-on' })
+            return Send-Json $Ctx @{ status = $st }
         }
         '^POST /api/sso(/setup|/open)?$' {
             # Only the StreamHub page itself (its Origin) changes how Edge signs in.

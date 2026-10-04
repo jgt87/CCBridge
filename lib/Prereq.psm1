@@ -29,6 +29,25 @@ function Get-DeviceJoinStatus {
     $out
 }
 
+function Rename-AppShortcuts {
+    <# Shortcuts made before the rename (CCBridge.lnk on the desktop and in the Start menu) become
+       StreamHub.lnk. Only shortcuts that start StreamHub's own start.cmd are touched; when a
+       StreamHub.lnk is already there, the old one is removed. Returns the new paths. $Folders and
+       $Target are for tests. #>
+    param([string[]]$Folders = @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('Desktop')), [string]$Target = '')
+    $shell = New-Object -ComObject WScript.Shell
+    foreach ($dir in @($Folders | Where-Object { $_ })) {
+        $old = Join-Path $dir 'CCBridge.lnk'
+        if (-not (Test-Path -LiteralPath $old -PathType Leaf)) { continue }
+        $points = "$($shell.CreateShortcut($old).TargetPath)"
+        $ours = if ($Target) { $points -ieq $Target } else { $points -match '(?i)\\CCBridge\\start\.cmd$' }
+        if (-not $ours) { continue }
+        $new = Join-Path $dir 'StreamHub.lnk'
+        if (Test-Path -LiteralPath $new) { [IO.File]::Delete($old) } else { [IO.File]::Move($old, $new) }
+        $new
+    }
+}
+
 function New-Check([string]$Name, [string]$Status, [string]$Detail, [string]$Hint = '', [string]$Link = '', [string]$Fix = '') {
     [pscustomobject]@{ name = $Name; status = $Status; detail = $Detail; hint = $Hint; link = $Link; fix = $Fix }
 }
@@ -263,4 +282,4 @@ function Write-PrereqReport {
     -not @($Checks | Where-Object { $_.status -eq 'FAIL' }).Count
 }
 
-Export-ModuleMember -Function Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText
+Export-ModuleMember -Function Rename-AppShortcuts, Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText

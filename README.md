@@ -131,7 +131,7 @@ The same bridge and agent loop for MCP clients (Claude Code, VS Code, ...), in a
 
 The start screen lists these as well, once Copilot is connected (`ui-src/src/lib/limitations.ts`):
 
-- **No Git integration**: commits, branches and pushes happen outside StreamHub.
+- **No Git integration**: StreamHub has no Git features: it does not commit, branch or push. Use your own Git tools for that.
 - **No MCP support**: MCP servers cannot be connected to StreamHub, so their tools are not available in a task. (Other programs can still use StreamHub itself as an MCP server; see [MCP server](#mcp-server).)
 - **No skill support**: there are no reusable skill packages. Project notes (`AGENTS.md`), runbooks and fetch prompts carry instructions instead.
 - **No artefact generator**: StreamHub does not generate documents, slides or images; Copilot writes text and code files.

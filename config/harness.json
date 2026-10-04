@@ -16,6 +16,8 @@
   "saveReplyFrames": true,
   "autoUpdate": true,
   "webRead": "named-sites",
+  "signIn": "single-sign-on",
+  "fileChangeCounts": "last-change",
   "stallSec": 90,
   "actionRetries": 2,
   "reviewAfterChanges": "big",

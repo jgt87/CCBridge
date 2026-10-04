@@ -6,6 +6,20 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.55] - 2026-10-04
+
+### Changed
+
+- Settings > Sign-in: single sign-on can be switched off and on again, also when Edge turned it on by itself. Off makes Copilot open in a private session in StreamHub's Edge (like an InPrivate window), where the Windows account is not used and you sign in yourself once per Edge start; On returns to StreamHub's Edge profile and closes the private session. No Edge setting or policy is changed. Applies at the next start (setting `signIn`). The status list shows which session Copilot uses.
+- Settings: the same padding left and right; reset and "Saved" sit just left of each control, so the controls end at the right padding.
+- Settings > Sign-in shows its status as a list: single sign-on, work account on this PC, the Edge profile's account, and the Copilot tab.
+- Files tab: a setting (Settings > Files > *Line counts in the Files tab*) to count added and removed lines for the last change only (the new default), so earlier counts and "new" tags disappear at the next change, or for the whole session as before.
+- Files tab: the "Source data" section is now called "Add data".
+- Every web link in the app, including the changelog link, opens in a new tab.
+- The start screen's limitations list says plainly that Git is not part of StreamHub (no commits, branches or pushes).
+- This changelog: entries that were missing for v0.1.50, v0.1.51 and v0.1.53 were added.
+- The desktop and Start menu shortcuts from before the rename (`CCBridge.lnk`) are renamed to `StreamHub` when StreamHub starts, so no new install is needed. Only shortcuts that start StreamHub itself are touched.
+
 ## [v0.1.54] - 2026-10-04
 
 ### Changed
@@ -26,6 +40,9 @@ Nothing yet.
   - a `web` action: StreamHub reads a public page and gives Copilot its text, as data. Sites your message names are read at once, other sites need your approval, and local or intranet addresses are never read. Setting: Settings > Web > *Read web pages*;
   - fetch prompts and runbooks take `sources`, `sites` and `pages` header fields: which data to use, the only websites to use (sources outside them are noted), and pages read up front for exact figures. The *New fetch prompt* form has fields for them;
   - a runbook template *Data from web pages*.
+- When StreamHub manages the Work/Web switch, a fetch prompt or runbook with `sources` sets it for its run (web: off, work or both: on) and puts it back afterwards.
+- Saved fetch prompts show their sources, sites and number of pages under the prompt text.
+- The blank runbook template documents the `sources`, `sites` and `pages` fields.
 
 ### Fixed
 
@@ -59,7 +76,8 @@ Nothing yet.
 - `agent-capture.cmd`: records a run you do by hand the same way.
 - Settings > Sign-in: single sign-on with your Windows work account in StreamHub's Edge profile, so Copilot signs in by itself after a restart. It shows the status (work account on this PC, the profile switch, the Copilot tab), turns Edge's "single sign-on for work or school sites" switch on or off in StreamHub's own profile only, and has "Run setup" (with a log) and "Open Edge's profile settings". No password is stored, and Edge policies are never changed. `sso-setup.cmd` does the same from a command window.
 - The system check at start shows whether this PC can use single sign-on.
-- README: "How a prompt is typed and sent", "Staying signed in" and "Tech stack".
+- README: "How a prompt is typed and sent", "Staying signed in", "Tech stack", and how to run the Researcher and Analyst test.
+- `stream-shape.cmd` can summarise one recording (`-Path`, `-OutFile`); `agent-capture.cmd` uses it for its structure file.
 
 ## [v0.1.50] - 2026-10-04
 
@@ -71,10 +89,12 @@ Nothing yet.
 - Import index: which file imports or uses which (ids, inline handlers, custom hooks), with line numbers kept current after every round. Copilot sees "Used by" when it reads a file. Imports of moved or deleted files, and removed ids, functions or hooks that others still use, are reported with the line to fix.
 - Pages opened from disk: local `fetch()`, JSON imports and module scripts, which the browser blocks there, are reported with the replacement (a `.js` data file and the `<script>` tag to add).
 - Files tab: new files get a "new" tag, a bar shows while the tree refreshes, and the tree refreshes after each step and when the window gets focus.
+- `CHANGELOG.md`, with every release since v0.1.0.
 
 ### Changed
 
 - Line counts and "new" tags in the Files tab cover the changes in the restored chat after a restart.
+- The issue scan and the code review skip `History/`, `Logs/` and `Runbooks/Exports/`, which hold generated data (the review also skips `.streamhub/`).
 - Copilot may not write in `.streamhub/`.
 - Settings has an "Update automatically" switch (Updates). It says plainly that a new release installs only when a new instance of the app starts.
 - The commit id next to the version (bottom left) links to the changelog on GitHub as of that commit.
@@ -631,7 +651,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.54...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.55...HEAD
+[v0.1.55]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.55
 [v0.1.54]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.54
 [v0.1.53]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.53
 [v0.1.52]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.52

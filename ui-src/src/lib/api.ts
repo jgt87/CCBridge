@@ -377,6 +377,8 @@ export interface Setting {
 export interface SsoStatus {
   workAccount: boolean;
   profileSso: "on" | "on-auto" | "off" | "managed" | "signed-in-work" | "not-found" | "unavailable" | "edge-not-running" | "unknown";
+  /** How Copilot signs in from the next start: StreamHub's profile, or a private session (single sign-on off). */
+  signIn?: "single-sign-on" | "private";
   /** The account StreamHub's Edge profile is signed in with. */
   profileAccount?: "work" | "personal" | "none" | "unknown";
   switchLabel?: string;

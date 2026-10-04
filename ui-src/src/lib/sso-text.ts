@@ -3,6 +3,8 @@ import type { SsoStatus } from "./api";
 /** Settings > Sign-in: what the switch state means, in words. */
 export function ssoStateText(s: SsoStatus | null): string {
   if (!s) return "Checking...";
+  if (s.signIn === "private")
+    return "Off: Copilot opens in a private session, where you sign in yourself once per Edge start; your Windows account is not used. Turn it on to sign in with your Windows account again. Applies at the next StreamHub start.";
   switch (s.profileSso) {
     case "on":
       return "On in StreamHub's Edge profile.";
@@ -32,4 +34,48 @@ export function copilotText(c: SsoStatus["copilot"] | undefined): string {
   if (c === "no tab") return "no Copilot tab open";
   if (c === "edge not running") return "Edge not running";
   return "-";
+}
+
+/** The switch state in a few words, for the status list. */
+export function ssoShortText(s: SsoStatus): string {
+  if (s.signIn === "private") return "Off (private session)";
+  switch (s.profileSso) {
+    case "on":
+      return "On";
+    case "on-auto":
+      return "On, turned on by Edge itself";
+    case "signed-in-work":
+      return "On, through the work account";
+    case "off":
+      return "Off";
+    case "managed":
+      return "Set by your organisation";
+    case "not-found":
+      return "Not offered by Edge";
+    case "unavailable":
+      return "Not available";
+    case "edge-not-running":
+      return "Edge is not running";
+    default:
+      return "Unknown";
+  }
+}
+
+/** Which account StreamHub's Edge profile uses, in words. */
+export function accountText(a: SsoStatus["profileAccount"]): string {
+  if (a === "work") return "signed in with a work account";
+  if (a === "personal") return "signed in with a personal account";
+  if (a === "none") return "not signed in";
+  return "unknown";
+}
+
+/** Settings > Sign-in: the status as label/value rows. */
+export function ssoStatusRows(s: SsoStatus): { label: string; value: string }[] {
+  return [
+    { label: "Single sign-on", value: ssoShortText(s) },
+    { label: "Work account on this PC", value: s.workAccount ? "yes" : "no" },
+    { label: "Edge profile", value: accountText(s.profileAccount) },
+    { label: "Copilot", value: copilotText(s.copilot) },
+    { label: "Copilot session", value: s.signIn === "private" ? "private, you sign in yourself" : "StreamHub's Edge profile" },
+  ];
 }
