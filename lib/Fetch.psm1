@@ -1,13 +1,15 @@
 # Saved fetch prompts: prompts that are run on demand to get current data from Copilot (for example
 # today's meetings), with the answer written to a markdown file in the project so it can be attached
 # to later messages with @.
-#   fetch/<name>.prompt.md   the prompt (plain text, editable)
-#   fetch/<name>.md          the latest answer, with a short header (when, from which prompt)
+#   Runbooks/<name>.prompt.md   the prompt (plain text, editable)
+#   Runbooks/Exports/<name>.md  the latest answer, with a short header (when, from which prompt)
+#   History/<name>-<stamp>.md   earlier answers (Layout.psm1 has the folders)
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Workspace', 'Executor') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Workspace', 'Executor', 'Layout') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
-$script:FetchDir = 'fetch'
+$script:FetchDir = Get-LayoutPath Runbooks
+$script:AnswerDir = Get-LayoutPath Exports
 
 function ConvertTo-FetchName {
     <# A file-safe name: lowercase letters, digits and dashes. #>
@@ -37,13 +39,13 @@ function Get-FetchPrompts {
     if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return }
     foreach ($f in Get-ChildItem -LiteralPath $dir -Filter '*.prompt.md' -File | Sort-Object Name) {
         $name = $f.Name.Substring(0, $f.Name.Length - '.prompt.md'.Length)
-        $out = Join-Path $dir "$name.md"
+        $out = Join-Path $ProjectRoot ("$($script:AnswerDir)/$name.md".Replace('/', '\'))
         $at = Get-FetchedAt $out
         [pscustomobject]@{
             name = $name
             prompt = ([IO.File]::ReadAllText($f.FullName)).Trim()
             promptPath = "$($script:FetchDir)/$name.prompt.md"
-            output = "$($script:FetchDir)/$name.md"
+            output = "$($script:AnswerDir)/$name.md"
             fetchedAt = $(if ($at) { $at.ToString('s') } else { $null })
             outputSize = $(if (Test-Path -LiteralPath $out) { (Get-Item -LiteralPath $out).Length } else { 0 })
         }
@@ -51,7 +53,7 @@ function Get-FetchPrompts {
 }
 
 function Save-FetchPrompt {
-    <# Creates or replaces fetch/<name>.prompt.md. Returns the saved prompt. #>
+    <# Creates or replaces Runbooks/<name>.prompt.md. Returns the saved prompt. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][AllowEmptyString()][string]$Prompt)
     if (-not $Prompt.Trim()) { throw 'The fetch prompt is empty.' }
     $slug = ConvertTo-FetchName $Name
@@ -82,10 +84,18 @@ function Format-FetchResult {
 }
 
 function Save-FetchResult {
+    <# Writes the answer to Runbooks/Exports/<name>.md; the answer it replaces goes to History/. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Content)
-    $full = Assert-Writable $ProjectRoot "$($script:FetchDir)/$Name.md"
+    $rel = "$($script:AnswerDir)/$Name.md"
+    $full = Assert-Writable $ProjectRoot $rel
+    if (Test-Path -LiteralPath $full -PathType Leaf) {
+        $old = Assert-Writable $ProjectRoot (Get-LayoutPath History "$Name-$((Get-Item -LiteralPath $full).LastWriteTime.ToString('yyyyMMdd-HHmmss')).md")
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path $old)
+        [IO.File]::Copy($full, $old, $true)
+    }
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $full)
     [IO.File]::WriteAllText($full, $Content, (New-Object Text.UTF8Encoding($false)))
-    "$($script:FetchDir)/$Name.md"
+    $rel
 }
 
 Export-ModuleMember -Function ConvertTo-FetchName, Get-FetchPrompts, Save-FetchPrompt, Format-FetchResult, Save-FetchResult

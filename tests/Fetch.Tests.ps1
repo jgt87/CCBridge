@@ -24,9 +24,9 @@ Describe 'Save-FetchPrompt and Get-FetchPrompts' {
         $p = New-TempProject
         $item = Save-FetchPrompt $p 'Meetings today' 'List my meetings for today with times and attendees.'
         $item.name | Should BeExactly 'meetings-today'
-        $item.output | Should BeExactly 'fetch/meetings-today.md'
+        $item.output | Should BeExactly 'Runbooks/Exports/meetings-today.md'
         $item.fetchedAt | Should BeNullOrEmpty
-        Test-Path (Join-Path $p 'fetch\meetings-today.prompt.md') | Should Be $true
+        Test-Path (Join-Path $p 'Runbooks\meetings-today.prompt.md') | Should Be $true
         @(Get-FetchPrompts $p).Count | Should Be 1
         Remove-Item $p -Recurse -Force
     }
@@ -48,10 +48,20 @@ Describe 'Format-FetchResult and Save-FetchResult' {
         $content | Should Match '_Fetched 2026-10-02 08:15'
         $content | Should Match '- \[Agenda\]\(https://example.com/a\)'
         $content | Should Not Match 'CCBridge'
-        Save-FetchResult $p 'meetings-today' $content | Should BeExactly 'fetch/meetings-today.md'
+        Save-FetchResult $p 'meetings-today' $content | Should BeExactly 'Runbooks/Exports/meetings-today.md'
         $item = Get-FetchPrompts $p | Select-Object -First 1
         $item.fetchedAt | Should BeExactly '2026-10-02T08:15:00'
         $item.outputSize -gt 0 | Should Be $true
+        Remove-Item $p -Recurse -Force
+    }
+    It 'keeps the answer it replaces in History/' {
+        $p = New-TempProject
+        $null = Save-FetchResult $p 'today' 'first'
+        $null = Save-FetchResult $p 'today' 'second'
+        [IO.File]::ReadAllText((Join-Path $p 'Runbooks\Exports\today.md')) | Should BeExactly 'second'
+        $old = @(Get-ChildItem (Join-Path $p 'History') -Filter 'today-*.md')
+        $old.Count | Should Be 1
+        [IO.File]::ReadAllText($old[0].FullName) | Should BeExactly 'first'
         Remove-Item $p -Recurse -Force
     }
 }

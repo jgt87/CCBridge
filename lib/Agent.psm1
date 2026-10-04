@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -176,6 +176,23 @@ function ConvertTo-EventHash($Object) {
     if ($Object -is [System.Collections.IEnumerable] -and $Object -isnot [System.Management.Automation.PSCustomObject]) { return , @($Object | ForEach-Object { ConvertTo-EventHash $_ }) }
     $h = @{}; foreach ($p in $Object.PSObject.Properties) { $h[$p.Name] = ConvertTo-EventHash $p.Value }
     $h
+}
+
+function Get-ChangeCountStart {
+    <# Where the Files tab's line counts and "new" marks start for a project just opened: at the
+       oldest event of its restored chat (a minute before, so a step's change set falls inside),
+       when that is earlier than $Now. So after a restart the counts match the change sets still
+       in the chat. Returns a checkpoint-style id (yyyyMMdd-HHmmss-fff). #>
+    param($State, [int]$AfterSeq, [string]$Now)
+    $first = $null
+    foreach ($e in @($State.Events)) {
+        if ($e.seq -le $AfterSeq -or -not $e.restored -or -not $e.at) { continue }
+        $t = [datetime]::MinValue
+        if ([datetime]::TryParse("$($e.at)", [ref]$t) -and (-not $first -or $t -lt $first)) { $first = $t }
+    }
+    if (-not $first) { return $Now }
+    $since = $first.AddMinutes(-1).ToString('yyyyMMdd-HHmmss-fff')
+    if ($since -lt $Now) { $since } else { $Now }
 }
 
 function Restore-ChatHistory {
@@ -958,7 +975,7 @@ function Invoke-ReviewJob {
 function Invoke-RunbookJob {
     <# Runs a project runbook in a fresh Copilot chat (read-only), takes the JSON from the reply,
        checks it against the runbook header, asks Copilot once to correct it when it does not match,
-       and saves a valid result to the runbook's output file (plus a dated copy in exports/history).
+       and saves a valid result to the runbook's output file (plus a dated copy in History/).
        An existing output file is kept when the run fails. #>
     param($State, [string]$Name)
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
@@ -1006,7 +1023,7 @@ function Invoke-RunbookJob {
 }
 
 function Invoke-FetchJob {
-    <# Runs a saved fetch prompt in a fresh Copilot chat and writes the answer to fetch/<name>.md.
+    <# Runs a saved fetch prompt in a fresh Copilot chat and writes the answer to Runbooks/Exports/<name>.md.
        Copilot only answers: action blocks in the answer are not carried out. An existing answer
        file is kept when the fetch fails. #>
     param($State, [string]$Name)
@@ -1422,7 +1439,10 @@ function Invoke-AgentAction {
         'read' {
             $paths = Get-ActionPaths $Action
             $evt.target = $paths -join ', '; Add-AgentEvent $State 'action' $evt
-            return @{ ok = $true; summary = "read $($paths.Count) file(s)"; output = ((Invoke-ReadAction $root $paths -MaxCharsPerFile 200000) -join "`n`n"); readPaths = @($paths) }
+            $out = (Invoke-ReadAction $root $paths -MaxCharsPerFile 200000) -join "`n`n"
+            $usedBy = try { Format-ImportUsers $root $paths } catch { '' }   # who imports it or uses its ids, functions, hooks
+            if ($usedBy) { $out += "`n`n$usedBy" }
+            return @{ ok = $true; summary = "read $($paths.Count) file(s)"; output = $out; readPaths = @($paths) }
         }
         'glob' {
             $pat = if ($Action.arg) { $Action.arg } else { $Action.body.Split("`n")[0].Trim() }
@@ -1543,7 +1563,7 @@ function Invoke-AgentAction {
             $why = $rbProblems -join '; '
             Write-CCBLog info agent "Runbook file refused: $($Action.arg)" @{ problems = $rbProblems }
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "runbook: $why" })
-            return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (runbook rules)"; output = "error: not written: $why. A runbook is one file runbooks/NAME.runbook.md that starts with the template's header block; send the complete file again with a write block." }
+            return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (runbook rules)"; output = "error: not written: $why. A runbook is one file Runbooks/NAME.runbook.md that starts with the template's header block; send the complete file again with a write block." }
         }
         $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0) -or [bool]$riskWarning
     } elseif ($Action.type -eq 'run') {
@@ -1804,6 +1824,10 @@ function Invoke-AgentTurn {
         $kind = Get-TurnKind $State $Text $ctx $ForceKind
         # Issue cycle step 1: index before the change (not for plain chat or plan mode).
         if ($kind -ne 'chat' -and $State.Mode -ne 'plan') { $baseline = Get-IssueBaseline $State }
+        if ($kind -ne 'chat' -and $State.ProjectRoot) {
+            $State.Activity.label = 'Updating the import index'
+            try { $null = Update-ImportIndex $State.ProjectRoot } catch { Write-CCBLogError agent 'import index' $_ } finally { $State.Activity.label = '' }
+        }
         # The app shows how a message was sent, with "Send again as a coding task" for plain chat.
         Add-AgentEvent $State 'kind' @{ taskKind = $kind }
         $summary = $State.Summary; $State.Summary = $null
@@ -1936,6 +1960,9 @@ function Invoke-AgentTurn {
                         foreach ($issue in @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot)) { "${rel}: $issue" }
                     } catch { Write-CCBLogError agent "File check $p" $_ }
                 }) + @(if ("$($State.Config.pageCheck)" -ne 'off') { Test-ScriptSyntax $State $roundChanged }))
+                # Import index: the changed files again, and what the round broke elsewhere (an import
+                # of a moved file, an id, function or hook others still use).
+                try { $syntax = @($syntax) + @(Update-ImportsAfterRound $State.ProjectRoot $roundChanged) } catch { Write-CCBLogError agent 'import index' $_ }
                 $ev.syntaxLast = @($syntax)
                 if ($syntax.Count) {
                     Write-CCBLog info agent 'File check problems after this round' @{ count = $syntax.Count }
@@ -2213,4 +2240,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

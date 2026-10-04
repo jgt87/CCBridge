@@ -2,6 +2,8 @@
 # The issue cycle: code-health limits, the project's issue details (.streamhub\issues.json), the app
 # index that imports them, incremental re-indexing, statuses, and the fix cycle after a task.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+# Project state (backups, chat history) of the test projects goes to a temporary folder, deleted below.
+$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Issues.psm1') -Force
@@ -271,3 +273,6 @@ Describe 'Reset-CCBridgeSettings' {
 
 Remove-Item -LiteralPath $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
 $env:CCBRIDGE_ISSUE_INDEX = $null
+
+if ($env:CCBRIDGE_STATE_ROOT -and (Test-Path -LiteralPath $env:CCBRIDGE_STATE_ROOT)) { [IO.Directory]::Delete($env:CCBRIDGE_STATE_ROOT, $true) }
+$env:CCBRIDGE_STATE_ROOT = $null

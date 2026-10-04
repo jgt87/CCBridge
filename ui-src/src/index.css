@@ -170,3 +170,7 @@
 /* First-time Split screen hint: a small upward nudge toward Edge's toolbar (split-view-hint.tsx). */
 @keyframes ccb-hint-nudge { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 @media (prefers-reduced-motion: reduce) { [class*="ccb-hint-nudge"] { animation: none; } }
+
+/* Files tab: the bar while the file tree refreshes (side-panel.tsx). */
+@keyframes ccb-sweep { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) { [class*="ccb-sweep"] { animation: none; } }

@@ -1,6 +1,6 @@
 ---
 title: My runbook
-output: exports/my-runbook.json
+output: Runbooks/Exports/my-runbook.json
 itemsKey: items
 required: generatedAt, period, items, truncated
 requiredItemFields: id, title, date
@@ -9,7 +9,7 @@ requiredItemFields: id, title, date
 HOW TO FILL IN THIS RUNBOOK
 - The block between the --- lines is read by the helper program:
   title               shown in the app
-  output              where the JSON is saved (a dated copy also goes to exports/history/)
+  output              where the JSON is saved (a dated copy also goes to History/)
   itemsKey            the name of the list in the JSON
   required            keys the JSON must have (comma separated)
   requiredItemFields  fields every list item must have (comma separated)

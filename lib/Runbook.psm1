@@ -1,14 +1,16 @@
 # Runbooks: repeatable, read-only exports of Microsoft 365 data (via Copilot with Work IQ) to JSON.
 #   templates\runbooks\*.runbook.md    ready-made runbooks shipped with the app
-#   runbooks\<name>.runbook.md         the project's runbooks (header + instructions for Copilot)
-#   <output> (e.g. exports\<name>.json) the latest valid result, plus exports\history\<name>-<stamp>.json
+#   Runbooks\<name>.runbook.md         the project's runbooks (header + instructions for Copilot)
+#   <output> (e.g. Runbooks\Exports\<name>.json) the latest valid result, plus History\<name>-<stamp>.json
+#   (the folders come from Layout.psm1)
 # The header (between --- lines) is read here: title, output, itemsKey, required, requiredItemFields;
 # other header lines become {{placeholders}}. HTML comments are notes for the person and not sent.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Workspace', 'Executor', 'Fetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Workspace', 'Executor', 'Fetch', 'Layout') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
-$script:RunbookDir = 'runbooks'
+$script:RunbookDir = Get-LayoutPath Runbooks
+$script:ExportDir = Get-LayoutPath Exports
 $script:Reserved = @('title', 'output', 'itemsKey', 'required', 'requiredItemFields')
 
 function Read-Runbook {
@@ -39,7 +41,7 @@ function Get-RunbookSlug([string]$Text) {
 
 function Test-RunbookFile {
     <# Rules for a runbook file Copilot writes; returns the problems (none = fine).
-       - In runbooks/: the name is runbooks/NAME.runbook.md with NAME lowercase words joined by -,
+       - In Runbooks/: the name is Runbooks/NAME.runbook.md with NAME lowercase words joined by -,
          the header has title and output (a .json path inside the project), and there are
          instructions with the JSON shape in a ```json block.
        - Elsewhere: when the request is about runbooks ($AboutRunbooks) and the file looks like a
@@ -52,21 +54,23 @@ function Test-RunbookFile {
     $slug = Get-RunbookSlug $(if ($rb.meta.title) { $rb.meta.title } else { $name })
     if (-not $slug) { $slug = 'NAME' }
     $isMd = $name -match '(?i)\.md$'
-    if ($p -notmatch '^runbooks/[^/]+$' -or $name -notmatch '\.runbook\.md$') {
+    $rd = $script:RunbookDir; $ed = $script:ExportDir
+    if ($p -notmatch "(?i)^$([regex]::Escape($rd))/[^/]+$" -or $name -notmatch '\.runbook\.md$') {
         $looks = $isMd -and (($name -match '(?i)runbook') -or ($Text -match '(?s)^\s*---\s*\n.*?\boutput\s*:'))
-        if ($AboutRunbooks -and $looks) { return @("runbooks are saved as runbooks/NAME.runbook.md (NAME: lowercase words joined with -), not as $p; write it to runbooks/$slug.runbook.md") }
+        if ($AboutRunbooks -and $looks) { return @("runbooks are saved as $rd/NAME.runbook.md (NAME: lowercase words joined with -), not as $p; write it to $rd/$slug.runbook.md") }
         return @()
     }
     $problems = New-Object System.Collections.Generic.List[string]
     $stem = $name.Substring(0, $name.Length - '.runbook.md'.Length)
-    if ($stem -cnotmatch '^[a-z0-9]+(-[a-z0-9]+)*$') { $problems.Add("the name must be lowercase words joined with -, for example runbooks/$slug.runbook.md") }
+    if ($stem -cnotmatch '^[a-z0-9]+(-[a-z0-9]+)*$') { $problems.Add("the name must be lowercase words joined with -, for example $rd/$slug.runbook.md") }
     if (-not $rb.meta.Count) { $problems.Add('the file must start with the header block between --- lines (title, output, itemsKey, required, requiredItemFields) as in the template') }
     else {
         if (-not "$($rb.meta.title)".Trim()) { $problems.Add('the header needs a title: line') }
         $out = "$($rb.meta.output)".Trim()
-        if (-not $out) { $problems.Add("the header needs an output: line, for example output: exports/$stem.json") }
-        elseif ($out -notmatch '(?i)\.json$') { $problems.Add("output must be a .json file, for example exports/$stem.json") }
-        elseif ([IO.Path]::IsPathRooted($out) -or $out -match '(^|[\\/])\.\.([\\/]|$)') { $problems.Add("output must be a path inside the project, for example exports/$stem.json") }
+        if (-not $out) { $problems.Add("the header needs an output: line, for example output: $ed/$stem.json") }
+        elseif ($out -notmatch '(?i)\.json$') { $problems.Add("output must be a .json file, for example $ed/$stem.json") }
+        elseif ([IO.Path]::IsPathRooted($out) -or $out -match '(^|[\\/])\.\.([\\/]|$)') { $problems.Add("output must be a path inside the project, for example $ed/$stem.json") }
+        elseif ($out -notmatch "(?i)^$([regex]::Escape($ed))/") { $problems.Add("the data goes in $ed/: write output: $ed/$stem.json") }
     }
     if (-not $rb.body) { $problems.Add('the runbook has no instructions below the header') }
     elseif ($rb.body -notmatch '```+\s*json') { $problems.Add('the Output section must show the JSON shape in a ```json block') }
@@ -75,7 +79,7 @@ function Test-RunbookFile {
 
 function Get-RunbookRunRequest {
     <# Whether a chat message asks to run a runbook, and which one. Naming a runbook is enough: its
-       name, title or path (@runbooks/NAME.runbook.md). Without a specific runbook, the word runbook
+       name, title or path (@Runbooks/NAME.runbook.md). Without a specific runbook, the word runbook
        (draaiboek) with a run word (run, execute, start, draai, voer uit) runs the only runbook, or
        asks which one. Not when the message creates or changes a runbook, or asks about one.
        Returns $null (not a run request) or @{ name } or @{ ambiguous = $true; names }. #>
@@ -146,7 +150,7 @@ function Get-Runbooks {
     foreach ($f in Get-ChildItem -LiteralPath $dir -Filter '*.runbook.md' -File | Sort-Object Name) {
         $name = $f.Name.Substring(0, $f.Name.Length - '.runbook.md'.Length)
         $rb = Read-Runbook ([IO.File]::ReadAllText($f.FullName))
-        $out = if ($rb.meta.output) { $rb.meta.output } else { "exports/$name.json" }
+        $out = if ($rb.meta.output) { $rb.meta.output } else { "$($script:ExportDir)/$name.json" }
         $outFull = try { Resolve-ProjectPath $ProjectRoot $out } catch { $null }
         $last = if ($outFull -and (Test-Path -LiteralPath $outFull)) { (Get-Item -LiteralPath $outFull).LastWriteTime.ToString('s') } else { $null }
         [pscustomobject]@{ name = $name; title = $(if ($rb.meta.title) { $rb.meta.title } else { $name }); path = "$($script:RunbookDir)/$($f.Name)"; output = $out; lastRun = $last }
@@ -154,7 +158,7 @@ function Get-Runbooks {
 }
 
 function New-RunbookFromTemplate {
-    <# Copies a template into runbooks/<name>.runbook.md, with its output set to exports/<name>.json. #>
+    <# Copies a template into Runbooks/<name>.runbook.md, with its output set to Runbooks/Exports/<name>.json. #>
     param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Template, [Parameter(Mandatory)][string]$Name)
     $src = Join-Path $AppRoot "templates\runbooks\$Template.runbook.md"
     if (-not (Test-Path -LiteralPath $src)) { throw "There is no runbook template '$Template'." }
@@ -162,7 +166,7 @@ function New-RunbookFromTemplate {
     $full = Assert-Writable $ProjectRoot "$($script:RunbookDir)/$slug.runbook.md"
     if (Test-Path -LiteralPath $full) { throw "A runbook named '$slug' already exists." }
     $text = [IO.File]::ReadAllText($src).Replace("`r`n", "`n")
-    $text = [regex]::Replace($text, '(?m)^output:\s*.*$', "output: exports/$slug.json", 1)
+    $text = [regex]::Replace($text, '(?m)^output:\s*.*$', "output: $($script:ExportDir)/$slug.json", 1)
     $dir = Split-Path $full
     if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -ItemType Directory -Path $dir }
     [IO.File]::WriteAllText($full, $text, (New-Object Text.UTF8Encoding($false)))
@@ -207,13 +211,13 @@ function Test-RunbookOutput {
 }
 
 function Save-RunbookOutput {
-    <# Writes the validated JSON to the runbook's output file and a dated copy to exports/history. #>
+    <# Writes the validated JSON to the runbook's output file and a dated copy to History/. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Output, [Parameter(Mandatory)][string]$Json)
     $enc = New-Object Text.UTF8Encoding($false)
     $full = Assert-Writable $ProjectRoot $Output
     $dir = Split-Path $full; if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -ItemType Directory -Path $dir }
     [IO.File]::WriteAllText($full, $Json.Trim() + "`n", $enc)
-    $hist = "exports/history/$Name-$((Get-Date).ToString('yyyyMMdd-HHmmss')).json"
+    $hist = Get-LayoutPath History "$Name-$((Get-Date).ToString('yyyyMMdd-HHmmss')).json"
     $hfull = Assert-Writable $ProjectRoot $hist
     $hdir = Split-Path $hfull; if (-not (Test-Path -LiteralPath $hdir)) { $null = New-Item -ItemType Directory -Path $hdir }
     [IO.File]::WriteAllText($hfull, $Json.Trim() + "`n", $enc)

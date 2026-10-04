@@ -13,7 +13,7 @@ Describe 'Runbook templates' {
         It "$($t.Name): its example passes its own checks, and it is read-only and ASCII" {
             $text = [IO.File]::ReadAllText($t.FullName)
             $rb = Read-Runbook $text
-            $rb.meta.output | Should Match '^exports/.+\.json$'
+            $rb.meta.output | Should Match '^Runbooks/Exports/.+\.json$'
             $rb.meta.itemsKey | Should Not BeNullOrEmpty
             $rb.body | Should Not Match '<!--'                   # notes for the person are not sent
             $rb.body | Should Match '(?i)read-only'
@@ -68,12 +68,12 @@ Describe 'Runbooks in a project' {
     It 'creates a runbook from a template, lists it and saves its output with a dated copy' {
         $rb = New-RunbookFromTemplate $root $p 'meetings' 'Meetings next week'
         $rb.name | Should Be 'meetings-next-week'
-        $rb.output | Should Be 'exports/meetings-next-week.json'
+        $rb.output | Should Be 'Runbooks/Exports/meetings-next-week.json'
         { New-RunbookFromTemplate $root $p 'meetings' 'Meetings next week' } | Should Throw 'already exists'
         @(Get-Runbooks $p).Count | Should Be 1
-        $saved = Save-RunbookOutput $p 'meetings-next-week' 'exports/meetings-next-week.json' '{ "meetings": [] }'
-        Test-Path (Join-Path $p 'exports\meetings-next-week.json') | Should Be $true
-        $saved.history | Should Match '^exports/history/meetings-next-week-\d{8}-\d{6}\.json$'
+        $saved = Save-RunbookOutput $p 'meetings-next-week' 'Runbooks/Exports/meetings-next-week.json' '{ "meetings": [] }'
+        Test-Path (Join-Path $p 'Runbooks\Exports\meetings-next-week.json') | Should Be $true
+        $saved.history | Should Match '^History/meetings-next-week-\d{8}-\d{6}\.json$'
         (Get-Runbooks $p)[0].lastRun | Should Not BeNullOrEmpty
     }
     It 'sends the runbook with the assistant role, the read-only rule and the JSON instruction' {
@@ -87,26 +87,26 @@ Describe 'Runbooks in a project' {
 }
 
 Describe 'Test-RunbookFile (runbooks Copilot writes)' {
-    $good = "---`ntitle: Meetings next week`noutput: exports/meetings-next-week.json`nitemsKey: items`n---`n# Purpose`nX`n# Output`n``````json`n{ ""items"": [] }`n``````"
-    It 'accepts a runbook in runbooks/ with a proper name and header' {
-        @(Test-RunbookFile 'runbooks/meetings-next-week.runbook.md' $good $true).Count | Should Be 0
+    $good = "---`ntitle: Meetings next week`noutput: Runbooks/Exports/meetings-next-week.json`nitemsKey: items`n---`n# Purpose`nX`n# Output`n``````json`n{ ""items"": [] }`n``````"
+    It 'accepts a runbook in Runbooks/ with a proper name and header' {
+        @(Test-RunbookFile 'Runbooks/meetings-next-week.runbook.md' $good $true).Count | Should Be 0
     }
     It 'refuses RUNBOOK.md at the project root when the request is about runbooks, and names the right path' {
         $p = @(Test-RunbookFile 'RUNBOOK.md' $good $true)
         $p.Count | Should Be 1
-        $p[0] | Should Match 'runbooks/meetings-next-week\.runbook\.md'
-        @(Test-RunbookFile 'docs/my-runbook.md' 'notes' $true)[0] | Should Match 'runbooks/my\.runbook\.md'
+        $p[0] | Should Match 'Runbooks/meetings-next-week\.runbook\.md'
+        @(Test-RunbookFile 'docs/my-runbook.md' 'notes' $true)[0] | Should Match 'Runbooks/my\.runbook\.md'
     }
     It 'leaves other Markdown alone, and RUNBOOK.md when the request is not about runbooks' {
         @(Test-RunbookFile 'README.md' 'hello' $true).Count | Should Be 0
         @(Test-RunbookFile 'RUNBOOK.md' $good $false).Count | Should Be 0
     }
-    It 'checks the name and header of a runbook in runbooks/' {
-        (Test-RunbookFile 'runbooks/Meetings Next.runbook.md' $good $true) -join ';' | Should Match 'lowercase words'
-        (Test-RunbookFile 'runbooks/x.runbook.md' "# Purpose`nno header" $true) -join ';' | Should Match 'header block'
-        (Test-RunbookFile 'runbooks/x.runbook.md' "---`ntitle: X`noutput: exports/x.csv`n---`nbody ``````json`n{}`n``````" $true) -join ';' | Should Match '\.json file'
-        (Test-RunbookFile 'runbooks/x.runbook.md' "---`ntitle: X`noutput: ../x.json`n---`nbody ``````json`n{}`n``````" $true) -join ';' | Should Match 'inside the project'
-        (Test-RunbookFile 'runbooks/x.runbook.md' "---`ntitle: X`noutput: exports/x.json`n---`njust words" $true) -join ';' | Should Match 'json block'
+    It 'checks the name and header of a runbook in Runbooks/' {
+        (Test-RunbookFile 'Runbooks/Meetings Next.runbook.md' $good $true) -join ';' | Should Match 'lowercase words'
+        (Test-RunbookFile 'Runbooks/x.runbook.md' "# Purpose`nno header" $true) -join ';' | Should Match 'header block'
+        (Test-RunbookFile 'Runbooks/x.runbook.md' "---`ntitle: X`noutput: Runbooks/Exports/x.csv`n---`nbody ``````json`n{}`n``````" $true) -join ';' | Should Match '\.json file'
+        (Test-RunbookFile 'Runbooks/x.runbook.md' "---`ntitle: X`noutput: ../x.json`n---`nbody ``````json`n{}`n``````" $true) -join ';' | Should Match 'inside the project'
+        (Test-RunbookFile 'Runbooks/x.runbook.md' "---`ntitle: X`noutput: Runbooks/Exports/x.json`n---`njust words" $true) -join ';' | Should Match 'json block'
     }
     It 'turns a title into a file name' {
         Get-RunbookSlug 'Meetings: next week!' | Should Be 'meetings-next-week'
@@ -119,19 +119,19 @@ Describe 'The runbook instructions for Copilot' {
         (Get-PromptModules 'Create a runbook for my meetings' @{ Traits = @() }) -contains 'rules:runbook' | Should Be $true
         (Get-PromptModules 'Fix the button' @{ Traits = @() }) -contains 'rules:runbook' | Should Be $false
         $m = Get-PromptPart $root 'rules:runbook' @{}
-        $m | Should Match 'runbooks/NAME\.runbook\.md'
+        $m | Should Match 'Runbooks/NAME\.runbook\.md'
         $m | Should Match '(?s)RUNBOOK TEMPLATE\n````\n---\ntitle:'
         $m | Should Not Match 'CCBridge'
     }
 }
 Describe 'Get-RunbookRunRequest (running a runbook from the chat)' {
     $rbs = @(
-        [pscustomobject]@{ name = 'meetings'; title = 'Meetings this week'; path = 'runbooks/meetings.runbook.md' },
-        [pscustomobject]@{ name = 'meetings-next-week'; title = 'Next week'; path = 'runbooks/meetings-next-week.runbook.md' },
-        [pscustomobject]@{ name = 'email-followups'; title = 'Emails waiting for my reply'; path = 'runbooks/email-followups.runbook.md' }
+        [pscustomobject]@{ name = 'meetings'; title = 'Meetings this week'; path = 'Runbooks/meetings.runbook.md' },
+        [pscustomobject]@{ name = 'meetings-next-week'; title = 'Next week'; path = 'Runbooks/meetings-next-week.runbook.md' },
+        [pscustomobject]@{ name = 'email-followups'; title = 'Emails waiting for my reply'; path = 'Runbooks/email-followups.runbook.md' }
     )
     It 'runs a runbook that is only named' {
-        (Get-RunbookRunRequest '@runbooks/email-followups.runbook.md' $rbs).name | Should Be 'email-followups'
+        (Get-RunbookRunRequest '@Runbooks/email-followups.runbook.md' $rbs).name | Should Be 'email-followups'
         (Get-RunbookRunRequest 'email followups' $rbs).name | Should Be 'email-followups'
         (Get-RunbookRunRequest 'Emails waiting for my reply' $rbs).name | Should Be 'email-followups'
         (Get-RunbookRunRequest 'meetings-next-week runbook' $rbs).name | Should Be 'meetings-next-week'

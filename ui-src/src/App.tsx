@@ -48,6 +48,9 @@ const EMPTY_STATE: AppState = {
   workIq: "leave", workIqActual: null, workIqAvailable: false, logLevel: "info", version: "",
 };
 
+/** The changelog on GitHub as it was at this build's commit. */
+const changelogUrl = (commit: string) => `https://github.com/jgt87/CCBridge/blob/${encodeURIComponent(commit)}/CHANGELOG.md`;
+
 export default function App() {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const [events, setEvents] = useState<AgentEvent[]>([]);
@@ -111,8 +114,19 @@ export default function App() {
   }, []);
   const sideVisible = wide || drawerOpen;
 
-  const refreshFiles = useCallback(() => {
-    api.files().then((r) => setFiles(r.files), () => {});
+  // The file tree: a refresh after a change shows a bar in the Files tab (at least 600 ms, so it is
+  // seen); the background refresh while StreamHub works is silent ({ quiet: true }).
+  const [filesRefreshing, setFilesRefreshing] = useState(false);
+  const refreshFiles = useCallback((opts?: { quiet?: boolean }) => {
+    const shown = !opts?.quiet;
+    const started = Date.now();
+    if (shown) setFilesRefreshing(true);
+    api.files().then(
+      (r) => setFiles(r.files),
+      () => {}
+    ).finally(() => {
+      if (shown) window.setTimeout(() => setFilesRefreshing(false), Math.max(0, 600 - (Date.now() - started)));
+    });
     api.fetchList().then(setFetchItems, () => {});
     api.runbooks().then((r) => {
       setRunbooks(r.runbooks);
@@ -142,7 +156,9 @@ export default function App() {
           lastSeq.current = r.events[r.events.length - 1].seq;
           setEvents((prev) => [...prev, ...r.events]);
           notifyEvents(r.events);
-          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || e.type === "runbook" || e.type === "review" || (e.type === "action-result" && e.changed))) refreshFiles();
+          // New and changed files show in the tree right away: after each action that changed files,
+          // and at the end of every step (its change set).
+          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || e.type === "runbook" || e.type === "review" || e.type === "checkpoint" || (e.type === "action-result" && e.changed))) refreshFiles();
           if (r.events.some((e) => e.type === "review" || e.type === "project" || (e.type === "action-result" && e.changed))) setReviewTick((t) => t + 1);
           if (r.events.some((e) => e.type === "newchat" || e.type === "error")) setNewChatPending(false);
         }
@@ -161,6 +177,19 @@ export default function App() {
 
   useEffect(() => {
     if (state.project) refreshFiles();
+  }, [state.project?.path, refreshFiles]);
+
+  // While StreamHub works, the tree also refreshes every few seconds (a command may write files
+  // before its result comes back); coming back to the window picks up files changed elsewhere.
+  useEffect(() => {
+    if (!state.project || !state.busy) return;
+    const t = window.setInterval(() => refreshFiles({ quiet: true }), 4000);
+    return () => window.clearInterval(t);
+  }, [state.project?.path, state.busy, refreshFiles]);
+  useEffect(() => {
+    const onFocus = () => state.project && refreshFiles();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [state.project?.path, refreshFiles]);
 
   // Ctrl/Cmd+K opens the command palette.
@@ -447,6 +476,7 @@ export default function App() {
                 queue={queueHere}
                 schedules={schedulesHere}
                 reviewTick={reviewTick}
+                filesRefreshing={filesRefreshing}
                 issueStamp={state.issueStamp ?? ""}
                 activity={state.activity ?? null}
                 pausedUntil={state.pausedUntil}
@@ -462,13 +492,21 @@ export default function App() {
             {state.version && (
               <div
                 className="flex shrink-0 items-center justify-center gap-2 px-1 pt-2 text-muted-foreground text-xs"
-                title="Installed StreamHub release and the commit it was built from; updates install automatically at start (or run update.cmd)"
+                title="Installed StreamHub release and the commit it was built from; with automatic updates on, a new release installs when a new instance of the app starts (or run update.cmd)"
               >
                 <span>StreamHub {state.release || state.version}</span>
                 {state.commit && (
                   <>
                     <span aria-hidden className="h-3 w-px bg-black/15 dark:bg-white/20" />
-                    <span className="font-mono">{state.commit}</span>
+                    <a
+                      className="font-mono underline-offset-2 hover:text-foreground hover:underline"
+                      href={changelogUrl(state.commit)}
+                      rel="noopener noreferrer"
+                      target="_blank"
+                      title="What changed: the changelog on GitHub, as of this commit"
+                    >
+                      {state.commit}
+                    </a>
                   </>
                 )}
               </div>

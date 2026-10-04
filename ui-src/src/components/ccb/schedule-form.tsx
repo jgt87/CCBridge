@@ -21,7 +21,7 @@ const DAYS: { label: string; value: number }[] = [
 ];
 const WEEKDAYS = [1, 2, 3, 4, 5];
 
-/** What a schedule starts: a message, a saved fetch prompt or a runbook (runbooks/*.runbook.md). */
+/** What a schedule starts: a message, a saved fetch prompt or a runbook (Runbooks/*.runbook.md). */
 export interface ScheduleTarget {
   kind: "chat" | "fetch" | "runbook";
   text?: string;
@@ -61,7 +61,7 @@ export function ScheduleForm({
   existing?: ScheduleItem;
   fetchItems: FetchItem[];
   runbooks: RunbookItem[];
-  /** Project files for the @ picker: a runbook from runbooks/ runs as a runbook, any other file is attached to the message. */
+  /** Project files for the @ picker: a runbook from Runbooks/ runs as a runbook, any other file is attached to the message. */
   files?: FileInfo[];
   onSave: (spec: ScheduleSpec) => Promise<void>;
   onCancel: () => void;
@@ -166,7 +166,7 @@ export function ScheduleForm({
             <option value={target}>Runbook: {target.slice(8)}</option>
           )}
           {runbooks.length > 0 && (
-            <optgroup label="Runbooks (runbooks/*.runbook.md)">
+            <optgroup label="Runbooks (Runbooks/*.runbook.md)">
               {runbooks.map((r) => (
                 <option key={r.name} value={`runbook:${r.name}`}>
                   {r.title}
@@ -188,7 +188,7 @@ export function ScheduleForm({
             aria-label="Pick a project file"
             className={cn("shrink-0 rounded-md border border-black/10 px-2 hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5", picking && "bg-black/10 dark:bg-white/15")}
             onClick={() => setPicking(!picking)}
-            title="Pick a project file: a runbook (runbooks/*.runbook.md) runs as a runbook; any other file, such as a Markdown file with instructions, is attached to the message"
+            title="Pick a project file: a runbook (Runbooks/*.runbook.md) runs as a runbook; any other file, such as a Markdown file with instructions, is attached to the message"
             type="button"
           >
             <AtSign className="h-4 w-4" />

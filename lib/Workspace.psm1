@@ -72,10 +72,12 @@ function Get-OneDriveLocation {
 }
 
 function Get-ProjectStateDir([string]$ProjectRoot) {
-    <# Per-project state (backups, session) under %LOCALAPPDATA%, so OneDrive does not sync it. #>
+    <# Per-project state (backups, session) under %LOCALAPPDATA%, so OneDrive does not sync it.
+       CCBRIDGE_STATE_ROOT puts it elsewhere (the tests use a temporary folder they delete). #>
     $sha = [Security.Cryptography.SHA1]::Create()
     $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($ProjectRoot.ToLowerInvariant())) | Select-Object -First 6 | ForEach-Object { $_.ToString('x2') })
-    $dir = Join-Path $env:LOCALAPPDATA "CCBridge\projects\$((Split-Path $ProjectRoot -Leaf) -replace '[^\w.-]', '_')-$hash"
+    $base = if ($env:CCBRIDGE_STATE_ROOT) { $env:CCBRIDGE_STATE_ROOT } else { Join-Path $env:LOCALAPPDATA 'CCBridge\projects' }
+    $dir = Join-Path $base "$((Split-Path $ProjectRoot -Leaf) -replace '[^\w.-]', '_')-$hash"
     if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir }
     $dir
 }

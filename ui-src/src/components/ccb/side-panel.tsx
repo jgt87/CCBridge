@@ -25,6 +25,8 @@ interface TreeNode {
   size?: number;
   added?: number;
   removed?: number;
+  /** Created since the project was opened. */
+  created?: boolean;
   children?: TreeNode[];
 }
 
@@ -37,7 +39,7 @@ function addFileToTree(root: TreeNode, f: FileInfo) {
     node.children ??= [];
     let child = node.children.find((c) => c.name === part && Boolean(c.children) === !isFile);
     if (!child) {
-      child = { name: part, path: parts.slice(0, idx + 1).join("/"), ...(isFile ? { size: f.size, added: f.added, removed: f.removed } : { children: [] }) };
+      child = { name: part, path: parts.slice(0, idx + 1).join("/"), ...(isFile ? { size: f.size, added: f.added, removed: f.removed, created: f.created } : { children: [] }) };
       node.children.push(child);
     }
     node = child;
@@ -66,6 +68,25 @@ function changeTotals(n: TreeNode): { added: number; removed: number } {
       return { added: t.added + s.added, removed: t.removed + s.removed };
     },
     { added: 0, removed: 0 }
+  );
+}
+
+/** A file created since the project was opened, or a folder holding only such files. */
+function isNew(n: TreeNode): boolean {
+  if (!n.children) return Boolean(n.created);
+  return n.children.length > 0 && n.children.every(isNew);
+}
+
+/** The "new" tag next to a file or folder made in this session (shown with or without line counts). */
+function NewTag({ node }: { node: TreeNode }) {
+  if (!isNew(node)) return null;
+  return (
+    <span
+      className="shrink-0 rounded px-1 font-medium text-[9px] text-muted-foreground uppercase tracking-wide ring-1 ring-black/15 dark:ring-white/20"
+      title={node.children ? "New folder: everything in it was created since the project was opened" : "New file: created since the project was opened"}
+    >
+      new
+    </span>
   );
 }
 
@@ -178,6 +199,7 @@ function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) =>
                   <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 )}
                 <span className="truncate">{n.name}</span>
+                <NewTag node={n} />
                 <ChangeBadge node={n} />
               </button>
               {!closed[n.path] && (
@@ -199,6 +221,7 @@ function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) =>
                 <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
               <span className="truncate">{n.name}</span>
+              <NewTag node={n} />
               <ChangeBadge node={n} />
               <IssueBadge path={n.path} />
             </button>
@@ -231,6 +254,7 @@ function FilesPanel({
   project,
   activity,
   issueStamp,
+  refreshing = false,
 }: {
   files: FileInfo[];
   onOpenFile: (path: string) => void;
@@ -238,6 +262,7 @@ function FilesPanel({
   project?: { name: string; path: string; location?: string[] } | null;
   activity: Activity | null;
   issueStamp: string;
+  refreshing?: boolean;
 }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const folders = useClosedFolders(project?.path);
@@ -324,6 +349,10 @@ function FilesPanel({
         id="files.tree"
         title="Files"
       >
+        {/* While the tree refreshes: a thin bar sweeping left to right. */}
+        <div aria-hidden className={cn("mb-1 h-0.5 overflow-hidden rounded-full", refreshing ? "bg-black/5 dark:bg-white/10" : "bg-transparent")}>
+          {refreshing && <div className="h-full w-1/3 animate-[ccb-sweep_0.9s_ease-in-out_infinite] rounded-full bg-foreground/60" />}
+        </div>
         <ClosedFolders.Provider value={folders}>
           <IssueCounts.Provider value={index.counts}>{project ? <ProjectRoot project={project}>{rows}</ProjectRoot> : rows}</IssueCounts.Provider>
         </ClosedFolders.Provider>
@@ -364,10 +393,13 @@ export function SidePanel({
   reviewTick,
   issueStamp = "",
   activity = null,
+  filesRefreshing = false,
 }: {
   reviewTick: number;
   /** Changes when the project's issue details change. */
   issueStamp?: string;
+  /** The file tree is being refreshed (a bar shows in the Files section). */
+  filesRefreshing?: boolean;
   /** What StreamHub is busy with besides Copilot (indexing, scanning). */
   activity?: Activity | null;
   schedules: ScheduleItem[];
@@ -393,7 +425,7 @@ export function SidePanel({
   queue: QueueEntry[];
 }) {
   const filesPanel = (
-    <FilesPanel activity={activity} files={files} issueStamp={issueStamp} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
+    <FilesPanel activity={activity} files={files} issueStamp={issueStamp} refreshing={filesRefreshing} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
   );
 
   const tasksPanel = (

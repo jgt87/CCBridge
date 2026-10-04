@@ -1,6 +1,8 @@
 # Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
 # Language-specific helpers around edits: indentation, outlines, local checks.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+# Project state (backups, chat history) of the test projects goes to a temporary folder, deleted below.
+$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Workspace.psm1') -Force
 
@@ -86,3 +88,6 @@ Describe 'ConvertTo-CheckableScript' {
         $out.Split("`n")[10] | Should Be 'foo(;'
     }
 }
+
+if ($env:CCBRIDGE_STATE_ROOT -and (Test-Path -LiteralPath $env:CCBRIDGE_STATE_ROOT)) { [IO.Directory]::Delete($env:CCBRIDGE_STATE_ROOT, $true) }
+$env:CCBRIDGE_STATE_ROOT = $null

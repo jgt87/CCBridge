@@ -1,6 +1,6 @@
 ---
 title: Documents shared with me or changed recently
-output: exports/documents-recent.json
+output: Runbooks/Exports/documents-recent.json
 itemsKey: documents
 required: generatedAt, period, documents, truncated
 requiredItemFields: name, type, lastModified, reason

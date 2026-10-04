@@ -1,6 +1,6 @@
 ---
 title: Topic digest across mail, meetings and chats
-output: exports/topic-digest.json
+output: Runbooks/Exports/topic-digest.json
 itemsKey: entries
 required: generatedAt, period, topic, entries, openQuestions, truncated
 requiredItemFields: date, source, title, summary

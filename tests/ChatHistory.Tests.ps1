@@ -1,6 +1,8 @@
 # Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
 # The chat is kept per project (in the project's state folder) and comes back after a restart.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+# Project state (backups, chat history) of the test projects goes to a temporary folder, deleted below.
+$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
@@ -78,6 +80,15 @@ Describe 'Chat history' {
         $kept[-1] | Should Match 'newest 2'
     }
 
+    It 'starts the Files tab counts at the oldest restored event, a minute before it' {
+        $s = New-AgentState -Config $config -AppRoot $root
+        Add-AgentEvent $s 'project' @{ name = 'x'; path = $proj }
+        $mark = $s.Seq
+        Add-AgentEvent $s 'user' @{ text = 'old'; restored = $true; time = '09:15:00'; at = '2026-09-30T09:15:00' }
+        Get-ChangeCountStart $s $mark '20261004-100000-000' | Should Be '20260930-091400-000'
+        # Nothing restored: the counts start now.
+        Get-ChangeCountStart $s $s.Seq '20261004-100000-000' | Should Be '20261004-100000-000'
+    }
     It 'saves nothing without SaveHistory (the MCP server''s own engine)' {
         $p2 = "$proj-2"; $null = New-Item -ItemType Directory -Force -Path $p2
         $s = New-AgentState -Config $config -AppRoot $root
@@ -90,3 +101,6 @@ Describe 'Chat history' {
     Remove-Item -LiteralPath (Split-Path (Get-ChatHistoryPath $proj)) -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $proj -Recurse -Force
 }
+
+if ($env:CCBRIDGE_STATE_ROOT -and (Test-Path -LiteralPath $env:CCBRIDGE_STATE_ROOT)) { [IO.Directory]::Delete($env:CCBRIDGE_STATE_ROOT, $true) }
+$env:CCBRIDGE_STATE_ROOT = $null

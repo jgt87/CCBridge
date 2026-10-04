@@ -1,6 +1,6 @@
 ---
 title: Meetings in a period
-output: exports/meetings.json
+output: Runbooks/Exports/meetings.json
 itemsKey: meetings
 required: generatedAt, period, meetings, truncated
 requiredItemFields: subject, start, end, organizer, isOnline, myResponse, isCancelled

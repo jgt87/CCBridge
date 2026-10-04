@@ -12,12 +12,12 @@ Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Executor.psm1')
 
 $script:ReviewExt = '(?i)\.(ps1|psm1|psd1|py|pyw|js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|html?|css|scss|less|json|cs|java|kt|go|rs|rb|php|sh|bash|cmd|bat|sql|ya?ml|toml|ini|xml|c|cpp|h|hpp|swift|dart|lua|r)$'
-$script:ReviewSkipPath = '(?i)(^|/)(source|reviews|evidence|exports|fetch|runbooks|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.next|\.venv|venv|__pycache__)/|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|poetry\.lock)$|\.min\.(js|css)$|\.map$'
+$script:ReviewSkipPath = '(?i)(^|/)(source|\.streamhub|reviews|evidence|exports|fetch|runbooks|History|Logs|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.next|\.venv|venv|__pycache__)/|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|poetry\.lock)$|\.min\.(js|css)$|\.map$'
 $script:Severity = @{ high = 0; medium = 1; low = 2 }
 
 function Get-ReviewFiles {
     <# Files to review: code and configuration under the project, without build output, lock files,
-       minified files, StreamHub's own folders (reviews, exports, fetch, runbooks), read-only
+       minified files, StreamHub's own folders (reviews, Runbooks, History, Logs), read-only
        source/ data and binaries. Larger than $MaxBytes is skipped as probably generated.
        Returns @{ files; skipped }. With $Paths only those files and folders are taken. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths, [int]$MaxBytes = 300000)

@@ -6,6 +6,30 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.50] - 2026-10-04
+
+### Added
+
+- Project folder layout: `src/` for new code, `Scripts/` for helper scripts, `Runbooks/` for everything that gets data from Microsoft 365 or Work IQ (runbooks and fetch prompts), `Runbooks/Exports/` for their data, `History/` for earlier versions, `Logs/` for the project's own logs, and `.streamhub/` for StreamHub's own records. Copilot gets the same rules, and web projects also get the usual web folders (`public/`, `src/components/`, `src/pages/`, `src/styles/`, `src/assets/`).
+- Older projects are moved to the new layout once, when they open. Nothing is overwritten.
+- Fetch answers keep their earlier versions in `History/`.
+- Import index: which file imports or uses which (ids, inline handlers, custom hooks), with line numbers kept current after every round. Copilot sees "Used by" when it reads a file. Imports of moved or deleted files, and removed ids, functions or hooks that others still use, are reported with the line to fix.
+- Pages opened from disk: local `fetch()`, JSON imports and module scripts, which the browser blocks there, are reported with the replacement (a `.js` data file and the `<script>` tag to add).
+- Files tab: new files get a "new" tag, a bar shows while the tree refreshes, and the tree refreshes after each step and when the window gets focus.
+
+### Changed
+
+- Line counts and "new" tags in the Files tab cover the changes in the restored chat after a restart.
+- Copilot may not write in `.streamhub/`.
+- Settings has an "Update automatically" switch (Updates). It says plainly that a new release installs only when a new instance of the app starts.
+- The commit id next to the version (bottom left) links to the changelog on GitHub as of that commit.
+- The "waiting for the reply" indicator no longer names the product and mixes in light-hearted lines ("Consulting the rubber duck...", "Herding semicolons..."), in a new order for each message.
+
+### Fixed
+
+- Undoing a step that created files also removes the folders it left empty.
+- Tests no longer leave state folders behind in `%LOCALAPPDATA%`.
+
 ## [v0.1.49] - 2026-10-04
 
 ### Added
@@ -552,7 +576,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.49...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.50...HEAD
+[v0.1.50]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.50
 [v0.1.49]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.49
 [v0.1.48]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.48
 [v0.1.47]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.47

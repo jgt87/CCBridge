@@ -38,7 +38,7 @@ Describe 'New-PromptMessage' {
         $m | Should Match 'OneDrive > CCBridge > budget tracker'
         $m | Should Match 'Request: Fix the build$'
         $m | Should Not Match 'app\.py|hello\.py|dotnet build|CCBridge sends'
-        $m.Length -lt 2600 | Should Be $true
+        $m.Length -lt 3200 | Should Be $true     # includes the folder rules (rules/folders.md)
     }
 
     It 'gives assistant tasks only the role, the read-only rule, saving and the location' {
@@ -231,10 +231,10 @@ Describe 'Case-specific prompt modules' {
         @(Get-ProjectTraits @('notes.md')).Count | Should Be 0
     }
     It 'picks modules from the request when the project does not show it yet' {
-        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:web,rules:moving'
-        (Get-PromptModules 'Split the parser into two modules' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:moving'
-        (Get-PromptModules 'Write a pytest for the parser' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:python'
-        (Get-PromptModules 'Fix the bug' @{ Traits = @('nocommands') }).Count | Should Be 0
+        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:web,rules:moving'
+        (Get-PromptModules 'Split the parser into two modules' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:moving'
+        (Get-PromptModules 'Write a pytest for the parser' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:python'
+        (Get-PromptModules 'Fix the bug' @{ Traits = @('nocommands') }) -join ',' | Should Be 'rules:folders'
     }
     It 'sends the web rules with a web project, after the core rules' {
         $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Fix the bug' -Sent (New-Sent) -Context @{ Location = 'L'; Full = 'F'; Traits = @('web') }

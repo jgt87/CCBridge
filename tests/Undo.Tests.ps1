@@ -1,6 +1,8 @@
 # Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
 # Undo also covers what run commands change, and says per file which lines came back or went.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+# Project state (backups, chat history) of the test projects goes to a temporary folder, deleted below.
+$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 
 Describe 'Undo of changes made by commands' {
@@ -59,5 +61,34 @@ Describe 'Undo of changes made by commands' {
         $cp.Files.Count | Should Be 0
     }
 
+    It 'marks files a step created as new in the Files tab, also an empty one' {
+        $since = (Get-Date).AddSeconds(-1).ToString('yyyyMMdd-HHmmss-fff')
+        $cp = New-Checkpoint $proj 'new files'
+        $snap = Start-RunSnapshot $cp $proj
+        & $write 'made.ps1' "line 1`nline 2`n"
+        & $write 'blank.txt' ''
+        & $write 'notes.txt' "keep me`nand more`n"
+        $null = Complete-RunSnapshot $cp $proj $snap
+        $stats = Get-SessionChangeStats $proj $since
+        "$($stats['made.ps1'].added) $($stats['made.ps1'].created)" | Should Be '2 True'
+        $stats['blank.txt'].created | Should Be $true
+        "$($stats['notes.txt'].added) $([bool]$stats['notes.txt'].created)" | Should Be '1 False'
+        $null = Undo-LastCheckpoint $proj
+    }
+    It 'removes folders a step created once their files are undone, but keeps folders with other files' {
+        $cp = New-Checkpoint $proj 'new folders'
+        $snap = Start-RunSnapshot $cp $proj
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $proj 'tools\gen'), (Join-Path $proj 'src\extra')
+        & $write 'tools\gen\make.ps1' "x`n"
+        & $write 'src\extra\more.js' "y`n"
+        $null = Complete-RunSnapshot $cp $proj $snap
+        $null = Undo-LastCheckpoint $proj
+        Test-Path (Join-Path $proj 'tools') | Should Be $false
+        Test-Path (Join-Path $proj 'src\extra') | Should Be $false
+        Test-Path (Join-Path $proj 'src\app.js') | Should Be $true
+    }
     [IO.Directory]::Delete($proj, $true)
 }
+
+if ($env:CCBRIDGE_STATE_ROOT -and (Test-Path -LiteralPath $env:CCBRIDGE_STATE_ROOT)) { [IO.Directory]::Delete($env:CCBRIDGE_STATE_ROOT, $true) }
+$env:CCBRIDGE_STATE_ROOT = $null

@@ -339,7 +339,7 @@ export interface QueueEntry {
   jobId?: string | null;
 }
 
-/** A project runbook (runbooks/<name>.runbook.md) and its output file. */
+/** A project runbook (Runbooks/<name>.runbook.md) and its output file. */
 export interface RunbookItem {
   name: string;
   title: string;
@@ -369,7 +369,7 @@ export interface Setting {
   options?: string[];
 }
 
-/** A saved fetch prompt (fetch/<name>.prompt.md) and its latest answer (fetch/<name>.md). */
+/** A saved fetch prompt (Runbooks/<name>.prompt.md) and its latest answer (Runbooks/Exports/<name>.md). */
 export interface FetchItem {
   name: string;
   prompt: string;
@@ -385,6 +385,8 @@ export interface FileInfo {
   /** Lines added / removed since the project was opened (only for changed files). */
   added?: number;
   removed?: number;
+  /** Created since the project was opened (shown as new, also without lines to count). */
+  created?: boolean;
 }
 
 // Whatever the server (and Copilot behind it) sends, the UI only ever renders strings here.

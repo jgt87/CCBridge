@@ -1,6 +1,6 @@
 ---
 title: Decisions and action items from Teams
-output: exports/teams-actions.json
+output: Runbooks/Exports/teams-actions.json
 itemsKey: items
 required: generatedAt, period, items, truncated
 requiredItemFields: kind, text, source, date, owner, status

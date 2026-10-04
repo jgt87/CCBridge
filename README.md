@@ -62,7 +62,7 @@ Requirements: Windows 10/11, Windows PowerShell 5.1 in FullLanguage mode, Micros
 - **Code review** (beta, Changes tab): Copilot reviews the whole project, the changes since you opened it, or chosen files, read-only, for bugs, security, performance, structure, readability or tests. Every finding is checked against the file (its quoted lines must be there), the report is saved in `reviews/`, and you pick the findings to fix; each becomes a task in the queue.
 - **File viewer**: click a file to view it. Markdown is rendered as on GitHub (tables, task lists, footnotes, callouts such as `> [!NOTE]`, HTML such as `<details>`, cleaned of scripts), with Mermaid diagrams, math (`$...$`, `$$...$$`), code blocks with syntax colors and a copy button, front matter as a small table, links that open other project files and images from the project; *Source* shows the text. Code files show line numbers and syntax colors. Chat replies use the same rendering, and so do Copilot's actions in the chat: changes show as a diff with syntax colors (a Markdown file also as *Rendered*), and file contents in read and edit results show with colors and their real line numbers. Everything is bundled: nothing is loaded from the internet.
 - **Settings** (Menu > Settings) are kept per computer; *Reset all to defaults* puts every setting back to the app default. Under *This browser*: the **theme** (System, Light or Dark; System follows Windows, also when it switches) and desktop notifications. Also: **Mode at start** (ask, auto or plan); **Commands that run without asking** (one per line, for example `npm test`; deleting or Microsoft 365 commands always ask, and a second command chained on with `;` does not ride along); **Privacy**: keep chat history on or off, keep raw Copilot replies on or off, and *Clear chat history* for the open project; **Ports**: shown only, since the system check moves them when another program uses them.
-- **Side panel** (left; always shown on a wide window, on a narrow one a button opens it over the chat). Everything in it belongs to the open project: switching projects switches every tab, the queue and the schedules included (schedules of other projects keep running in the background). Each tab has sections that fold away (remembered in the browser), and the panel reopens on the last tab: *Files* (Source data, Index, Files: the project tree; folders you close stay closed, also across tabs, reloads and projects; click to view a file; changed files show `+added -removed` line counts since the project was opened, folders show their totals, files with open issues a count), *Tasks* (Plan: Copilot's checklist, Queue, Scheduled), *Changes* (Change sets with *Undo last change set*: it also restores what run commands changed, created or deleted, and shows per file the lines that came back and went; Issues, Code review), *Fetch* (Runbooks, Fetch prompts).
+- **Side panel** (left; always shown on a wide window, on a narrow one a button opens it over the chat). Everything in it belongs to the open project: switching projects switches every tab, the queue and the schedules included (schedules of other projects keep running in the background). Each tab has sections that fold away (remembered in the browser), and the panel reopens on the last tab: *Files* (Source data, Index, Files: the project tree; folders you close stay closed, also across tabs, reloads and projects; click to view a file; changed files show `+added -removed` line counts, folders their totals, and files and folders a step created a NEW tag (also when there are no lines to count); the counts cover the change sets still in the chat, also after a restart; the tree refreshes after every change, with a thin bar under the FILES header while it does, files with open issues a count), *Tasks* (Plan: Copilot's checklist, Queue, Scheduled), *Changes* (Change sets with *Undo last change set*: it also restores what run commands changed, created or deleted, and shows per file the lines that came back and went; Issues, Code review), *Fetch* (Runbooks, Fetch prompts).
 - **Menu** (top right, or Ctrl+K): new Copilot chat, undo, switch project, attach a file, change mode, open any file, verbose logging on/off, export diagnostics.
 - Attach files to a message with `@path` (or the @ button) so Copilot gets their full content.
 - Monochrome, flat interface built with [Kokonut UI](https://kokonutui.com) components; served from prebuilt files, so the target machine never needs Node.
@@ -119,8 +119,8 @@ The same bridge and agent loop for MCP clients (Claude Code, VS Code, ...), in a
 9. **Page check**: after a task changed web files (HTML, CSS, JavaScript, JSON), StreamHub opens the changed page (or `index.html`) in a hidden Edge tab, served read-only from the project, and collects JavaScript errors, console errors and files that fail to load (a missing `styles.css`, a `fetch()` of a JSON file that is not there). Problems go to Copilot in the review after the task. `pageCheck` (`on`/`off`) in Settings.
 10. **Settings**: the gear next to Menu (or Menu > Settings) shows pacing, waiting, retries, checks, timeouts and sizes for this computer; changes apply right away and are kept across updates (in `config\harness.local.json`).
 11. **Suggested next steps**: when Copilot's reply lists "Next steps" (or says "the next step is to ..."), they appear under the reply; click one to put it in the message box, adjust it if needed and send it.
-12. **Runbooks**: repeatable, read-only exports of Microsoft 365 data (via Work IQ) to JSON. In the Fetch tab, *New runbook from a template* copies one of the templates (meetings in a period, emails waiting for my reply, decisions and action items from Teams, recently shared or changed documents, a topic digest, or a blank one) to `runbooks/<name>.runbook.md`. Each runbook states its purpose, sources, period, what to include, the exact JSON shape with an example, field rules (dates with time-zone offset, `null` for unknown, never invent) and quality rules (every item, no summarising, deduplicate, `truncated` instead of silently cutting, read-only). Its header (`title`, `output`, `itemsKey`, `required`, `requiredItemFields`, and own values such as `topic:`) is used by StreamHub; placeholders such as `{{today}}`, `{{weekStart}}`, `{{today-7d}}`, `{{timezone}}` are filled in at run time. *Run* asks Copilot in a fresh chat, takes the JSON from its reply and checks it against the header; when it does not match, Copilot gets the problems and one retry. A valid result is saved to the output file (for example `exports/meetings.json`) plus a dated copy in `exports/history/`; a failed run keeps the previous file.
-13. **Fetch prompts**: the *Fetch* tab keeps prompts that get current data, such as "List my meetings for today with times, attendees and the agenda". *New fetch prompt* saves one as `fetch/<name>.prompt.md`; *Run* / *Refresh* asks Copilot in a fresh chat and writes its answer to `fetch/<name>.md` (with when it was fetched and the sources Copilot cited). *Attach* adds `@fetch/<name>.md` to your message; the @ menu shows how old each fetched file is. Copilot only answers in a fetch: action blocks are not carried out, the Microsoft 365 read-only rule applies, and a failed fetch leaves the previous answer file in place. The prompt files are plain text, so you can also edit them in the folder.
+12. **Runbooks**: repeatable, read-only exports of Microsoft 365 data (via Work IQ) to JSON. In the Fetch tab, *New runbook from a template* copies one of the templates (meetings in a period, emails waiting for my reply, decisions and action items from Teams, recently shared or changed documents, a topic digest, or a blank one) to `Runbooks/<name>.runbook.md`. Each runbook states its purpose, sources, period, what to include, the exact JSON shape with an example, field rules (dates with time-zone offset, `null` for unknown, never invent) and quality rules (every item, no summarising, deduplicate, `truncated` instead of silently cutting, read-only). Its header (`title`, `output`, `itemsKey`, `required`, `requiredItemFields`, and own values such as `topic:`) is used by StreamHub; placeholders such as `{{today}}`, `{{weekStart}}`, `{{today-7d}}`, `{{timezone}}` are filled in at run time. *Run* asks Copilot in a fresh chat, takes the JSON from its reply and checks it against the header; when it does not match, Copilot gets the problems and one retry. A valid result is saved to the output file (for example `Runbooks/Exports/meetings.json`) plus a dated copy in `History/`; a failed run keeps the previous file.
+13. **Fetch prompts**: the *Fetch* tab keeps prompts that get current data, such as "List my meetings for today with times, attendees and the agenda". *New fetch prompt* saves one as `Runbooks/<name>.prompt.md`; *Run* / *Refresh* asks Copilot in a fresh chat and writes its answer to `Runbooks/Exports/<name>.md` (the answer it replaces goes to `History/`; with when it was fetched and the sources Copilot cited). *Attach* adds `@Runbooks/Exports/<name>.md` to your message; the @ menu shows how old each fetched file is. Copilot only answers in a fetch: action blocks are not carried out, the Microsoft 365 read-only rule applies, and a failed fetch leaves the previous answer file in place. The prompt files are plain text, so you can also edit them in the folder.
 
 Command line, one prompt without the interface:
 
@@ -230,7 +230,7 @@ Settings live in `config\harness.json` and `config\selectors.json`. Put your own
 | `autoApproveCommands` | `[]` | Regular expressions of commands that run without approval (never applies to risky commands) |
 | `workIq` | `leave` | `on`, `off` or `leave` (do not touch the toggle) |
 | `saveReplyFrames` | `true` | Keep the raw data of the last 30 Copilot replies for diagnosis |
-| `autoUpdate` | (on) | `false` turns automatic updates off |
+| `autoUpdate` | on | Settings > Updates. Installs a new release only when a new instance of the app starts; the running app is never updated. `false` turns it off |
 | `logLevel` | `info` | `off`, `info`, `verbose`, `trace` |
 
 `selectors.json` holds the Copilot address, `chatUrl` (default `https://www.microsoft365.com/chat`, opened at start and when a new chat needs a page reload; it signs in without an extra prompt and may redirect to `m365.cloud.microsoft/chat`), `chatHosts` (the hosts on which StreamHub recognises the Copilot tab), and the CSS selectors for Copilot's message box, Send button and (via `capture.cmd`) the Work IQ toggle. If Microsoft changes the Copilot page, a selector fix in `selectors.local.json` is usually all that is needed.
@@ -477,6 +477,39 @@ stateDiagram-v2
 
 ---
 
+## Project folders
+
+StreamHub gives Copilot the same folder rules with every coding or project task (`prompts/rules/folders.md`), and uses them itself:
+
+| Folder | What goes there | Written by |
+|---|---|---|
+| `src/` | The project's own source code, for new projects. Files a tool needs at the root (`index.html`, `package.json`, `README.md`, `AGENTS.md`) stay at the root; an existing project keeps its layout unless you ask to move it | Copilot |
+| `Scripts/` | Helper scripts: setup, checks, data conversion, one-off tools | Copilot |
+| `Runbooks/` | Everything that gets data from Microsoft 365 or Work IQ: runbooks and fetch prompts | You, Copilot |
+| `Runbooks/Exports/` | The data they produce (runbook JSON, fetch answers) | StreamHub |
+| `History/` | Earlier versions of that data | StreamHub |
+| `Logs/` | Log files the project's own scripts write (StreamHub's own log stays in `%LOCALAPPDATA%\CCBridge`) | The project's scripts |
+| `source/` | Your source data, read-only | You |
+| `.streamhub/` | StreamHub's own records (schedules, issues); Copilot's writes there are refused | StreamHub |
+| `tests/`, `docs/`, `data/` | Tests; documentation; data files the code reads | Copilot |
+| `dist/`, `build/`, `out/`, `node_modules/` | Generated by builds and package managers: never edited by hand | Build tools |
+
+Web projects also get the usual web folders (unless the project already uses others): `public/` for files served as they are (favicon, `robots.txt`, images linked by URL), `src/components/`, `src/pages/` (pages or routes), `src/styles/`, `src/assets/` (images and fonts the code imports), `src/lib/` (shared helpers) and `src/data/`. A plain site without a build step keeps `index.html` at the root with `css/`, `js/` and `images/` next to it.
+
+Projects from before v0.1.50 are moved once when they open: `fetch/*.prompt.md` and `runbooks/` to `Runbooks/`, fetch answers and `exports/` to `Runbooks/Exports/`, `exports/history/` to `History/`, and runbook `output:` lines are updated. Nothing is overwritten: a clash keeps both files.
+
+### Imports and hooks
+
+StreamHub keeps an index of which project file uses which, and on which line (`.streamhub\imports.json`):
+- **Imports:** JavaScript/TypeScript imports, HTML `<script>`/`<link>` tags, CSS `@import`, Python imports, and PowerShell `Import-Module` and dot-sourcing.
+- **Hooks:** element ids used from scripts, functions called from inline handlers such as `onclick="save()"`, and custom `useX` hooks.
+
+The index catches up at the start of every task, and the changed files are indexed again after every round, so the line numbers follow the edits. When Copilot reads a file, it also gets "Used by" with file and line. When a round deletes or moves a file that is still imported, or removes an id, function or hook that other files use, StreamHub names each affected line and asks Copilot to fix it in the next round.
+
+### Pages opened from disk
+
+Edge and Chrome block some things on a page opened straight from disk (`file://`): `fetch()` of local files, importing JSON, and `<script type="module">`. In a project without a build tool or web server (no `package.json`, bundler config or server script), StreamHub reports each of these after a change, together with the replacement: a `.js` file that sets a global (`window.expensesData = ...;`), plus the `<script src>` tag to add to the page that uses it. Copilot is given the same rule up front.
+
 ## Where StreamHub keeps its data
 
 | Location | Content |
@@ -487,8 +520,11 @@ stateDiagram-v2
 | `<project>\evidence\` | Per task: what was asked, what changed, which checks passed |
 | `<project>\reviews\` | Code review reports (`.md`) and their findings (`.json`) |
 | `<project>\.streamhub\schedules.json` | The project's schedules (what runs, when, last and next run); read at every start, and changes made outside the app (by hand, or synced by OneDrive) are picked up within a minute |
+| `<project>\.streamhub\imports.json` | The import index: which file imports or uses which (ids, inline handlers, hooks), with line numbers |
 | `<project>\.streamhub\issues.json` | The project's issue details: every problem found per file, with its status (open, fixing, gave up, ignored) |
-| `<project>\runbooks\`, `exports\`, `fetch\` | Runbooks and their JSON exports; fetch prompts and their answers |
+| `<project>\Runbooks\` | Everything that gets data from Microsoft 365 / Work IQ: runbooks (`NAME.runbook.md`) and fetch prompts (`NAME.prompt.md`) |
+| `<project>\Runbooks\Exports\` | Their latest data: runbook JSON and fetch answers |
+| `<project>\History\` | Earlier versions of that data (dated copies) |
 | `%LOCALAPPDATA%\Programs\CCBridge` | The installed application |
 | `%LOCALAPPDATA%\CCBridge\edge-profile` | The Edge profile StreamHub uses for Copilot (your sign-in) |
 | `%LOCALAPPDATA%\CCBridge\projects\…` | Per project: undo backups, the source-data copy and the chat history (`chat-history.jsonl`; kept on this computer, not synced) |

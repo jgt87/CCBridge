@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 foreach ($m in 'Workspace', 'Executor', 'Lint', 'Health') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:IssueExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|psd1|css|scss|less|json|jsonc|ya?ml|toml|sh|bash|cmd|bat|sql|html?|xml|csproj|config|xaml|svg|md|markdown|csv|tsv)$'
-$script:IssueSkip = '(?i)(^|/)(source|\.streamhub|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.venv|venv|__pycache__|evidence|reviews|exports)/|\.min\.(js|css)$|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$'
+$script:IssueSkip = '(?i)(^|/)(source|\.streamhub|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.venv|venv|__pycache__|evidence|reviews|exports|History|Logs|Runbooks/Exports)/|\.min\.(js|css)$|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$'
 $script:Order = @{ error = 0; secret = 1; health = 2 }
 
 function Get-IssueIndexPath([string]$ProjectRoot) { Join-Path $ProjectRoot '.streamhub\issues.json' }

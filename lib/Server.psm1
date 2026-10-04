@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -165,7 +165,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $stats = Get-SessionChangeStats $State.ProjectRoot ([string]$State.SessionSince)
             $files = @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object {
                 $s = $stats[$_.path]
-                if ($s) { [pscustomobject]@{ path = $_.path; size = $_.size; added = $s.added; removed = $s.removed } } else { $_ }
+                if ($s) { [pscustomobject]@{ path = $_.path; size = $_.size; added = $s.added; removed = $s.removed; created = [bool]$s.created } } else { $_ }
             })
             return Send-Json $Ctx @{ files = $files }
         }
@@ -535,7 +535,15 @@ function Set-Project($State, [string]$Path) {
     $State.Todos = @()
     $State.NeedNewChat = $State.NeedNewChat -or $State.ChatStarted   # a new project starts a fresh Copilot chat
     Add-AgentEvent $State 'project' @{ name = (Split-Path $Path -Leaf); path = $Path }
+    # Older projects: fetch prompts, runbooks and their data move to Runbooks/ and History/ (once).
+    try {
+        $moved = @(Move-ProjectLayout $State.ProjectRoot)
+        if ($moved.Count) { Add-AgentEvent $State 'status' @{ text = "Project folders tidied to the new layout: fetch prompts and runbooks are in Runbooks/, their data in Runbooks/Exports/, earlier versions in History/ ($($moved.Count) item(s) moved)." } }
+    } catch { Write-CCBLogError server 'project layout' $_ }
+    $mark = $State.Seq
     if ($State.SaveHistory) { try { $null = Restore-ChatHistory $State $State.ProjectRoot } catch { Write-CCBLogError server 'chat history' $_ } }   # the earlier conversation, back in the chat
+    # Line counts and "new" marks in the Files tab cover the change sets in the restored chat too.
+    try { $State.SessionSince = Get-ChangeCountStart $State $mark ([string]$State.SessionSince) } catch { Write-CCBLogError server 'change counts' $_ }
     try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue fix reset' $_ }
     try { $null = Sync-ProjectSchedules $State -Roots @($State.ProjectRoot) -Force } catch { Write-CCBLogError server 'schedule import' $_ }
     try { $null = Start-IssueIndexer $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue index' $_ }   # step 1 of the issue cycle, in the background

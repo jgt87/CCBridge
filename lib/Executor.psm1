@@ -256,6 +256,18 @@ function Clear-RunSnapshot($Checkpoint) {
     if (Test-Path -LiteralPath $stage) { [IO.Directory]::Delete($stage, $true) }
 }
 
+function Remove-EmptyFolders([string]$ProjectRoot, [string]$Dir) {
+    # Folders a step created and its undo left empty go too, up to (not including) the project
+    # folder. OneDrive can mark folders read-only, which blocks deleting them: the mark is cleared.
+    $root = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
+    $d = [IO.Path]::GetFullPath($Dir).TrimEnd('\')
+    while ($d.Length -gt $root.Length -and $d.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) -and [IO.Directory]::Exists($d)) {
+        if (@([IO.Directory]::GetFileSystemEntries($d)).Count) { break }
+        try { (New-Object IO.DirectoryInfo $d).Attributes = 'Directory'; [IO.Directory]::Delete($d) } catch { break }
+        $d = Split-Path -Parent $d
+    }
+}
+
 function Get-UndoFileChange([string]$Full, [string]$Backup, [string]$Rel, [bool]$WasNew) {
     <# What undoing does to one file, measured before it happens: the lines that come back (added)
        and the lines that go (removed), and a preview (old = now, new = after the undo). Binary
@@ -297,6 +309,7 @@ function Undo-LastCheckpoint {
                 Copy-Item -LiteralPath $backup -Destination $full -Force
             }
             $restored += $(if ($Detailed) { $detail } else { $p.Name })
+            if ($p.Value -eq 'new') { Remove-EmptyFolders $ProjectRoot (Split-Path -Parent $full) }
         }
         Remove-Item $cp.FullName -Recurse -Force
         return $restored
@@ -381,11 +394,131 @@ function ConvertTo-CheckableScript([string]$Text) {
     '(async function(){' + $t + "`n})"
 }
 
+function Test-ServedProject([string]$ProjectRoot) {
+    <# Whether the project's pages run from a build tool or web server (package.json, a bundler config,
+       a server script) rather than being opened straight from disk. #>
+    foreach ($n in 'package.json', 'vite.config.js', 'vite.config.ts', 'vite.config.mjs', 'webpack.config.js', 'server.js', 'server.ts', 'server.py', 'server.ps1', 'app.py', 'manage.py', 'web.config', 'staticwebapp.config.json') {
+        if (Test-Path -LiteralPath (Join-Path $ProjectRoot $n) -PathType Leaf) { return $true }
+    }
+    $false
+}
+
+function Get-PagesLoading([string]$ProjectRoot, [string]$Rel) {
+    # The project's HTML pages that load $Rel with a script tag (the page itself for an HTML file).
+    if ($Rel -match '(?i)\.html?$') { return @($Rel) }
+    if (-not $ProjectRoot) { return @() }
+    $leaf = [IO.Path]::GetFileName($Rel)
+    $pages = New-Object System.Collections.Generic.List[string]
+    foreach ($f in Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include '*.html', '*.htm' -ErrorAction SilentlyContinue) {
+        $pr = ConvertTo-RelativePath $ProjectRoot $f.FullName
+        if ($pr -match '(?i)(^|/)(node_modules|dist|build|source|\.streamhub|History)/') { continue }
+        $t = [IO.File]::ReadAllText($f.FullName)
+        foreach ($m in [regex]::Matches($t, '(?i)<script\b[^>]*\bsrc\s*=\s*["'']([^"''?#]+)')) {
+            if ([IO.Path]::GetFileName($m.Groups[1].Value) -ne $leaf) { continue }
+            if ((Resolve-RelRef $ProjectRoot (Split-Path -Parent $pr) $m.Groups[1].Value) -eq $Rel) { $pages.Add($pr); break }
+        }
+    }
+    $pages.ToArray()
+}
+
+function Resolve-RelRef([string]$ProjectRoot, [string]$BaseDir, [string]$Ref) {
+    # A reference written in a file in $BaseDir (project-relative), as a project-relative path.
+    $root = if ($ProjectRoot) { $ProjectRoot } else { 'C:\p' }
+    $dir = if ($Ref.StartsWith('/') -or -not $BaseDir) { $root } else { Join-Path $root ("$BaseDir".Replace('/', '\')) }
+    $full = [IO.Path]::GetFullPath((Join-Path $dir ($Ref.TrimStart('/').Replace('/', '\'))))
+    $rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\')
+    if (-not $full.StartsWith("$rootFull\", [StringComparison]::OrdinalIgnoreCase)) { return $null }
+    $full.Substring($rootFull.Length + 1).Replace('\', '/')
+}
+
+function Get-RelativeRef([string]$FromDir, [string]$To) {
+    # How a file in $FromDir refers to $To (both project-relative, / separated).
+    $fromParts = @("$FromDir".Split('/') | Where-Object { $_ })
+    $toParts = @($To.Split('/'))
+    $i = 0
+    while ($i -lt $fromParts.Count -and $i -lt ($toParts.Count - 1) -and $fromParts[$i] -eq $toParts[$i]) { $i++ }
+    $up = @(for ($k = $i; $k -lt $fromParts.Count; $k++) { '..' })
+    (@($up) + @($toParts[$i..($toParts.Count - 1)])) -join '/'
+}
+
+function Get-DataScriptFix([string]$ProjectRoot, [string]$DataRel, [string[]]$Pages, [string]$UsedBy) {
+    # The replacement for a blocked data file: a .js file next to it that sets a global, loaded by
+    # each page with a script tag before the script that uses it.
+    $stem = [IO.Path]::GetFileNameWithoutExtension($DataRel)
+    $words = @($stem -split '[^A-Za-z0-9]+' | Where-Object { $_ })
+    if (-not $words.Count) { $words = @('page') }
+    $name = $words[0].Substring(0, 1).ToLowerInvariant() + $words[0].Substring(1)
+    for ($k = 1; $k -lt $words.Count; $k++) { $name += $words[$k].Substring(0, 1).ToUpperInvariant() + $words[$k].Substring(1) }
+    if ($name -match '^\d') { $name = "data$name" }
+    $name += 'Data'
+    $dir = [IO.Path]::GetDirectoryName($DataRel.Replace('/', '\')).Replace('\', '/')
+    $prefix = if ($dir) { "$dir/" } else { '' }
+    $jsRel = "$prefix$stem.js"
+    if ($ProjectRoot -and (Test-Path -LiteralPath (Join-Path $ProjectRoot $jsRel.Replace('/', '\')) -PathType Leaf)) {
+        $existing = [IO.File]::ReadAllText((Join-Path $ProjectRoot $jsRel.Replace('/', '\')))
+        if ($existing -notmatch "window\.$name\s*=") { $jsRel = "$prefix$stem.data.js" }
+    }
+    $value = if ($DataRel -match '(?i)\.json$') { "the contents of $DataRel" } else { "the contents of $DataRel as a text string" }
+    $tags = @(foreach ($pg in @($Pages)) {
+        $src = Get-RelativeRef (Split-Path -Parent $pg).Replace('\', '/') $jsRel
+        $where = if ($UsedBy -and $UsedBy -ne $pg) { "before the script tag that loads $UsedBy" } else { 'before the script that uses it' }
+        "add <script src=""$src""></script> to $pg $where"
+    })
+    if (-not $tags.Count) { $tags = @("load it with <script src=""...""></script> in the page, before the script that uses it") }
+    "Replace it: write $jsRel containing window.$name = $value;, $($tags -join ' and '), and use window.$name directly instead (no fetch, await or .then)"
+}
+
+function Find-FileUrlBlocks {
+    <# A page opened straight from disk (file://, no web server) may not fetch local files, import
+       JSON or load module scripts: Edge and Chrome block them ("blocked by CORS policy", origin
+       'null'). Finds those in an HTML or JavaScript file of a project without a server
+       (Test-ServedProject). Each finding names the line and the exact replacement: the .js data
+       file to write, the global it sets, and the script tag to add to which page
+       (Get-DataScriptFix). #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Text, [string]$ProjectRoot = '')
+    $ext = [IO.Path]::GetExtension($Rel).ToLowerInvariant()
+    if ($ext -notin '.html', '.htm', '.js', '.mjs') { return }
+    $line = { param($i) ([regex]::Matches($Text.Substring(0, $i), "`n")).Count + 1 }
+    $isLocal = { param($u) $u -and $u -notmatch '(?i)^([a-z][a-z0-9+.-]*:|//)' -and $u -notmatch '\$\{' }
+    $blocked = 'is blocked when the page is opened from disk (file://).'
+    $fileDir = (Split-Path -Parent $Rel).Replace('\', '/')
+    $pages = $null
+    if ($ext -in '.html', '.htm') {
+        foreach ($m in [regex]::Matches($Text, '(?i)<script\b[^>]*\btype\s*=\s*["'']?module\b')) {
+            "${Rel}:$(& $line $m.Index): <script type=""module""> $blocked Use plain <script src> tags in the right order, without import/export."
+        }
+        foreach ($m in [regex]::Matches($Text, '(?i)<script\b[^>]*\bsrc\s*=\s*["'']([^"''?#]+\.json)["'']')) {
+            $u = $m.Groups[1].Value
+            if (-not (& $isLocal $u)) { continue }
+            $data = Resolve-RelRef $ProjectRoot $fileDir $u
+            "${Rel}:$(& $line $m.Index): <script src=""$u""> cannot load JSON. $(Get-DataScriptFix $ProjectRoot $data @($Rel) $Rel)"
+        }
+    }
+    # fetch and XMLHttpRequest resolve against the page; import against the file itself.
+    $calls = @(
+        @{ re = '(?i)\bfetch\(\s*["''`]([^"''`]+)'; what = 'fetch(''{0}'')'; page = $true },
+        @{ re = '(?i)\.open\(\s*["'']GET["'']\s*,\s*["'']([^"'']+)'; what = 'loading {0} with XMLHttpRequest'; page = $true },
+        @{ re = '(?i)\bimport\b[^;\n]*?["'']([^"'']+\.json)["'']'; what = 'importing {0}'; page = $false }
+    )
+    foreach ($call in $calls) {
+        foreach ($m in [regex]::Matches($Text, $call.re)) {
+            $u = $m.Groups[1].Value
+            if (-not (& $isLocal $u)) { continue }
+            if ($null -eq $pages) { $pages = @(Get-PagesLoading $ProjectRoot $Rel) }
+            $base = if ($call.page -and $pages.Count) { (Split-Path -Parent $pages[0]).Replace('\', '/') } else { $fileDir }
+            $data = Resolve-RelRef $ProjectRoot $base $u
+            if (-not $data) { $data = $u }
+            "${Rel}:$(& $line $m.Index): $($call.what -f $u) $blocked $(Get-DataScriptFix $ProjectRoot $data $pages $Rel)"
+        }
+    }
+}
 function Test-ProjectConsistency {
     <# Fixed checks on the given project files (no judgement of the code): JSON parses, PowerShell has
        no syntax errors, and local files referenced from HTML, JavaScript and CSS (href, src, fetch,
-       import, url()) exist. Returns one line per problem. #>
+       import, url()) exist; in a project opened from disk, nothing the browser blocks on file://
+       (Find-FileUrlBlocks). Returns one line per problem. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths, [switch]$SyntaxOnly)
+    $fromDisk = -not $SyntaxOnly -and -not (Test-ServedProject $ProjectRoot)
     foreach ($rel in @($Paths)) {
         try { $full = Resolve-ProjectPath $ProjectRoot $rel } catch { continue }
         if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Test-BinaryFile $full)) { continue }
@@ -408,11 +541,12 @@ function Test-ProjectConsistency {
             $null = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$tok, [ref]$errs)
             foreach ($x in @($errs) | Select-Object -First 3) { "${rel}:$($x.Extent.StartLineNumber): $($x.Message)" }
         }
+        if ($fromDisk) { Find-FileUrlBlocks $rel $text $ProjectRoot }
         if (-not $SyntaxOnly -and $ext -in '.html', '.htm', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.mts', '.tsx', '.css', '.scss', '.vue', '.svelte') {
             $refs = New-Object System.Collections.Generic.List[object]
             $patterns = @(
                 @{ kind = 'ref'; re = '(?i)\b(?:href|src)\s*=\s*["'']([^"''#?]+)' },
-                @{ kind = 'ref'; re = '(?i)\bfetch\(\s*["''`]([^"''`?#]+)' },
+                @{ kind = 'fetch'; re = '(?i)\bfetch\(\s*["''`]([^"''`?#]+)' },
                 @{ kind = 'import'; re = '(?i)\bimport\s[^;]*?from\s*["'']([^"''?#]+)' },
                 @{ kind = 'import'; re = '(?im)^\s*import\s*["'']([^"''?#]+)' },
                 @{ kind = 'import'; re = '(?i)\bimport\(\s*["'']([^"''?#]+)["'']\s*\)' },
@@ -436,6 +570,14 @@ function Test-ProjectConsistency {
                 if (Test-Path -LiteralPath $target -PathType Leaf) { continue }
                 if ($r.kind -eq 'import' -and (Resolve-ModuleImport $target)) { continue }
                 if ($r.kind -ne 'import' -and (Test-Path -LiteralPath $target)) { continue }
+                if ($r.kind -eq 'fetch' -and $ext -notin '.html', '.htm') {
+                    # fetch() resolves against the page that runs the script, not the script file.
+                    $onPage = @(Get-PagesLoading $ProjectRoot $rel | Where-Object {
+                        $hit = Resolve-RelRef $ProjectRoot (Split-Path -Parent $_).Replace('\', '/') $ref
+                        $hit -and (Test-Path -LiteralPath (Join-Path $ProjectRoot $hit.Replace('/', '\')))
+                    })
+                    if ($onPage.Count) { continue }
+                }
                 "${rel}: refers to $ref, which does not exist"
             }
         }
@@ -444,7 +586,9 @@ function Test-ProjectConsistency {
 
 function Get-SessionChangeStats {
     <# Per changed file: lines added/removed since $SinceId (a checkpoint id, yyyyMMdd-HHmmss-fff),
-       measured against the version before the first change in that period (from the undo backups). #>
+       measured against the version before the first change in that period (from the undo backups).
+       A file created in that period has created = $true, also when it has no lines to count
+       (empty, binary or very large). #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [string]$SinceId = '')
     $base = Join-Path (Get-ProjectStateDir $ProjectRoot) 'backups'
     $result = @{}
@@ -461,10 +605,16 @@ function Get-SessionChangeStats {
     foreach ($rel in $baseline.Keys) {
         try {
             $full = Resolve-ProjectPath $ProjectRoot $rel
-            if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Get-Item -LiteralPath $full).Length -gt 2MB -or (Test-BinaryFile $full)) { continue }
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+            $created = -not $baseline[$rel]
+            if ((Get-Item -LiteralPath $full).Length -gt 2MB -or (Test-BinaryFile $full)) {
+                if ($created) { $result[$rel] = @{ added = 0; removed = 0; created = $true } }
+                continue
+            }
             $old = if ($baseline[$rel]) { (Read-TextFile $baseline[$rel]).Text } else { '' }
             $stats = Measure-LineChanges $old (Read-TextFile $full).Text
-            if ($stats.added -or $stats.removed) { $result[$rel] = $stats }
+            $stats.created = $created
+            if ($stats.added -or $stats.removed -or $created) { $result[$rel] = $stats }
         } catch { }
     }
     $result
@@ -644,6 +794,10 @@ function Invoke-GrepAction {
 function Assert-Writable([string]$ProjectRoot, [string]$Path) {
     <# Returns the full path, or throws when the path is user source data (read-only). #>
     $full = Resolve-ProjectPath $ProjectRoot $Path
+    $rel = (ConvertTo-RelativePath $ProjectRoot $full)
+    if ($rel -match '(?i)^\.streamhub(/|$)') {
+        throw "$Path is in .streamhub/, which holds the helper program's own records (issues, schedules). Do not write there; put your file elsewhere in the project."
+    }
     if (Test-InSource $ProjectRoot $full) {
         throw "$Path is in source/, which holds the user's source data and is read-only. Leave it unchanged and write your own working file elsewhere in the project (for example work/$([IO.Path]::GetFileName($full)))."
     }
@@ -1351,5 +1505,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

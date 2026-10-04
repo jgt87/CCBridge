@@ -1,6 +1,6 @@
 ---
 title: Emails waiting for my reply
-output: exports/email-followups.json
+output: Runbooks/Exports/email-followups.json
 itemsKey: emails
 required: generatedAt, period, emails, truncated
 requiredItemFields: subject, from, received, ask, priority

@@ -16,7 +16,7 @@ $script:M365Pattern = '(?i)\b(e-?mails?|mails?|mailbox|inbox|outlook|meetings?|c
 $script:ProjectPattern = '(?i)\b(files?|folders?|project|documents?|notes|csv|excel|xlsx|spreadsheet|data|report|readme|summary|summaries|bestand(en)?|map|rapport|samenvatting|source)\b|(^|\s)@[\w.]'
 
 # Case-specific rule modules: request words, or what the project contains (Context.Traits).
-$script:WebPattern = '(?i)\b(html|css|scss|website|web ?app|web ?page|landing page|frontend|front-end|react|vue|svelte|angular|tsx|jsx|javascript|typescript|component|stylesheet|dashboard|webpagina)\b'
+$script:WebPattern = '(?i)\b(html|css|scss|website|web ?app|web ?page|landing page|frontend|front-end|react|vue|svelte|angular|tsx|jsx|javascript|typescript|component|stylesheet|dashboard|webpagina)\b|\bCORS\b|file://|origin ''null'''
 $script:MovePattern = '(?i)\b(move|moving|split|extract|separate|refactor|offload|reorgani[sz]e|restructure|verplaats|splits|scheid|herstructureer)\b'
 $script:PythonPattern = '(?i)\b(python|pip|django|flask|pandas|pytest)\b|\.pyw?\b'
 $script:PowerShellPattern = '(?i)\b(powershell|pester|cmdlets?)\b|\.ps[md]?1\b'
@@ -67,6 +67,7 @@ function Get-PromptModules {
     $web = ($traits -contains 'web') -or ($Text -match $script:WebPattern)
     $ids = New-Object System.Collections.Generic.List[string]
     if ($traits -notcontains 'nocommands') { $ids.Add('actions:run') }
+    $ids.Add('rules:folders')   # where each kind of file goes (Layout.psm1)
     # find and remember: only useful once the project has files.
     if (@($Context.Paths | Where-Object { $_ }).Count -or $traits -contains 'code') { $ids.Add('actions:project') }
     if ($web) { $ids.Add('rules:web') }

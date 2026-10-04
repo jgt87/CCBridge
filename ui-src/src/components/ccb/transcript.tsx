@@ -7,6 +7,7 @@ import AITextLoading from "@/components/kokonutui/ai-text-loading";
 import type { Activity, AgentEvent, Reference, UndoChange } from "@/lib/api";
 import { UndoCard } from "./undo-card";
 import { stripActionBlocks } from "@/lib/diff";
+import { thinkingTexts } from "@/lib/thinking-texts";
 import { cn } from "@/lib/utils";
 import { ActionCard, type ActionItem } from "./action-card";
 
@@ -310,23 +311,24 @@ function activityText(a: Activity): string {
   return a.total ? `${a.label} (${a.done} of ${a.total} files)` : `${a.label}...`;
 }
 
-function thinkingTexts(progress: string, stopping: boolean, activity: Activity | null): string[] {
+function indicatorTexts(progress: string, stopping: boolean, activity: Activity | null, seed: number): string[] {
   if (stopping) return ["Stopping..."];
   if (activity?.label) return [activityText(activity)];
-  if (progress) return ["Copilot is writing...", "Receiving the reply..."];
-  return ["Asking Copilot...", "Waiting for the reply...", "Copilot is thinking..."];
+  return thinkingTexts(progress ? "writing" : "waiting", seed);
 }
 
 function ThinkingIndicator({ progress, stopping, activity }: { progress: string; stopping: boolean; activity: Activity | null }) {
   // StreamHub's own work (indexing, scanning for issues): the same indicator, its own text.
   const own = Boolean(activity?.label);
+  // One order of the light lines per wait (the indicator mounts when a message starts waiting).
+  const [seed] = useState(() => Date.now());
   return (
     <div className="rounded-xl border border-black/10 border-dashed px-3 py-2 dark:border-white/10">
       <AITextLoading
         className="font-semibold text-base"
         containerClassName="justify-start p-0"
         interval={1800}
-        texts={thinkingTexts(progress, stopping, activity)}
+        texts={indicatorTexts(progress, stopping, activity, seed)}
       />
       {own && activity?.current && <div className="mt-1 truncate font-mono text-muted-foreground text-xs">{activity.current}</div>}
       {progress && !own && (
