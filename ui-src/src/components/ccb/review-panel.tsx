@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, FileText, ScanSearch, Wrench } from "lucide-react";
+import { ChevronDown, ChevronRight, EyeOff, FileText, ScanSearch, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReviewDetail, ReviewFinding, ReviewSummary } from "@/lib/api";
 import { api } from "@/lib/api";
@@ -62,7 +62,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
   const load = (id: string) => {
     api.getReview(id).then((r) => {
       setDetail(r);
-      setPicked(new Set(r.findings.filter((f) => f.status !== "unverified" && !f.fixQueueId && f.severity !== "low").map((f) => f.id)));
+      setPicked(new Set(r.findings.filter((f) => f.status !== "unverified" && !f.fixQueueId && !f.ignored && f.severity !== "low").map((f) => f.id)));
     }, () => setDetail(null));
   };
 
@@ -94,6 +94,16 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
       setNotice((e as Error).message);
     } finally {
       setFixing(false);
+    }
+  };
+
+  const ignore = async (f: ReviewFinding) => {
+    if (!detail) return;
+    try {
+      await api.ignoreFindings(detail.id, [f.id], Boolean(f.ignored));
+      load(detail.id);
+    } catch (e) {
+      setNotice((e as Error).message);
     }
   };
 
@@ -156,6 +166,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
               <span className="block text-sm">{new Date(r.created).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</span>
               <span className="block truncate text-muted-foreground text-xs">
                 {r.scopeText} · {r.high} high · {r.medium} medium · {r.low} low{r.unverified ? ` · ${r.unverified} unverified` : ""}
+                {r.ignored ? ` · ${r.ignored} ignored` : ""}
               </span>
             </span>
           </button>
@@ -177,7 +188,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
                   <div className="space-y-1" key={sev}>
                     <div className="font-medium text-xs uppercase tracking-wide">{sev}</div>
                     {list.map((f) => (
-                      <FindingRow finding={f} key={f.id} onOpen={onOpen} onToggle={() => toggle(f.id)} picked={picked.has(f.id)} />
+                      <FindingRow finding={f} key={f.id} onIgnore={() => ignore(f)} onOpen={onOpen} onToggle={() => toggle(f.id)} picked={picked.has(f.id)} />
                     ))}
                   </div>
                 );
@@ -190,7 +201,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
                   {detail.findings
                     .filter((f) => f.status === "unverified")
                     .map((f) => (
-                      <FindingRow finding={f} key={f.id} onOpen={onOpen} onToggle={() => toggle(f.id)} picked={picked.has(f.id)} />
+                      <FindingRow finding={f} key={f.id} onIgnore={() => ignore(f)} onOpen={onOpen} onToggle={() => toggle(f.id)} picked={picked.has(f.id)} />
                     ))}
                 </div>
               )}
@@ -203,12 +214,24 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
   );
 }
 
-function FindingRow({ finding: f, picked, onToggle, onOpen }: { finding: ReviewFinding; picked: boolean; onToggle: () => void; onOpen: (path: string) => void }) {
+function FindingRow({
+  finding: f,
+  picked,
+  onToggle,
+  onOpen,
+  onIgnore,
+}: {
+  finding: ReviewFinding;
+  picked: boolean;
+  onToggle: () => void;
+  onOpen: (path: string) => void;
+  onIgnore: () => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={cn("rounded-md border border-black/10 p-1.5 dark:border-white/10", f.status === "unverified" && "opacity-60")}>
+    <div className={cn("rounded-md border border-black/10 p-1.5 dark:border-white/10", (f.status === "unverified" || f.ignored) && "opacity-50")}>
       <div className="flex items-start gap-1.5">
-        <input checked={picked} className="mt-0.5 accent-zinc-500" disabled={Boolean(f.fixQueueId)} onChange={onToggle} title="Fix this finding" type="checkbox" />
+        <input checked={picked && !f.ignored} className="mt-0.5 accent-zinc-500" disabled={Boolean(f.fixQueueId || f.ignored)} onChange={onToggle} title="Fix this finding" type="checkbox" />
         <button className="min-w-0 flex-1 text-left text-xs" onClick={() => setOpen(!open)} type="button">
           <span className="font-medium">{f.title}</span>
           {f.category && <span className="text-muted-foreground"> · {f.category}</span>}
@@ -225,6 +248,17 @@ function FindingRow({ finding: f, picked, onToggle, onOpen }: { finding: ReviewF
         )}
         {f.status === "unverified" && <span title={f.reason}>unverified</span>}
         {f.fixQueueId && <span>fix queued</span>}
+        {f.ignored && <span>ignored</span>}
+        {f.file && f.quote && (
+          <button
+            className="ml-auto inline-flex items-center gap-1 hover:text-foreground"
+            onClick={onIgnore}
+            title={f.ignored ? "Show this finding again, also in later reviews" : "Not a real problem: hide it here and leave the same line out of later reviews"}
+            type="button"
+          >
+            <EyeOff className="h-3 w-3" /> {f.ignored ? "Unignore" : "Ignore"}
+          </button>
+        )}
       </div>
       {open && (
         <div className="mt-1 space-y-1 pl-5 text-xs">

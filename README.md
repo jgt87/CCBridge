@@ -612,6 +612,8 @@ The index catches up at the start of every task, and the changed files are index
 
 Edge and Chrome block some things on a page opened straight from disk (`file://`): `fetch()` of local files, importing JSON, and `<script type="module">`. In a project without a build tool or web server (no `package.json`, bundler config or server script), StreamHub reports each of these after a change, together with the replacement: a `.js` file that sets a global (`window.expensesData = ...;`), plus the `<script src>` tag to add to the page that uses it. Copilot is given the same rule up front.
 
+**Data copies follow their JSON.** A `.js` file that only wraps JSON data (`window.calendarData = {...};`, or `const`/`var`) and has a JSON file of the same name in the project is a data copy; the JSON is the one source. Whenever the JSON changes (after a task, a runbook or chain run, or when the project opens), StreamHub rewrites the copy from it, with a first line `// Generated from data/calendar-data.json by the helper program. Do not edit...`. A rewrite is a change set (Undo takes it back), and the chat says when a copy differed from its JSON. Copilot's edits to a copy are refused with "change the JSON instead", code review skips copies, and a copy whose JSON is missing or invalid is left alone and reported. JS files with any other code are never touched. So a wrong value is fixed where it comes from: in the JSON, or in the runbook or script that writes it. Each rewrite shows in the chat as a Write card "by StreamHub" with its diff, like Copilot's own changes. Turn it off under Settings > Changes and commands > *Data copies follow their JSON*.
+
 ## Where StreamHub keeps its data
 
 | Location | Content |

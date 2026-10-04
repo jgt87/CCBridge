@@ -14,6 +14,7 @@
   "workIq": "leave",
   "startMode": "ask",
   "chatHistory": true,
+  "dataCopies": true,
   "saveReplyFrames": true,
   "autoUpdate": true,
   "webRead": "named-sites",

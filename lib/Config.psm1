@@ -85,6 +85,7 @@ $script:SettingDefs = @(
     @{ key = 'commandTimeoutSec'; group = 'Changes and commands'; label = 'Command timeout (s)'; help = 'Longest time a run command may take.'; type = 'number'; min = 10; max = 3600 }
     @{ key = 'autoApproveCommands'; group = 'Changes and commands'; label = 'Commands that run without asking'; help = 'One per line: a command that starts with one of these runs without asking you, for example npm test. Commands that delete or move files, or touch Microsoft 365, always ask, whatever is listed here.'; type = 'commands' }
     @{ key = 'fileChangeCounts'; group = 'Changes and commands'; label = 'Line counts in the Files tab'; help = 'last-change: only the most recent change since the project was opened, so earlier counts and "new" tags disappear at the next change and nothing shows right after a start; session: lines added and removed since the project was opened (also after a restart).'; type = 'select'; options = @('last-change', 'session') }
+    @{ key = 'dataCopies'; group = 'Changes and commands'; label = 'Data copies follow their JSON'; help = 'A .js file that only wraps a JSON file''s data (for pages opened from disk) is rewritten from that JSON after each task and when a project opens, and Copilot changes the JSON instead of the copy. Off: such files are ordinary files.'; type = 'toggle' }
     @{ key = 'chainScripts'; group = 'Changes and commands'; label = 'Scripts in chains'; help = 'approve-once: a person approves a script from Scripts/ the first time a chain runs it and again after it changed; after that it also runs from a schedule without asking. always-ask: every run. off: chains run runbooks and fetch prompts only. Scripts that delete data or use Microsoft 365 always need a person, and deleting or moving outside the project is never allowed.'; type = 'select'; options = @('approve-once', 'always-ask', 'off') }
     @{ key = 'reviewAfterChanges'; group = 'Checks and issues'; label = 'Copilot checks its big changes'; help = 'Ask Copilot to review changed files for leftovers, dead code and broken references.'; type = 'select'; options = @('big', 'always', 'off') }
     @{ key = 'reviewMinLines'; group = 'Checks and issues'; label = 'Big change from (lines)'; help = 'Changed lines from which a change counts as big.'; type = 'number'; min = 5; max = 1000 }
@@ -191,6 +192,12 @@ function Set-CCBridgeSetting {
     Get-SettingValue (Get-CCBridgeConfig harness $AppRoot) $Key
 }
 
+function Test-DataCopiesOn([string]$AppRoot) {
+    <# Setting dataCopies (on unless turned off): data copies follow their JSON (DataMirror.psm1).
+       Read from disk, so every runspace sees a change at once. #>
+    try { $v = (Get-CCBridgeConfig harness $AppRoot).dataCopies; ($null -eq $v) -or [bool]$v } catch { $true }
+}
+
 function Reset-CCBridgeSettings {
     <# Puts every adjustable setting back to the app default (removes them from harness.local.json;
        other local values, such as the ports, stay). Returns the keys that were changed. #>
@@ -225,4 +232,4 @@ function Get-CCBridgeEnvironment {
     }
 }
 
-Export-ModuleMember -Function Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings
+Export-ModuleMember -Function Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings

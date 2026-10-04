@@ -631,11 +631,7 @@ export default function App() {
                       <span className="truncate font-medium" title="Waiting tasks run while StreamHub is open; if you close it, they continue at the next start.">
                         Queued: runs after the current task, while StreamHub stays open.
                       </span>
-                    ) : (
-                      <span className="truncate">
-                        {state.project?.name} · {MODES.find((m) => m.id === state.mode)?.description}
-                      </span>
-                    )
+                    ) : null
                   }
                   headerRight={
                     <span className="flex items-center gap-2">

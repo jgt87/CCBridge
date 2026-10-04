@@ -11,6 +11,8 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Executor.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Layout.psm1')
+Import-Module (Join-Path $PSScriptRoot 'DataMirror.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 
 $script:ReviewExt = '(?i)\.(ps1|psm1|psd1|py|pyw|js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|html?|css|scss|less|json|cs|java|kt|go|rs|rb|php|sh|bash|cmd|bat|sql|ya?ml|toml|ini|xml|c|cpp|h|hpp|swift|dart|lua|r)$'
 $script:ReviewSkipPath = '(?i)(^|/)(source|\.streamhub|reviews|evidence|exports|fetch|runbooks|History|Logs|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.next|\.venv|venv|__pycache__)/|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|poetry\.lock)$|\.min\.(js|css)$|\.map$'
@@ -23,6 +25,7 @@ function Get-ReviewFiles {
        Returns @{ files; skipped }. With $Paths only those files and folders are taken. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths, [int]$MaxBytes = 300000)
     $all = @(Get-ProjectFiles $ProjectRoot)
+    $dataCopies = Test-DataCopiesOn   # setting: data copies follow their JSON, so they are reviewed there
     $want = @($Paths | Where-Object { $_ } | ForEach-Object { $_.Trim().Replace('\', '/').Trim('/') })
     $files = New-Object System.Collections.Generic.List[string]
     $skipped = New-Object System.Collections.Generic.List[string]
@@ -31,6 +34,11 @@ function Get-ReviewFiles {
         if ($want.Count -and -not @($want | Where-Object { $p -eq $_ -or $p.StartsWith("$_/", [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
         if ($p -notmatch $script:ReviewExt -or $p -match $script:ReviewSkipPath) { continue }
         if ([int64]$f.size -gt $MaxBytes) { $skipped.Add("$p (too large, probably generated)"); continue }
+        # A data copy (a JS file that only wraps JSON data): its content is the JSON's, reviewed there.
+        if ($p -match '(?i)\.js$' -and $dataCopies) {
+            $w = try { Read-DataWrapper (Read-TextFile (Join-Path $ProjectRoot $p.Replace('/', '\'))).Text } catch { $null }
+            if ($w) { $skipped.Add("$p (a data copy of $(if ($w.source) { $w.source } else { 'a JSON file' }))"); continue }
+        }
         $files.Add($p)
     }
     @{ files = $files.ToArray(); skipped = $skipped.ToArray() }
@@ -197,10 +205,10 @@ function Get-Reviews {
     foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter 'review-*.json' -File | Sort-Object Name -Descending)) {
         try {
             $r = [IO.File]::ReadAllText($f.FullName) | ConvertFrom-Json
-            $ok = @($r.findings | Where-Object { $_.status -ne 'unverified' })
+            $ok = @($r.findings | Where-Object { $_.status -ne 'unverified' -and -not $_.ignored })
             [pscustomobject]@{ id = $r.id; created = $r.created; scopeText = $r.scopeText; files = @($r.files).Count; messages = $r.messages
                 high = @($ok | Where-Object severity -eq 'high').Count; medium = @($ok | Where-Object severity -eq 'medium').Count; low = @($ok | Where-Object severity -eq 'low').Count
-                unverified = @($r.findings).Count - $ok.Count; report = (Get-LayoutPath Reviews "$($r.id).md") }
+                unverified = @($r.findings | Where-Object { $_.status -eq 'unverified' -and -not $_.ignored }).Count; ignored = @($r.findings | Where-Object { $_.ignored }).Count; report = (Get-LayoutPath Reviews "$($r.id).md") }
         } catch { }
     }
 }

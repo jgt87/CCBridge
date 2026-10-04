@@ -31,13 +31,14 @@ function Use-IssueLock([scriptblock]$Body) {
 
 function Read-IssueIndex([string]$ProjectRoot) {
     $p = Get-IssueIndexPath $ProjectRoot
-    $ix = @{ version = 1; updated = $null; files = @{}; states = @{} }
+    $ix = @{ version = 1; updated = $null; files = @{}; states = @{}; ignored = @{} }
     if (Test-Path -LiteralPath $p) {
         try {
             $j = [IO.File]::ReadAllText($p) | ConvertFrom-Json
             $ix.updated = $j.updated
             foreach ($f in @($j.files.PSObject.Properties)) { $ix.files[$f.Name] = @{ size = [int64]$f.Value.size; mtime = [int64]$f.Value.mtime; issues = @($f.Value.issues | Where-Object { $_ }) } }
             foreach ($s in @($j.states.PSObject.Properties)) { $ix.states[$s.Name] = @{ status = "$($s.Value.status)"; attempts = [int]$s.Value.attempts; note = "$($s.Value.note)" } }
+            if ($j.ignored) { foreach ($g in @($j.ignored.PSObject.Properties)) { $ix.ignored[$g.Name] = @{ path = "$($g.Value.path)"; category = "$($g.Value.category)"; message = "$($g.Value.message)"; text = "$($g.Value.text)"; at = "$($g.Value.at)" } } }
         } catch { }
     }
     $ix
@@ -126,6 +127,36 @@ function Get-IssueId([string]$Category, [string]$Path, [string]$Message, [int]$O
     try { (($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($key)) | Select-Object -First 6 | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() }
 }
 
+function ConvertTo-IgnoreText([string]$Text) {
+    # A code line as it is compared for ignoring: no line-number prefix, spacing collapsed.
+    (("$Text" -replace '^\s*\d+\s*\|\s?', '').Trim() -replace '\s+', ' ')
+}
+
+function Get-IgnoreKey([string]$Path, [string]$Category, [string]$Message, [string]$LineText) {
+    <# What an ignored finding is: the file, the check, its message (numbers left out) and the code
+       line it is about. Not the line number or how often the message occurs, so an ignore holds
+       when lines move or other findings come and go. #>
+    "$Category|$("$Path".Replace('\', '/').ToLowerInvariant())|$("$Message" -replace '\d+', '#')|$(ConvertTo-IgnoreText $LineText)"
+}
+
+function Get-IssueLineText([string]$ProjectRoot, [string]$Path, [int]$Line) {
+    if ($Line -le 0) { return '' }
+    try {
+        $lines = (Read-TextFile (Resolve-ProjectPath $ProjectRoot $Path)).Text.Replace("`r`n", "`n").Split("`n")
+        if ($Line -le $lines.Count) { return $lines[$Line - 1].Trim() }
+    } catch { }
+    ''
+}
+
+function Get-IssueIgnore([string]$ProjectRoot, [string]$Path, $Issue) {
+    <# @{ key; entry } for one issue: the entry is what the ignore list keeps. Issues indexed before
+       the line text was kept take it from the file. #>
+    $has = $(if ($Issue -is [hashtable]) { $Issue.ContainsKey('text') } else { [bool]$Issue.PSObject.Properties['text'] })
+    $text = ConvertTo-IgnoreText $(if ($has) { "$($Issue.text)" } else { Get-IssueLineText $ProjectRoot $Path ([int]$Issue.line) })
+    @{ key = (Get-IgnoreKey $Path $Issue.category $Issue.message $text)
+       entry = @{ path = $Path; category = "$($Issue.category)"; message = "$($Issue.message)"; text = $text; at = (Get-Date).ToString('s') } }
+}
+
 function Get-FileIssues {
     <# Every issue in one file: errors (file checks, missing local files, unknown PowerShell commands),
        secrets, and code-health limits. Returns @{ id; line; category; message }. #>
@@ -142,9 +173,12 @@ function Get-FileIssues {
     if ($Path -notmatch '(?i)\.(md|markdown)$|(^|/)(tests?|__tests__|fixtures|spec)/|[._-](tests?|spec)\.') { foreach ($s in @(Find-Secrets $t)) { & $split 'secret' $s } }
     foreach ($h in @(Get-HealthIssues $Path $t)) { $raw.Add(@{ category = 'health'; line = $h.line; message = $h.message }) }
     $seen = @{}
+    $lines = $t.Split("`n")
     foreach ($r in $raw) {
         $k = "$($r.category)|$($r.message -replace '\d+', '#')"; $seen[$k] = 1 + [int]$seen[$k]
-        [pscustomobject]@{ id = (Get-IssueId $r.category $Path $r.message $seen[$k]); line = $r.line; category = $r.category; message = $r.message }
+        $text = $(if ($r.line -gt 0 -and $r.line -le $lines.Count) { $lines[$r.line - 1].Trim() } else { '' })
+        if ($text.Length -gt 300) { $text = $text.Substring(0, 300) }
+        [pscustomobject]@{ id = (Get-IssueId $r.category $Path $r.message $seen[$k]); line = $r.line; category = $r.category; message = $r.message; text = $text }
     }
 }
 
@@ -178,11 +212,19 @@ function Update-IssueIndex {
     }
     Use-IssueLock {
         $ix = Read-IssueIndex $ProjectRoot   # again, inside the lock: another writer may have saved meanwhile
+        # Ignores from before the ignore list (a state only): kept by what they are about.
+        foreach ($p in @($ix.files.Keys)) { foreach ($i in @($ix.files[$p].issues)) {
+            if ($ix.states[$i.id].status -eq 'ignored') { $g = Get-IssueIgnore $ProjectRoot $p $i; if (-not $ix.ignored.ContainsKey($g.key)) { $ix.ignored[$g.key] = $g.entry } }
+        } }
         foreach ($k in $results.Keys) { $ix.files[$k] = $results[$k] }
         foreach ($g in $gone) { $ix.files.Remove($g) }
         if ($all) { $keep = @{}; foreach ($p in $list) { $keep[$p] = $true }; foreach ($k in @($ix.files.Keys)) { if (-not $keep.ContainsKey($k)) { $ix.files.Remove($k) } } }
         $live = @{}; foreach ($f in $ix.files.Values) { foreach ($i in @($f.issues)) { $live[$i.id] = $true } }
         foreach ($k in @($ix.states.Keys)) { if (-not $live.ContainsKey($k)) { $ix.states.Remove($k) } }
+        # An ignored finding stays ignored when it is found again, under whatever id it has now.
+        foreach ($p in @($ix.files.Keys)) { foreach ($i in @($ix.files[$p].issues)) {
+            if ($ix.ignored.ContainsKey((Get-IssueIgnore $ProjectRoot $p $i).key) -and $ix.states[$i.id].status -ne 'ignored') { $ix.states[$i.id] = @{ status = 'ignored'; attempts = 0; note = '' } }
+        } }
         Save-IssueIndex $ProjectRoot $ix
         $null = Import-ProjectIssues $ProjectRoot
         $counts = @{ error = 0; secret = 0; health = 0 }
@@ -210,6 +252,12 @@ function Set-IssueState {
     Use-IssueLock {
         $ix = Read-IssueIndex $ProjectRoot
         foreach ($id in $Ids) {
+            # Ignoring is remembered by what the finding is about; showing it again forgets that.
+            foreach ($p in @($ix.files.Keys)) { foreach ($i in @($ix.files[$p].issues | Where-Object { $_.id -eq $id })) {
+                $g = Get-IssueIgnore $ProjectRoot $p $i
+                if ($Status -eq 'ignored') { $ix.ignored[$g.key] = $g.entry }
+                elseif ($Status -eq 'open') { $ix.ignored.Remove($g.key) }
+            } }
             $st = if ($ix.states[$id]) { $ix.states[$id] } else { @{ status = 'open'; attempts = 0; note = '' } }
             $st.status = $Status
             if ($Attempts -ge 0) { $st.attempts = $Attempts }
@@ -219,6 +267,54 @@ function Set-IssueState {
         Save-IssueIndex $ProjectRoot $ix
     }
     $null = Import-ProjectIssues $ProjectRoot
+}
+
+function Get-IgnoredFindings([string]$ProjectRoot) {
+    <# Everything the user ignored, in Issues or in a code review: path, category, message, text. #>
+    $ix = Use-IssueLock { Read-IssueIndex $ProjectRoot }
+    @($ix.ignored.Values | ForEach-Object { [pscustomobject]$_ })
+}
+
+function Set-IgnoredFinding {
+    <# Ignores (or with -Undo shows again) a code review finding: by its file and the first line it
+       quotes, so a later review that reports the same line again leaves it out. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Path, [string]$Title, [string]$Quote, [switch]$Undo)
+    $text = ConvertTo-IgnoreText (@("$Quote".Replace("`r`n", "`n").Split("`n") | Where-Object { (ConvertTo-IgnoreText $_) }) | Select-Object -First 1)
+    if (-not $text) { throw 'This finding quotes no code, so it cannot be recognised in a later review.' }
+    $key = Get-IgnoreKey $Path 'review' '' $text
+    Use-IssueLock {
+        $ix = Read-IssueIndex $ProjectRoot
+        if ($Undo) { $ix.ignored.Remove($key) } else { $ix.ignored[$key] = @{ path = $Path.Replace('\', '/'); category = 'review'; message = $Title; text = $text; at = (Get-Date).ToString('s') } }
+        Save-IssueIndex $ProjectRoot $ix
+    }
+}
+
+function Test-RecognisableLine([string]$Text) {
+    # Only a line with real content identifies a finding in a review ("}" or "end" could be anywhere).
+    ("$Text".Length -ge 8) -and ("$Text" -match '[A-Za-z]')
+}
+
+function Test-IgnoredFinding {
+    <# True when a code review finding is about a line the user ignored before (in Issues or in a
+       review): the same file, and one of the lines it quotes is that line. #>
+    param($Ignored, $Finding)
+    if (-not $Finding.file) { return $false }
+    $file = "$($Finding.file)".Replace('\', '/').ToLowerInvariant()
+    $quoted = @("$($Finding.quote)".Replace("`r`n", "`n").Split("`n") | ForEach-Object { ConvertTo-IgnoreText $_ } | Where-Object { $_ })
+    if (-not $quoted.Count) { return $false }
+    foreach ($g in @($Ignored)) {
+        if ((Test-RecognisableLine $g.text) -and "$($g.path)".ToLowerInvariant() -eq $file -and $quoted -contains $g.text) { return $true }
+    }
+    $false
+}
+
+function Format-IgnoredForReview($Ignored, [string[]]$Files) {
+    <# The ignored findings in these files, for the review message: Copilot leaves them out. #>
+    $want = @{}; foreach ($f in $Files) { $want["$f".Replace('\', '/').ToLowerInvariant()] = $true }
+    $list = @(@($Ignored) | Where-Object { (Test-RecognisableLine $_.text) -and $want.ContainsKey("$($_.path)".ToLowerInvariant()) } | Select-Object -First 40)
+    if (-not $list.Count) { return '' }
+    $lines = $list | ForEach-Object { $t = "$($_.text)"; if ($t.Length -gt 160) { $t = $t.Substring(0, 157) + '...' }; "- $($_.path), the line ``$t``$(if ($_.message) { ": $($_.message)" })" }
+    "`n`nThe user checked these and accepted them; do not report them again:`n" + ($lines -join "`n")
 }
 
 function New-FixMessage {
@@ -241,4 +337,4 @@ function New-FixMessage {
     $sb.ToString().TrimEnd()
 }
 
-Export-ModuleMember -Function Get-FileIssues, Get-IssueCandidates, Update-IssueIndex, Get-IssueReport, Set-IssueState, New-FixMessage, Get-IssueIndexPath, Read-IssueIndex, Import-ProjectIssues, Get-AppIssueIndex, Get-AppIssueIndexPath
+Export-ModuleMember -Function Get-IgnoredFindings, Set-IgnoredFinding, Test-IgnoredFinding, Format-IgnoredForReview, Get-IgnoreKey, Get-FileIssues, Get-IssueCandidates, Update-IssueIndex, Get-IssueReport, Set-IssueState, New-FixMessage, Get-IssueIndexPath, Read-IssueIndex, Import-ProjectIssues, Get-AppIssueIndex, Get-AppIssueIndexPath

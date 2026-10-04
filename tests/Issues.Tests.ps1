@@ -271,6 +271,57 @@ Describe 'Reset-CCBridgeSettings' {
     Remove-Item -LiteralPath $app -Recurse -Force
 }
 
+Describe 'Ignored findings' {
+    It 'stay ignored when lines move, other findings come and go, or the finding is gone for a while' {
+        $p = New-TestProject
+        try {
+            Set-TestFile $p 'a.ps1' (Get-BigPsFunction 'Get-Alpha')
+            $null = Update-IssueIndex $p
+            $hit = @(Get-IssueReport $p | Where-Object { $_.category -eq 'health' })[0]
+            Set-IssueState $p @($hit.id) 'ignored'
+            # Lines move and an earlier finding with the same kind of message appears.
+            Set-TestFile $p 'a.ps1' ("# moved`n`n" + (Get-BigPsFunction 'Get-Beta') + "`n" + (Get-BigPsFunction 'Get-Alpha'))
+            $null = Update-IssueIndex $p
+            $r = @(Get-IssueReport $p | Where-Object { $_.category -eq 'health' })
+            @($r | Where-Object { $_.message -match 'Get-Alpha' })[0].status | Should Be 'ignored'
+            @($r | Where-Object { $_.message -match 'Get-Beta' })[0].status | Should Be 'open'
+            # Gone (the function was cut down), then back: still ignored.
+            Set-TestFile $p 'a.ps1' "function Get-Alpha { 1 }`n"
+            $null = Update-IssueIndex $p
+            Set-TestFile $p 'a.ps1' (Get-BigPsFunction 'Get-Alpha')
+            $null = Update-IssueIndex $p
+            $again = @(Get-IssueReport $p | Where-Object { $_.category -eq 'health' })[0]
+            $again.status | Should Be 'ignored'
+            # Unignore forgets it.
+            Set-IssueState $p @($again.id) 'open'
+            Set-TestFile $p 'a.ps1' ("`n" + (Get-BigPsFunction 'Get-Alpha'))
+            $null = Update-IssueIndex $p
+            @(Get-IssueReport $p | Where-Object { $_.category -eq 'health' })[0].status | Should Be 'open'
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+    It 'are left out of code reviews: named to Copilot and dropped when a finding quotes the same line' {
+        $p = New-TestProject
+        try {
+            Set-TestFile $p 'a.ps1' (Get-BigPsFunction 'Get-Alpha')
+            $null = Update-IssueIndex $p
+            Set-IssueState $p @(@(Get-IssueReport $p | Where-Object { $_.category -eq 'health' })[0].id) 'ignored'
+            $ign = @(Get-IgnoredFindings $p)
+            Format-IgnoredForReview $ign @('a.ps1') | Should Match 'do not report them again:\s+- a\.ps1, the line `function Get-Alpha'
+            Format-IgnoredForReview $ign @('b.ps1') | Should Be ''
+            Test-IgnoredFinding $ign @{ file = 'a.ps1'; title = 'Too complex'; quote = 'function Get-Alpha($x, $y) {' } | Should Be $true
+            Test-IgnoredFinding $ign @{ file = 'a.ps1'; title = 'Other'; quote = 'if ($x -eq 1) { }' } | Should Be $false
+            Test-IgnoredFinding $ign @{ file = 'b.ps1'; title = 'Too complex'; quote = 'function Get-Alpha($x, $y) {' } | Should Be $false
+            # Ignored in a review: a later review reporting the same line (any title) leaves it out.
+            Set-IgnoredFinding $p 'src/app.js' 'Unchecked input' "  12 | const total = items.length * price;`n  13 | return total;"
+            Test-IgnoredFinding @(Get-IgnoredFindings $p) @{ file = 'src/app.js'; title = 'Possible overflow'; quote = 'const total = items.length * price;' } | Should Be $true
+            Set-IgnoredFinding $p 'src/app.js' '' 'const total = items.length * price;' -Undo
+            Test-IgnoredFinding @(Get-IgnoredFindings $p) @{ file = 'src/app.js'; quote = 'const total = items.length * price;' } | Should Be $false
+            # A line without real content never hides a review finding.
+            Test-IgnoredFinding @([pscustomobject]@{ path = 'a.js'; text = '}' }) @{ file = 'a.js'; quote = '}' } | Should Be $false
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+}
+
 Remove-Item -LiteralPath $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
 $env:CCBRIDGE_ISSUE_INDEX = $null
 

@@ -5,9 +5,11 @@ import {
   FilePen,
   FilePlus2,
   FileSearch,
+  FolderInput,
   FolderSearch,
   ListTodo,
   Play,
+  RotateCcw,
   TerminalSquare,
   X,
 } from "lucide-react";
@@ -34,6 +36,8 @@ export interface ActionItem {
   output?: string;
   /** Who approved or rejected it: "user" (you, in the web app), "api" or "mcp". */
   decidedBy?: string;
+  /** "streamhub": a change StreamHub made itself (data copies, folder moves, links, source data put back). */
+  by?: string;
   /** Failed step: category, possible reasons and what happens next. */
   code?: string;
   reasons?: string[];
@@ -48,6 +52,8 @@ const ICONS: Record<string, React.ReactNode> = {
   edit: <FilePen className="h-4 w-4 text-muted-foreground" />,
   run: <TerminalSquare className="h-4 w-4 text-muted-foreground" />,
   todo: <ListTodo className="h-4 w-4 text-muted-foreground" />,
+  move: <FolderInput className="h-4 w-4 text-muted-foreground" />,
+  restore: <RotateCcw className="h-4 w-4 text-muted-foreground" />,
 };
 
 const VERBS: Record<string, string> = {
@@ -58,6 +64,8 @@ const VERBS: Record<string, string> = {
   edit: "Edit",
   run: "Run",
   todo: "Plan",
+  move: "Move",
+  restore: "Restore",
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -124,6 +132,11 @@ export function ActionCard({ item }: { item: ActionItem }) {
         <span className="font-medium">{VERBS[item.action] ?? item.action}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground text-xs">{item.target}</span>
         {counts && <ChangePill added={counts.add} removed={counts.del} />}
+        {item.by === "streamhub" && (
+          <span className="text-[11px] text-muted-foreground" title="StreamHub made this change itself, not Copilot">
+            by StreamHub
+          </span>
+        )}
         {item.decidedBy && item.decidedBy !== "user" && (
           <span className="text-[11px] text-muted-foreground" title="This action was approved or rejected by another program, not in this window">
             via {item.decidedBy === "mcp" ? "MCP" : "API"}

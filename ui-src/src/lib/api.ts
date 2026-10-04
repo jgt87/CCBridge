@@ -278,6 +278,7 @@ export interface ReviewSummary {
   medium: number;
   low: number;
   unverified: number;
+  ignored?: number;
   report: string;
 }
 
@@ -295,6 +296,8 @@ export interface ReviewFinding {
   status: "verified" | "unverified" | "general";
   reason?: string;
   fixQueueId?: string;
+  /** The user marked it as not a real problem; later reviews leave the same line out. */
+  ignored?: boolean;
 }
 
 export interface ReviewDetail {
@@ -603,6 +606,7 @@ export const api = {
       findings: asList(r.review.findings),
     })),
   fixFindings: (id: string, ids: string[]) => call<{ ok: boolean; tasks: number }>("POST", "/api/reviews/fix", { id, ids }),
+  ignoreFindings: (id: string, ids: string[], undo = false) => call<{ ok: boolean }>("POST", "/api/reviews/ignore", { id, ids, undo }),
   createSchedule: (spec: ScheduleSpec) => call<{ ok: boolean; id: string }>("POST", "/api/schedules", spec),
   editSchedule: (id: string, spec: ScheduleSpec) => call<{ ok: boolean }>("POST", "/api/schedules/edit", { id, ...spec }),
   updateSchedule: (id: string, change: { enabled?: boolean }) => call<{ ok: boolean }>("POST", "/api/schedules/update", { id, ...change }),

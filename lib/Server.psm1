@@ -224,7 +224,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ($State.ProjectRoot) { $list = @(Get-Reviews $State.ProjectRoot) }
             return Send-Json $Ctx @{ reviews = $list }
         }
-        '^POST /api/reviews/(get|fix)$' {
+        '^POST /api/reviews/(get|fix|ignore)$' {
             $op = $Matches[1]
             $b = Read-JsonBody $Ctx
             if ("$($b.id)" -notmatch '^review-[\d-]+$') { throw "Unknown review '$($b.id)'" }
@@ -233,7 +233,16 @@ function Invoke-ApiRequest($Ctx, $State) {
             $rv = [IO.File]::ReadAllText($jsonPath) | ConvertFrom-Json
             if ($op -eq 'get') { return Send-Json $Ctx @{ review = $rv } }
             $ids = @($b.ids | ForEach-Object { "$_" })
-            $picked = @($rv.findings | Where-Object { $ids -contains $_.id } | ForEach-Object { ConvertTo-PlainHashtable $_ })
+            if ($op -eq 'ignore') {
+                # Not a real problem: hidden here, and a later review leaves the same line out.
+                foreach ($f in @($rv.findings | Where-Object { $ids -contains $_.id })) {
+                    Set-IgnoredFinding $State.ProjectRoot "$($f.file)" "$($f.title)" "$($f.quote)" -Undo:([bool]$b.undo)
+                    $f | Add-Member -NotePropertyName ignored -NotePropertyValue (-not $b.undo) -Force
+                }
+                [IO.File]::WriteAllText($jsonPath, (ConvertTo-Json -InputObject $rv -Depth 6), (New-Object Text.UTF8Encoding($false)))
+                return Send-Json $Ctx @{ ok = $true }
+            }
+            $picked = @($rv.findings | Where-Object { $ids -contains $_.id -and -not $_.ignored } | ForEach-Object { ConvertTo-PlainHashtable $_ })
             if (-not $picked.Count) { throw 'Pick at least one finding to fix' }
             $queued = 0
             foreach ($t in @(New-ReviewFixTasks $picked)) {
@@ -614,21 +623,27 @@ function Set-Project($State, [string]$Path) {
     Add-AgentEvent $State 'project' @{ name = (Split-Path $Path -Leaf); path = $Path }
     # Older projects move to the current layout once (Runbooks/, StreamHub's records in .streamhub/,
     # capitalised folders); then the project's own code and documents follow the moves.
+    # What these change is shown as action cards after the earlier conversation is back (below).
+    $moved = @(); $re = $null
     try {
         $moves = New-Object System.Collections.ArrayList
         $moved = @(Move-ProjectLayout $State.ProjectRoot -Moves $moves)
-        if ($moved.Count) { Add-AgentEvent $State 'status' @{ text = "Project folders tidied to the current layout: fetch prompts and runbooks in Runbooks/, their data in Runbooks/Exports/, StreamHub's own records (evidence, reviews, plans, earlier data versions) in .streamhub/, folder names with a capital ($($moved.Count) item(s))." } }
-        if ($moves.Count) {
-            $re = Update-MovedReferences $State.ProjectRoot $moves
-            if (@($re.files).Count) {
-                $list = (@($re.files) | ForEach-Object { "$($_.path) ($($_.count))" }) -join ', '
-                Add-AgentEvent $State 'status' @{ text = "Links and references in the project's code now point at the new folders: $list. The earlier versions of these files are kept in $($re.backup)." }
-            }
-        }
+        if ($moves.Count) { $re = Update-MovedReferences $State.ProjectRoot $moves }
     } catch { Write-CCBLogError server 'project layout' $_ }
     try { $null = Invoke-ProjectRetention $State.ProjectRoot $State.Config } catch { Write-CCBLogError server 'retention' $_ }
     $mark = $State.Seq
     if ($State.SaveHistory) { try { $null = Restore-ChatHistory $State $State.ProjectRoot } catch { Write-CCBLogError server 'chat history' $_ } }   # the earlier conversation, back in the chat
+    # A new instance of the app starts on a new chat (the earlier one stays in the history file and
+    # Arrow Up still recalls its messages); switching projects later shows each project's conversation.
+    if (-not $State.FirstProjectOpened) { $State.FirstProjectOpened = $true; Add-AgentEvent $State 'newchat' @{ text = 'New chat: StreamHub started.' } }
+    if ($moved.Count) { Add-OwnChangeEvent $State 'move' "$($moved.Count) item(s) to the current folder layout" "Project folders tidied to the current layout: fetch prompts and runbooks in Runbooks/, their data in Runbooks/Exports/, StreamHub's own records (evidence, reviews, plans, earlier data versions) in .streamhub/, folder names with a capital." -Output ($moved -join "`n") }
+    foreach ($f in @(if ($re) { $re.files })) {
+        # Each file whose links now point at the moved folders: an edit card with its diff.
+        $old = try { (Read-TextFile (Join-Path $re.backup $f.path.Replace('/', ''))).Text } catch { $null }
+        $new = try { (Read-TextFile (Join-Path $State.ProjectRoot $f.path.Replace('/', ''))).Text } catch { $null }
+        Add-OwnChangeEvent $State 'edit' $f.path "$($f.count) link(s) or reference(s) now point at the new folders. The earlier version is kept in $($re.backup)." @{ path = $f.path; exists = $true; old = $old; new = $new }
+    }
+    Sync-DataMirrors $State   # data copies (JS wrapping a JSON file) follow their JSON
     # Line counts and "new" marks in the Files tab cover the change sets in the restored chat too.
     try { $State.SessionSince = Get-ChangeCountStart $State $mark ([string]$State.SessionSince) } catch { Write-CCBLogError server 'change counts' $_ }
     try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue fix reset' $_ }

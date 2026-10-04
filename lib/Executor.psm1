@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Log.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Guardrails.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 
 $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
@@ -471,7 +472,7 @@ function Get-DataScriptFix([string]$ProjectRoot, [string]$DataRel, [string[]]$Pa
         "add <script src=""$src""></script> to $pg $where"
     })
     if (-not $tags.Count) { $tags = @("load it with <script src=""...""></script> in the page, before the script that uses it") }
-    "Replace it: write $jsRel containing window.$name = $value;, $($tags -join ' and '), and use window.$name directly instead (no fetch, await or .then)"
+    "Replace it: write $jsRel containing window.$name = $value;, $($tags -join ' and '), and use window.$name directly instead (no fetch, await or .then)$(if (Test-DataCopiesOn) { ". Write it once: after that the helper program keeps it up to date from $DataRel, so later changes go into $DataRel only" })"
 }
 
 function Find-FileUrlBlocks {
@@ -857,6 +858,13 @@ function Assert-Writable([string]$ProjectRoot, [string]$Path) {
     }
     $generated = Test-GeneratedPath $rel $ProjectRoot
     if ($generated) { throw "not written: $generated." }
+    # A data copy (DataMirror.psm1): rewritten from its JSON, so a change belongs in the JSON.
+    if ($rel -match '(?i)\.js$' -and (Test-Path -LiteralPath $full -PathType Leaf)) {
+        $head = ''
+        try { $sr = New-Object IO.StreamReader($full); try { $head = "$($sr.ReadLine())" } finally { $sr.Dispose() } } catch { }
+        $hm = [regex]::Match($head, '^\s*//\s*Generated from (\S+) by the helper program')
+        if ($hm.Success -and (Test-DataCopiesOn)) { throw "$Path is generated from $($hm.Groups[1].Value) by the helper program and is rewritten from it automatically. Do not edit it: change $($hm.Groups[1].Value) (or the runbook or script that writes it) instead." }
+    }
     if (Test-InSource $ProjectRoot $full) {
         throw "$Path is in Source/, which holds the user's source data and is read-only. Leave it unchanged and write your own working file elsewhere in the project (for example Work/$([IO.Path]::GetFileName($full)))."
     }

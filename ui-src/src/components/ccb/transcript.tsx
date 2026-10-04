@@ -71,6 +71,7 @@ function mergeAction(e: AgentEvent, ctx: BuildContext) {
     warning: e.warning ?? existing?.warning,
     error: e.error ?? existing?.error,
     target: e.target ?? existing?.target ?? "",
+    by: (e as AgentEvent & { by?: string }).by ?? existing?.by,
   };
   ctx.actions.set(e.id!, next);
   if (!existing) ctx.items.push({ kind: "action", seq: e.seq, item: next });

@@ -6,6 +6,25 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.67] - 2026-10-04
+
+### Added
+
+- Data copies follow their JSON: a `.js` file that only wraps a JSON file's data (made because a page opened from disk cannot load JSON) is rewritten from that JSON whenever it differs, after every task and when a project opens, with a "Generated from ... Do not edit" first line. The JSON is the one source of truth, so a mismatch between the two cannot stay: the chat says when a copy differed, a rewrite is an undoable change set, and a copy whose JSON is missing or invalid is reported and left alone. Copilot's edits to a copy are refused ("change the JSON instead"), code review no longer reports findings in copies (their data is the JSON's), and Copilot's web rules and the `file://` fix say the copy follows the JSON. JS files with other code are never touched. Setting "Data copies follow their JSON" (Settings > Changes and commands, on by default) turns all of this off.
+- Changes StreamHub makes to a project itself now show in the chat as action cards, like Copilot's reads and writes, tagged "by StreamHub": a rewritten data copy (Write, with its diff), folders moved to the current layout (Move), files whose links were updated after a move (Edit, with the diff) and changes to Source/ that were put back (Restore). Before, these were plain notes. At project open they now appear below the earlier conversation instead of above it.
+
+- Code review findings have an Ignore button (and Unignore). An ignored finding is greyed out, cannot be picked for fixing, and later reviews leave out findings about the same line.
+
+### Fixed
+
+- Issues you ignored came back: an ignore was tied to the issue's id, which changes when the same kind of problem appears earlier in the file, and it was forgotten as soon as the issue was briefly not found. Ignores are now remembered by what they are about (file, check, message and the code line), so they hold when lines move, other issues come and go, or the file is rescanned. Ignores made before this update are kept.
+- Code review reported problems you had ignored in Issues: each review part now tells Copilot which findings in its files were ignored, and any finding that still quotes such a line is left out (the review's summary says how many).
+
+### Changed
+
+- StreamHub always opens on a new chat: the first project it opens after a start shows a fresh chat instead of the earlier conversation (that stays in the chat history; Arrow Up still recalls its messages). Switching projects later still shows each project's conversation.
+- The line above the message box no longer repeats the project name and the mode's description (both are already shown in the side panel and the mode picker); it only shows the Queued note when a message waits.
+
 ## [v0.1.66] - 2026-10-04
 
 ### Changed
@@ -773,7 +792,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.66...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.67...HEAD
+[v0.1.67]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.67
 [v0.1.66]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.66
 [v0.1.65]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.65
 [v0.1.64]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.64

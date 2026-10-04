@@ -10,6 +10,7 @@
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'WebFetch.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 
 # Signals for the kind of task (English and common Dutch words).
 $script:CodingPattern = '(?i)\b(code|coding|codebase|script|scripts|program|programming|programma|function|functie|class|method|bug|bugs|debug|refactor|compile|build|builds|unit tests?|tests?|api|endpoint|database|sql|html|css|javascript|typescript|python|powershell|c#|java|react|vue|node|npm|dotnet|\.net|app|apps|application|applicatie|repo|repository|git|commit|module|library|package|deploy|cli|component|frontend|backend|server|json|yaml|regex|dashboard|website|webpage|implement|implementeer)\b|\.(ps1|psm1|py|js|ts|tsx|jsx|cs|java|go|rs|html|css|json|ya?ml|sql|sh|cmd|bat)\b'
@@ -122,7 +123,10 @@ function Get-PromptParts {
 }
 
 function Read-PromptPart([string]$AppRoot, [string]$Name) {
-    ([IO.File]::ReadAllText((Join-Path $AppRoot "prompts\$Name"))).Trim()
+    $t = ([IO.File]::ReadAllText((Join-Path $AppRoot "prompts\$Name"))).Trim()
+    # Data copies turned off (setting dataCopies): no word about the helper program keeping them.
+    if ($Name -eq 'rules\web.md' -and -not (Test-DataCopiesOn $AppRoot)) { $t = $t -replace '; when the data is also a \.json file[^)]*', ';' }
+    $t
 }
 
 function Get-PromptPart {

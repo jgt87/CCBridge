@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -901,13 +901,13 @@ function Invoke-ReviewJob {
             $p = [IO.File]::ReadAllText($partial) | ConvertFrom-Json
             $rv = @{ id = $p.id; created = $p.created; scope = $p.scope; scopeText = $p.scopeText; focus = @($p.focus); files = @($p.files); skipped = @($p.skipped)
                 messages = [int]$p.messages; done = @($p.done | ForEach-Object { [int]$_ }); summaries = @($p.summaries | ForEach-Object { ConvertTo-PlainHash $_ })
-                findings = @($p.findings | ForEach-Object { ConvertTo-PlainHash $_ }); overall = $p.overall }
+                findings = @($p.findings | ForEach-Object { ConvertTo-PlainHash $_ }); overall = $p.overall; ignored = [int]$p.ignored }
             Add-AgentEvent $State 'status' @{ text = "Continuing the code review where it stopped ($($rv.done.Count) part(s) done)." }
         } else {
             $sc = Get-ReviewScope $State ([string]$Task.scope) @($Task.paths)
             if (-not $sc.files.Count) { Add-AgentEvent $State 'error' @{ text = "Nothing to review in $($sc.text): no code files found."; code = 'REVIEW'; hint = 'Pick another scope; build output, lock files, data and Source/ are never reviewed.' }; return }
             $rv = @{ id = $id; created = (Get-Date).ToString('s'); scope = "$($Task.scope)"; scopeText = $sc.text; focus = @($focus.Split(',') | ForEach-Object { $_.Trim() }); files = @($sc.files); skipped = @($sc.skipped)
-                messages = 0; done = @(); summaries = @(); findings = @(); overall = $null }
+                messages = 0; done = @(); summaries = @(); findings = @(); overall = $null; ignored = 0 }
         }
         $budget = if ($State.Config.reviewBatchChars) { [int]$State.Config.reviewBatchChars } else { 40000 }
         $batches = @(New-ReviewBatches $State.ProjectRoot $rv.files $budget)
@@ -916,6 +916,8 @@ function Invoke-ReviewJob {
         Write-CCBLog info agent "Code review $id" @{ files = $rv.files.Count; batches = $total; done = $rv.done.Count }
         Start-NewChat $State
         $instructions = (Get-PromptPart $State.AppRoot 'review-code').Replace('FOCUS', $focus).Replace('TOTAL', "$total")
+        # What the user ignored (in Issues or an earlier review) is named per part and left out.
+        $ignoredList = @(try { Get-IgnoredFindings $State.ProjectRoot } catch { Write-CCBLogError agent 'ignored findings' $_ })
         $send = {
             param([string]$Message)
             $r = Send-ToCopilot $State $Message
@@ -945,12 +947,16 @@ function Invoke-ReviewJob {
             if ($State.Throttle.max -and $State.Throttle.used -ge ($State.Throttle.max - 2)) { Start-NewChat $State }
             $names = ($b.files | Select-Object -First 4) -join ', '
             Add-AgentEvent $State 'status' @{ text = "Code review: part $($b.index) of $total ($names$(if (@($b.files).Count -gt 4) { ', ...' }))." }
-            $res = & $ask ($instructions.Replace('BATCH', "$($b.index)") + "`n" + $b.text)
+            $res = & $ask ($instructions.Replace('BATCH', "$($b.index)") + "`n" + $b.text + (Format-IgnoredForReview $ignoredList @($b.files)))
             if ($res.stop) { & $save; return }
             if (-not $res.out.ok) {
                 $rv.summaries += @{ index = $b.index; files = @($b.files); summary = "(no valid answer from Copilot for this part: $($res.out.errors -join '; '))" }
             } else {
-                foreach ($f in $res.out.findings) { $f.part = $b.index; $rv.findings += (Test-ReviewQuote $State.ProjectRoot $f) }
+                foreach ($f in $res.out.findings) {
+                    $f.part = $b.index
+                    if (Test-IgnoredFinding $ignoredList $f) { $rv.ignored = [int]$rv.ignored + 1; continue }
+                    $rv.findings += (Test-ReviewQuote $State.ProjectRoot $f)
+                }
                 $rv.summaries += @{ index = $b.index; files = @($b.files); summary = $res.out.summary }
                 if ($res.out.dropped) { Write-CCBLog info agent "Review part $($b.index): $($res.out.dropped) finding(s) without a title dropped" }
             }
@@ -963,7 +969,11 @@ function Invoke-ReviewJob {
             $res = & $ask ((Get-PromptPart $State.AppRoot 'review-cross') + "Files:`n" + ((@($rv.files) | ForEach-Object { "- $_" }) -join "`n") + "`n`nSummaries:`n$list")
             if ($res.stop) { & $save; return }
             if ($res.out.ok) {
-                foreach ($f in $res.out.findings) { $f.part = 0; $rv.findings += (Test-ReviewQuote $State.ProjectRoot $f -AllowGeneral) }
+                foreach ($f in $res.out.findings) {
+                    $f.part = 0
+                    if (Test-IgnoredFinding $ignoredList $f) { $rv.ignored = [int]$rv.ignored + 1; continue }
+                    $rv.findings += (Test-ReviewQuote $State.ProjectRoot $f -AllowGeneral)
+                }
                 $rv.overall = $res.out.summary
             }
         } elseif (-not $rv.overall) { $rv.overall = (@($rv.summaries) | Select-Object -First 1).summary }
@@ -977,7 +987,7 @@ function Invoke-ReviewJob {
         $ok = @($rv.findings | Where-Object { $_.status -ne 'unverified' })
         $counts = "$(@($ok | Where-Object severity -eq 'high').Count) high, $(@($ok | Where-Object severity -eq 'medium').Count) medium, $(@($ok | Where-Object severity -eq 'low').Count) low"
         $unv = @($rv.findings).Count - $ok.Count
-        Add-AgentEvent $State 'review' @{ id = $rv.id; path = $paths.md; json = $paths.json; text = "Code review done: $($ok.Count) finding(s) ($counts)$(if ($unv) { "; $unv unverified" }) in $(@($rv.files).Count) file(s), $($rv.messages) Copilot message(s). Report: $($paths.md). Pick findings to fix in the Changes tab." }
+        Add-AgentEvent $State 'review' @{ id = $rv.id; path = $paths.md; json = $paths.json; text = "Code review done: $($ok.Count) finding(s) ($counts)$(if ($unv) { "; $unv unverified" })$(if ([int]$rv.ignored) { "; $($rv.ignored) left out because you ignored them before" }) in $(@($rv.files).Count) file(s), $($rv.messages) Copilot message(s). Report: $($paths.md). Pick findings to fix in the Changes tab." }
         if ($Task.jobId -and $State.Jobs[$Task.jobId]) { $State.Jobs[$Task.jobId].reviewPath = (Resolve-ProjectPath $State.ProjectRoot $paths.json); $State.Jobs[$Task.jobId].reviewReport = $paths.md }
     } catch {
         Write-CCBLogError agent "Code review $id failed" $_
@@ -1045,6 +1055,40 @@ function Invoke-RunbookJob {
         $State.NeedNewChat = $true
         if (-not $State.InChain) { $State.Busy = $false; $State.Cancel = $false }   # a chain carries on (and keeps a Stop)
     }
+}
+
+function Add-OwnChangeEvent {
+    <# A change StreamHub made to the project itself (data copies, folder moves, links, source data
+       put back): an action card in the chat like Copilot's reads and writes, with the diff when
+       $Preview (@{ path; exists; old; new }) is given and the details as its output. #>
+    param($State, [string]$Action, [string]$Target, [string]$Summary, $Preview = $null, [string]$Output = '')
+    $id = 'own-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $evt = @{ id = $id; action = $Action; target = $Target; status = 'running'; by = 'streamhub' }
+    if ($Preview) { $evt.preview = @{ path = $Preview.path; exists = [bool]$Preview.exists; old = (Get-PreviewText $Preview.old); new = (Get-PreviewText $Preview.new) } }
+    Add-AgentEvent $State 'action' $evt
+    $out = $(if ($Output) { "$Summary`n$Output" } else { $Summary })
+    Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'ok'; summary = $Summary; output = (Limit-Text $out 4000); changed = $true }
+}
+
+function Sync-DataMirrors {
+    <# Data copies (JS files that wrap a JSON file) follow their JSON: after each task and when a
+       project opens. What was rewritten is one change set; problems are said in the chat. #>
+    param($State)
+    if (-not $State.ProjectRoot) { return }
+    if (-not (Test-DataCopiesOn $State.AppRoot)) { return }   # setting dataCopies off
+    try {
+        $r = Update-DataMirrors $State.ProjectRoot
+        $notes = @(Format-DataMirrorNotes $r)
+        $items = @($r.items)
+        for ($i = 0; $i -lt $items.Count; $i++) {
+            $it = $items[$i]
+            if ($it.status -eq 'updated' -or $it.status -eq 'marked') {
+                # A write like any other: a card with the diff in the chat, not only a note.
+                Add-OwnChangeEvent $State 'write' "$($it.js) (data copy of $($it.json))" $notes[$i] @{ path = $it.js; exists = $true; old = $it.old; new = $it.new }
+            } else { Add-AgentEvent $State 'status' @{ text = $notes[$i] } }
+        }
+        if ($r.checkpoint -and $r.checkpoint.Files.Count) { Add-ChangeSetEvent $State $r.checkpoint 'Data copies updated from their JSON' }
+    } catch { Write-CCBLogError agent 'data copies' $_ }
 }
 
 function Add-ChangeSetEvent {
@@ -1128,7 +1172,7 @@ function Invoke-ChainJob {
         }
         try {
             $fixed = @(Restore-SourceData $root)
-            if ($fixed.Count) { Add-AgentEvent $State 'status' @{ text = 'Source data is read-only; StreamHub undid changes to it: ' + ($fixed -join '; ') } }
+            if ($fixed.Count) { Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) file(s) in Source/" 'Source data is read-only; StreamHub undid changes to it.' -Output ($fixed -join "`n") }
         } catch { Write-CCBLogError agent 'source data' $_ }
         $State.InChain = $false; $State.NeedNewChat = $true
         $State.Busy = $false; $State.Cancel = $false
@@ -2054,7 +2098,7 @@ function Invoke-AgentAction {
                 }
                 $fixed = @(Restore-SourceData $root)
                 if ($fixed.Count) {
-                    Add-AgentEvent $State 'status' @{ text = "Source data is read-only; StreamHub undid what the command did to it: " + ($fixed -join '; ') }
+                    Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) file(s) in Source/" 'Source data is read-only; StreamHub undid what the command did to it.' -Output ($fixed -join "`n")
                     $out += "`nNote: Source/ is the user's read-only source data. This command changed it, so it was put back: " + ($fixed -join '; ') + '. Work on copies outside Source/.'
                 }
                 if ($runChanged.Count) { $out += "`nFiles this command changed: " + ($runChanged -join ', ') }
@@ -2469,7 +2513,7 @@ function Invoke-AgentTurn {
         Write-CCBLog info agent "Turn finished" @{ ms = $turnWatch.ElapsedMilliseconds; chat = "$($State.Throttle.used)/$($State.Throttle.max)"; cancelled = [bool]$State.Cancel }
         try {
             $fixed = @(Restore-SourceData $State.ProjectRoot)
-            if ($fixed.Count) { Add-AgentEvent $State 'status' @{ text = 'Source data is read-only; StreamHub undid changes to it: ' + ($fixed -join '; ') } }
+            if ($fixed.Count) { Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) file(s) in Source/" 'Source data is read-only; StreamHub undid changes to it.' -Output ($fixed -join "`n") }
         } catch { Add-AgentEvent $State 'error' @{ text = "Could not verify source data: $($_.Exception.Message)" } }
         try { Clear-RunSnapshot $checkpoint } catch { Write-CCBLogError agent 'run snapshot' $_ }
         if (-not $checkpoint.Files.Count) { Remove-Item $checkpoint.Dir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -2644,6 +2688,8 @@ function Start-AgentWorker {
             }
             # Retention: old .streamhub/History, evidence and reviews and undo backups of the project go now.
             if ($State.ProjectRoot -and $task.kind -ne 'connect') { try { $null = Invoke-ProjectRetention $State.ProjectRoot $State.Config } catch { Write-CCBLogError agent 'retention' $_ } }
+            # Data copies follow their JSON (a runbook, chain or change may have written the JSON).
+            if ($State.ProjectRoot -and $task.kind -ne 'connect') { Sync-DataMirrors $State }
             $State.CurrentQueueId = $null
             $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller; $State.ResponseMode = $saved.ResponseMode
             if ($foreign -and $saved.ProjectRoot -and $State.ProjectRoot -ne $saved.ProjectRoot) {
@@ -2655,4 +2701,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
