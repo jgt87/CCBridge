@@ -16,6 +16,19 @@ $script:Links = @{
     onedrive   = 'https://www.microsoft.com/microsoft-365/onedrive/download'
 }
 
+function Get-DeviceJoinStatus {
+    <# Whether this PC can sign in to work sites with the Windows account: the yes/no fields of
+       dsregcmd /status (nothing else is read; no ids or names). $Lines is for tests. #>
+    param([string[]]$Lines)
+    if (-not $PSBoundParameters.ContainsKey('Lines')) { $Lines = @(cmd /c "dsregcmd /status 2>nul") }
+    $out = [ordered]@{}
+    foreach ($k in 'AzureAdJoined', 'DomainJoined', 'WorkplaceJoined', 'EnterpriseJoined', 'AzureAdPrt') {
+        $m = @($Lines | Select-String -Pattern "^\s*$k\s*:\s*(YES|NO)\s*$") | Select-Object -First 1
+        $out[$k] = if ($m) { $m.Matches[0].Groups[1].Value } else { '?' }
+    }
+    $out
+}
+
 function New-Check([string]$Name, [string]$Status, [string]$Detail, [string]$Hint = '', [string]$Link = '', [string]$Fix = '') {
     [pscustomobject]@{ name = $Name; status = $Status; detail = $Detail; hint = $Hint; link = $Link; fix = $Fix }
 }
@@ -158,6 +171,12 @@ function Get-PrereqChecks {
         else { New-Check 'OneDrive' 'WARN' 'not installed' 'The web app keeps projects in OneDrive; install OneDrive and sign in. (The MCP server works without it.)' $script:Links.onedrive }
     }))
 
+    $out.Add((Invoke-SafeCheck 'Single sign-on' {
+        $j = Get-DeviceJoinStatus
+        if ($j['AzureAdPrt'] -eq 'YES') { New-Check 'Single sign-on' 'OK' 'work account on this PC' 'Run sso-setup.cmd once, so Copilot signs in by itself with your Windows account after a restart.' }
+        else { New-Check 'Single sign-on' 'OK' 'no work account on this PC' 'Copilot keeps its sign-in in StreamHub''s Edge profile: sign in once and choose "Stay signed in".' }
+    }))
+
     $out.Add((Invoke-SafeCheck 'Data folder' {
         try {
             $dataDir = Join-Path $env:LOCALAPPDATA 'CCBridge'
@@ -244,4 +263,4 @@ function Write-PrereqReport {
     -not @($Checks | Where-Object { $_.status -eq 'FAIL' }).Count
 }
 
-Export-ModuleMember -Function Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText
+Export-ModuleMember -Function Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText

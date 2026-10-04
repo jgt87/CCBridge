@@ -6,6 +6,16 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.51] - 2026-10-04
+
+### Added
+
+- `agent-test.cmd`: tests Copilot's Researcher and Analyst agents the way StreamHub will invoke them (mentioned in the message box): a new chat, the mention picked from the @ list, a fixed harmless prompt (Analyst gets a made-up CSV), one automatic answer when the agent first asks questions or shows a plan, and a stop once the run has finished. Each run writes a zip with a step log, timings and the reply structure, without reply text.
+- `agent-capture.cmd`: records a run you do by hand the same way.
+- Settings > Sign-in: single sign-on with your Windows work account in StreamHub's Edge profile, so Copilot signs in by itself after a restart. It shows the status (work account on this PC, the profile switch, the Copilot tab), turns Edge's "single sign-on for work or school sites" switch on or off in StreamHub's own profile only, and has "Run setup" (with a log) and "Open Edge's profile settings". No password is stored, and Edge policies are never changed. `sso-setup.cmd` does the same from a command window.
+- The system check at start shows whether this PC can use single sign-on.
+- README: "How a prompt is typed and sent", "Staying signed in" and "Tech stack".
+
 ## [v0.1.50] - 2026-10-04
 
 ### Added
@@ -576,7 +586,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.50...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.51...HEAD
+[v0.1.51]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.51
 [v0.1.50]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.50
 [v0.1.49]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.49
 [v0.1.48]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.48

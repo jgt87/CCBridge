@@ -8,15 +8,16 @@
     which frames it occurs. Only short single-word values (status words such as "Completed",
     "Progress", "Success") and booleans are shown; all other text is replaced by its length.
     The summary is written to C:\temp\CCBridge-stream-shape-<date>.txt.
+    -Path summarises one recording instead (agent-capture.ps1 uses it), -OutFile sets the file.
 .EXAMPLE
     stream-shape.cmd
     stream-shape.cmd -Count 5
 #>
-param([int]$Count = 3, [string]$OutRoot = 'C:\temp')
+param([int]$Count = 3, [string]$OutRoot = 'C:\temp', [string]$Path = '', [string]$OutFile = '')
 
 $ErrorActionPreference = 'Stop'
 $dir = Join-Path $env:LOCALAPPDATA 'CCBridge\replies'
-$files = @(Get-ChildItem $dir -Filter *.jsonl -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First $Count)
+$files = if ($Path) { @(Get-Item -LiteralPath $Path) } else { @(Get-ChildItem $dir -Filter *.jsonl -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First $Count) }
 if (-not $files.Count) { Write-Host 'No reply recordings found. Ask Copilot something in StreamHub first, then run this again.' -ForegroundColor Yellow; exit 1 }
 
 $sep = [char]0x1e
@@ -83,8 +84,7 @@ foreach ($f in $files) {
         }
     }
 }
-$null = New-Item -ItemType Directory -Force -Path $OutRoot
-$out = Join-Path $OutRoot ("CCBridge-stream-shape-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt")
+$out = if ($OutFile) { $OutFile } else { $null = New-Item -ItemType Directory -Force -Path $OutRoot; Join-Path $OutRoot ("CCBridge-stream-shape-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt") }
 [IO.File]::WriteAllLines($out, [string[]]$lines)
 Write-Host "Written: $out" -ForegroundColor Green
 Write-Host 'It contains field names, types, lengths and status words only - no answer text. Please send this file.'

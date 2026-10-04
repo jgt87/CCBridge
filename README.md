@@ -26,11 +26,16 @@ Automating Copilot Chat may be subject to your organisation's policies; check be
 - [Microsoft 365 data (Work IQ) and human in the loop](#microsoft-365-data-work-iq-and-human-in-the-loop)
 - [Install and updates](#install-and-updates)
   - [Updating](#updating)
+  - [Staying signed in (single sign-on)](#staying-signed-in-single-sign-on)
 - [Configuration](#configuration)
 - [Logging and diagnostics](#logging-and-diagnostics)
 - [Troubleshooting](#troubleshooting)
 - [How it works](#how-it-works) (diagrams)
+  - [How a prompt is typed and sent](#how-a-prompt-is-typed-and-sent)
+  - [How a reply is read](#how-a-reply-is-read)
+- [Project folders](#project-folders)
 - [Where StreamHub keeps its data](#where-streamhub-keeps-its-data)
+- [Tech stack](#tech-stack)
 - [Development](#development)
 
 ---
@@ -211,6 +216,24 @@ Your settings in `config\harness.local.json` and `config\selectors.local.json` a
 
 ---
 
+### Staying signed in (single sign-on)
+
+StreamHub's Edge profile (`%LOCALAPPDATA%\CCBridge\edge-profile`) keeps your Copilot sign-in between restarts. Edge stores the sign-in itself and encrypts its cookies with a key that Windows protects for your account (DPAPI); StreamHub stores no password or token. The sign-in can still be lost when:
+- you answered "Stay signed in?" with No (the cookies then end when Edge closes);
+- your organisation requires a new sign-in after a set time, or after every browser start (Conditional Access). Nothing on this PC can or should get around that;
+- Edge is set to clear cookies when it closes.
+
+On a work PC (joined to Microsoft Entra ID), Copilot can instead sign in by itself with the work account Windows already holds. Use **Settings > Sign-in**:
+
+| Item | What it does |
+|---|---|
+| Status | Whether this PC has a work account to sign in with, whether single sign-on is on in StreamHub's Edge profile, and whether the Copilot tab is signed in |
+| Sign in with your Windows account | Turns Edge's "Allow single sign-on for work or school sites using this profile" on or off, in StreamHub's own Edge profile only. Your normal Edge profile and Edge policies are never touched. It applies after StreamHub restarts. When your organisation sets this through a policy, the switch shows as managed |
+| Run setup | The full check, then turns single sign-on on, with a log in `C:\temp\StreamHub-sso-<date>.txt` (names and yes/no values only) |
+| Open Edge's profile settings | Opens Edge's own page in StreamHub's Edge window, to check or change it by hand |
+
+`sso-setup.cmd` does the same from a command window (`-Yes` skips the question, `-Off` turns it off). The system check at start shows whether this PC can use single sign-on. It reads only the yes/no fields of `dsregcmd /status`, never account names or ids.
+
 ## Configuration
 
 Settings live in `config\harness.json` and `config\selectors.json`. Put your own values in **`config\harness.local.json`** / **`config\selectors.local.json`** (same keys, only the ones you change): updates never overwrite these files.
@@ -319,6 +342,16 @@ The same run measures speed. For every step it records the exact time (`HH:mm:ss
 
 **Reply format of your tenant (`stream-shape.cmd`).** Writes the structure of Copilot's recent replies (field names, types, lengths and status words; no answer text) to `C:\temp\CCBridge-stream-shape-<date>.txt`. Sending that file lets StreamHub support your tenant's reply format (for example StreamHub) directly, which is faster and gives back the chat message count and remaining credits.
 
+**Researcher and Analyst test (`agent-test.cmd`).** Runs Copilot's Researcher and then its Analyst agent the way StreamHub will invoke them:
+- a new chat, with the agent mentioned in the message box (`@` plus the name, picked from the list);
+- a fixed, harmless test prompt (web sources only for Researcher; for Analyst, a made-up `sample-sales.csv` is attached);
+- one automatic answer if the agent first asks questions or shows a plan;
+- a stop once the run has finished, or after 40 minutes.
+
+This uses up to 2 runs of your monthly agent allowance. If an agent is not in the `@` list, nothing is sent for it. Each run writes a folder in `C:\temp` with a zip to send: `run.log` (every step), `summary.txt`, `timeline.txt`, `page.txt` and `shape.txt`, which hold steps, timings and structure but no reply text. `frames.jsonl` next to the zip holds the full replies; share it only if you are fine with its content.
+
+To test one agent: `agent-test.cmd Researcher`. If the agent has another name in your language: `agent-test.cmd Researcher -AgentName "NAME"`. To record a run you do by hand: `agent-capture.cmd -Label researcher`.
+
 **Reading an error.** Every error in the chat shows a category (for example `EDGE-LOST`, `SIGN-IN`, `NO-ANSWER`, `TIMEOUT`, `CREDITS`, `EDIT`), what to do, an error id and **Copy details** (id, time, version, category and the technical detail, ready to send). The same id is in the log, next to the full detail, so `diagnostics.cmd` plus the id leads straight to it. A failed step (read, grep, edit, write, run) shows its own category on its card (for example `EDIT-NOT-FOUND`, `EDIT-AMBIGUOUS`, `EDIT-HALF-BLOCK`, `EDIT-MOVE-ORDER`, `RUN-FAILED`), the possible reasons and what happens next; failed steps are always logged, also without verbose logging.
 
 **Pacing.** StreamHub deliberately takes its time, because completing a task matters more than speed: after a new chat is ready it waits 3 s, after typing a prompt 1 s before pressing Send, and it leaves at least 5 s after the previous reply. Change these in `config\harness.local.json`, for example `{ "pacing": { "newChatSettleSec": 5, "beforeSendSec": 2, "betweenPromptsSec": 10 } }`. If no part of a reply arrives within 25 s of sending, StreamHub stops that request and sends the prompt once more in the same chat. If the page loses its message box, StreamHub reloads it; if that does not help, the error says what the page shows and a screenshot is saved in `%LOCALAPPDATA%\CCBridge\screens`.
@@ -391,6 +424,36 @@ sequenceDiagram
     App->>Files: evidence/task-date.md
     App-->>You: result, changed files, next steps
 ```
+
+### How a prompt is typed and sent
+
+StreamHub uses no Copilot API. It drives the normal Copilot web page in Edge, the way a person would, through Edge's DevTools connection: the same channel the browser's developer tools use. At start it opens Edge with its own profile (`%LOCALAPPDATA%\CCBridge\edge-profile`, where you signed in once) and a debug port (`cdpPort`, default 9333). Over that port it can run JavaScript in the page, press keys, and see the page's network traffic. It never takes its own app tab for the Copilot tab.
+
+```mermaid
+flowchart TD
+    Build["Prompt text: your request, plus only the instructions<br/>this chat has not had yet (plain chat: your text as typed)"] --> Lock["Machine-wide lock:<br/>one sender at a time (web app and MCP server)"]
+    Lock --> Find["Find the message box and wait until it stays put<br/>(the page rebuilds it about 3 times after loading)"]
+    Find --> Clear["Clear it with real key presses: Ctrl+A, Backspace<br/>(the box is a Lexical editor and ignores edit commands)"]
+    Clear --> Mention{"Agent run?<br/>(Researcher, Analyst)"}
+    Mention -->|yes| At["Type @ + agent name, pick it from the list,<br/>check that a real mention was inserted;<br/>not offered: clear the box, send nothing"]
+    Mention -->|no| Type
+    At --> Type["Insert the prompt in one go (insertText, line breaks as \n only)"]
+    Type --> Check{"Box holds exactly<br/>the prompt?"}
+    Check -->|"empty: the box was rebuilt"| Type
+    Check -->|"daily limit banner"| Limit["Reported as the daily limit"]
+    Check -->|yes| Pace["Short pause (pacing settings)"]
+    Pace --> Send["Click Send once it is clickable"]
+    Send --> Wait{"Any part of the reply<br/>within 25 s?"}
+    Wait -->|no| Resend["Send once more in the same chat<br/>(some pages open their reply connection at the first send)"]
+    Wait -->|yes| Read["Read the reply (next section)"]
+    Resend --> Read
+```
+
+- **Typing.** The prompt goes in with `Input.insertText`, which the page treats like keyboard input, not pasted HTML. A `\r` would show up as extra characters, so line breaks are sent as `\n` only. The page escapes `<` and `>` in prompts, so Copilot sometimes copies `&lt;`/`&gt;` back into code; StreamHub repairs that in code files, not in markup files.
+- **Checking.** After typing, StreamHub counts the characters in the box. Too few means the page swapped the box while it was typing, so it types again. An empty box with Copilot's limit banner means the daily limit is reached.
+- **Pacing.** Short pauses around each send (`pacing` in the settings: after a new chat, before Send, between replies) keep the page from being rushed.
+- **Agent mentions.** Researcher and Analyst are invoked by mentioning them in the message box. Typing `@Researcher` as plain text does nothing; the agent has to be picked from the list that opens after `@`. `agent-test.cmd` already uses these steps to test both agents on a tenant that has them; StreamHub's own runs will use the same steps.
+- **Selectors.** Where the message box, Send and Stop buttons and the reply are on the page is set in `config\selectors.json`. When Microsoft changes the page, that file is usually the fix.
 
 ### How a reply is read
 
@@ -536,6 +599,20 @@ Edge and Chrome block some things on a page opened straight from disk (`file://`
 | `%LOCALAPPDATA%\CCBridge\queue.json`, `queue-pause.json` | The queue and the daily-limit pause, kept across restarts |
 
 ---
+
+## Tech stack
+
+| Part | Built with |
+|---|---|
+| Runtime on the target PC | What ships with Windows only: **Windows PowerShell 5.1** on **.NET Framework 4.x** (`HttpListener` for the web server, `ClientWebSocket` for Edge), and **Microsoft Edge**. No installs, no admin rights |
+| The model | **Microsoft 365 Copilot Chat** in Edge, with your own sign-in. StreamHub has no language model of its own |
+| Driving Copilot | The **Chrome DevTools Protocol** (Edge's remote debugging port), with a separate Edge profile: typing into the page, clicking Send, reading the reply stream (SignalR WebSocket frames) and the page's own state |
+| Backend | PowerShell modules (`lib/*.psm1`): bridge, agent loop, executor, file checks, issues, imports, schedules, runbooks, review, web server and JSON API |
+| MCP server | `mcp/ccbridge-mcp.ps1`, JSON-RPC over stdio in Windows PowerShell |
+| Web interface | **React 19** and **TypeScript**, built with **Vite**; **Tailwind CSS 4**; **Kokonut UI** components with **Motion** and **lucide-react** icons. File views use **react-markdown**, **highlight.js** (code), **KaTeX** (math) and **Mermaid** (diagrams). Prebuilt into `ui/`, so the target PC needs no Node |
+| Storage | Projects in **OneDrive** (`OneDrive\CCBridge`); StreamHub's own data (undo backups, queue, chat history, logs) in `%LOCALAPPDATA%\CCBridge`, never synced |
+| Tests | **Pester 3.4** (ships with Windows) for the backend; **Vitest** for the interface |
+| Build and release | Node and npm on a development PC only (to build `ui/`); `tools\build-release.ps1` with Git and the **GitHub CLI** (`gh`) for tags and releases |
 
 ## Development
 

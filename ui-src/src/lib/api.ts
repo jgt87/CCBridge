@@ -369,6 +369,19 @@ export interface Setting {
   options?: string[];
 }
 
+/**
+ * Settings > Sign-in: single sign-on with the Windows work account in StreamHub's Edge profile.
+ * profileSso: the switch on Edge's profile page; unavailable = no work account on this PC.
+ * copilot: where the Copilot tab is (chat = signed in).
+ */
+export interface SsoStatus {
+  workAccount: boolean;
+  profileSso: "on" | "off" | "managed" | "not-found" | "unavailable" | "edge-not-running" | "unknown";
+  switchLabel?: string;
+  copilot: "chat" | "sign-in page" | "no tab" | "edge not running";
+  checkedAt?: string;
+}
+
 /** A saved fetch prompt (Runbooks/<name>.prompt.md) and its latest answer (Runbooks/Exports/<name>.md). */
 export interface FetchItem {
   name: string;
@@ -505,6 +518,10 @@ export const api = {
   settings: () => call<{ settings: Setting[] }>("GET", "/api/settings").then((r) => (Array.isArray(r.settings) ? r.settings : [])),
   setSetting: (key: string, value: Setting["value"]) =>
     call<{ ok: boolean; settings: Setting[] }>("POST", "/api/settings", { key, value }).then((r) => ({ ...r, settings: Array.isArray(r.settings) ? r.settings : [] })),
+  ssoStatus: () => call<{ status: SsoStatus }>("GET", "/api/sso").then((r) => r.status),
+  setSso: (on: boolean) => call<{ ok: boolean; result: string; status: SsoStatus }>("POST", "/api/sso", { on }),
+  ssoSetup: () => call<{ ok: boolean; result: string; logFile: string; status: SsoStatus }>("POST", "/api/sso/setup"),
+  openSsoSettings: () => call<{ ok: boolean }>("POST", "/api/sso/open"),
   setWorkIq: (value: "on" | "off" | "leave") => call<{ ok: boolean }>("POST", "/api/workiq", { value }),
   setLogging: (level: "off" | "info" | "verbose" | "trace") => call<{ ok: boolean }>("POST", "/api/logging", { level }),
   diagnostics: () => call<{ ok: boolean; path: string; fullPath: string }>("POST", "/api/diagnostics"),

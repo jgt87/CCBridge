@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -459,6 +459,23 @@ function Invoke-ApiRequest($Ctx, $State) {
             $State.SaveHistory = ($State.Config.chatHistory -ne $false -and "$($State.Config.chatHistory)" -ne 'off')
             Write-CCBLog info server 'Settings reset to the app defaults' @{ changed = $changed -join ', ' }
             return Send-Json $Ctx @{ ok = $true; changed = $changed; settings = @(Get-CCBridgeSettings $State.AppRoot) }
+        }
+        '^GET /api/sso$' {
+            # Settings > Sign-in: work account on this PC, the profile switch, the Copilot tab.
+            return Send-Json $Ctx @{ status = (Get-SsoStatus -Port ([int]$State.Config.cdpPort)) }
+        }
+        '^POST /api/sso(/setup|/open)?$' {
+            # Only the StreamHub page itself (its Origin) changes how Edge signs in.
+            if ($Ctx.Request.Headers['Origin'] -ne "http://localhost:$($State.Config.port)") { return Send-Json $Ctx @{ error = 'Only the StreamHub page can change single sign-on.' } 403 }
+            $port = [int]$State.Config.cdpPort
+            if ($Matches[1] -eq '/open') { $null = Open-SsoSettingsPage $port; return Send-Json $Ctx @{ ok = $true } }
+            if ($Matches[1] -eq '/setup') {
+                $r = Invoke-SsoSetup -Port $port -On $true
+                return Send-Json $Ctx @{ ok = $true; result = $r.Result; logFile = $r.LogFile; status = (Get-SsoStatus -Port $port -NoPage) }
+            }
+            $b = Read-JsonBody $Ctx
+            $result = Set-ProfileSso -Port $port -On ([bool]$b.on)
+            return Send-Json $Ctx @{ ok = $true; result = $result; status = (Get-SsoStatus -Port $port) }
         }
         '^POST /api/hints$' {
             # A one-time hint was shown (it is not shown again, also after a restart).

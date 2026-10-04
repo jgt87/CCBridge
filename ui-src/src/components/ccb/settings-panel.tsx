@@ -2,6 +2,7 @@ import { Monitor, Moon, RotateCcw, Sun, X } from "lucide-react";
 import type React from "react";
 import { getThemeChoice, setThemeChoice, type ThemeChoice } from "@/lib/theme";
 import { ModalBackdrop } from "./modal-backdrop";
+import { SsoSection } from "./sso-section";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Setting } from "@/lib/api";
 import { notifyEnabled, notifySupported, setNotifyEnabled } from "@/lib/notify";
@@ -326,6 +327,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <div className="mt-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">This browser</div>
             <ThemeSetting onChange={changeTheme} value={theme} />
             <NotificationSetting />
+          </div>
+          <div className="border-black/10 border-t dark:border-white/10">
+            <SsoSection />
           </div>
           {groups.map(([group, list], i) => (
             <div className={cn("pt-2", i > 0 && "border-black/10 border-t dark:border-white/10")} key={group}>

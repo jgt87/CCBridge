@@ -5,7 +5,7 @@ Import-Module (Join-Path $root 'lib\Prereq.psm1') -Force
 Describe 'Get-PrereqChecks' {
     $checks = @(Get-PrereqChecks -WebPort 8765 -CdpPort 9333)
     It 'checks every part StreamHub needs, each with OK, WARN or FAIL' {
-        ($checks | ForEach-Object { $_.name }) -join '|' | Should Match '^Windows PowerShell\|Language mode\|Execution policy\|\.NET Framework\|Microsoft Edge\|Edge remote debugging\|Local web server\|Port 8765 \(web app\)\|Port 9333 \(Edge for Copilot\)\|OneDrive\|Data folder$'
+        ($checks | ForEach-Object { $_.name }) -join '|' | Should Match '^Windows PowerShell\|Language mode\|Execution policy\|\.NET Framework\|Microsoft Edge\|Edge remote debugging\|Local web server\|Port 8765 \(web app\)\|Port 9333 \(Edge for Copilot\)\|OneDrive\|Single sign-on\|Data folder$'
         @($checks | Where-Object { $_.status -notin 'OK', 'WARN', 'FAIL' }).Count | Should Be 0
     }
     It 'gives a hint for everything that is not OK' {
@@ -87,4 +87,22 @@ Describe 'Repair-PrereqChecks' {
     }
     $hold.Stop()
     Remove-Item -LiteralPath $app -Recurse -Force
+}
+
+Describe 'Get-DeviceJoinStatus' {
+    It 'reads only the yes/no fields of dsregcmd /status' {
+        $lines = @('+----------------------------------------------------------------------+', '| Device State                                                         |',
+            '             AzureAdJoined : YES', '          EnterpriseJoined : NO', '              DomainJoined : NO', '                  TenantId : 00000000-0000-0000-0000-000000000000',
+            '                AzureAdPrt : YES', '       AzureAdPrtUpdateTime : 2026-10-04 08:00:00.000 UTC')
+        $j = Get-DeviceJoinStatus -Lines $lines
+        $j['AzureAdJoined'] | Should Be 'YES'
+        $j['AzureAdPrt'] | Should Be 'YES'
+        $j['DomainJoined'] | Should Be 'NO'
+        $j['WorkplaceJoined'] | Should Be '?'
+        ($j.Values -join ',') | Should Not Match '0000|UTC'
+    }
+    It 'gives question marks when dsregcmd says nothing' {
+        $j = Get-DeviceJoinStatus -Lines @()
+        @($j.Values | Where-Object { $_ -ne '?' }).Count | Should Be 0
+    }
 }
