@@ -6,6 +6,20 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.73] - 2026-10-04
+
+### Added
+
+- Automation > Scripts: the project's scripts (`Scripts/`, .ps1, .cmd, .bat, .py) with Run, Schedule and View, like runbooks. A script runs as its own task (Actions > Runs) with the same rules as a script step in a chain: inside the project, approved the first time and again after it changes (setting *Scripts in chains* applies), a script that deletes data or uses Microsoft 365 asks a person every time, and what it changes is one change set in History. Schedules can run a script.
+
+### Changed
+
+- Re-index (Files tab and Code health > Issues) also brings data copies up to date with their JSON first, so a JSON changed outside StreamHub is picked up without running a task. Not while a task runs; the copies follow after it as before.
+
+### Fixed
+
+- The chat view stopped with "Cannot read properties of undefined (reading 'split')" when a chain asked to run a script: the card sent the script as plain text where a file preview was expected. The card now shows the script as code, and saved chat history with such cards opens again.
+
 ## [v0.1.72] - 2026-10-04
 
 ### Changed
@@ -833,7 +847,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.72...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.73...HEAD
+[v0.1.73]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.73
 [v0.1.72]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.72
 [v0.1.71]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.71
 [v0.1.70]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.70

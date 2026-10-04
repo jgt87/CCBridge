@@ -44,8 +44,8 @@ hljs.registerAliases(["patch"], { languageName: "diff" });
 const MAX_CHARS = 300_000;
 
 /** The language for a file name (by extension or a known name), or null for plain text. */
-export function languageForPath(path: string): string | null {
-  const name = path.split("/").pop()?.toLowerCase() ?? "";
+export function languageForPath(path: string | null | undefined): string | null {
+  const name = (path ?? "").split("/").pop()?.toLowerCase() ?? "";
   if (name === "dockerfile" || name === "makefile") return "bash";
   if (name.startsWith(".env") || name === ".gitignore" || name === ".editorconfig") return "ini";
   const ext = name.includes(".") ? name.split(".").pop()! : "";

@@ -9,6 +9,7 @@ import SmoothTab from "@/components/kokonutui/smooth-tab";
 import type { ChainItem, ChangeSetView, FetchItem, FetchWeb, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
 
 import { RunbooksPanel, runbookRows } from "./runbooks-panel";
+import { ScriptsPanel } from "./scripts-panel";
 import { ChainsPanel } from "./chains-panel";
 import { QueuePanel } from "./queue-panel";
 import { SchedulesList } from "./schedules-panel";
@@ -431,6 +432,7 @@ export function SidePanel({
   scripts = [],
   onCreateChain,
   onRunChain,
+  onRunScript,
   onChainSteps,
   queue,
   schedules,
@@ -475,6 +477,8 @@ export function SidePanel({
   scripts?: string[];
   onCreateChain?: (name: string) => Promise<void>;
   onRunChain?: (name: string) => void;
+  /** Runs one script from Scripts/ (Automation > Scripts). */
+  onRunScript?: (path: string) => void;
   onChainSteps?: (name: string, op: "add" | "remove" | "up" | "down", opts?: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number }) => Promise<void>;
   queue: QueueEntry[];
 }) {
@@ -660,6 +664,11 @@ export function SidePanel({
                   texts={fetchItems}
                 />
               </PanelSection>
+              {onRunScript && (
+                <PanelSection badge={scripts.length ? <SectionCount n={scripts.length} /> : null} id="automation.scripts" title="Scripts">
+                  <ScriptsPanel busy={busy} onOpen={onOpenFile} onRun={onRunScript} onSchedule={(path) => onSchedule({ kind: "script", name: path })} scripts={scripts} />
+                </PanelSection>
+              )}
               {onCreateChain && onRunChain && (
                 <PanelSection badge={chains.length ? <SectionCount n={chains.length} /> : null} id="automation.chains" title="Chains">
                   <ChainsPanel

@@ -522,6 +522,7 @@ export default function App() {
                   refreshFiles();
                 }}
                 onRunChain={(name) => api.runChain(name).catch((e) => setError((e as Error).message))}
+                onRunScript={(path) => api.runScript(path).catch((e) => setError((e as Error).message))}
                 onChainSteps={async (name, op, opts) => {
                   await api.chainSteps(name, op, opts);
                   refreshFiles();
@@ -625,6 +626,7 @@ export default function App() {
                     }}
                     runbooks={runbooks}
                     chains={chains}
+                    scripts={scripts}
                     schedules={schedulesHere}
                   />
                 )}

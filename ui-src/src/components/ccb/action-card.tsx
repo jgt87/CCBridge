@@ -23,6 +23,8 @@ import { countChanges, diffLines } from "@/lib/diff";
 import { ChangePill } from "./change-pill";
 import { ActionOutput } from "./action-output";
 import { DiffView } from "./diff-view";
+import { CodeView } from "./code-block";
+import { languageForPath } from "@/lib/highlight";
 
 export interface ActionItem {
   id: string;
@@ -110,7 +112,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
 
   const hasDetails = Boolean(item.preview || item.output || item.error || item.reasons?.length || item.action === "run");
   const counts = useMemo(() => {
-    if (!item.preview) return null;
+    if (!item.preview || item.action === "run") return null;
     const lines = diffLines(item.preview.old ?? "", item.preview.new ?? "");
     return lines ? countChanges(lines) : null;
   }, [item.preview]);
@@ -176,7 +178,17 @@ export function ActionCard({ item }: { item: ActionItem }) {
               )}
             </div>
           )}
-          {item.preview && <DiffView preview={item.preview} />}
+          {item.preview && item.action === "run" ? (
+            // A script a chain or Automation > Scripts runs: its text, not a change.
+            <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+              <div className="border-black/10 border-b px-3 py-1.5 font-mono text-muted-foreground text-xs dark:border-white/10">{item.preview.path || "script"}</div>
+              <div className="max-h-[28rem] overflow-auto">
+                <CodeView language={languageForPath(item.preview.path)} text={item.preview.new ?? ""} />
+              </div>
+            </div>
+          ) : (
+            item.preview && <DiffView preview={item.preview} />
+          )}
           {item.action === "run" && (
             <pre className="overflow-auto rounded-lg bg-black/80 px-3 py-2 font-mono text-xs text-zinc-100">
               <span className="select-none text-zinc-400">&gt; </span>

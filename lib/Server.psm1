@@ -390,6 +390,15 @@ function Invoke-ApiRequest($Ctx, $State) {
             $null = Submit-AgentTask $State @{ kind = 'chain'; name = [string]$b.name } 'user'
             return Send-Json $Ctx @{ ok = $true }
         }
+        '^POST /api/scripts/run$' {
+            # One script from Scripts/ (Automation > Scripts); checked again when it runs.
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            $sc = Resolve-ChainScript $State.ProjectRoot ([string]$b.path)
+            if ($sc.error) { throw "Cannot run $($b.path): $($sc.error)" }
+            $null = Submit-AgentTask $State @{ kind = 'script'; name = $sc.path } 'user'
+            return Send-Json $Ctx @{ ok = $true }
+        }
         '^GET /api/fetch$' {
             if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ items = @() } }
             return Send-Json $Ctx @{ items = @(Get-FetchPrompts $State.ProjectRoot) }
@@ -490,6 +499,9 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/issues/reindex$' {
             if (-not $State.ProjectRoot) { throw 'Open a project first.' }
             $b = Read-JsonBody $Ctx
+            # Data copies follow their JSON first, so the index sees them as they will be. Not while a
+            # task runs: copies never change under Copilot (they follow after the task anyway).
+            if (-not $State.Busy) { Sync-DataMirrors $State }
             $started = Start-IssueIndexer $State $State.ProjectRoot -Force:([bool]$b.force)
             return Send-Json $Ctx @{ ok = $true; started = $started }
         }

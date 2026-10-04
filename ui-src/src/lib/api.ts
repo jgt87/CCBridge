@@ -84,6 +84,7 @@ export interface AgentEvent {
     | "fetch"
     | "runbook"
     | "chain"
+    | "script"
     | "review"
     | "kind"
     | "clarify"
@@ -314,7 +315,7 @@ export interface ReviewDetail {
 export interface ScheduleItem {
   id: string;
   title: string;
-  kind: "chat" | "fetch" | "runbook" | "chain";
+  kind: "chat" | "fetch" | "runbook" | "chain" | "script";
   name: string;
   /** The message, for a scheduled message. */
   text?: string;
@@ -333,7 +334,7 @@ export interface ScheduleItem {
 }
 
 export interface ScheduleSpec {
-  kind: "chat" | "fetch" | "runbook" | "chain";
+  kind: "chat" | "fetch" | "runbook" | "chain" | "script";
   text?: string;
   name?: string;
   title?: string;
@@ -582,6 +583,7 @@ export const api = {
     })),
   createChain: (name: string) => call<{ ok: boolean }>("POST", "/api/chains", { name }),
   runChain: (name: string) => call<{ ok: boolean }>("POST", "/api/chains/run", { name }),
+  runScript: (path: string) => call<{ ok: boolean }>("POST", "/api/scripts/run", { path }),
   /** Add a runbook or script step to a chain, or remove / move one (index from 0). */
   chainSteps: (name: string, op: "add" | "remove" | "up" | "down", opts: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number } = {}) =>
     call<{ ok: boolean }>("POST", "/api/chains/steps", { name, op, ...opts }),

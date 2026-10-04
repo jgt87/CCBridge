@@ -229,7 +229,32 @@ Describe 'Running a chain' {
             [IO.File]::WriteAllText((Join-Path $p 'Runbooks\broken.chain.md'), "1. runbook: nope")
             $s = New-State $p
             Invoke-ChainJob $s 'broken'
-            (@($s.Events) | Where-Object type -eq 'error' | Select-Object -Last 1).text | Should Match 'cannot start'
+            (@($s.Events) | Where-Object type -eq 'error' | Select-Object -Last 1).text | Should Match 'cannot start'
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+    It 'runs one script on its own (Automation > Scripts) with the same rules, as its own change set' {
+        $p = New-TestProject
+        try {
+            Add-ApprovedScript $p 'Scripts/make.ps1' (Get-ScriptHash (Join-Path $p 'Scripts\make.ps1'))
+            $s = New-State $p
+            Invoke-ScriptJob $s 'Scripts/make.ps1'
+            ([IO.File]::ReadAllText((Join-Path $p 'out.txt'))).Trim() | Should Be 'made'
+            $ev = @($s.Events)
+            ($ev | Where-Object type -eq 'script').text | Should Match 'Scripts/make\.ps1 finished: exit code 0'
+            ($ev | Where-Object type -eq 'checkpoint').title | Should Be 'Script: Scripts/make.ps1'
+            $s.Busy | Should Be $false
+            # A failing script is an error; a deleting one needs a person; outside Scripts/ is refused.
+            Add-ApprovedScript $p 'Scripts/fail.ps1' (Get-ScriptHash (Join-Path $p 'Scripts\fail.ps1'))
+            Invoke-ScriptJob $s 'Scripts/fail.ps1'
+            (@($s.Events) | Where-Object type -eq 'error' | Select-Object -Last 1).text | Should Match 'did not finish: exit code 3'
+            [IO.File]::WriteAllText((Join-Path $p 'Scripts\wipe.ps1'), "Remove-Item -LiteralPath 'out.txt'`n")
+            $h = New-State $p; $h.Headless = $true
+            Invoke-ScriptJob $h 'Scripts/wipe.ps1'
+            (@($h.Events) | Where-Object type -eq 'error' | Select-Object -Last 1).text | Should Match 'needs a person'
+            Test-Path (Join-Path $p 'out.txt') | Should Be $true
+            Invoke-ScriptJob $s 'make.ps1'
+            (@($s.Events) | Where-Object type -eq 'error' | Select-Object -Last 1).text | Should Match "must be in the project's Scripts/ folder"
+            { Test-ScheduleSpec @{ kind = 'script'; name = 'Scripts/make.ps1'; repeat = 'daily'; times = @('08:00') } } | Should Not Throw
         } finally { Remove-Item $p -Recurse -Force }
     }
 }

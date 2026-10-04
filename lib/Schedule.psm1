@@ -25,7 +25,7 @@ function Get-ScheduleTimes($Schedule) {
 function Test-ScheduleSpec {
     <# Throws when a schedule is incomplete or invalid. #>
     param([Parameter(Mandatory)][hashtable]$Spec)
-    if ($Spec.kind -notin 'chat', 'fetch', 'runbook', 'chain') { throw "kind must be chat, fetch, runbook or chain" }
+    if ($Spec.kind -notin 'chat', 'fetch', 'runbook', 'chain', 'script') { throw "kind must be chat, fetch, runbook, chain or script" }
     if ($Spec.kind -eq 'chat' -and -not "$($Spec.text)".Trim()) { throw 'The message to schedule is empty' }
     if ($Spec.kind -ne 'chat' -and -not "$($Spec.name)".Trim()) { throw "Which $($Spec.kind) should run?" }
     switch ($Spec.repeat) {

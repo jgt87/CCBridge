@@ -4,7 +4,7 @@ import type { ChatOptions } from "@/lib/api";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MarkdownView } from "./markdown-view";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
-import type { Activity, AgentEvent, Reference, UndoChange } from "@/lib/api";
+import type { Activity, AgentEvent, Preview, Reference, UndoChange } from "@/lib/api";
 import { UndoCard } from "./undo-card";
 import { stripActionBlocks } from "@/lib/diff";
 import { thinkingTexts } from "@/lib/thinking-texts";
@@ -42,6 +42,7 @@ const NOTE_EVENTS: Partial<Record<AgentEvent["type"], { tone: NoteTone; fallback
   fetch: { tone: "done", fallback: "Runbook finished." },
   runbook: { tone: "done", fallback: "Runbook finished." },
   chain: { tone: "done", fallback: "Chain finished." },
+  script: { tone: "done", fallback: "Script finished." },
   review: { tone: "done", fallback: "Code review finished." },
   "human-required": { tone: "human", fallback: "" },
 };
@@ -62,12 +63,20 @@ function addNote(e: AgentEvent, ctx: BuildContext) {
 }
 
 /** An action event creates the card the first time and updates it afterwards. */
+/** An action's preview as the card expects it. Older script runs (also in saved chat history) sent
+ *  the script as plain text; that becomes a preview of the script itself. */
+export function asPreview(p: unknown, target?: string): Preview | undefined {
+  if (p == null) return undefined;
+  if (typeof p === "string") return { path: (target ?? "").match(/Scripts[\\/][^"\s]+/i)?.[0]?.replace(/\\/g, "/") ?? "", exists: true, old: null, new: p };
+  return typeof p === "object" ? (p as Preview) : undefined;
+}
+
 function mergeAction(e: AgentEvent, ctx: BuildContext) {
   const existing = ctx.actions.get(e.id!);
   const next: ActionItem = {
     ...(existing ?? { id: e.id!, action: e.action!, target: e.target ?? "", status: "running" }),
     status: e.status ?? "running",
-    preview: e.preview ?? existing?.preview,
+    preview: asPreview(e.preview, e.target) ?? existing?.preview,
     warning: e.warning ?? existing?.warning,
     error: e.error ?? existing?.error,
     target: e.target ?? existing?.target ?? "",

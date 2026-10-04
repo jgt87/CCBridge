@@ -359,7 +359,7 @@ function Submit-AgentTask {
     $id = 'q-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     if (-not $Title) {
         $Title = switch ($Task.kind) {
-            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Runbook: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'chain' { "Chain: $($Task.name)" } 'agent' { "$(Get-AgentDisplayName $Task.agent): $($Task.text)" } 'review' { 'Code review' }
+            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Runbook: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'chain' { "Chain: $($Task.name)" } 'script' { "Script: $($Task.name)" } 'agent' { "$(Get-AgentDisplayName $Task.agent): $($Task.text)" } 'review' { 'Code review' }
             'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } default { "$($Task.kind)" }
         }
     }
@@ -711,7 +711,7 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     <# Status and result of a finished task, from the events it produced. #>
     $events = @(Get-AgentEvents $State $FromSeq)
     $err = @($events | Where-Object { $_.type -eq 'error' } | Select-Object -Last 1)
-    $done = @($events | Where-Object { $_.type -in 'done', 'fetch', 'runbook', 'chain', 'review', 'undo', 'newchat' } | Select-Object -Last 1)
+    $done = @($events | Where-Object { $_.type -in 'done', 'fetch', 'runbook', 'chain', 'script', 'review', 'undo', 'newchat' } | Select-Object -Last 1)
     $last = @($events | Where-Object { $_.type -eq 'assistant' } | Select-Object -Last 1)
     $Entry.messages = [int]$State.MessagesSent - $MessagesBefore
     $Entry.finished = (Get-Date).ToString('s')
@@ -1179,6 +1179,35 @@ function Invoke-ChainJob {
     }
 }
 
+function Invoke-ScriptJob {
+    <# Runs one script from the project's Scripts/ folder on its own (Automation > Scripts, or a
+       schedule), with the same rules as a script step in a chain (Invoke-ChainScript): inside the
+       project, approved once and again after it changes (setting chainScripts), Microsoft 365 or
+       deleting scripts by a person every time. What it changes is one change set. #>
+    param($State, [string]$Path)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
+    $root = $State.ProjectRoot
+    $cp = [pscustomobject]@{ Value = $null }
+    $State.Busy = $true; $State.Cancel = $false
+    try {
+        Add-AgentEvent $State 'status' @{ text = "Running script $Path..." }
+        Write-CCBLog info agent "Script $Path"
+        $r = Invoke-ChainScript $State ([pscustomobject]@{ title = $Path; direct = $true }) ([pscustomobject]@{ target = $Path; args = '' }) $cp
+        if ($r.ok) { Add-AgentEvent $State 'script' @{ name = $Path; text = "Script $Path finished: $($r.why)." } }
+        else { Add-AgentEvent $State 'error' @{ text = "Script $Path did not finish: $($r.why)."; code = 'SCRIPT'; hint = 'The card above shows its output; fix the script and run it again.' } }
+    } catch {
+        Write-CCBLogError agent "Script $Path failed" $_
+        Add-AgentEvent $State 'error' @{ text = "Script $Path failed: $($_.Exception.Message)"; record = $_ }
+    } finally {
+        if ($cp.Value) {
+            try { Clear-RunSnapshot $cp.Value } catch { Write-CCBLogError agent 'run snapshot' $_ }
+            if (-not $cp.Value.Files.Count) { Remove-Item $cp.Value.Dir -Recurse -Force -ErrorAction SilentlyContinue }
+            else { Add-ChangeSetEvent $State $cp.Value "Script: $Path" }
+        }
+        $State.Busy = $false; $State.Cancel = $false
+    }
+}
+
 function Invoke-ChainScript {
     <# One script step of a chain. Same rules as Copilot's commands: deleting or moving outside the
        project is refused; scripts that delete data or use Microsoft 365 need a person every time
@@ -1198,13 +1227,15 @@ function Invoke-ChainScript {
     if ($risky -and $State.Headless) { return @{ ok = $false; why = "this script $($risk.reasons -join ', '); that needs a person in the StreamHub window" } }
     $id = 'chain-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $preview = if ($text.Length -gt 20000) { $text.Substring(0, 20000) + "`n..." } else { $text }
-    $evt = @{ id = $id; action = 'run'; target = $sc.command; preview = $preview }
+    # The script that runs, shown on the card (a preview: path and text, like a file change).
+    $evt = @{ id = $id; action = 'run'; target = $sc.command; preview = @{ path = $sc.path; exists = $true; old = $null; new = $preview } }
+    $who = $(if ($Chain.direct) { 'This' } else { "Chain '$($Chain.title)'" })   # direct: run from Automation > Scripts
     $hash = Get-ScriptHash $sc.full
     $ask = $risky -or $mode -eq 'always-ask' -or -not (Test-ScriptApproved $root $sc.path $hash)
     if ($ask) {
         $warn = if ($risky) { "Human in the loop: this script $($risk.reasons -join ', '). Only approve it if you want exactly this to happen; it is asked every time." }
-            elseif ($mode -eq 'approve-once') { "Chain '$($Chain.title)' runs $($sc.path) for the first time, or the script changed since it was approved. Check it: once approved, it runs without asking until it changes." }
-            else { "Chain '$($Chain.title)' runs $($sc.path)." }
+            elseif ($mode -eq 'approve-once') { "$who runs $($sc.path) for the first time, or the script changed since it was approved. Check it: once approved, it runs without asking until it changes." }
+            else { "$who runs $($sc.path)." }
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; warning = $warn })
         $d = Wait-Approval $State $id $true
         if ($d.decision -ne 'approve') {
@@ -1216,7 +1247,7 @@ function Invoke-ChainScript {
     } else {
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'running' })
     }
-    if (-not $CheckpointBox.Value) { $CheckpointBox.Value = New-Checkpoint $root "Chain: $($Chain.title)" }
+    if (-not $CheckpointBox.Value) { $CheckpointBox.Value = New-Checkpoint $root $(if ($Chain.direct) { "Script: $($sc.path)" } else { "Chain: $($Chain.title)" }) }
     $cp = $CheckpointBox.Value
     $snap = try { Start-RunSnapshot $cp $root } catch { Write-CCBLogError agent 'run snapshot' $_; $null }
     $r = Invoke-RunAction $root $sc.command -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
@@ -2586,7 +2617,7 @@ function Start-AgentWorker {
         $State.ReviewByCaller = [bool]$task.reviewByCaller
         $foreign = $task.source -and $task.source -ne 'user'
         if ($task.mode) { $State.Mode = $task.mode }
-        if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook', 'chain', 'review' -and $task.projectRoot -ne $State.ProjectRoot) {
+        if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook', 'chain', 'script', 'review' -and $task.projectRoot -ne $State.ProjectRoot) {
             if (-not (Test-Path -LiteralPath $task.projectRoot -PathType Container)) { $task.missingProject = $true }
             else { $State.ProjectRoot = $task.projectRoot }
         }
@@ -2630,6 +2661,7 @@ function Start-AgentWorker {
                 'runbook' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-RunbookJob $State $task.name }
                 'agent' { Invoke-AgentRun $State ([string]$task.agent) ([string]$task.text) -FollowUp:([bool]$task.followUp) }
                 'chain' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ChainJob $State $task.name }
+                'script' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ScriptJob $State $task.name }
                 'review' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ReviewJob $State $task }
                 'ask' {
                     # A plain question to Copilot, without project context or actions.
@@ -2701,4 +2733,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

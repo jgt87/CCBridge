@@ -69,7 +69,7 @@ function Resolve-ChainScript {
     $rel = $Path.Replace('\', '/').TrimStart('/')
     $fail = { param($why) [pscustomobject]@{ path = $rel; full = $null; command = $null; error = $why } }
     if ($rel -match '(^|/)\.\.(/|$)' -or $rel -match '^[A-Za-z]:' -or $rel.StartsWith('//')) { return & $fail 'a script step names a path inside the project, without ..' }
-    if (-not $rel.StartsWith("$($script:ScriptDir)/", [StringComparison]::OrdinalIgnoreCase)) { return & $fail "scripts in a chain must be in the project's $($script:ScriptDir)/ folder" }
+    if (-not $rel.StartsWith("$($script:ScriptDir)/", [StringComparison]::OrdinalIgnoreCase)) { return & $fail "scripts must be in the project's $($script:ScriptDir)/ folder" }
     $ext = [IO.Path]::GetExtension($rel).ToLowerInvariant()
     if ($script:ScriptTypes -notcontains $ext) { return & $fail "a script step runs .ps1, .cmd, .bat or .py files, not '$ext'" }
     $why = Test-ScriptArgs $ArgText

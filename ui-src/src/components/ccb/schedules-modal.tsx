@@ -38,6 +38,7 @@ export function SchedulesModal({
   fetchItems,
   runbooks,
   chains = [],
+  scripts = [],
   files,
   initial,
   initialEditing,
@@ -48,6 +49,7 @@ export function SchedulesModal({
   fetchItems: FetchItem[];
   runbooks: RunbookItem[];
   chains?: ChainItem[];
+  scripts?: string[];
   files: FileInfo[];
   /** Opened to schedule something specific (from the message box, a runbook or a chain). */
   initial: ScheduleTarget | null;
@@ -106,6 +108,7 @@ export function SchedulesModal({
               }}
               runbooks={runbooks}
               chains={chains}
+              scripts={scripts}
             />
           ) : target ? (
             <ScheduleForm
@@ -120,6 +123,7 @@ export function SchedulesModal({
               }}
               runbooks={runbooks}
               chains={chains}
+              scripts={scripts}
             />
           ) : (
             <SchedulesList onEdit={setEditing} schedules={schedules} />

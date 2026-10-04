@@ -23,7 +23,7 @@ const WEEKDAYS = [1, 2, 3, 4, 5];
 
 /** What a schedule starts: a message, a runbook (text answer: kind fetch; checked JSON: kind runbook) or a chain. */
 export interface ScheduleTarget {
-  kind: "chat" | "fetch" | "runbook" | "chain";
+  kind: "chat" | "fetch" | "runbook" | "chain" | "script";
   text?: string;
   name?: string;
 }
@@ -53,6 +53,7 @@ export function ScheduleForm({
   fetchItems,
   runbooks,
   chains = [],
+  scripts = [],
   files = [],
   onSave,
   onCancel,
@@ -63,6 +64,8 @@ export function ScheduleForm({
   fetchItems: FetchItem[];
   runbooks: RunbookItem[];
   chains?: ChainItem[];
+  /** Scripts in Scripts/ that can run on a schedule. */
+  scripts?: string[];
   /** Project files for the @ picker: a runbook from Runbooks/ runs as a runbook, any other file is attached to the message. */
   files?: FileInfo[];
   onSave: (spec: ScheduleSpec) => Promise<void>;
@@ -181,6 +184,15 @@ export function ScheduleForm({
               {chains.map((c) => (
                 <option key={c.name} value={`chain:${c.name}`}>
                   {c.title}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {scripts.length > 0 && (
+            <optgroup label="Scripts (Scripts/)">
+              {scripts.map((p) => (
+                <option key={p} value={`script:${p}`}>
+                  {p.replace(/^Scripts\//i, "")}
                 </option>
               ))}
             </optgroup>
