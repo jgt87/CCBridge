@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.72] - 2026-10-04
+
+### Changed
+
+- A new chain without steps no longer shows a warning: it says to pick a runbook or script and click Add. Run and Schedule stay unavailable until it has a step.
+
 ## [v0.1.71] - 2026-10-04
 
 ### Changed
@@ -827,7 +833,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.71...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.72...HEAD
+[v0.1.72]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.72
 [v0.1.71]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.71
 [v0.1.70]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.70
 [v0.1.69]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.69

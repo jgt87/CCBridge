@@ -117,7 +117,9 @@ export function ChainsPanel({
             ))}
           </ol>
           {onSteps && <AddStep chain={c.name} onSteps={onSteps} runbooks={runbookNames} scripts={scripts} />}
-          {c.problems.length > 0 && (
+          {/* A new chain has no steps yet: that is not a problem to warn about, just the next step. */}
+          {c.steps.length === 0 && <p className="mt-1 text-muted-foreground text-xs">No steps yet: pick a runbook or script above and click Add.</p>}
+          {c.steps.length > 0 && c.problems.length > 0 && (
             <div className="mt-1 flex gap-1 text-xs text-zinc-700 dark:text-zinc-300">
               <AlertTriangle aria-hidden className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{c.problems.join("; ")}</span>
@@ -128,7 +130,7 @@ export function ChainsPanel({
               className={flatButton}
               disabled={c.problems.length > 0}
               onClick={() => onRun(c.name)}
-              title={c.problems.length ? "Fix the steps first" : busy ? "Add it to the queue" : "Run the steps now, one after another"}
+              title={c.steps.length === 0 ? "Add a step first" : c.problems.length ? "Fix the steps first" : busy ? "Add it to the queue" : "Run the steps now, one after another"}
               type="button"
             >
               <Play className="h-3 w-3" /> Run
