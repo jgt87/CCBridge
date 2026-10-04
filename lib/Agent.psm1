@@ -297,6 +297,9 @@ function Send-ToCopilot {
     }
     $progress = { param($t) $State.Progress = $t }.GetNewClosure()
     $cancel = { [bool]$State.Cancel }.GetNewClosure()
+    # An agent's progress lines ("Searching for release details") show in the waiting indicator.
+    $who = if ($Agent) { $Agent } elseif ($State.AgentChat) { [string]$State.AgentChat } else { 'Copilot' }
+    $status = { param($t) $State.Activity.label = "${who}: $t" }.GetNewClosure()
     try {
         $stall = if ($State.Config.PSObject.Properties['stallSec']) { [int]$State.Config.stallSec } else { 90 }
         $timeout = [int]$State.Config.replyTimeoutSec
@@ -307,7 +310,7 @@ function Send-ToCopilot {
         }
         $r = $null
         try {
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OnStatus $status
         } catch {
             if (-not (Test-ConnectionLost $_) -or $State.ChatStarted) { throw }
             # First message of a chat: reconnect, start a fresh chat and send it once more.
@@ -316,7 +319,7 @@ function Send-ToCopilot {
             Reset-Bridge $State
             Start-NewChat $State
             $bridge = Get-Bridge $State
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OnStatus $status
         }
     } catch {
         if (Test-ConnectionLost $_) {
@@ -327,7 +330,7 @@ function Send-ToCopilot {
         }
         Reset-Bridge $State   # the next send reconnects
         throw
-    } finally { $State.Progress = '' }
+    } finally { $State.Progress = ''; if ("$($State.Activity.label)" -like "${who}: *") { $State.Activity.label = '' } }
     if ($r.Throttling -and $r.Throttling.maxNumUserMessagesInConversation) {
         $State.Throttle = @{ used = [int]$r.Throttling.numUserMessagesInConversation; max = [int]$r.Throttling.maxNumUserMessagesInConversation }
     } elseif (-not $r.Cancelled) {
@@ -356,7 +359,7 @@ function Submit-AgentTask {
     $id = 'q-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     if (-not $Title) {
         $Title = switch ($Task.kind) {
-            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Fetch: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'chain' { "Chain: $($Task.name)" } 'agent' { "$(Get-AgentDisplayName $Task.agent): $($Task.text)" } 'review' { 'Code review' }
+            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Runbook: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'chain' { "Chain: $($Task.name)" } 'agent' { "$(Get-AgentDisplayName $Task.agent): $($Task.text)" } 'review' { 'Code review' }
             'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } default { "$($Task.kind)" }
         }
     }
@@ -720,6 +723,8 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     if ($done.Count -and $done[0].path) { $Entry.resultPath = "$($done[0].path)" }
     $changed = @($events | Where-Object { $_.type -eq 'checkpoint' } | ForEach-Object { $_.files }) | Select-Object -Unique
     if ($changed) { $Entry.changed = @($changed) }
+    $sets = @($events | Where-Object { $_.type -eq 'checkpoint' })
+    if ($sets.Count) { $Entry.changeSeq = [int]$sets[-1].seq }   # the Changes tab's card of this task
 }
 
 function Write-PlanResult {
@@ -1042,6 +1047,18 @@ function Invoke-RunbookJob {
     }
 }
 
+function Add-ChangeSetEvent {
+    <# The 'checkpoint' event of a finished change set (Changes tab): its files, what asked for it
+       (title) and the lines added and removed per file. $Extra adds fields (contents for MCP). #>
+    param($State, $Checkpoint, [string]$Title, [hashtable]$Extra = @{})
+    if (-not $Checkpoint -or -not $Checkpoint.Files.Count) { return }
+    $counts = @(try { Get-CheckpointChanges $State.ProjectRoot $Checkpoint | ForEach-Object { @{ path = $_.path; added = [int]$_.added; removed = [int]$_.removed; created = [bool]$_.created; deleted = [bool]$_.deleted } } } catch { Write-CCBLogError agent 'change set counts' $_ })
+    $t = ("$Title" -replace '\s+', ' ').Trim(); if ($t.Length -gt 120) { $t = $t.Substring(0, 117) + '...' }
+    $data = @{ files = @($Checkpoint.Files.Keys); title = $t; counts = $counts; changeSet = $Checkpoint.Id }
+    foreach ($k in $Extra.Keys) { $data[$k] = $Extra[$k] }
+    Add-AgentEvent $State 'checkpoint' $data
+}
+
 function Invoke-ChainJob {
     <# Runs a chain (Runbooks/NAME.chain.md): its runbooks, fetch prompts and scripts one after
        another. With stopOnError (the default) the first failing step ends the chain. Scripts run
@@ -1071,7 +1088,11 @@ function Invoke-ChainJob {
             $from = [int]$State.Seq
             $ok = $true; $why = ''
             switch ($step.kind) {
-                'runbook' { Invoke-RunbookJob $State $step.target -Inputs @($step.with) }
+                'runbook' {
+                    # A text runbook (NAME.prompt.md) runs as one; a checked-JSON runbook gets the inputs.
+                    if (-not @(Get-Runbooks $root | Where-Object name -eq $step.target).Count -and @(Get-FetchPrompts $root | Where-Object name -eq $step.target).Count) { Invoke-FetchJob $State $step.target }
+                    else { Invoke-RunbookJob $State $step.target -Inputs @($step.with) }
+                }
                 'fetch' { Invoke-FetchJob $State $step.target }
                 'script' { $r = Invoke-ChainScript $State $item $step $cp; $ok = $r.ok; $why = $r.why }
             }
@@ -1103,7 +1124,7 @@ function Invoke-ChainJob {
         if ($cp.Value) {
             try { Clear-RunSnapshot $cp.Value } catch { Write-CCBLogError agent 'run snapshot' $_ }
             if (-not $cp.Value.Files.Count) { Remove-Item $cp.Value.Dir -Recurse -Force -ErrorAction SilentlyContinue }
-            else { Add-AgentEvent $State 'status' @{ text = "Files the chain's scripts changed: $(@($cp.Value.Files.Keys) -join ', '). Undo restores them." } }
+            else { Add-ChangeSetEvent $State $cp.Value "Chain: $($item.title)" }
         }
         try {
             $fixed = @(Restore-SourceData $root)
@@ -1346,10 +1367,10 @@ function Invoke-FetchJob {
     param($State, [string]$Name)
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
     $item = Get-FetchPrompts $State.ProjectRoot | Where-Object name -eq $Name | Select-Object -First 1
-    if (-not $item) { Add-AgentEvent $State 'error' @{ text = "There is no fetch prompt named '$Name'." }; return }
+    if (-not $item) { Add-AgentEvent $State 'error' @{ text = "There is no runbook named '$Name'." }; return }
     $State.Busy = $true; $State.Cancel = $false
     try {
-        Add-AgentEvent $State 'status' @{ text = "Fetching '$Name' from Copilot..." }
+        Add-AgentEvent $State 'status' @{ text = "Running runbook '$Name' (text answer)..." }
         Write-CCBLog info agent "Fetch $Name" @{ promptChars = $item.prompt.Length }
         Start-NewChat $State   # a fetch never mixes with the conversation
         $spec = Get-WebSourceSpec $item
@@ -1360,9 +1381,9 @@ function Invoke-FetchJob {
         $sent = New-Object 'System.Collections.Generic.HashSet[string]'
         $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text "$($item.prompt)$(if ($web.text) { "`n`n$($web.text)" })" -Sent $sent
         $r = Send-AgentJobMessage $State $spec $message $agentSpec
-        if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "Fetch '$Name' stopped; $($item.output) was left unchanged." }; return }
+        if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "Runbook '$Name' stopped; $($item.output) was left unchanged." }; return }
         if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
-            Add-AgentEvent $State 'error' @{ text = "Fetch '$Name' got no usable answer ($($r.Result): $($r.ResultMessage)); $($item.output) was left unchanged." }
+            Add-AgentEvent $State 'error' @{ text = "Runbook '$Name' got no usable answer ($($r.Result): $($r.ResultMessage)); $($item.output) was left unchanged." }
             return
         }
         $notes = @($web.notes) + @(Get-SourceSiteNotes $spec $r.References)
@@ -1372,7 +1393,7 @@ function Invoke-FetchJob {
         Add-AgentEvent $State 'fetch' @{ name = $Name; path = $path; text = "Saved the answer to $path. Attach it with @$path." }
     } catch {
         Write-CCBLogError agent "Fetch $Name failed" $_
-        Add-AgentEvent $State 'error' @{ text = "Fetch '$Name' failed: $($_.Exception.Message)"; record = $_ }
+        Add-AgentEvent $State 'error' @{ text = "Runbook '$Name' failed: $($_.Exception.Message)"; record = $_ }
     } finally {
         $State.NeedNewChat = $true   # the next message starts its own chat
         if (-not $State.InChain) { $State.Busy = $false; $State.Cancel = $false }   # a chain carries on (and keeps a Stop)
@@ -1459,7 +1480,7 @@ function Get-StepFailureInfo {
         'SEARCH text not found' { @{ code = 'EDIT-NOT-FOUND'; reasons = @('The file changed since Copilot read it: an earlier edit in this task, or you edited it.', 'Copilot''s SEARCH lines differ slightly from the file: spaces, quotes, or a line it remembered differently.', 'The change was already made earlier, but with different text.', 'Copilot shortened SEARCH without a line containing only ... (only its first lines were given).'); next = "Nothing was changed. Copilot gets the reason plus the file's closest current lines. $copilotRetries" }; break }
         'is in Source/|read-only' { @{ code = 'SOURCE-DATA'; reasons = @('The step tried to change a file in Source/, which holds your source data and is read-only.'); next = 'Nothing was changed. Copilot is told to write its result elsewhere (for example Work/ or output/).' }; break }
         'file not found|\(file not found\)' { @{ code = 'FILE-NOT-FOUND'; reasons = @('The path does not exist in the project: a typo, another folder, or a file that was never created.', 'For a new file Copilot should use a write block, not an edit.'); next = $copilotRetries }; break }
-        'without a path' { @{ code = 'STEP-FORMAT'; reasons = @('The block had no file name after the action name (for example ````edit with nothing after it).'); next = $copilotRetries }; break }
+        'without a path' { @{ code = 'STEP-FORMAT'; reasons = @('The block had no file name after the action name (for example ACTION edit with nothing after it).'); next = $copilotRetries }; break }
         'plan mode' { @{ code = 'PLAN-MODE'; reasons = @('"Plan only" mode is on, so changes and commands are not carried out.'); next = 'Switch the mode to "Ask before changes" or "Auto-accept edits" and ask again to carry out the plan.' }; break }
         'commands are not allowed' { @{ code = 'RUN-NOT-ALLOWED'; reasons = @('Commands are not allowed for this task (MCP task started without permission to run commands).'); next = 'Copilot is told to finish without running commands.' }; break }
         'needs a person|refused' { @{ code = 'RUN-NEEDS-PERSON'; reasons = @('The command would act on Microsoft 365 or delete data; that always needs a person.'); next = 'Run it yourself if you really want it; Copilot is told not to work around it.' }; break }
@@ -2450,9 +2471,9 @@ function Invoke-AgentTurn {
         }
         if ($checkpoint.Files.Count -and $State.ReviewByCaller) {
             $contents = @(try { Get-ChangeSetContents $State.ProjectRoot $checkpoint } catch { Write-CCBLogError agent 'change set contents' $_ })
-            Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys); contents = $contents }
+            Add-ChangeSetEvent $State $checkpoint $Text @{ contents = $contents }
         }
-        elseif ($checkpoint.Files.Count) { Add-AgentEvent $State 'checkpoint' @{ files = @($checkpoint.Files.Keys) } }
+        elseif ($checkpoint.Files.Count) { Add-ChangeSetEvent $State $checkpoint $Text }
         # Issue cycle steps 3-6: scan what changed, queue fixes, check a fix task's file again.
         if (($checkpoint.Files.Count -or $State.IssueFix) -and $null -ne $baseline -and -not $State.Cancel) {
             $scan = @($checkpoint.Files.Keys) + @(if ($State.IssueFix) { "$($State.IssueFix.path)" })
@@ -2621,4 +2642,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

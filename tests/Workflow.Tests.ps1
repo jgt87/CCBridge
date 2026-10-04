@@ -87,7 +87,7 @@ Describe 'find and remember instructions' {
     It 'go only to projects that have files' {
         (Get-PromptModules 'Fix the build' @{ Traits = @(); Paths = @() }) -contains 'actions:project' | Should Be $false
         (Get-PromptModules 'Fix the build' @{ Traits = @('code'); Paths = @('a.js') }) -contains 'actions:project' | Should Be $true
-        Get-PromptPart $root 'actions:project' @{} | Should Match '(?s)```find.*```remember'
+        Get-PromptPart $root 'actions:project' @{} | Should Match '(?s)ACTION find.*ACTION remember'
     }
 }
 

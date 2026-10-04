@@ -94,14 +94,19 @@ export function countChanges(lines: DiffLine[]) {
   return { add, del };
 }
 
-const ACTION_TYPES = new Set(["read", "glob", "grep", "write", "edit", "run", "todo", "done"]);
+const ACTION_TYPES = new Set(["read", "glob", "grep", "find", "web", "write", "edit", "run", "remember", "todo", "done"]);
+const PLAIN_LABELS = new Set(["", "text", "txt", "plaintext", "plain", "none"]);
+/** First line of an action in a plain block: "ACTION read" (any action), or, in older replies, the bare
+ *  name of one of the actions the helper also takes that way (lib/Protocol.psm1 keeps the same lists). */
+const ACTION_LINE = /^\s*action\s+(read|glob|grep|find|web|write|edit|run|remember|todo|done)\b/i;
+const BARE_ACTION_LINE = /^\s*(read|glob|grep|web|write|edit|run|todo|done)\b/;
 
 /** Removes CCBridge action blocks from a reply; they are shown as cards instead. */
 export function stripActionBlocks(text: string): string {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = /^\s{0,3}(`{3,}|~{3,})\s*([A-Za-z]+)(?:[:\s].*)?$/.exec(lines[i]);
+    const m = /^\s{0,3}(`{3,}|~{3,})\s*([A-Za-z]*)(?:[:\s].*)?$/.exec(lines[i]);
     if (!m) {
       out.push(lines[i]);
       continue;
@@ -110,7 +115,11 @@ export function stripActionBlocks(text: string): string {
     const close = new RegExp(`^\\s{0,3}${fence[0] === "`" ? "`" : "~"}{${fence.length},}\\s*$`);
     let j = i + 1;
     while (j < lines.length && !close.test(lines[j])) j++;
-    if (ACTION_TYPES.has(m[2].toLowerCase())) {
+    // An action: the action name as the label (older form), or a plain block whose first line is
+    // "ACTION NAME" (the form Copilot is taught) or the bare action name.
+    const label = m[2].toLowerCase();
+    const plainAction = PLAIN_LABELS.has(label) && /^\s{0,3}(`{3,}|~{3,})\s*[A-Za-z]*\s*$/.test(lines[i]) && i + 1 < lines.length && (ACTION_LINE.test(lines[i + 1]) || BARE_ACTION_LINE.test(lines[i + 1]));
+    if (ACTION_TYPES.has(label) || plainAction) {
       i = j;
     } else {
       for (let k = i; k <= Math.min(j, lines.length - 1); k++) out.push(lines[k]);

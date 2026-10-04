@@ -9,6 +9,67 @@ Import-Module (Join-Path $root 'lib\Workspace.psm1') -Force
 $fence3 = '```'
 $fence4 = '````'
 
+Describe 'Get-ActionBlocks: the ACTION line in a text block' {
+    It 'reads every action from a ```text block whose first line is ACTION NAME' {
+        $reply = @"
+${fence3}text
+ACTION read
+src/a.py
+README.md:outline
+${fence3}
+
+${fence4}text
+ACTION write docs/notes.md
+# Notes
+${fence3}bash
+echo hi
+${fence3}
+${fence4}
+
+${fence4}text
+ACTION edit src/a.py
+<<<<<<< SEARCH
+old
+=======
+new
+>>>>>>> REPLACE
+${fence4}
+
+${fence3}text
+ACTION find renderChart
+${fence3}
+
+${fence3}
+action run npm test
+${fence3}
+
+${fence3}text
+ACTION done
+Added the notes.
+${fence3}
+"@
+        $a = @(Get-ActionBlocks $reply)
+        ($a | ForEach-Object { $_.type }) -join ',' | Should Be 'read,write,edit,find,run,done'
+        (Get-ActionPaths $a[0]) -join ',' | Should Be 'src/a.py,README.md:outline'
+        $a[1].arg | Should Be 'docs/notes.md'
+        $a[1].body | Should Be "# Notes`n${fence3}bash`necho hi`n${fence3}"
+        $a[2].arg | Should Be 'src/a.py'
+        @($a[2].edits).Count | Should Be 1
+        $a[2].edits[0].replace | Should Be 'new'
+        $a[3].arg | Should Be 'renderChart'
+        $a[4].arg | Should Be 'npm test'
+        $a[5].body | Should Be 'Added the notes.'
+    }
+    It 'never takes an ordinary text block, or ACTION in another kind of block, for an action' {
+        $reply = "${fence3}text`nThe ACTION read line is shown here.`n${fence3}`n`n${fence3}json`nACTION write x.txt`n${fence3}`n`n${fence3}text`nACTION delete everything`n${fence3}"
+        @(Get-ActionBlocks $reply).Count | Should Be 0
+    }
+    It 'still reads the older form (the action name as the label)' {
+        $a = @(Get-ActionBlocks "${fence3}read`nsrc/a.py`n${fence3}")
+        $a[0].type | Should Be 'read'
+    }
+}
+
 Describe 'Get-ActionBlocks' {
     It 'finds actions among prose and ignores ordinary code blocks' {
         $reply = @"

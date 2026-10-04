@@ -39,7 +39,7 @@ const NOTE_EVENTS: Partial<Record<AgentEvent["type"], { tone: NoteTone; fallback
   error: { tone: "error", fallback: "" },
   undo: { tone: "undo", fallback: "" },
   newchat: { tone: "info", fallback: "New Copilot chat started." },
-  fetch: { tone: "done", fallback: "Fetched." },
+  fetch: { tone: "done", fallback: "Runbook finished." },
   runbook: { tone: "done", fallback: "Runbook finished." },
   chain: { tone: "done", fallback: "Chain finished." },
   review: { tone: "done", fallback: "Code review finished." },

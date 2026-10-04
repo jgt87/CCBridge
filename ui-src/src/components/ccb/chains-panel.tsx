@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarClock, FileCode2, Play, Plus } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, CalendarClock, FileCode2, Play, Plus, X } from "lucide-react";
 import { useState } from "react";
 import type { ChainItem, ChainStep } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,7 @@ export function stepText(s: ChainStep): string {
   return `${s.kind} ${s.target}${extra}`;
 }
 
-/** Chains: runbooks, fetch prompts and scripts from Scripts/ that run one after another. */
+/** Chains: runbooks and scripts from Scripts/ that run one after another. */
 export function ChainsPanel({
   chains,
   scripts,
@@ -23,9 +23,15 @@ export function ChainsPanel({
   onRun,
   onOpen,
   onSchedule,
+  runbookNames = [],
+  onSteps,
 }: {
   chains: ChainItem[];
   scripts: string[];
+  /** Runbooks a step can run (both kinds). */
+  runbookNames?: { name: string; title: string }[];
+  /** Change a chain's steps; resolves when done (the list reloads), rejects with the reason. */
+  onSteps?: (name: string, op: "add" | "remove" | "up" | "down", opts?: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number }) => Promise<void>;
   busy: boolean;
   onCreate: (name: string) => Promise<void>;
   onRun: (name: string) => void;
@@ -54,7 +60,7 @@ export function ChainsPanel({
   return (
     <div className="space-y-2">
       <p className="text-muted-foreground text-xs">
-        Runbooks, fetch prompts and scripts from <span className="font-mono">Scripts/</span> that run one after another, for example an export, then a script that
+        Runbooks and scripts from <span className="font-mono">Scripts/</span> that run one after another, for example an export, then a script that
         converts it, then a runbook that summarises the result. Each chain is a file <span className="font-mono">Runbooks/NAME.chain.md</span> with one step per line; edit it there.
         A script is approved the first time it runs and again after it changes.
       </p>
@@ -90,11 +96,27 @@ export function ChainsPanel({
           </div>
           <ol className="mt-1 space-y-0.5 text-muted-foreground text-xs">
             {c.steps.map((s, i) => (
-              <li className="truncate font-mono" key={`${i}-${s.kind}-${s.target}`} title={stepText(s)}>
-                {i + 1}. {stepText(s)}
+              <li className="group flex items-center gap-1" key={`${i}-${s.kind}-${s.target}`}>
+                <span className="min-w-0 flex-1 truncate font-mono" title={stepText(s)}>
+                  {i + 1}. {stepText(s)}
+                </span>
+                {onSteps && (
+                  <span className="flex shrink-0 gap-0.5 opacity-60 group-hover:opacity-100">
+                    <button aria-label="Move up" className={iconButton} disabled={i === 0} onClick={() => onSteps(c.name, "up", { index: i })} title="Move this step up" type="button">
+                      <ArrowUp className="h-3 w-3" />
+                    </button>
+                    <button aria-label="Move down" className={iconButton} disabled={i === c.steps.length - 1} onClick={() => onSteps(c.name, "down", { index: i })} title="Move this step down" type="button">
+                      <ArrowDown className="h-3 w-3" />
+                    </button>
+                    <button aria-label="Remove step" className={iconButton} onClick={() => onSteps(c.name, "remove", { index: i })} title="Remove this step from the chain" type="button">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                )}
               </li>
             ))}
           </ol>
+          {onSteps && <AddStep chain={c.name} onSteps={onSteps} runbooks={runbookNames} scripts={scripts} />}
           {c.problems.length > 0 && (
             <div className="mt-1 flex gap-1 text-xs text-zinc-700 dark:text-zinc-300">
               <AlertTriangle aria-hidden className="mt-0.5 h-3 w-3 shrink-0" />
@@ -117,7 +139,7 @@ export function ChainsPanel({
               </button>
             )}
             <button className={flatButton} onClick={() => onOpen(c.path)} title={`View the chain (${c.path}); edit it in the project folder`} type="button">
-              <FileCode2 className="h-3 w-3" /> Chain
+              <FileCode2 className="h-3 w-3" /> View
             </button>
           </div>
         </div>
@@ -128,6 +150,76 @@ export function ChainsPanel({
           Scripts a chain can run: {scripts.length} in <span className="font-mono">Scripts/</span>.
         </p>
       )}
+    </div>
+  );
+}
+
+const iconButton = "rounded p-0.5 hover:bg-black/5 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent dark:hover:bg-white/5";
+
+/** Adds a runbook or a script from Scripts/ as the chain's last step. */
+function AddStep({
+  chain,
+  runbooks,
+  scripts,
+  onSteps,
+}: {
+  chain: string;
+  runbooks: { name: string; title: string }[];
+  scripts: string[];
+  onSteps: NonNullable<Parameters<typeof ChainsPanel>[0]["onSteps"]>;
+}) {
+  const [pick, setPick] = useState("");
+  const [args, setArgs] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const isScript = pick.startsWith("script:");
+  const add = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      const target = pick.slice(pick.indexOf(":") + 1);
+      await onSteps(chain, "add", { kind: isScript ? "script" : "runbook", target, args: isScript ? args : "" });
+      setPick("");
+      setArgs("");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="mt-1.5 space-y-1">
+      <div className="flex gap-1">
+        <select aria-label="Step to add" className={cn(field, "py-0.5 text-xs")} onChange={(e) => setPick(e.target.value)} value={pick}>
+          <option value="">Add a step...</option>
+          {runbooks.length > 0 && (
+            <optgroup label="Runbooks">
+              {runbooks.map((r) => (
+                <option key={r.name} value={`runbook:${r.name}`}>
+                  {r.title}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {scripts.length > 0 && (
+            <optgroup label="Scripts in Scripts/">
+              {scripts.map((p) => (
+                <option key={p} value={`script:${p}`}>
+                  {p.replace(/^Scripts\//i, "")}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+        <button className={cn(flatButton, "shrink-0 border border-black/10 dark:border-white/10")} disabled={!pick || saving} onClick={add} type="button">
+          <Plus className="h-3 w-3" /> Add
+        </button>
+      </div>
+      {isScript && (
+        <input aria-label="Script arguments" className={cn(field, "py-0.5 text-xs")} onChange={(e) => setArgs(e.target.value)} placeholder="Optional arguments, e.g. -Week current" value={args} />
+      )}
+      {!runbooks.length && !scripts.length && <p className="text-muted-foreground text-xs">No runbooks or scripts yet: create a runbook above, or put a script in Scripts/.</p>}
+      {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
     </div>
   );
 }

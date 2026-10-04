@@ -6,6 +6,26 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.64] - 2026-10-04
+
+### Changed
+
+- Side panel: new tabs *Code health* (Issues, Code review) and *Automation* (Scheduled, Runbooks, Chains). *Changes* shows only the change sets, without a fold-away section; *Tasks* keeps Plan and Queue. The *Fetch* tab is gone (a browser that last showed it opens Automation). The tabs sit in two columns so their names stay readable; the Files tab's "N file(s) with issues" opens Code health.
+- Fetch prompts and runbooks are one thing now: **Runbooks**, with a *text answer* (Markdown; the former fetch prompts, still `NAME.prompt.md`) or *checked JSON* (`NAME.runbook.md`). One list with a kind tag and the same buttons for both (*Run*, *Schedule*, *View*, *Result*, *Attach*); *New runbook* asks which kind, and the text kind has the sources, sites, pages, agent and files fields. A chain's `runbook:` step runs either kind (`fetch:` still works); schedules, the queue and the chat say "Runbook".
+- The Automation tab lists the schedules in place (Edit, Run now, Pause, Delete) with *New schedule*; Edit opens the schedule's form directly.
+- Change sets show what asked for them (the message, or the chain) and `+added -removed` per file, and the newest says that Undo takes it back. In the Queue, a task's "N file(s) changed" opens its change set on the Changes tab and lights it up. A chain's script changes now appear as a change set too.
+- Chains get their steps in the app: *Add a step...* on each chain adds a runbook (either kind) or a script from `Scripts/` with optional arguments, and each step can move up or down or be removed. StreamHub writes and renumbers the step lines in `Runbooks/NAME.chain.md` and checks a new step first. A new chain starts without steps (it had two placeholder steps that showed as problems), and the chain's *Chain* button is now *View*, like the runbooks' button.
+
+### Added
+
+- Settings > Retention: *Charts: kept per item* (default 20) and *Charts: days kept* (default 90) for the charts saved from Researcher and Analyst answers in `Runbooks/Exports/`, per runbook, fetch prompt or agent; the charts of one answer count as one. Only files with StreamHub's chart name pattern are removed, never the exports themselves.
+- While Researcher or Analyst works, the waiting indicator shows the agent's own progress lines from Copilot's reply stream (for example "Researcher: Searching for release details") instead of a general waiting text.
+
+### Fixed
+
+- Copilot's page no longer draws StreamHub's action blocks as broken charts ("Chart.js", "Invalid JSON"). On some tenants the page draws every code block whose label it does not know as a chart, `text read` included (`render-test.cmd`). Copilot now writes each action as a `text` block whose first line is `ACTION` and the action (for example `ACTION read`, or `ACTION write PATH` in a four-backtick block), which the page shows as plain code. Replies in the old form (`read` as the label) still work, ordinary text blocks are never taken for actions, and the chat in StreamHub hides exactly the blocks that are carried out.
+- On tenants where StreamHub reads replies from the page, a running Researcher is never taken for finished or stuck while Copilot's message box asks for "additional instructions for the ongoing research report".
+
 ## [v0.1.63] - 2026-10-04
 
 ### Added
@@ -734,7 +754,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.63...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.64...HEAD
+[v0.1.64]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.64
 [v0.1.63]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.63
 [v0.1.62]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.62
 [v0.1.61]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.61

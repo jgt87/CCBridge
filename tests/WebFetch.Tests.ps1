@@ -91,7 +91,7 @@ Describe 'Web instructions in work prompts' {
         @(Get-PromptModules 'Check the latest version on nodejs.org and update package.json' @{ Traits = @() }) -join ',' | Should Match 'rules:websources,actions:web'
         @(Get-PromptModules 'Fix the header' @{ Traits = @() }) -join ',' | Should Not Match 'websources'
         $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Use the pricing from https://example.com/prices' -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
-        $m | Should Match '```web'
+        $m | Should Match 'ACTION web'
         $m | Should Match 'use only those'
         $m | Should Not Match 'CCBridge'
     }

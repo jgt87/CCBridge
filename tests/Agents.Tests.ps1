@@ -34,6 +34,18 @@ Describe 'Agent replies' {
     }
 }
 
+Describe 'Agent progress lines' {
+    It 'takes the first line of the newest progress message, not the checklist or the answer' {
+        $msgs = @(
+            [pscustomobject]@{ author = 'bot'; messageType = 'Progress'; contentOrigin = 'ChainOfThoughtSummary'; text = "**Searching for release details**`n`nLooking into three generators." },
+            [pscustomobject]@{ author = 'bot'; messageType = 'Progress'; contentOrigin = 'TodoListContentOrigin'; contentType = 'TodoList'; text = 'step 1; step 2' },
+            [pscustomobject]@{ author = 'bot'; text = '# Report' })
+        Get-ProgressLine $msgs | Should BeExactly 'Searching for release details'
+        Get-ProgressLine @([pscustomobject]@{ author = 'bot'; text = 'answer' }) | Should Be ''
+        (Get-ProgressLine @([pscustomobject]@{ author = 'bot'; messageType = 'Progress'; text = ('x' * 200) })).Length | Should Be 120
+    }
+}
+
 Describe 'Invoke-AgentRun (Copilot mocked)' {
     $p = Join-Path $env:TEMP ('ccb-agent-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
     $config = Get-CCBridgeConfig harness $root

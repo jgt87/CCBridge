@@ -1,4 +1,3 @@
-import { AtSign, CalendarClock, FileText, Plus, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type { FetchItem, FetchWeb } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -16,8 +15,12 @@ export function fetchedAge(iso: string | null, now = Date.now()): string {
 
 const field =
   "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-xs outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+const bigField =
+  "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+const flatButton =
+  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
 
-/** "web only · nodejs.org · 1 page · Analyst · 2 files": the web fields of a saved prompt, or "" when it has none. */
+/** "web only · nodejs.org · 1 page · Analyst · 2 files": the header fields of a text runbook, or "" when it has none. */
 export function webSummary(it: Pick<FetchItem, "sources" | "sites" | "pages" | "agent" | "files">): string {
   const parts: string[] = [];
   if (it.sources === "web") parts.push("web only");
@@ -30,31 +33,11 @@ export function webSummary(it: Pick<FetchItem, "sources" | "sites" | "pages" | "
   if (a === "researcher" || a === "analyst") parts.push(a === "researcher" ? "Researcher" : "Analyst");
   const f = (it.files ?? "").split(",").filter((x) => x.trim()).length;
   if (f) parts.push(f === 1 ? "1 file" : `${f} files`);
-  return parts.join(" \u00b7 ");
+  return parts.join(" · ");
 }
 
-const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
-
-/** Fetch tab: saved prompts that get current data from Copilot into a file you can attach with @. */
-export function FetchPanel({
-  items,
-  busy,
-  onRun,
-  onSave,
-  onAttach,
-  onOpen,
-  onSchedule,
-}: {
-  onSchedule?: (name: string) => void;
-  items: FetchItem[];
-  busy: boolean;
-  onRun: (name: string) => void;
-  onSave: (name: string, prompt: string, web: FetchWeb) => Promise<void>;
-  onAttach: (path: string) => void;
-  onOpen: (path: string) => void;
-}) {
-  const [adding, setAdding] = useState(false);
+/** A new runbook with a text answer: its prompt, and where the data may come from and who answers. */
+export function TextRunbookForm({ onSave, onCancel }: { onSave: (name: string, prompt: string, web: FetchWeb) => Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [sources, setSources] = useState<FetchWeb["sources"]>("");
@@ -70,14 +53,7 @@ export function FetchPanel({
     setError("");
     try {
       await onSave(name, prompt, { sources, sites, pages, agent, files });
-      setName("");
-      setPrompt("");
-      setSources("");
-      setSites("");
-      setPages("");
-      setAgent("");
-      setFiles("");
-      setAdding(false);
+      onCancel();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -87,95 +63,44 @@ export function FetchPanel({
 
   return (
     <div className="space-y-2">
-      <p className="text-muted-foreground text-xs">
-        Saved prompts that fetch current data, such as today's meetings. Each run writes Copilot's answer to a file in <span className="font-mono">Runbooks/Exports/</span> (earlier answers in <span className="font-mono">.streamhub/History/</span>); attach it to a message with @.
-      </p>
-
-      {adding ? (
-        <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
-          <input aria-label="Fetch prompt name"
-            className="w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30"
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name, e.g. meetings today"
-            value={name}
-          />
-          <textarea aria-label="Fetch prompt"
-            className="min-h-24 w-full resize-y rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30"
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Prompt, e.g. List my meetings for today with times, attendees and the agenda."
-            value={prompt}
-          />
-          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1 text-xs">
-            <span className="text-muted-foreground">Sources</span>
-            <select aria-label="Sources" className={field} onChange={(e) => setSources(e.target.value as FetchWeb["sources"])} value={sources}>
-              <option value="">As the prompt says</option>
-              <option value="web">Web only</option>
-              <option value="work">Work data only</option>
-              <option value="both">Work data and the web</option>
-            </select>
-            <span className="text-muted-foreground">Sites</span>
-            <input aria-label="Only these websites" className={field} onChange={(e) => setSites(e.target.value)} placeholder="Optional: only these websites, e.g. nodejs.org, python.org" value={sites} />
-            <span className="text-muted-foreground">Pages</span>
-            <input aria-label="Pages to read" className={field} onChange={(e) => setPages(e.target.value)} placeholder="Optional: pages to read exactly, e.g. https://nodejs.org/en/about/previous-releases" value={pages} />
-            <span className="text-muted-foreground">Ask</span>
-            <select aria-label="Who answers" className={field} onChange={(e) => setAgent(e.target.value as NonNullable<FetchWeb["agent"]>)} title="Researcher or Analyst answer instead of Copilot itself; they take several minutes" value={agent}>
-              <option value="">Copilot</option>
-              <option value="researcher">Researcher</option>
-              <option value="analyst">Analyst</option>
-            </select>
-            <span className="text-muted-foreground">Files</span>
-            <input aria-label="Files to attach" className={field} onChange={(e) => setFiles(e.target.value)} placeholder="Optional: project files to attach, e.g. Source/sales.csv" value={files} />
-          </div>
-          {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
-          <div className="flex justify-end gap-1">
-            <button className={flatButton} onClick={() => setAdding(false)} type="button">
-              Cancel
-            </button>
-            <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={saving || !name.trim() || !prompt.trim()} onClick={save} type="button">
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button className={cn(flatButton, "w-full justify-center border border-black/10 py-1.5 dark:border-white/10")} onClick={() => setAdding(true)} type="button">
-          <Plus className="h-3.5 w-3.5" /> New fetch prompt
+      <input aria-label="Runbook name" className={bigField} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. meetings today" value={name} />
+      <textarea
+        aria-label="What Copilot should get"
+        className={cn(bigField, "min-h-24 resize-y")}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder="What to get, e.g. List my meetings for today with times, attendees and the agenda."
+        value={prompt}
+      />
+      <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1 text-xs">
+        <span className="text-muted-foreground">Sources</span>
+        <select aria-label="Sources" className={field} onChange={(e) => setSources(e.target.value as FetchWeb["sources"])} value={sources}>
+          <option value="">As the prompt says</option>
+          <option value="web">Web only</option>
+          <option value="work">Work data only</option>
+          <option value="both">Work data and the web</option>
+        </select>
+        <span className="text-muted-foreground">Sites</span>
+        <input aria-label="Only these websites" className={field} onChange={(e) => setSites(e.target.value)} placeholder="Optional: only these websites, e.g. nodejs.org, python.org" value={sites} />
+        <span className="text-muted-foreground">Pages</span>
+        <input aria-label="Pages to read" className={field} onChange={(e) => setPages(e.target.value)} placeholder="Optional: pages to read exactly, e.g. https://nodejs.org/en/about/previous-releases" value={pages} />
+        <span className="text-muted-foreground">Ask</span>
+        <select aria-label="Who answers" className={field} onChange={(e) => setAgent(e.target.value as NonNullable<FetchWeb["agent"]>)} title="Researcher or Analyst answer instead of Copilot itself; they take several minutes" value={agent}>
+          <option value="">Copilot</option>
+          <option value="researcher">Researcher</option>
+          <option value="analyst">Analyst</option>
+        </select>
+        <span className="text-muted-foreground">Files</span>
+        <input aria-label="Files to attach" className={field} onChange={(e) => setFiles(e.target.value)} placeholder="Optional: project files to attach, e.g. Source/sales.csv" value={files} />
+      </div>
+      {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
+      <div className="flex justify-end gap-1">
+        <button className={flatButton} onClick={onCancel} type="button">
+          Cancel
         </button>
-      )}
-
-      {items.length === 0 && !adding && <p className="pt-1 text-muted-foreground text-sm">No fetch prompts yet.</p>}
-
-      {items.map((it) => (
-        <div className="rounded-lg border border-black/10 p-2 dark:border-white/10" key={it.name}>
-          <div className="flex items-center gap-2">
-            <span className="truncate font-medium text-sm" title={it.prompt}>
-              {it.name}
-            </span>
-            <span className="ml-auto shrink-0 text-muted-foreground text-xs" title={it.fetchedAt ? new Date(it.fetchedAt).toLocaleString() : undefined}>
-              {fetchedAge(it.fetchedAt)}
-            </span>
-          </div>
-          <p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs" title={it.prompt}>
-            {it.prompt}
-          </p>
-          {webSummary(it) && <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={it.pages || undefined}>{webSummary(it)}</p>}
-          <div className="mt-1.5 flex gap-1">
-            <button className={flatButton} onClick={() => onRun(it.name)} title={busy ? "Add it to the queue; the answer is saved when it runs" : "Ask Copilot now and save the answer"} type="button">
-              <RefreshCw className="h-3 w-3" /> {it.fetchedAt ? "Refresh" : "Run"}
-            </button>
-            {onSchedule && (
-              <button className={flatButton} onClick={() => onSchedule(it.name)} title="Fetch it on set days and times" type="button">
-                <CalendarClock className="h-3 w-3" /> Schedule
-              </button>
-            )}
-            <button className={flatButton} disabled={!it.fetchedAt} onClick={() => onAttach(it.output)} title={`Attach @${it.output} to your message`} type="button">
-              <AtSign className="h-3 w-3" /> Attach
-            </button>
-            <button className={flatButton} disabled={!it.fetchedAt} onClick={() => onOpen(it.output)} title={it.output} type="button">
-              <FileText className="h-3 w-3" /> View
-            </button>
-          </div>
-        </div>
-      ))}
+        <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={saving || !name.trim() || !prompt.trim()} onClick={save} type="button">
+          {saving ? "Creating..." : "Create"}
+        </button>
+      </div>
     </div>
   );
 }

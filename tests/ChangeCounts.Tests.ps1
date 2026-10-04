@@ -49,4 +49,25 @@ Describe 'Line counts per change' {
     }
     Remove-Item $p -Recurse -Force
 }
+
+Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
+Describe 'Change set events' {
+    It 'carry what asked for them and the lines added and removed per file' {
+        $p = Join-Path $env:TEMP ('ccb-cse-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        try {
+            $s = New-AgentState -Config ([pscustomobject]@{}) -AppRoot $root; $s.ProjectRoot = $p
+            [IO.File]::WriteAllText((Join-Path $p 'a.txt'), "one`n")
+            $cp = New-Checkpoint $p 'test'
+            $null = Invoke-WriteAction $p 'a.txt' "one`ntwo`nthree`n" $cp
+            Add-ChangeSetEvent $s $cp ('Add   two lines ' + ('x' * 200))
+            $e = @($s.Events | Where-Object type -eq 'checkpoint')[0]
+            $e.title.Length | Should Be 120
+            $e.title | Should Match '^Add two lines'
+            @($e.files) -join ',' | Should Be 'a.txt'
+            $e.counts[0].path | Should Be 'a.txt'
+            $e.counts[0].added | Should Be 2
+            $e.changeSet | Should Be $cp.Id
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+}
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

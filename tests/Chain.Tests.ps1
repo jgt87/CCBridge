@@ -67,6 +67,40 @@ Describe 'Chain files' {
             @(Test-ChainSteps $p @()).Count | Should Be 1
         } finally { Remove-Item $p -Recurse -Force }
     }
+    It 'lets a runbook step name a runbook with a text answer (a .prompt.md file)' {
+        $p = New-TestProject
+        try {
+            [IO.File]::WriteAllText((Join-Path $p 'Runbooks\text.chain.md'), "1. runbook: news")
+            @((Get-Chains $p | Where-Object name -eq 'text').problems).Count | Should Be 0
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+    It 'adds runbook and script steps, moves and removes them, and leaves the rest of the file alone' {
+        $p = New-TestProject
+        try {
+            $null = New-ChainFile $root $p 'Weekly'
+            $file = Join-Path $p 'Runbooks\weekly.chain.md'
+            @((Get-Chains $p | Where-Object name -eq 'weekly').steps).Count | Should Be 0     # a new chain starts empty
+            $null = Set-ChainSteps $p 'weekly' add -Kind runbook -Target 'meetings'
+            $null = Set-ChainSteps $p 'weekly' add -Kind script -Target 'Scripts/make.ps1' -ArgText '-Week current'
+            $c = Set-ChainSteps $p 'weekly' add -Kind runbook -Target 'news'                      # a text runbook
+            (@($c.steps) | ForEach-Object { "$($_.kind) $($_.target)" }) -join ' | ' | Should Be 'runbook meetings | script Scripts/make.ps1 | runbook news'
+            @($c.problems).Count | Should Be 0
+            { Set-ChainSteps $p 'weekly' add -Kind runbook -Target 'nope' } | Should Throw
+            { Set-ChainSteps $p 'weekly' add -Kind script -Target 'tools/x.ps1' } | Should Throw
+            { Set-ChainSteps $p 'weekly' add -Kind script -Target 'Scripts/make.ps1' -ArgText 'a & b' } | Should Throw
+            $c = Set-ChainSteps $p 'weekly' down -Index 0
+            (@($c.steps) | ForEach-Object { $_.target }) -join ',' | Should Be 'Scripts/make.ps1,meetings,news'
+            $c = Set-ChainSteps $p 'weekly' up -Index 2
+            (@($c.steps) | ForEach-Object { $_.target }) -join ',' | Should Be 'Scripts/make.ps1,news,meetings'
+            { Set-ChainSteps $p 'weekly' up -Index 0 } | Should Throw
+            $c = Set-ChainSteps $p 'weekly' remove -Index 1
+            (@($c.steps) | ForEach-Object { $_.target }) -join ',' | Should Be 'Scripts/make.ps1,meetings'
+            $text = [IO.File]::ReadAllText($file)
+            $text | Should Match '(?m)^1\. script: Scripts/make\.ps1 -Week current$'
+            $text | Should Match '(?m)^2\. runbook: meetings$'
+            $text | Should Match '1\. runbook: NAME   '                                           # the explanation in the comment is untouched
+        } finally { Remove-Item $p -Recurse -Force }
+    }
     It 'creates a chain from the blank template and refuses a duplicate' {
         $p = New-TestProject
         try {

@@ -127,6 +127,10 @@ export interface AgentEvent {
   version?: string;
   /** user: the agent the message went to; assistant: the agent that answered (from Copilot's stream). */
   agent?: string;
+  /** checkpoint: what asked for the change set, and lines added/removed per file. */
+  title?: string;
+  counts?: ChangeCount[] | ChangeCount;
+  changeSet?: string;
   name?: string;
   path?: string;
   /** undo: per file what came back and what went. */
@@ -336,6 +340,24 @@ export interface ScheduleSpec {
   times?: string[];
 }
 
+/** One file of a change set: lines added and removed. */
+export interface ChangeCount {
+  path: string;
+  added: number;
+  removed: number;
+  created?: boolean;
+  deleted?: boolean;
+}
+
+/** A change set in the Changes tab. */
+export interface ChangeSetView {
+  seq: number;
+  time: string;
+  files: string[];
+  title?: string;
+  counts?: ChangeCount[];
+}
+
 /** A task in the queue. */
 export interface QueueEntry {
   id: string;
@@ -357,6 +379,8 @@ export interface QueueEntry {
   /** E.g. why it waits, or that a schedule was missed while StreamHub was closed. */
   note?: string | null;
   changed?: string[];
+  /** The change set this task made (its card on the Changes tab). */
+  changeSeq?: number | null;
   jobId?: string | null;
 }
 
@@ -379,7 +403,7 @@ export interface ChainStep {
   args?: string;
 }
 
-/** A chain (Runbooks/<name>.chain.md): runbooks, fetch prompts and scripts run one after another. */
+/** A chain (Runbooks/<name>.chain.md): runbooks and scripts run one after another. */
 export interface ChainItem {
   name: string;
   title: string;
@@ -435,7 +459,7 @@ export interface SsoStatus {
   checkedAt?: string;
 }
 
-/** A saved fetch prompt (Runbooks/<name>.prompt.md) and its latest answer (Runbooks/Exports/<name>.md). */
+/** A runbook with a text answer (Runbooks/<name>.prompt.md; once called a fetch prompt) and its latest answer (Runbooks/Exports/<name>.md). */
 export interface FetchItem {
   name: string;
   prompt: string;
@@ -452,7 +476,7 @@ export interface FetchItem {
   files?: string;
 }
 
-/** The web fields of a fetch prompt when it is saved. */
+/** The header fields of a text runbook when it is saved. */
 export interface FetchWeb {
   sources: "" | "web" | "work" | "both";
   sites: string;
@@ -553,6 +577,9 @@ export const api = {
     })),
   createChain: (name: string) => call<{ ok: boolean }>("POST", "/api/chains", { name }),
   runChain: (name: string) => call<{ ok: boolean }>("POST", "/api/chains/run", { name }),
+  /** Add a runbook or script step to a chain, or remove / move one (index from 0). */
+  chainSteps: (name: string, op: "add" | "remove" | "up" | "down", opts: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number } = {}) =>
+    call<{ ok: boolean }>("POST", "/api/chains/steps", { name, op, ...opts }),
   approve: (id: string, decision: "approve" | "reject", note = "") =>
     call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user" }),
   setMode: (mode: Mode) => call<{ ok: boolean }>("POST", "/api/mode", { mode }),

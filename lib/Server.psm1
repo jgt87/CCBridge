@@ -360,6 +360,13 @@ function Invoke-ApiRequest($Ctx, $State) {
             $item = New-ChainFile $State.AppRoot $State.ProjectRoot ([string]$b.name)
             return Send-Json $Ctx @{ ok = $true; item = $item }
         }
+        '^POST /api/chains/steps$' {
+            # Add a runbook or script step, remove one, or move one up or down (Automation tab).
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            $item = Set-ChainSteps $State.ProjectRoot ([string]$b.name) ([string]$b.op) -Kind ([string]$b.kind) -Target ([string]$b.target) -ArgText ([string]$b.args) -Index $(if ($null -ne $b.index) { [int]$b.index } else { -1 })
+            return Send-Json $Ctx @{ ok = $true; item = $item }
+        }
         '^POST /api/chains/run$' {
             if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
             $b = Read-JsonBody $Ctx

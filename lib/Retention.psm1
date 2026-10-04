@@ -2,6 +2,8 @@
 #   .streamhub/History/ earlier versions of runbook and fetch data, per runbook or fetch prompt
 #   .streamhub/evidence/ one file per task
 #   .streamhub/reviews/ code review reports (NAME.md and NAME.json count as one)
+#   Runbooks/Exports/   charts saved from agent answers (NAME-chart-yyyyMMdd-HHmmss[-N].png), per
+#                       runbook, fetch prompt or agent; the exports themselves are never touched
 #   undo backups        change sets in %LOCALAPPDATA%\CCBridge\projects\...\backups (the newest
 #                       one always stays, so "Undo last change set" keeps working)
 # Per item: keep the newest COUNT and nothing older than DAYS (0 = no limit). Runs when a project
@@ -15,6 +17,7 @@ $script:Defaults = [ordered]@{
     historyCount = 20; historyDays = 90
     evidenceCount = 100; evidenceDays = 90
     reviewsCount = 20; reviewsDays = 180
+    chartsCount = 20; chartsDays = 90
     backupsCount = 100; backupsDays = 30
 }
 
@@ -59,7 +62,7 @@ function Invoke-ProjectRetention {
        only reports. $Now is for tests. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, $Config, [switch]$WhatIf, [datetime]$Now = (Get-Date))
     $r = Get-RetentionSettings $Config
-    $removed = [ordered]@{ history = 0; evidence = 0; reviews = 0; backups = 0 }
+    $removed = [ordered]@{ history = 0; evidence = 0; reviews = 0; charts = 0; backups = 0 }
     if (-not (Test-Path -LiteralPath $ProjectRoot -PathType Container)) { return $removed }
     $apply = { param($kind, $items) foreach ($x in @($items)) { if (-not $WhatIf) { Remove-RetentionItem $x }; $removed[$kind]++ } }
 
@@ -82,6 +85,17 @@ function Invoke-ProjectRetention {
             [pscustomobject]@{ Time = ($_.Group | Measure-Object LastWriteTime -Maximum).Maximum; Paths = @($_.Group | ForEach-Object FullName) } })
         & $apply 'reviews' (Select-Expired $reports $r.reviewsCount $r.reviewsDays -Now $Now)
     }
+    # Charts saved from agent answers: per runbook, fetch prompt or agent (NAME-chart-<stamp>[-N].png;
+    # the charts of one answer count as one item). Only files with that exact name pattern.
+    $ex = Join-Path $ProjectRoot ((Get-LayoutPath Exports).Replace('/', '\'))
+    if (Test-Path -LiteralPath $ex) {
+        $charts = @(Get-ChildItem -LiteralPath $ex -File -Filter '*-chart-*.png' | Where-Object { $_.Name -match '^(.+)-chart-(\d{8}-\d{6})(-\d+)?\.png$' } | ForEach-Object {
+            $null = $_.Name -match '^(.+)-chart-(\d{8}-\d{6})(-\d+)?\.png$'
+            [pscustomobject]@{ Group = $Matches[1]; Stamp = $Matches[2]; File = $_ } } |
+            Group-Object Group, Stamp | ForEach-Object {
+                [pscustomobject]@{ Group = $_.Group[0].Group; Time = ($_.Group.File | Measure-Object LastWriteTime -Maximum).Maximum; Paths = @($_.Group.File | ForEach-Object FullName) } })
+        foreach ($g in ($charts | Group-Object Group)) { & $apply 'charts' (Select-Expired $g.Group $r.chartsCount $r.chartsDays -Now $Now) }
+    }
     # Undo backups: change sets by their id (yyyyMMdd-HHmmss-fff); the newest one always stays.
     $bk = Join-Path (Get-ProjectStateDir $ProjectRoot) 'backups'
     if (Test-Path -LiteralPath $bk) {
@@ -92,7 +106,7 @@ function Invoke-ProjectRetention {
         & $apply 'backups' (Select-Expired $sets $r.backupsCount $r.backupsDays -KeepNewest -Now $Now)
     }
     $total = ($removed.Values | Measure-Object -Sum).Sum
-    if ($total -and -not $WhatIf) { Write-CCBLog info retention "Removed old generated items" @{ project = $ProjectRoot; history = $removed.history; evidence = $removed.evidence; reviews = $removed.reviews; backups = $removed.backups } }
+    if ($total -and -not $WhatIf) { Write-CCBLog info retention "Removed old generated items" @{ project = $ProjectRoot; history = $removed.history; evidence = $removed.evidence; reviews = $removed.reviews; charts = $removed.charts; backups = $removed.backups } }
     $removed
 }
 

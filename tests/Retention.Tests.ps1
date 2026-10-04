@@ -68,6 +68,28 @@ Describe 'Invoke-ProjectRetention' {
         [IO.File]::ReadAllLines((Join-Path $base 'a-1\chat-history.jsonl'))[0] | Should Be '{"seq":151}'
         Remove-Item $base -Recurse -Force
     }
+    It 'keeps saved charts per item, counts the charts of one answer as one, and leaves exports alone' {
+        $p = New-RetentionProject
+        $ex = Join-Path $p 'Runbooks\Exports'; New-Item -ItemType Directory $ex -Force | Out-Null
+        try {
+            foreach ($i in 1..3) { Add-Aged (Join-Path $ex "sales-chart-2026100$i-080000.png") (3 - $i) }
+            Add-Aged (Join-Path $ex 'analyst-chart-20261001-090000-1.png') 1
+            Add-Aged (Join-Path $ex 'analyst-chart-20261001-090000-2.png') 1    # same answer as -1
+            Add-Aged (Join-Path $ex 'analyst-chart-20260101-090000.png') 200    # older than the days limit
+            Add-Aged (Join-Path $ex 'sales.json') 400                           # an export: never touched
+            Add-Aged (Join-Path $ex 'my-chart.png') 400                         # not StreamHub's name pattern
+            $cfg = @{ retention = @{ chartsCount = 2; chartsDays = 90; historyCount = 0; historyDays = 0; evidenceCount = 0; evidenceDays = 0; reviewsCount = 0; reviewsDays = 0; backupsCount = 0; backupsDays = 0 } }
+            $r = Invoke-ProjectRetention $p $cfg
+            $r.charts | Should Be 2
+            Test-Path (Join-Path $ex 'sales-chart-20261001-080000.png') | Should Be $false   # the oldest of three, count 2
+            Test-Path (Join-Path $ex 'sales-chart-20261003-080000.png') | Should Be $true
+            Test-Path (Join-Path $ex 'analyst-chart-20261001-090000-1.png') | Should Be $true
+            Test-Path (Join-Path $ex 'analyst-chart-20261001-090000-2.png') | Should Be $true
+            Test-Path (Join-Path $ex 'analyst-chart-20260101-090000.png') | Should Be $false
+            Test-Path (Join-Path $ex 'sales.json') | Should Be $true
+            Test-Path (Join-Path $ex 'my-chart.png') | Should Be $true
+        } finally { Remove-Item $p -Recurse -Force }
+    }
     It 'uses the defaults when the settings have none' {
         (Get-RetentionSettings $null).historyCount | Should Be 20
         (Get-RetentionSettings @{ retention = @{ historyCount = 5 } }).historyCount | Should Be 5

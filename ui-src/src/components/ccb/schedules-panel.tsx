@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const flatButton =
   "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
 
-const KIND: Record<ScheduleItem["kind"], string> = { chat: "Message", fetch: "Fetch", runbook: "Runbook", chain: "Chain" };
+const KIND: Record<ScheduleItem["kind"], string> = { chat: "Message", fetch: "Runbook", runbook: "Runbook", chain: "Chain" };
 
 /** "today 08:00", "tomorrow 13:00", "Mon 6 Oct 08:00". */
 export function formatWhen(iso: string | null): string {
@@ -23,7 +23,7 @@ export function formatWhen(iso: string | null): string {
   return `${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${time}`;
 }
 
-/** Scheduled messages, fetches and runbooks, with the next run and pause, run-now and delete. */
+/** Scheduled messages, runbooks and chains, with the next run, edit, run now, pause and delete. */
 export function SchedulesList({ schedules, onEdit }: { schedules: ScheduleItem[]; onEdit?: (s: ScheduleItem) => void }) {
   return (
     <div className="space-y-1.5">

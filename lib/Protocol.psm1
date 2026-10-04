@@ -25,10 +25,13 @@ function Get-ActionBlocks {
         $closeRe = '^\s{0,3}' + [regex]::Escape($fence[0]) + '{' + $fence.Length + ',}\s*$'
         $body = New-Object System.Collections.Generic.List[string]
         $j = $i + 1
-        # Copilot sometimes leaves the info string empty (or "text") and writes the action as the
-        # first line of the block: "read index.html". Take the action from that line.
+        # The action is the block's first line: "ACTION read", "ACTION write PATH" in a ```text block
+        # (the form Copilot is taught: a label other than text draws as a chart on some tenants).
+        # Older form, still accepted: the action name as the label (```read). Copilot also sometimes
+        # leaves the label empty (or "text") and writes the bare action name as the first line.
         if ($script:PlainInfo -contains $type -and -not $arg -and $j -lt $lines.Length) {
-            $first = [regex]::Match($lines[$j], '^\s*(read|glob|grep|web|write|edit|run|todo|done)\b[:\s]*(.*)$')
+            $first = [regex]::Match($lines[$j], '^\s*ACTION\s+(read|glob|grep|find|web|write|edit|run|remember|todo|done)\b[:\s]*(.*)$', 'IgnoreCase')
+            if (-not $first.Success) { $first = [regex]::Match($lines[$j], '^\s*(read|glob|grep|web|write|edit|run|todo|done)\b[:\s]*(.*)$') }
             if ($first.Success) { $type = $first.Groups[1].Value.ToLowerInvariant(); $arg = $first.Groups[2].Value.Trim(); $j++ }
         }
         # In an edit block, code fences inside a SEARCH/REPLACE section are file content

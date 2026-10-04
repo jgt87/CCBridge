@@ -32,9 +32,9 @@ import { FileViewer } from "@/components/ccb/file-viewer";
 import { SplitViewHint } from "@/components/ccb/split-view-hint";
 import { ModalBackdrop } from "@/components/ccb/modal-backdrop";
 import { notifyEvents, notifyQueue } from "@/lib/notify";
-import type { ChatOptions } from "@/lib/api";
+import type { ChatOptions, ScheduleItem } from "@/lib/api";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
-import { type AgentEvent, type AppState, api, type ChainItem, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
+import { type AgentEvent, type AppState, api, type ChainItem, type ChangeSetView, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
 
 type AgentChoice = "copilot" | "researcher" | "analyst";
@@ -65,7 +65,7 @@ export default function App() {
   const [runbookTemplates, setRunbookTemplates] = useState<RunbookTemplate[]>([]);
   const [draft, setDraft] = useState("");
   // Schedules modal: closed (null), the list ({ target: null }) or a form for a target.
-  const [scheduling, setScheduling] = useState<{ target: ScheduleTarget | null } | null>(null);
+  const [scheduling, setScheduling] = useState<{ target: ScheduleTarget | null; editing?: ScheduleItem } | null>(null);
   const [reviewTick, setReviewTick] = useState(0);
   // Clarify first: remembered in this browser.
   const [clarifyFirst, setClarifyFirst] = useState(() => {
@@ -280,9 +280,12 @@ export default function App() {
 
   // The change sets that can still be undone: an undo takes the newest one off the list.
   const changes = useMemo(() => {
-    const list: { seq: number; time: string; files: string[] }[] = [];
+    const list: ChangeSetView[] = [];
     for (const e of projectEvents) {
-      if (e.type === "checkpoint") list.push({ seq: e.seq, time: e.time, files: e.files ?? [] });
+      if (e.type === "checkpoint") {
+        const counts = Array.isArray(e.counts) ? e.counts : e.counts ? [e.counts] : [];
+        list.push({ seq: e.seq, time: e.time, files: Array.isArray(e.files) ? e.files : e.files ? [e.files as unknown as string] : [], title: e.title || undefined, counts });
+      }
       else if (e.type === "undo" && (e.files ?? []).length) list.pop();
     }
     return list;
@@ -495,6 +498,10 @@ export default function App() {
                   refreshFiles();
                 }}
                 onUndo={() => api.undo()}
+                onEditSchedule={(s) => {
+                  setScheduling({ target: null, editing: s });
+                  setDrawerOpen(false);
+                }}
                 onUploaded={refreshFiles}
                 onCreateRunbook={async (template, name) => {
                   await api.createRunbook(template, name);
@@ -508,6 +515,10 @@ export default function App() {
                   refreshFiles();
                 }}
                 onRunChain={(name) => api.runChain(name).catch((e) => setError((e as Error).message))}
+                onChainSteps={async (name, op, opts) => {
+                  await api.chainSteps(name, op, opts);
+                  refreshFiles();
+                }}
                 project={state.project}
                 queue={queueHere}
                 schedules={schedulesHere}
@@ -599,6 +610,7 @@ export default function App() {
                     fetchItems={fetchItems}
                     files={files}
                     initial={scheduling.target}
+                    initialEditing={scheduling.editing}
                     onClose={() => setScheduling(null)}
                     onCreate={async (spec) => {
                       await api.createSchedule(spec);

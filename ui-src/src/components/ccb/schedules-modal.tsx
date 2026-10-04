@@ -23,7 +23,7 @@ export function SchedulesSummary({ schedules, onOpen }: { schedules: ScheduleIte
         <span className="block font-medium text-sm">Open schedules</span>
         <span className="block truncate text-muted-foreground text-xs">
           {schedules.length === 0
-            ? "Run messages, fetches and runbooks on set days and times"
+            ? "Run messages, runbooks and chains on set days and times"
             : `${active.length} active${schedules.length > active.length ? `, ${schedules.length - active.length} paused or done` : ""}${next ? ` · next ${formatWhen(next.nextRun)}` : ""}`}
         </span>
       </span>
@@ -40,6 +40,7 @@ export function SchedulesModal({
   chains = [],
   files,
   initial,
+  initialEditing,
   onCreate,
   onClose,
 }: {
@@ -48,13 +49,15 @@ export function SchedulesModal({
   runbooks: RunbookItem[];
   chains?: ChainItem[];
   files: FileInfo[];
-  /** Opened to schedule something specific (from the message box, a runbook or a fetch prompt). */
+  /** Opened to schedule something specific (from the message box, a runbook or a chain). */
   initial: ScheduleTarget | null;
+  /** Opened from the list on the Automation tab: this schedule's form. */
+  initialEditing?: ScheduleItem;
   onCreate: (spec: ScheduleSpec) => Promise<void>;
   onClose: () => void;
 }) {
   const [target, setTarget] = useState<ScheduleTarget | null>(initial);
-  const [editing, setEditing] = useState<ScheduleItem | null>(null);
+  const [editing, setEditing] = useState<ScheduleItem | null>(initialEditing ?? null);
   useEffect(() => setTarget(initial), [initial]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && onClose();
@@ -71,7 +74,7 @@ export function SchedulesModal({
         <div className="flex shrink-0 items-center justify-between gap-2 border-black/10 border-b px-4 py-3 dark:border-white/10">
           <div className="min-w-0">
             <div className="font-semibold">Scheduled</div>
-            <div className="text-muted-foreground text-xs">Messages, fetches and runbooks that run on set days and times while StreamHub is open.</div>
+            <div className="text-muted-foreground text-xs">Messages, runbooks and chains that run on set days and times while StreamHub is open.</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {!target && !editing && (

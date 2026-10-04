@@ -96,7 +96,8 @@ function Test-ChainSteps {
     foreach ($s in @($Steps)) {
         switch ($s.kind) {
             'runbook' {
-                if ($runbooks -notcontains $s.target) { "step $($s.n): there is no runbook '$($s.target)' in $($script:ChainDir)/" }
+                # A runbook with a checked JSON result, or one with a text answer (NAME.prompt.md).
+                if ($runbooks -notcontains $s.target -and $fetches -notcontains $s.target) { "step $($s.n): there is no runbook '$($s.target)' in $($script:ChainDir)/" }
                 foreach ($w in @($s.with)) { try { $null = Resolve-ProjectPath $ProjectRoot $w } catch { "step $($s.n): $w is not a path inside the project" } }
             }
             'fetch' { if ($fetches -notcontains $s.target) { "step $($s.n): there is no fetch prompt '$($s.target)' in $($script:ChainDir)/" } }
@@ -135,6 +136,76 @@ function New-ChainFile {
     [IO.File]::WriteAllText($full, $text, (New-Object Text.UTF8Encoding($false)))
     Write-CCBLog info chain "Chain created: $rel"
     [pscustomobject]@{ name = $slug; path = $rel }
+}
+
+function Get-ChainStepLines {
+    <# Indexes (0-based) of the step lines in a chain file's lines, outside HTML comments, in order. #>
+    param([string[]]$Lines)
+    $inComment = $false
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        $l = $Lines[$i]
+        if ($inComment) { if ($l -match '-->') { $inComment = $false }; continue }
+        if ($l -match '<!--' -and $l -notmatch '-->') { $inComment = $true; continue }
+        if ($l -match '^\s*(?:\d+[.)]|[-*])\s*(runbook|fetch|script)\s*:') { $i }
+    }
+}
+
+function Set-ChainSteps {
+    <# Edits the steps of Runbooks/NAME.chain.md: add a step at the end, remove one, or move one up
+       or down (index is 0-based). Step lines are renumbered 1., 2., ...; the rest of the file stays.
+       A new step is checked first: the runbook must exist (either kind), the script must be a
+       .ps1/.cmd/.bat/.py file in Scripts/ with plain arguments. Returns the chain. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][ValidateSet('add', 'remove', 'up', 'down')][string]$Op,
+        [string]$Kind = '', [string]$Target = '', [string]$ArgText = '', [int]$Index = -1)
+    $rel = "$($script:ChainDir)/$Name.chain.md"
+    $full = Resolve-ProjectPath $ProjectRoot $rel
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "There is no chain named '$Name'." }
+    $text = [IO.File]::ReadAllText($full).Replace("`r`n", "`n")
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $text.Split("`n")) { $lines.Add($l) }
+    $steps = @(Get-ChainStepLines $lines.ToArray())
+    switch ($Op) {
+        'add' {
+            $t = $Target.Trim()
+            if ($Kind -eq 'runbook') {
+                $names = @(@(Get-Runbooks $ProjectRoot) + @(Get-FetchPrompts $ProjectRoot) | ForEach-Object { $_.name })
+                if ($names -notcontains $t) { throw "There is no runbook named '$t'." }
+                $line = "1. runbook: $t"
+            } elseif ($Kind -eq 'script') {
+                $sc = Resolve-ChainScript $ProjectRoot $t $ArgText
+                if ($sc.error) { throw $sc.error }
+                $line = "1. script: $($sc.path)$(if ($ArgText.Trim()) { ' ' + $ArgText.Trim() })"
+            } else { throw 'A step is a runbook or a script.' }
+            if ($steps.Count) { $lines.Insert($steps[-1] + 1, $line) }
+            else {
+                # After a "## Steps" heading when there is one, else at the end.
+                $h = -1; for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*#+\s*Steps\s*$') { $h = $i } }
+                while ($lines.Count -and -not $lines[$lines.Count - 1].Trim()) { $lines.RemoveAt($lines.Count - 1) }
+                if ($h -ge 0 -and $h -ge $lines.Count - 1) { $lines.Add('') }
+                elseif ($h -lt 0) { $lines.Add(''); $lines.Add('## Steps'); $lines.Add('') }
+                $lines.Add($line)
+            }
+        }
+        'remove' {
+            if ($Index -lt 0 -or $Index -ge $steps.Count) { throw 'There is no such step.' }
+            $lines.RemoveAt($steps[$Index])
+        }
+        { $_ -in 'up', 'down' } {
+            $j = if ($Op -eq 'up') { $Index - 1 } else { $Index + 1 }
+            if ($Index -lt 0 -or $Index -ge $steps.Count -or $j -lt 0 -or $j -ge $steps.Count) { throw 'The step cannot move further.' }
+            $a = $lines[$steps[$Index]]; $lines[$steps[$Index]] = $lines[$steps[$j]]; $lines[$steps[$j]] = $a
+        }
+    }
+    # Renumber: 1., 2., ... (bullets become numbers too).
+    $n = 0
+    foreach ($i in @(Get-ChainStepLines $lines.ToArray())) {
+        $n++
+        $lines[$i] = [regex]::Replace($lines[$i], '^(\s*)(?:\d+[.)]|[-*])', { param($m) "$($m.Groups[1].Value)$n." })
+    }
+    [IO.File]::WriteAllText($full, (($lines -join "`n").TrimEnd() + "`n"), (New-Object Text.UTF8Encoding($false)))
+    Write-CCBLog info chain "Chain ${Name}: step $Op" @{ kind = $Kind }
+    Get-Chains $ProjectRoot | Where-Object name -eq $Name
 }
 
 function Get-ProjectScripts {
@@ -197,4 +268,4 @@ function New-ChainInputBlock {
     [pscustomobject]@{ text = $sb.ToString().TrimEnd(); notes = @($notes) }
 }
 
-Export-ModuleMember -Function Get-ProjectScripts, Read-ChainSteps, Read-Chain, Test-ScriptArgs, Resolve-ChainScript, Test-ChainSteps, Get-Chains, New-ChainFile, Get-ScriptHash, Test-ScriptApproved, Add-ApprovedScript, New-ChainInputBlock
+Export-ModuleMember -Function Get-ChainStepLines, Set-ChainSteps, Get-ProjectScripts, Read-ChainSteps, Read-Chain, Test-ScriptArgs, Resolve-ChainScript, Test-ChainSteps, Get-Chains, New-ChainFile, Get-ScriptHash, Test-ScriptApproved, Add-ApprovedScript, New-ChainInputBlock

@@ -46,7 +46,7 @@ Describe 'New-PromptMessage' {
         $m | Should Match '^You are the user''s personal assistant'
         $m | Should Match 'only to read it'
         $m | Should Match 'write notes/NAME.md'
-        $m | Should Not Match 'SEARCH|```read'
+        $m | Should Not Match 'SEARCH|ACTION read'
         $m.Length -lt 900 | Should Be $true
     }
 
@@ -57,7 +57,7 @@ Describe 'New-PromptMessage' {
         $second | Should Match 'expert software developer'
         $third = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Now add a test' -Sent $sent -Context $ctx
         $third | Should Match '^Now add a test\n\n\(How to answer: you cannot open or change the files, but the helper program applies the action blocks you write'
-        $third | Should Match '````edit PATH````'
+        $third | Should Match 'ACTION edit PATH'
         $third | Should Not Match 'expert software developer'
         New-PromptMessage -AppRoot $root -Kind 'chat' -Text 'thanks' -Sent $sent -Context $ctx | Should BeExactly 'thanks'
         $fourth = New-PromptMessage -AppRoot $root -Kind 'mixed' -Text 'Also read my emails about it' -Sent $sent -Context $ctx

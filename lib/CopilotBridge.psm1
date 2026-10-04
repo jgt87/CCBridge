@@ -680,7 +680,17 @@ function Get-BotReplyText {
 # is rebuilt from the raw chunks, taking from each snapshot only the tokens that never arrived
 # as chunks. Uncertain counts the merges that needed a heuristic.
 
-function New-ReplyMerger { [pscustomobject]@{ Text = ''; LastSnap = $null; Pending = ''; Uncertain = 0 } }
+function New-ReplyMerger { [pscustomobject]@{ Text = ''; LastSnap = $null; Pending = ''; Uncertain = 0; Progress = '' } }
+
+function Get-ProgressLine($Messages) {
+    <# The latest progress line of an agent (Researcher's "Searching for release details"): the first
+       line of the newest bot Progress message, not its checklist (TodoList). '' when there is none. #>
+    $p = @($Messages | Where-Object { $_.author -eq 'bot' -and $_.messageType -eq 'Progress' -and $_.contentType -ne 'TodoList' -and $_.contentOrigin -ne 'EarlyProgress' -and "$($_.text)".Trim() }) | Select-Object -Last 1
+    if (-not $p) { return '' }
+    $line = @("$($p.text)".Replace("`r", '').Split("`n") | ForEach-Object { ($_ -replace '[*_#`]', '').Trim() } | Where-Object { $_ }) | Select-Object -First 1
+    if ("$line".Length -gt 120) { $line = "$line".Substring(0, 117) + '...' }
+    "$line"
+}
 
 function Add-ReplyChunk($M, [string]$Chunk) { $M.Text += $Chunk; $M.Pending += $Chunk }
 
@@ -718,7 +728,11 @@ function Add-HubRecord {
             if ($Rec.target -ne 'update' -or -not $Rec.arguments) { return }
             $a = $Rec.arguments[0]
             if ($null -ne $a.writeAtCursor) { Add-ReplyChunk $M $a.writeAtCursor }
-            elseif ($a.messages) { Add-ReplySnapshot $M (Get-BotReplyText $a.messages) }
+            elseif ($a.messages) {
+                Add-ReplySnapshot $M (Get-BotReplyText $a.messages)
+                $line = Get-ProgressLine $a.messages
+                if ($line) { $M.Progress = $line }
+            }
         }
         2 { return $Rec.item }
         3 { if ($Rec.error) { throw "Copilot hub error: $($Rec.error)" } }
@@ -1155,18 +1169,19 @@ function Send-CopilotPrompt {
         [scriptblock]$OnProgress,
         [scriptblock]$CancelCheck,   # returns $true to stop now: Copilot's Stop is pressed and Cancelled = $true is returned
         [int]$StallSec = 90,         # no data from Copilot this long: it hangs; press Stop and report NoAnswer
+        [scriptblock]$OnStatus,      # an agent's progress line ("Searching for release details")
         [string]$Agent = '',         # Researcher or Analyst: mentioned at the start of the message
         [string[]]$Files = @()       # local files to attach
     )
     Use-CopilotLock {
-        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files
+        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OnStatus $OnStatus
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
         if ($r.Result -eq 'Lost') {
             # The request never reached Copilot's answer stream (seen when the page opens that
             # connection only at the first send). The connection exists now: send it once more.
             Write-CCBLog info bridge 'No part of the reply arrived; sending the prompt again'
             Add-TimelineEvent $Bridge 'resent' $null
-            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -LostSec 0
+            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OnStatus $OnStatus -LostSec 0
             if ($r.Result -eq 'Lost') { $r.Result = 'NoAnswer' }
         }
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
@@ -1183,6 +1198,7 @@ function Send-CopilotPromptUnlocked {
         [scriptblock]$CancelCheck,
         [int]$StallSec = 90,
         [int]$LostSec = 25,    # no part of the reply this long after sending: the request was lost (0 = off)
+        [scriptblock]$OnStatus,  # an agent's progress line, when it changes
         [string]$Agent = '',   # Researcher or Analyst: the message starts with a mention of that agent
         [string[]]$Files = @() # local files attached to the message (as with Copilot's + button)
     )
@@ -1222,6 +1238,7 @@ function Send-CopilotPromptUnlocked {
     $merger = New-ReplyMerger
     $frames = New-Object System.Collections.Generic.List[string]   # kept for diagnosis
     $reported = 0
+    $statusShown = ''
     # The page may run several requests over the same connection (titles, suggestions, ...).
     # The id of the request carrying our prompt is taken from the outgoing frames, and only its
     # completion ends the wait; completions of other requests are ignored.
@@ -1271,10 +1288,11 @@ function Send-CopilotPromptUnlocked {
                         References = @(); ProposedActions = @(); ActionClaims = @(); Source = 'page' }
                 }
                 if ($st.lastLen -ne $pageLastLen) { if ($pageLastLen -ge 0) { $lastActivity = Get-Date }; $pageLastLen = $st.lastLen; $pageDoneSince = $null; $pageQuietSince = $null }
+                if ($st.agentBusy) { $lastActivity = Get-Date; $pageDoneSince = $null; $pageQuietSince = $null }   # an agent at work is not stuck
                 # No Stop button and nothing changing: finished, even when the reply shows no Copy button.
                 if (-not $st.stop -and $st.lastFresh -and $st.lastLen -gt 0) { if (-not $pageQuietSince) { $pageQuietSince = Get-Date } } else { $pageQuietSince = $null }
                 $quietDone = $pageQuietSince -and ((Get-Date) - $pageQuietSince).TotalSeconds -ge 8
-                $finished = -not $st.stop -and $st.lastFresh -and ($st.lastHasCopy -or $st.copies -gt $pageBefore.copies -or $quietDone) -and $st.lastLen -gt 0 -and
+                $finished = -not $st.stop -and -not $st.agentBusy -and $st.lastFresh -and ($st.lastHasCopy -or $st.copies -gt $pageBefore.copies -or $quietDone) -and $st.lastLen -gt 0 -and
                     ($sawStop -or $sendWatch.Elapsed.TotalSeconds -ge 6)
                 # When StreamHub carried this reply and has been quiet for a moment, the page need not settle.
                 $stableNeeded = if ($stream.Items -and $stream.LastAt -and ((Get-Date) - $stream.LastAt).TotalMilliseconds -ge 300) { 0 } else { $pageStableSec }
@@ -1421,6 +1439,7 @@ function Send-CopilotPromptUnlocked {
                 return $reply
             }
         }
+        if ($OnStatus -and $merger.Progress -and $merger.Progress -ne $statusShown) { $statusShown = $merger.Progress; try { & $OnStatus $statusShown } catch { } }
         if ($OnProgress -and $merger.Text.Length -ne $reported) {
             $reported = $merger.Text.Length
             & $OnProgress $merger.Text
@@ -1465,6 +1484,9 @@ function Get-PageReplyState {
     lastLen: last ? (last.innerText || '').length : 0,
     lastHasCopy: !!last && [...((last.closest('[data-testid="copilot-message-div"]') || last.parentElement || last).querySelectorAll($copy))].some(vis),
     bar: [...document.querySelectorAll($bars)].filter(vis).map(e => (e.innerText || '').trim()).filter(Boolean).join(' | ').slice(0, 300),
+    // An agent (Researcher) at work: the message box asks for "additional instructions for the
+    // ongoing research report" instead of a new message.
+    agentBusy: [...document.querySelectorAll('[aria-placeholder], [placeholder], [class*=placeholder i]')].some(e => vis(e) && /ongoing/i.test(e.getAttribute('aria-placeholder') || e.getAttribute('placeholder') || e.innerText || '')),
     now: Date.now()
   };
   if ($withFlags && last) {
@@ -1676,4 +1698,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

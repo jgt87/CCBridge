@@ -23,7 +23,7 @@ function when(e: QueueEntry): string {
 }
 
 /** The queue: every task, whatever started it, with its status and result. */
-export function QueuePanel({ queue, onOpen, pausedUntil }: { queue: QueueEntry[]; onOpen: (path: string) => void; pausedUntil?: string | null }) {
+export function QueuePanel({ queue, onOpen, pausedUntil, onShowChange }: { queue: QueueEntry[]; onOpen: (path: string) => void; pausedUntil?: string | null; onShowChange?: (seq: number) => void }) {
   const paused = pausedUntil ? (
     <div className="flex items-start gap-2 rounded-lg border border-black/20 p-2 text-xs dark:border-white/20">
       <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -39,7 +39,7 @@ export function QueuePanel({ queue, onOpen, pausedUntil }: { queue: QueueEntry[]
     return (
       <div className="space-y-1.5">
         {paused}
-        <p className="text-muted-foreground text-sm">Tasks you send, fetches, runbooks, scheduled tasks and tasks from MCP clients appear here.</p>
+        <p className="text-muted-foreground text-sm">Tasks you send, runbooks, chains, scheduled tasks and tasks from MCP clients appear here.</p>
       </div>
     );
   const waiting = queue.some((e) => e.status === "queued" || e.status === "running" || e.status === "awaiting");
@@ -100,11 +100,21 @@ export function QueuePanel({ queue, onOpen, pausedUntil }: { queue: QueueEntry[]
                     <FileText className="h-3 w-3" /> {e.resultPath}
                   </button>
                 )}
-                {e.changed && e.changed.length > 0 && (
-                  <span className="px-1.5 py-0.5 text-muted-foreground text-xs" title={e.changed.join("\n")}>
-                    {e.changed.length} file(s) changed
-                  </span>
-                )}
+                {e.changed && e.changed.length > 0 &&
+                  (e.changeSeq && onShowChange ? (
+                    <button
+                      className="rounded-md px-1.5 py-0.5 text-muted-foreground text-xs hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+                      onClick={() => onShowChange(e.changeSeq!)}
+                      title={`Show this change set on the Changes tab:\n${e.changed.join("\n")}`}
+                      type="button"
+                    >
+                      {e.changed.length} file(s) changed
+                    </button>
+                  ) : (
+                    <span className="px-1.5 py-0.5 text-muted-foreground text-xs" title={e.changed.join("\n")}>
+                      {e.changed.length} file(s) changed
+                    </span>
+                  ))}
               </div>
             )}
           </div>

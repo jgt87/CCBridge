@@ -1,4 +1,4 @@
-import { ChevronRight, CloudDownload, ExternalLink, File, FileClock, Folder, FolderLock, FolderOpen, FolderTree, ListTodo, Lock, RefreshCw, RotateCcw, SquareCheck, Square } from "lucide-react";
+import { ChevronRight, ExternalLink, File, FileClock, Folder, FolderLock, FolderOpen, FolderTree, HeartPulse, ListTodo, Lock, Plus, RefreshCw, RotateCcw, SquareCheck, Square, Workflow } from "lucide-react";
 import type React from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import FileUpload from "@/components/kokonutui/file-upload";
@@ -6,12 +6,12 @@ import GradientButton from "@/components/kokonutui/gradient-button";
 import { api } from "@/lib/api";
 import { ChangePill } from "./change-pill";
 import SmoothTab from "@/components/kokonutui/smooth-tab";
-import type { ChainItem, FetchItem, FetchWeb, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
-import { FetchPanel } from "./fetch-panel";
-import { RunbooksPanel } from "./runbooks-panel";
+import type { ChainItem, ChangeSetView, FetchItem, FetchWeb, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
+
+import { RunbooksPanel, runbookRows } from "./runbooks-panel";
 import { ChainsPanel } from "./chains-panel";
 import { QueuePanel } from "./queue-panel";
-import { SchedulesSummary } from "./schedules-modal";
+import { SchedulesList } from "./schedules-panel";
 import { BetaTag } from "./beta-tag";
 import { IssuesPanel } from "./issues-panel";
 import { openSection, PanelSection, SectionButton, SectionCount } from "./panel-section";
@@ -390,7 +390,8 @@ function FilesPanel({
 function lastTab() {
   try {
     const t = localStorage.getItem("ccb.sideTab");
-    return t && ["files", "tasks", "changes", "fetch"].includes(t) ? t : "files";
+    if (t === "fetch") return "automation"; // the Fetch tab became part of Automation
+    return t && ["files", "tasks", "changes", "health", "automation"].includes(t) ? t : "files";
   } catch {
     return "files";
   }
@@ -407,6 +408,7 @@ export function SidePanel({
   fetchItems,
   onRunFetch,
   onSaveFetch,
+  onEditSchedule,
   onAttach,
   project,
   runbooks,
@@ -417,6 +419,7 @@ export function SidePanel({
   scripts = [],
   onCreateChain,
   onRunChain,
+  onChainSteps,
   queue,
   schedules,
   pausedUntil,
@@ -439,7 +442,7 @@ export function SidePanel({
   onSchedule: (target: ScheduleTarget | null) => void;
   files: FileInfo[];
   todos: TodoItem[];
-  changes: { seq: number; time: string; files: string[] }[];
+  changes: ChangeSetView[];
   onOpenFile: (path: string) => void;
   onUndo: () => void;
   onUploaded: () => void;
@@ -447,6 +450,8 @@ export function SidePanel({
   fetchItems: FetchItem[];
   onRunFetch: (name: string) => void;
   onSaveFetch: (name: string, prompt: string, web: FetchWeb) => Promise<void>;
+  /** Opens the schedules window on this schedule's form. */
+  onEditSchedule?: (s: ScheduleItem) => void;
   onAttach: (path: string) => void;
   project?: { name: string; path: string; location?: string[] } | null;
   runbooks: RunbookItem[];
@@ -458,6 +463,7 @@ export function SidePanel({
   scripts?: string[];
   onCreateChain?: (name: string) => Promise<void>;
   onRunChain?: (name: string) => void;
+  onChainSteps?: (name: string, op: "add" | "remove" | "up" | "down", opts?: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number }) => Promise<void>;
   queue: QueueEntry[];
 }) {
   // "N file(s) with issues" on the Files tab leads to Changes > Issues: the section is opened,
@@ -478,9 +484,17 @@ export function SidePanel({
     return () => window.clearInterval(t);
   }, [project, issueStamp, issuesBusy]);
   const showIssues = () => {
-    openSection("changes.issues");
+    openSection("health.issues");
+    setTabRequest((r) => ({ id: "health", n: (r?.n ?? 0) + 1 }));
+    window.setTimeout(() => document.getElementById("section-health.issues")?.scrollIntoView({ behavior: "smooth", block: "start" }), 450);
+  };
+  // From the Queue: the Changes tab, scrolled to that task's change set, which lights up briefly.
+  const [litChange, setLitChange] = useState<number | null>(null);
+  const showChange = (seq: number) => {
     setTabRequest((r) => ({ id: "changes", n: (r?.n ?? 0) + 1 }));
-    window.setTimeout(() => document.getElementById("section-changes.issues")?.scrollIntoView({ behavior: "smooth", block: "start" }), 450);
+    setLitChange(seq);
+    window.setTimeout(() => document.getElementById(`change-${seq}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 450);
+    window.setTimeout(() => setLitChange((x) => (x === seq ? null : x)), 2500);
   };
   const filesPanel = (
     <FilesPanel activity={activity} files={files} issueStamp={issueStamp} onShowIssues={showIssues} refreshing={filesRefreshing} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
@@ -511,17 +525,13 @@ export function SidePanel({
         id="tasks.queue"
         title="Queue"
       >
-        <QueuePanel onOpen={onOpenFile} pausedUntil={pausedUntil} queue={queue} />
-      </PanelSection>
-      <PanelSection id="tasks.scheduled" title="Scheduled">
-        <SchedulesSummary onOpen={() => onSchedule(null)} schedules={schedules} />
+        <QueuePanel onOpen={onOpenFile} onShowChange={showChange} pausedUntil={pausedUntil} queue={queue} />
       </PanelSection>
     </div>
   );
 
   const changesPanel = (
     <div>
-      <PanelSection badge={changes.length ? <SectionCount n={changes.length} /> : null} id="changes.sets" title="Change sets">
       <div className="flex flex-col gap-2">
       <GradientButton
         className="h-9 w-full"
@@ -531,28 +541,44 @@ export function SidePanel({
         variant="subtle"
       />
       {changes.length ? (
-        [...changes].reverse().map((c) => (
-          <div className="rounded-lg border border-black/10 p-2 dark:border-white/10" key={c.seq}>
-            <div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
-              <RotateCcw className="h-3 w-3" /> {c.time}
+        [...changes].reverse().map((c, i) => {
+          const counts = new Map((c.counts ?? []).map((x) => [x.path, x]));
+          return (
+            <div
+              className={cn("rounded-lg border p-2 transition-colors", litChange === c.seq ? "border-black/40 bg-black/5 dark:border-white/40 dark:bg-white/10" : "border-black/10 dark:border-white/10")}
+              id={`change-${c.seq}`}
+              key={c.seq}
+            >
+              <div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
+                <RotateCcw className="h-3 w-3 shrink-0" /> {c.time}
+                {i === 0 && <span className="ml-auto shrink-0">latest: Undo takes this back</span>}
+              </div>
+              {c.title && (
+                <div className="mb-1 line-clamp-2 text-sm" title={c.title}>
+                  {c.title}
+                </div>
+              )}
+              {c.files.map((f) => {
+                const n = counts.get(f);
+                return (
+                  <button className="flex w-full items-center gap-2 text-left font-mono text-xs hover:underline" key={f} onClick={() => onOpenFile(f)} type="button">
+                    <span className="min-w-0 flex-1 truncate">{f}</span>
+                    {n && (n.deleted ? <span className="shrink-0 font-sans text-muted-foreground">deleted</span> : <ChangePill added={n.added} removed={n.removed} />)}
+                  </button>
+                );
+              })}
             </div>
-            {c.files.map((f) => (
-              <button
-                className="block w-full truncate text-left font-mono text-xs hover:underline"
-                key={f}
-                onClick={() => onOpenFile(f)}
-                type="button"
-              >
-                {f}
-              </button>
-            ))}
-          </div>
-        ))
+          );
+        })
       ) : (
         <p className="text-muted-foreground text-sm">Files changed in this session are listed here. Each message is one undoable change set.</p>
       )}
       </div>
-      </PanelSection>
+    </div>
+  );
+
+  const healthPanel = (
+    <div>
       <PanelSection
         badge={
           <>
@@ -560,14 +586,14 @@ export function SidePanel({
             <BetaTag title="Beta: still being refined. The checks run without a language model and can miss problems or report ones that are not real; use Ignore for those." />
           </>
         }
-        id="changes.issues"
+        id="health.issues"
         title="Issues"
       >
         <IssuesPanel activity={activity} onOpen={onOpenFile} tick={issueStamp} />
       </PanelSection>
       <PanelSection
         badge={<BetaTag title="Beta: still being refined. Findings are checked against the files, but review them before fixing." />}
-        id="changes.review"
+        id="health.review"
         title="Code review"
       >
         <ReviewPanel onOpen={onOpenFile} tick={reviewTick} />
@@ -591,27 +617,42 @@ export function SidePanel({
         { id: "files", title: "Files", icon: FolderTree, color: "bg-zinc-700", content: filesPanel },
         { id: "tasks", title: "Tasks", icon: ListTodo, color: "bg-zinc-700", content: tasksPanel },
         { id: "changes", title: "Changes", icon: FileClock, color: "bg-zinc-700", content: changesPanel },
+        { id: "health", title: "Code health", icon: HeartPulse, color: "bg-zinc-700", content: healthPanel },
         {
-          id: "fetch",
-          title: "Fetch",
-          icon: CloudDownload,
+          id: "automation",
+          title: "Automation",
+          icon: Workflow,
           color: "bg-zinc-700",
           content: (
             <div>
-              <PanelSection badge={runbooks.length ? <SectionCount n={runbooks.length} /> : null} id="fetch.runbooks" title="Runbooks">
+              <PanelSection badge={schedules.length ? <SectionCount n={schedules.length} /> : null} id="automation.scheduled" title="Scheduled">
+                <div className="space-y-2">
+                  <button
+                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-black/10 px-2 py-1.5 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+                    onClick={() => onSchedule({ kind: "chat" })}
+                    type="button"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> New schedule
+                  </button>
+                  <SchedulesList onEdit={onEditSchedule} schedules={schedules} />
+                </div>
+              </PanelSection>
+              <PanelSection badge={runbooks.length + fetchItems.length ? <SectionCount n={runbooks.length + fetchItems.length} /> : null} id="automation.runbooks" title="Runbooks">
                 <RunbooksPanel
                   busy={busy}
                   onAttach={onAttach}
                   onCreate={onCreateRunbook}
+                  onCreateText={onSaveFetch}
                   onOpen={onOpenFile}
-                  onRun={onRunRunbook}
-                  onSchedule={(name) => onSchedule({ kind: "runbook", name })}
+                  onRun={(kind, name) => (kind === "text" ? onRunFetch(name) : onRunRunbook(name))}
+                  onSchedule={(kind, name) => onSchedule({ kind: kind === "text" ? "fetch" : "runbook", name })}
                   runbooks={runbooks}
                   templates={runbookTemplates}
+                  texts={fetchItems}
                 />
               </PanelSection>
               {onCreateChain && onRunChain && (
-                <PanelSection badge={chains.length ? <SectionCount n={chains.length} /> : null} id="fetch.chains" title="Chains">
+                <PanelSection badge={chains.length ? <SectionCount n={chains.length} /> : null} id="automation.chains" title="Chains">
                   <ChainsPanel
                     busy={busy}
                     chains={chains}
@@ -619,13 +660,12 @@ export function SidePanel({
                     onOpen={onOpenFile}
                     onRun={onRunChain}
                     onSchedule={(name) => onSchedule({ kind: "chain", name })}
+                    onSteps={onChainSteps}
+                    runbookNames={runbookRows(runbooks, fetchItems).map((r) => ({ name: r.name, title: r.kind === "text" ? `${r.title} (text)` : r.title }))}
                     scripts={scripts}
                   />
                 </PanelSection>
               )}
-              <PanelSection badge={fetchItems.length ? <SectionCount n={fetchItems.length} /> : null} id="fetch.prompts" title="Fetch prompts">
-                <FetchPanel busy={busy} items={fetchItems} onAttach={onAttach} onOpen={onOpenFile} onRun={onRunFetch} onSave={onSaveFetch} onSchedule={(name) => onSchedule({ kind: "fetch", name })} />
-              </PanelSection>
             </div>
           ),
         },

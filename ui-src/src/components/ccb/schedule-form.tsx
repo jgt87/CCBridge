@@ -21,7 +21,7 @@ const DAYS: { label: string; value: number }[] = [
 ];
 const WEEKDAYS = [1, 2, 3, 4, 5];
 
-/** What a schedule starts: a message, a saved fetch prompt or a runbook (Runbooks/*.runbook.md). */
+/** What a schedule starts: a message, a runbook (text answer: kind fetch; checked JSON: kind runbook) or a chain. */
 export interface ScheduleTarget {
   kind: "chat" | "fetch" | "runbook" | "chain";
   text?: string;
@@ -168,7 +168,7 @@ export function ScheduleForm({
             <option value={target}>Runbook: {target.slice(8)}</option>
           )}
           {runbooks.length > 0 && (
-            <optgroup label="Runbooks (Runbooks/*.runbook.md)">
+            <optgroup label="Runbooks with checked JSON">
               {runbooks.map((r) => (
                 <option key={r.name} value={`runbook:${r.name}`}>
                   {r.title}
@@ -186,7 +186,7 @@ export function ScheduleForm({
             </optgroup>
           )}
           {fetchItems.length > 0 && (
-            <optgroup label="Fetch prompts">
+            <optgroup label="Runbooks with a text answer">
               {fetchItems.map((f) => (
                 <option key={f.name} value={`fetch:${f.name}`}>
                   {f.name}
