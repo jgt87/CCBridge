@@ -440,6 +440,9 @@ export interface FetchItem {
   sources?: string;
   sites?: string;
   pages?: string;
+  /** Optional header: the agent that answers (researcher, analyst) and project files to attach. */
+  agent?: string;
+  files?: string;
 }
 
 /** The web fields of a fetch prompt when it is saved. */
@@ -447,6 +450,10 @@ export interface FetchWeb {
   sources: "" | "web" | "work" | "both";
   sites: string;
   pages: string;
+  /** Ask one of Copilot's agents instead of Copilot itself. */
+  agent?: "" | "researcher" | "analyst";
+  /** Project files to attach (comma separated). */
+  files?: string;
 }
 
 export interface FileInfo {

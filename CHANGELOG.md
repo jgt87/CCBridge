@@ -6,6 +6,14 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.62] - 2026-10-04
+
+### Added
+
+- Files for Researcher and Analyst: `@` and a project file in a message to an agent (for example `@Source/sales.csv`) attaches that file the way Copilot's own + button does; at most 10 files of up to 50 MB, never StreamHub's own records.
+- Charts in an agent's answer (Analyst draws them in the page) are saved as PNG files in `Runbooks/Exports/`, on a white background, with an *Open* link in the chat. The file viewer now shows images.
+- Agents in runbooks, fetch prompts and chains: header lines `agent: researcher` or `agent: analyst` and `files: PATH, PATH`; the *New fetch prompt* form has *Ask* and *Files* fields. A runbook runs unattended, so a research plan from Researcher is answered with "go ahead with your plan and your own assumptions" (the runbook's instructions are the answer). Copilot's runbook instructions describe the new lines.
+
 ## [v0.1.61] - 2026-10-04
 
 ### Added
@@ -715,7 +723,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.61...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.62...HEAD
+[v0.1.62]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.62
 [v0.1.61]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.61
 [v0.1.60]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.60
 [v0.1.59]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.59

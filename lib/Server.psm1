@@ -373,7 +373,10 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/fetch$' {
             if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
             $b = Read-JsonBody $Ctx
-            $item = Save-FetchPrompt $State.ProjectRoot ([string]$b.name) ([string]$b.prompt) -Sources ([string]$b.sources) -Sites ([string]$b.sites) -Pages ([string]$b.pages)
+            $more = @{}   # agent and files only when the form sends them (else the file's own lines stay)
+            if ($null -ne $b.agent) { $more.Agent = [string]$b.agent }
+            if ($null -ne $b.files) { $more.Files = [string]$b.files }
+            $item = Save-FetchPrompt $State.ProjectRoot ([string]$b.name) ([string]$b.prompt) -Sources ([string]$b.sources) -Sites ([string]$b.sites) -Pages ([string]$b.pages) @more
             Write-CCBLog info server "Fetch prompt saved: $($item.name)" @{ chars = $item.prompt.Length }
             return Send-Json $Ctx @{ ok = $true; item = $item }
         }

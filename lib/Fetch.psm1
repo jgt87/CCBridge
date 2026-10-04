@@ -41,7 +41,7 @@ function Split-FetchPrompt {
     $meta = @{}
     $m = [regex]::Match($t, '^\s*---\s*\n(.*?)\n---\s*(\n|$)', 'Singleline')
     if ($m.Success) {
-        foreach ($l in $m.Groups[1].Value.Split("`n")) { if ($l -match '^\s*(sources|sites|pages)\s*:\s*(.*)$') { $meta[$Matches[1].ToLowerInvariant()] = $Matches[2].Trim() } }
+        foreach ($l in $m.Groups[1].Value.Split("`n")) { if ($l -match '^\s*(sources|sites|pages|agent|files)\s*:\s*(.*)$') { $meta[$Matches[1].ToLowerInvariant()] = $Matches[2].Trim() } }
         $t = $t.Substring($m.Length)
     }
     @{ meta = $meta; body = $t.Trim() }
@@ -63,6 +63,8 @@ function Get-FetchPrompts {
             sources = "$($sp.meta['sources'])"
             sites = "$($sp.meta['sites'])"
             pages = "$($sp.meta['pages'])"
+            agent = "$($sp.meta['agent'])"
+            files = "$($sp.meta['files'])"
             promptPath = "$($script:FetchDir)/$name.prompt.md"
             output = "$($script:AnswerDir)/$name.md"
             fetchedAt = $(if ($at) { $at.ToString('s') } else { $null })
@@ -74,12 +76,20 @@ function Get-FetchPrompts {
 function Save-FetchPrompt {
     <# Creates or replaces Runbooks/<name>.prompt.md. Returns the saved prompt. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][AllowEmptyString()][string]$Prompt,
-        [string]$Sources = '', [string]$Sites = '', [string]$Pages = '')
+        [string]$Sources = '', [string]$Sites = '', [string]$Pages = '', [string]$Agent = '', [string]$Files = '')
     if (-not $Prompt.Trim()) { throw 'The fetch prompt is empty.' }
     if ($Sources -and $Sources -notin 'web', 'work', 'both') { throw "Sources must be web, work or both." }
-    $head = @(); if ($Sources) { $head += "sources: $Sources" }; if ($Sites.Trim()) { $head += "sites: $($Sites.Trim())" }; if ($Pages.Trim()) { $head += "pages: $($Pages.Trim())" }
-    if ($head.Count) { $Prompt = "---`n$($head -join "`n")`n---`n" + (Split-FetchPrompt $Prompt).body }
+    if ($Agent -and $Agent -notin 'researcher', 'analyst') { throw "Agent must be researcher or analyst." }
     $slug = ConvertTo-FetchName $Name
+    # Not given (an older form): the file's own agent and files lines stay.
+    if (-not $PSBoundParameters.ContainsKey('Agent') -or -not $PSBoundParameters.ContainsKey('Files')) {
+        $old = Get-FetchPrompts $ProjectRoot | Where-Object name -eq $slug | Select-Object -First 1
+        if (-not $PSBoundParameters.ContainsKey('Agent')) { $Agent = "$($old.agent)" }
+        if (-not $PSBoundParameters.ContainsKey('Files')) { $Files = "$($old.files)" }
+    }
+    $head = @(); if ($Sources) { $head += "sources: $Sources" }; if ($Sites.Trim()) { $head += "sites: $($Sites.Trim())" }; if ($Pages.Trim()) { $head += "pages: $($Pages.Trim())" }
+    if ($Agent) { $head += "agent: $Agent" }; if ("$Files".Trim()) { $head += "files: $("$Files".Trim())" }
+    if ($head.Count) { $Prompt = "---`n$($head -join "`n")`n---`n" + (Split-FetchPrompt $Prompt).body }
     $full = Assert-Writable $ProjectRoot "$($script:FetchDir)/$slug.prompt.md"
     $dir = Split-Path $full
     if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -ItemType Directory -Path $dir }

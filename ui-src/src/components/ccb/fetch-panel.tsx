@@ -17,8 +17,8 @@ export function fetchedAge(iso: string | null, now = Date.now()): string {
 const field =
   "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-xs outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
 
-/** "web only Â· nodejs.org Â· 1 page": the web fields of a saved prompt, or "" when it has none. */
-export function webSummary(it: Pick<FetchItem, "sources" | "sites" | "pages">): string {
+/** "web only · nodejs.org · 1 page · Analyst · 2 files": the web fields of a saved prompt, or "" when it has none. */
+export function webSummary(it: Pick<FetchItem, "sources" | "sites" | "pages" | "agent" | "files">): string {
   const parts: string[] = [];
   if (it.sources === "web") parts.push("web only");
   else if (it.sources === "work") parts.push("work data only");
@@ -26,6 +26,10 @@ export function webSummary(it: Pick<FetchItem, "sources" | "sites" | "pages">): 
   if (it.sites?.trim()) parts.push(it.sites.trim());
   const n = (it.pages ?? "").split(/[\s,;]+/).filter((p) => /^https?:\/\//i.test(p)).length;
   if (n) parts.push(n === 1 ? "1 page" : `${n} pages`);
+  const a = (it.agent ?? "").trim().toLowerCase();
+  if (a === "researcher" || a === "analyst") parts.push(a === "researcher" ? "Researcher" : "Analyst");
+  const f = (it.files ?? "").split(",").filter((x) => x.trim()).length;
+  if (f) parts.push(f === 1 ? "1 file" : `${f} files`);
   return parts.join(" \u00b7 ");
 }
 
@@ -56,6 +60,8 @@ export function FetchPanel({
   const [sources, setSources] = useState<FetchWeb["sources"]>("");
   const [sites, setSites] = useState("");
   const [pages, setPages] = useState("");
+  const [agent, setAgent] = useState<NonNullable<FetchWeb["agent"]>>("");
+  const [files, setFiles] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -63,12 +69,14 @@ export function FetchPanel({
     setSaving(true);
     setError("");
     try {
-      await onSave(name, prompt, { sources, sites, pages });
+      await onSave(name, prompt, { sources, sites, pages, agent, files });
       setName("");
       setPrompt("");
       setSources("");
       setSites("");
       setPages("");
+      setAgent("");
+      setFiles("");
       setAdding(false);
     } catch (e) {
       setError((e as Error).message);
@@ -109,6 +117,14 @@ export function FetchPanel({
             <input aria-label="Only these websites" className={field} onChange={(e) => setSites(e.target.value)} placeholder="Optional: only these websites, e.g. nodejs.org, python.org" value={sites} />
             <span className="text-muted-foreground">Pages</span>
             <input aria-label="Pages to read" className={field} onChange={(e) => setPages(e.target.value)} placeholder="Optional: pages to read exactly, e.g. https://nodejs.org/en/about/previous-releases" value={pages} />
+            <span className="text-muted-foreground">Ask</span>
+            <select aria-label="Who answers" className={field} onChange={(e) => setAgent(e.target.value as NonNullable<FetchWeb["agent"]>)} title="Researcher or Analyst answer instead of Copilot itself; they take several minutes" value={agent}>
+              <option value="">Copilot</option>
+              <option value="researcher">Researcher</option>
+              <option value="analyst">Analyst</option>
+            </select>
+            <span className="text-muted-foreground">Files</span>
+            <input aria-label="Files to attach" className={field} onChange={(e) => setFiles(e.target.value)} placeholder="Optional: project files to attach, e.g. Source/sales.csv" value={files} />
           </div>
           {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
           <div className="flex justify-end gap-1">

@@ -16,6 +16,9 @@ HOW TO FILL IN THIS RUNBOOK
   sources             optional: web, work or both (which data Copilot may use)
   sites               optional: the only websites Copilot may use, comma separated
   pages               optional: web addresses the helper program reads itself and adds as data
+  agent               optional: researcher or analyst (one of Copilot's agents answers; it takes minutes;
+                      a research plan is answered with "go ahead": these instructions are the answer)
+  files               optional: project files to attach, comma separated (for example Source/sales.csv)
   Any other line (for example "topic: Project Apollo") becomes a placeholder {{topic}}.
 - Placeholders filled in when the runbook runs: {{today}}, {{now}}, {{weekStart}}, {{weekEnd}},
   {{monthStart}}, {{monthEnd}}, {{today-7d}}, {{today+14d}} (any number of days), {{timezone}}.

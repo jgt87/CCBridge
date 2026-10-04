@@ -282,7 +282,7 @@ function Reset-Bridge($State) {
 }
 
 function Send-ToCopilot {
-    param($State, [string]$Message, [string]$Agent = '', [switch]$Long)   # -Agent mentions Researcher/Analyst; -Long: agent runs take minutes
+    param($State, [string]$Message, [string]$Agent = '', [switch]$Long, [string[]]$Files = @())   # -Agent mentions Researcher/Analyst; -Long: agent runs take minutes; -Files are attached
     $bridge = Get-Bridge $State
     if ($State.ResponseMode -in 'auto', 'quick', 'deep') {
         try { $State.ResponseModeActual = Set-CopilotResponseMode $bridge $State.ResponseMode } catch { Write-CCBLogError agent 'Response mode' $_ }
@@ -307,7 +307,7 @@ function Send-ToCopilot {
         }
         $r = $null
         try {
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files
         } catch {
             if (-not (Test-ConnectionLost $_) -or $State.ChatStarted) { throw }
             # First message of a chat: reconnect, start a fresh chat and send it once more.
@@ -316,7 +316,7 @@ function Send-ToCopilot {
             Reset-Bridge $State
             Start-NewChat $State
             $bridge = Get-Bridge $State
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files
         }
     } catch {
         if (Test-ConnectionLost $_) {
@@ -1001,13 +1001,14 @@ function Invoke-RunbookJob {
         Write-CCBLog info agent "Runbook $Name" @{ chars = $body.Length; output = $item.output }
         Start-NewChat $State   # a runbook never mixes with the conversation
         $spec = Get-WebSourceSpec $rb.meta
+        $agentSpec = Get-AgentSpec $rb.meta   # agent: researcher / analyst, files: to attach
         $web = Get-WebSourcePrompt $State $spec
         $inp = New-ChainInputBlock $State.ProjectRoot $Inputs ([int]$State.Config.resultCharBudget)
         foreach ($n in @($inp.notes)) { Add-AgentEvent $State 'status' @{ text = "Runbook '$($item.title)': $n." } }
         $message = New-PromptMessage -AppRoot $State.AppRoot -Kind 'runbook' -Text "$body$(if ($web.text) { "`n`n$($web.text)" })$(if ($inp.text) { "`n`n$($inp.text)" })" -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
         $check = $null
         for ($attempt = 1; $attempt -le 2; $attempt++) {
-            $r = Send-WithSources $State $spec $message
+            $r = if ($attempt -eq 1) { Send-AgentJobMessage $State $spec $message $agentSpec } else { Send-WithSources $State $spec $message -Long:([bool]$agentSpec.agent) }
             if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "Runbook '$($item.title)' stopped; $($item.output) was left unchanged." }; return }
             if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
                 Add-AgentEvent $State 'error' @{ text = "Runbook '$($item.title)' got no usable answer ($($r.Result): $($r.ResultMessage)); $($item.output) was left unchanged." }
@@ -1027,6 +1028,7 @@ function Invoke-RunbookJob {
             return
         }
         $saved = Save-RunbookOutput $State.ProjectRoot $Name $item.output $json
+        if ($agentSpec.agent) { $null = Save-AgentCharts $State "$Name-chart" }
         $note = if ($check.truncated) { ' Copilot marked it as truncated: not every item fitted. Narrow the period or the sources.' } else { '' }
         $siteNotes = @(@($web.notes) + @(Get-SourceSiteNotes $spec $r.References))
         if ($siteNotes.Count) { $note += ' Note: ' + ($siteNotes -join '; ') + '.' }
@@ -1163,6 +1165,95 @@ function Invoke-ChainScript {
     @{ ok = $ok; why = $status }
 }
 
+$script:AgentGoAhead = 'Proceed with your plan. Where the instructions above do not decide something, use your best assumptions and list them at the start. Then give the result in exactly the form the instructions ask for.'
+$script:AgentFileMaxBytes = 50MB
+
+function Resolve-AgentFiles {
+    <# Project files to attach to an agent message: full paths, checked (inside the project, not in
+       .streamhub/, existing, at most 50 MB each, at most 10). Throws with what is wrong. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths)
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($p in @($Paths | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().Trim('`', '"', "'").Replace('\', '/') } | Select-Object -Unique)) {
+        if ($p -match '(?i)^\.streamhub(/|$)') { throw "$p is one of StreamHub's own records; attach a project file instead." }
+        $full = Resolve-ProjectPath $ProjectRoot $p
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "There is no file $p in the project." }
+        if ((Get-Item -LiteralPath $full).Length -gt $script:AgentFileMaxBytes) { throw "$p is larger than 50 MB; Copilot does not take files that large." }
+        $out.Add($full)
+    }
+    if ($out.Count -gt 10) { throw 'At most 10 files can be attached to one message.' }
+    $out.ToArray()
+}
+
+function Get-AgentAttachments {
+    <# @path references in a message to an agent that name project files: those files are attached
+       (uploaded as with Copilot's + button), and in the text each becomes the file name, because
+       typing @ in Copilot's message box opens its @ list. Returns @{ text; files (full); names }. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+    $files = New-Object System.Collections.Generic.List[string]; $names = New-Object System.Collections.Generic.List[string]
+    $new = [regex]::Replace($Text, '(?<![\w@])@([^\s,;()<>"''`]+[^\s,;()<>"''`.:!?])', {
+        param($m)
+        $rel = $m.Groups[1].Value.Replace('\', '/')
+        if ($rel -match '(?i)^\.streamhub(/|$)') { return $m.Value }
+        $full = try { Resolve-ProjectPath $ProjectRoot $rel } catch { $null }
+        if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { return $m.Value }
+        if (-not $files.Contains($full)) { $files.Add($full); $names.Add($rel) }
+        '`' + [IO.Path]::GetFileName($full) + '` (attached)'
+    })
+    [pscustomobject]@{ text = $new; files = $files.ToArray(); names = $names.ToArray() }
+}
+
+function Get-AgentSpec($Meta) {
+    <# The agent fields of a runbook or fetch prompt header: agent (researcher / analyst) and files
+       (project files to attach, comma separated). #>
+    $get = { param($k) if ($null -eq $Meta) { '' } elseif ($Meta -is [System.Collections.IDictionary]) { "$($Meta[$k])" } else { "$($Meta.$k)" } }
+    $a = (& $get 'agent').Trim().ToLowerInvariant()
+    [pscustomobject]@{
+        agent = $(if ($a -in 'researcher', 'analyst') { Get-AgentDisplayName $a } else { '' })
+        files = @((& $get 'files') -split '\s*,\s*' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+}
+
+function Save-AgentCharts {
+    <# Saves the charts in Copilot's last reply (Analyst draws them on a canvas) as PNG files in
+       Runbooks/Exports/ and says so in the chat with an Open link. Returns the project paths. #>
+    param($State, [string]$Prefix = 'analyst-chart')
+    $saved = New-Object System.Collections.Generic.List[string]
+    try {
+        $charts = @(Get-CopilotCharts (Get-Bridge $State))
+        $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+        $n = 0
+        foreach ($bytes in $charts) {
+            $n++
+            $rel = Get-LayoutPath Exports "$Prefix-$stamp$(if ($charts.Count -gt 1) { "-$n" }).png"
+            $full = Resolve-ProjectPath $State.ProjectRoot $rel
+            $null = New-Item -ItemType Directory -Force -Path (Split-Path $full)
+            [IO.File]::WriteAllBytes($full, [byte[]]$bytes)
+            $saved.Add($rel)
+            Add-AgentEvent $State 'status' @{ text = "Chart saved: $rel"; path = $rel }
+        }
+    } catch { Write-CCBLogError agent 'saving charts' $_ }
+    $saved.ToArray()
+}
+
+function Send-AgentJobMessage {
+    <# The first message of a runbook or fetch prompt, to its agent when the header names one (with
+       its files attached). Researcher may answer with a plan first: a runbook runs unattended and
+       its instructions are the answer, so the fixed go-ahead is sent (at most twice). #>
+    param($State, $Spec, [string]$Message, $AgentSpec)
+    if (-not $AgentSpec -or -not $AgentSpec.agent) { return (Send-WithSources $State $Spec $Message) }
+    $files = @(Resolve-AgentFiles $State.ProjectRoot $AgentSpec.files)
+    Add-AgentEvent $State 'status' @{ text = "Asking $($AgentSpec.agent)$(if ($files.Count) { " with $($files.Count) attached file(s)" }) (this can take several minutes)..." }
+    $r = Send-WithSources $State $Spec $Message -Agent $AgentSpec.agent -Files $files
+    for ($i = 0; $i -lt 2 -and $r -and $r.IsPlan -and -not $r.Cancelled; $i++) {
+        Add-AgentEvent $State 'status' @{ text = "$($AgentSpec.agent) made a research plan; the instructions are its answer, so it goes ahead." }
+        $r = Send-WithSources $State $Spec $script:AgentGoAhead -Long
+    }
+    if ($r -and $r.Agent -ne $AgentSpec.agent -and -not ($r.PSObject.Properties['Source'] -and $r.Source -eq 'page') -and -not $r.Cancelled) {
+        Add-AgentEvent $State 'status' @{ text = "This answer came from $(if ($r.Agent) { $r.Agent } else { 'Copilot itself' }), not from $($AgentSpec.agent)." }
+    }
+    $r
+}
+
 function Invoke-AgentRun {
     <# Sends a message to one of Copilot's agents (Researcher, Analyst) by mentioning it, as typed:
        no coding instructions or project context. A new run starts a fresh Copilot chat; -FollowUp
@@ -1179,7 +1270,11 @@ function Invoke-AgentRun {
         $State.AgentChat = $name
         Add-AgentEvent $State 'status' @{ text = $(if ($FollowUp) { "Sending your answer to $name; it works on it now (this can take several minutes)." } else { "Asking $name (this can take several minutes)..." }) }
         Write-CCBLog info agent "Agent run: $name" @{ chars = $Text.Length; followUp = [bool]$FollowUp }
-        $r = Send-ToCopilot $State $Text -Agent $(if ($FollowUp) { '' } else { $name }) -Long
+        # @path references to project files are attached (uploaded) to the message.
+        $att = Get-AgentAttachments $State.ProjectRoot $Text
+        $files = @(Resolve-AgentFiles $State.ProjectRoot $att.names)
+        if ($files.Count) { Add-AgentEvent $State 'status' @{ text = "Attaching $($att.names -join ', ') (Copilot keeps a copy in your OneDrive, as with its own + button)." } }
+        $r = Send-ToCopilot $State $att.text -Agent $(if ($FollowUp) { '' } else { $name }) -Long -Files $files
         if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "$name stopped." }; $State.AgentChat = $null; $State.NeedNewChat = $true; return }
         if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
             Add-AgentEvent $State 'error' @{ text = "$name gave no usable answer ($($r.Result): $($r.ResultMessage))."; code = 'AGENT' }
@@ -1201,6 +1296,7 @@ function Invoke-AgentRun {
         foreach ($claim in @($r.ActionClaims)) {
             Add-AgentEvent $State 'human-required' @{ text = "$name's reply says: ""$claim"" StreamHub did not confirm any Microsoft 365 action. Check Outlook / Teams if this is unexpected." }
         }
+        if (-not $r.IsPlan) { $null = Save-AgentCharts $State "$($name.ToLowerInvariant())-chart" }   # Analyst draws charts on the page
         if ($r.IsPlan) {
             # Researcher waits for the person: the plan card asks for answers (or "go ahead").
             Add-AgentEvent $State 'agent-plan' @{ agent = $name }
@@ -1225,12 +1321,13 @@ function Get-WebSourcePrompt($State, $Spec) {
     New-WebSourceBlock $Spec -PageChars $per
 }
 
-function Send-WithSources($State, $Spec, [string]$Message) {
+function Send-WithSources($State, $Spec, [string]$Message, [string]$Agent = '', [string[]]$Files = @(), [switch]$Long) {
     # Sends with the Work/Web switch set for the header's sources (web: off, work or both: on),
     # only when StreamHub manages the switch (workIq on or off); it is set back afterwards.
+    # -Agent mentions Researcher/Analyst (with -Files attached); -Long for follow-ups to an agent.
     $old = $State.WorkIq
     if ($Spec.sources -and $old -in 'on', 'off') { $State.WorkIq = $(if ($Spec.sources -eq 'web') { 'off' } else { 'on' }) }
-    try { Send-ToCopilot $State $Message } finally { $State.WorkIq = $old }
+    try { Send-ToCopilot $State $Message -Agent $Agent -Files $Files -Long:([bool]($Agent -or $Long)) } finally { $State.WorkIq = $old }
 }
 
 function Get-SourceSiteNotes($Spec, $References) {
@@ -1256,12 +1353,13 @@ function Invoke-FetchJob {
         Write-CCBLog info agent "Fetch $Name" @{ promptChars = $item.prompt.Length }
         Start-NewChat $State   # a fetch never mixes with the conversation
         $spec = Get-WebSourceSpec $item
+        $agentSpec = Get-AgentSpec $item   # agent: researcher / analyst, files: to attach
         $tk = Get-TaskKind $item.prompt
         $kind = if ($spec.sources -eq 'web') { 'fetch' } elseif ($spec.sources -in 'work', 'both') { 'fetch-m365' } elseif ($tk -eq 'assistant' -or $tk -eq 'mixed') { 'fetch-m365' } else { 'fetch' }
         $web = Get-WebSourcePrompt $State $spec
         $sent = New-Object 'System.Collections.Generic.HashSet[string]'
         $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text "$($item.prompt)$(if ($web.text) { "`n`n$($web.text)" })" -Sent $sent
-        $r = Send-WithSources $State $spec $message
+        $r = Send-AgentJobMessage $State $spec $message $agentSpec
         if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "Fetch '$Name' stopped; $($item.output) was left unchanged." }; return }
         if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
             Add-AgentEvent $State 'error' @{ text = "Fetch '$Name' got no usable answer ($($r.Result): $($r.ResultMessage)); $($item.output) was left unchanged." }
@@ -1270,6 +1368,7 @@ function Invoke-FetchJob {
         $notes = @($web.notes) + @(Get-SourceSiteNotes $spec $r.References)
         $content = Format-FetchResult -Name $Name -Reply $r.Text -References @($r.References) -Notes $notes
         $path = Save-FetchResult $State.ProjectRoot $Name $content
+        if ($agentSpec.agent) { $null = Save-AgentCharts $State "$Name-chart" }
         Add-AgentEvent $State 'fetch' @{ name = $Name; path = $path; text = "Saved the answer to $path. Attach it with @$path." }
     } catch {
         Write-CCBLogError agent "Fetch $Name failed" $_
@@ -2522,4 +2621,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

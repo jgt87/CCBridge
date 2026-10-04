@@ -323,7 +323,9 @@ export default function App() {
   const openFile = async (path: string) => {
     setDrawerOpen(false);
     try {
-      setViewer(await api.file(path));
+      // Images are shown from the project's read-only preview address, not read as text.
+      if (/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(path)) setViewer({ path, text: "" });
+      else setViewer(await api.file(path));
     } catch (e) {
       setError((e as Error).message);
     }

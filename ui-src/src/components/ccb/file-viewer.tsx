@@ -7,6 +7,7 @@ import { MarkdownView } from "./markdown-view";
 import { ModalBackdrop } from "./modal-backdrop";
 
 const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
+const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(path);
 
 /** A project file in a modal: Markdown rendered (with a Source view), code with colors and line numbers. */
 export function FileViewer({
@@ -47,13 +48,17 @@ export function FileViewer({
               </button>
             </div>
           )}
-          <CopyButton text={file.text} />
+          {!isImage(file.path) && <CopyButton text={file.text} />}
           <button className="rounded p-1 hover:bg-black/5 dark:hover:bg-white/10" onClick={onClose} title="Close (Esc)" type="button">
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
-          {md && !source ? (
+          {isImage(file.path) && previewBase ? (
+            <div className="flex justify-center p-4">
+              <img alt={file.path} className="max-h-[75vh] max-w-full" src={previewBase + file.path.split("/").map(encodeURIComponent).join("/")} />
+            </div>
+          ) : md && !source ? (
             <MarkdownView className="px-6 py-4" onOpenFile={onOpenFile} path={file.path} previewBase={previewBase} text={file.text} />
           ) : (
             <CodeView language={md ? "markdown" : languageForPath(file.path)} text={file.text} />

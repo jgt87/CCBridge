@@ -38,6 +38,7 @@ Describe 'Invoke-AgentRun (Copilot mocked)' {
     $p = Join-Path $env:TEMP ('ccb-agent-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
     $config = Get-CCBridgeConfig harness $root
     Mock -ModuleName Agent Start-NewChat { $global:ccbNewChats++ }
+    Mock -ModuleName Agent Save-AgentCharts { @() }   # needs the Copilot page
     Mock -ModuleName Agent Send-ToCopilot {
         param($State, [string]$Message, [string]$Agent, [switch]$Long)
         $global:ccbSent += , @{ text = $Message; agent = $Agent; long = [bool]$Long }

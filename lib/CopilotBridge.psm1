@@ -519,6 +519,74 @@ function Add-CopilotMention {
     Write-CCBLog info bridge "Mentioned $Name in the message box"
 }
 
+function Add-CopilotAttachment {
+    <# Attaches a local file to the message as a person does with the + button: hands it to the
+       page's file input (DOM.setFileInputFiles) and waits until its name shows and nothing is
+       uploading any more (Copilot ignores Send while a file uploads). Throws when the page has no
+       input for this kind of file or the upload does not finish. #>
+    param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)][string]$Path, [int]$TimeoutSec = 120)
+    $s = $Bridge.Session
+    $ext = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+    $doc = Invoke-Cdp $s 'DOM.getDocument' @{ depth = -1; pierce = $true }
+    $ids = @((Invoke-Cdp $s 'DOM.querySelectorAll' @{ nodeId = $doc.root.nodeId; selector = 'input[type=file]' }).nodeIds)
+    $target = $null
+    foreach ($id in $ids) {
+        $a = @((Invoke-Cdp $s 'DOM.getAttributes' @{ nodeId = $id }).attributes)
+        $acc = ''; for ($i = 0; $i + 1 -lt $a.Count; $i += 2) { if ($a[$i] -eq 'accept') { $acc = $a[$i + 1] } }
+        if (-not $acc -or $acc -match '\*' -or @($acc.Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() }) -contains $ext) { $target = $id; break }
+    }
+    if ($null -eq $target) { throw "Copilot does not accept $ext files as attachments here." }
+    $null = Invoke-Cdp $s 'DOM.setFileInputFiles' @{ nodeId = $target; files = @($Path) }
+    $stem = [IO.Path]::GetFileNameWithoutExtension($Path)
+    $stemJs = ConvertTo-JsString $stem.Substring(0, [Math]::Min(10, $stem.Length))
+    $editorSel = ConvertTo-JsString $Bridge.Selectors.editor
+    $js = @"
+(() => {
+  const named = [...document.querySelectorAll('body *')].some(e => e.children.length === 0 && (e.innerText || '').includes($stemJs));
+  const ed = document.querySelector($editorSel);
+  const area = ed ? (ed.closest('form, [role=group], footer') || ed.parentElement) : null;
+  const busy = !!document.querySelector('[role=progressbar], [aria-busy=true]') || /uploading/i.test(area ? (area.innerText || '') : '');
+  return named ? (busy ? 'uploading' : 'ready') : '';
+})()
+"@
+    $until = (Get-Date).AddSeconds($TimeoutSec)
+    $state = ''
+    while ((Get-Date) -lt $until) {
+        Start-Sleep -Milliseconds 500
+        $state = Invoke-CdpEval $s $js
+        if ($state -eq 'ready') { Start-Sleep -Milliseconds 1500; Write-CCBLog info bridge "Attached $([IO.Path]::GetFileName($Path))"; return }
+    }
+    throw "The attachment $([IO.Path]::GetFileName($Path)) did not finish uploading within $TimeoutSec s ($(if ($state) { $state } else { 'not shown' }))."
+}
+
+function Get-CopilotCharts {
+    <# The charts in Copilot's last reply (Analyst draws them on a canvas), as PNG bytes. #>
+    param([Parameter(Mandatory)]$Bridge, [int]$WaitSec = 6)
+    $js = @'
+(() => {
+  const reply = [...document.querySelectorAll('[data-testid="lastChatMessage"]')].pop();
+  if (!reply) return '[]';
+  const out = [];
+  for (const c of reply.querySelectorAll('canvas')) {
+    if (c.width < 80 || c.height < 60) continue;
+    // On a white background: the page draws charts on a transparent canvas.
+    try { const w = document.createElement('canvas'); w.width = c.width; w.height = c.height; const g = w.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, w.width, w.height); g.drawImage(c, 0, 0); out.push(w.toDataURL('image/png')); } catch (e) { }
+  }
+  return JSON.stringify(out);
+})()
+'@
+    $until = (Get-Date).AddSeconds($WaitSec)
+    do {
+        $list = @((Invoke-CdpEval $Bridge.Session $js) | ConvertFrom-Json)
+        if ($list.Count) { break }
+        Start-Sleep -Milliseconds 700
+    } while ((Get-Date) -lt $until)
+    foreach ($d in $list) {
+        $b64 = "$d" -replace '^data:image/png;base64,', ''
+        if ($b64) { , [Convert]::FromBase64String($b64) }
+    }
+}
+
 function Set-CopilotInput {
     <# Replaces the message box contents with $Text. The box is a Lexical editor, which ignores
        execCommand, so it is cleared with real key presses and the result is verified. #>
@@ -1087,17 +1155,18 @@ function Send-CopilotPrompt {
         [scriptblock]$OnProgress,
         [scriptblock]$CancelCheck,   # returns $true to stop now: Copilot's Stop is pressed and Cancelled = $true is returned
         [int]$StallSec = 90,         # no data from Copilot this long: it hangs; press Stop and report NoAnswer
-        [string]$Agent = ''          # Researcher or Analyst: mentioned at the start of the message
+        [string]$Agent = '',         # Researcher or Analyst: mentioned at the start of the message
+        [string[]]$Files = @()       # local files to attach
     )
     Use-CopilotLock {
-        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent
+        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
         if ($r.Result -eq 'Lost') {
             # The request never reached Copilot's answer stream (seen when the page opens that
             # connection only at the first send). The connection exists now: send it once more.
             Write-CCBLog info bridge 'No part of the reply arrived; sending the prompt again'
             Add-TimelineEvent $Bridge 'resent' $null
-            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -LostSec 0
+            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -LostSec 0
             if ($r.Result -eq 'Lost') { $r.Result = 'NoAnswer' }
         }
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
@@ -1114,7 +1183,8 @@ function Send-CopilotPromptUnlocked {
         [scriptblock]$CancelCheck,
         [int]$StallSec = 90,
         [int]$LostSec = 25,    # no part of the reply this long after sending: the request was lost (0 = off)
-        [string]$Agent = ''    # Researcher or Analyst: the message starts with a mention of that agent
+        [string]$Agent = '',   # Researcher or Analyst: the message starts with a mention of that agent
+        [string[]]$Files = @() # local files attached to the message (as with Copilot's + button)
     )
     $s = $Bridge.Session
     $replyRecords = 0      # records that belong to a reply (not handshakes or keep-alive pings)
@@ -1131,7 +1201,9 @@ function Send-CopilotPromptUnlocked {
         if ($left -gt 0) { Write-CCBLog verbose bridge "Pause $([Math]::Round($left, 1)) s (gap after the previous reply)"; $until = (Get-Date).AddSeconds($left); while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $s 200 } }
     }
     Add-TimelineEvent $Bridge 'typing' $null
-    if ($Agent) { Add-CopilotMention $Bridge $Agent; Set-CopilotInput $Bridge $Text -Append }
+    if ($Agent) { Add-CopilotMention $Bridge $Agent }
+    foreach ($f in @($Files | Where-Object { $_ })) { Add-CopilotAttachment $Bridge $f }
+    if ($Agent) { Set-CopilotInput $Bridge $Text -Append }
     else { Set-CopilotInput $Bridge $Text }
     Wait-Pacing $Bridge 'beforeSendSec' 'prompt typed, before Send'
     Invoke-CopilotSend $Bridge
@@ -1604,4 +1676,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

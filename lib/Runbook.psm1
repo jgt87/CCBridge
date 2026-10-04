@@ -11,7 +11,7 @@ foreach ($m in 'Workspace', 'Executor', 'Fetch', 'Layout') { Import-Module (Join
 
 $script:RunbookDir = Get-LayoutPath Runbooks
 $script:ExportDir = Get-LayoutPath Exports
-$script:Reserved = @('title', 'output', 'itemsKey', 'required', 'requiredItemFields', 'sources', 'sites', 'pages')
+$script:Reserved = @('title', 'output', 'itemsKey', 'required', 'requiredItemFields', 'sources', 'sites', 'pages', 'agent', 'files')
 
 function Read-Runbook {
     <# Splits a runbook into its header (ordered key/value pairs) and its instructions (comments removed). #>
