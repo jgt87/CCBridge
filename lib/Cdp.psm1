@@ -29,6 +29,10 @@ function Start-CdpEdge {
     )
     if (Test-CdpEndpoint $Port) { Write-CCBLog verbose cdp "Reusing Edge on debug port $Port"; return $null }
     $null = New-Item -ItemType Directory -Force -Path $ProfileDir
+    # Settings > Privacy > Clear Edge's cache: the folders Edge locked are removed now, before it opens.
+    if (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-cache-clear.flag')) {
+        try { Import-Module (Join-Path $PSScriptRoot 'EdgeCache.psm1'); $null = Clear-EdgeCacheFolders $ProfileDir } catch { Write-CCBLog info cdp "Edge cache not cleared: $($_.Exception.Message)" }
+    }
     $edgeArgs = @("--remote-debugging-port=$Port", "--user-data-dir=`"$ProfileDir`"",
                   '--no-first-run', '--no-default-browser-check',
                   # Copilot's tab usually sits in the background; throttling it stalls reply streams.

@@ -4,7 +4,8 @@ import { ModalBackdrop } from "./modal-backdrop";
 import { SsoSection } from "./sso-section";
 import { actionClass, fieldClass, Segmented, SettingLine, SettingsGroup } from "./settings-ui";
 import { useEffect, useMemo, useState } from "react";
-import { api, type Setting } from "@/lib/api";
+import { api, type EdgeCacheInfo, type Setting } from "@/lib/api";
+import { formatBytes } from "@/lib/project-overview";
 import { notifyEnabled, notifySupported, setNotifyEnabled } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 
@@ -182,6 +183,44 @@ function ClearHistoryRow() {
   );
 }
 
+/** Settings > Privacy: Edge's caches in StreamHub's own profile; the Copilot sign-in stays. */
+function ClearEdgeCacheRow() {
+  const [info, setInfo] = useState<EdgeCacheInfo | null>(null);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.edgeCache().then(setInfo, () => {});
+  }, []);
+  const clear = async () => {
+    setBusy(true);
+    try {
+      const r = await api.clearEdgeCache();
+      setInfo(r.info);
+      setNote(
+        `Cleared ${formatBytes(r.freedNow)} now.` +
+          (r.pending ? " Edge keeps the rest locked while it runs; it is removed the next time StreamHub starts Edge." : ""),
+      );
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const size = info ? `${formatBytes(info.cacheBytes)} of ${formatBytes(info.profileBytes)}` : "";
+  return (
+    <SettingLine
+      control={
+        <button className={actionClass} disabled={busy} onClick={clear} type="button">
+          {busy ? "Clearing..." : "Clear"}
+        </button>
+      }
+      help={`Removes Edge's caches in StreamHub's own Edge profile: stored web files, compiled code, graphics caches and downloaded updates. Your Copilot sign-in, cookies and settings stay.${size ? ` Cache now: ${size} (the whole profile).` : ""}${info?.pending ? " A clear waits for the next start." : ""}`}
+      notes={note ? <div className="text-muted-foreground text-xs">{note}</div> : null}
+      title="Clear Edge's cache"
+    />
+  );
+}
+
 const THEMES: { id: ThemeChoice; label: string; icon: React.ReactNode }[] = [
   { id: "system", label: "System", icon: <Monitor className="h-3.5 w-3.5" /> },
   { id: "light", label: "Light", icon: <Sun className="h-3.5 w-3.5" /> },
@@ -306,6 +345,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <SettingRow key={s.key} onSaved={setSettings} s={s} />
               ))}
               {group === "Privacy" && <ClearHistoryRow />}
+              {group === "Privacy" && <ClearEdgeCacheRow />}
             </SettingsGroup>
           ))}
         </div>

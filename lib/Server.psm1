@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -520,6 +520,12 @@ function Invoke-ApiRequest($Ctx, $State) {
             $b = Read-JsonBody $Ctx
             Set-UiHintShown $State ([string]$b.name)
             return Send-Json $Ctx @{ ok = $true }
+        }
+        '^GET /api/edge-cache$' { return Send-Json $Ctx (Get-EdgeCacheInfo) }
+        '^POST /api/edge-cache/clear$' {
+            # Settings > Privacy: Edge's caches in StreamHub's profile (never the sign-in).
+            if ($Ctx.Request.Headers['Origin'] -ne "http://localhost:$($State.Config.port)") { return Send-Json $Ctx @{ error = 'Only the StreamHub page can clear the cache.' } 403 }
+            return Send-Json $Ctx (Request-EdgeCacheClear -Port ([int]$State.Config.cdpPort))
         }
         '^POST /api/history/clear$' {
             # Settings > Privacy: forget this project's conversation (the chat view empties too).

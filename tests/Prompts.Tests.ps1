@@ -231,9 +231,9 @@ Describe 'Case-specific prompt modules' {
         @(Get-ProjectTraits @('notes.md')).Count | Should Be 0
     }
     It 'picks modules from the request when the project does not show it yet' {
-        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:web,rules:moving'
+        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:web,rules:moving,rules:quality'
         (Get-PromptModules 'Split the parser into two modules' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:moving'
-        (Get-PromptModules 'Write a pytest for the parser' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:python'
+        (Get-PromptModules 'Write a pytest for the parser' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:python,rules:quality'
         (Get-PromptModules 'Fix the bug' @{ Traits = @('nocommands') }) -join ',' | Should Be 'rules:folders'
     }
     It 'sends the web rules with a web project, after the core rules' {
@@ -303,5 +303,18 @@ Describe 'Get-TurnKind forced kinds' {
     It 'never sends a task from another program as plain chat' {
         & (Get-Module Agent) { param($a, $b, $f) Get-TurnKind $a $b @{ Traits = @(); Paths = @() } $f } $s 'tidy this up' 'work' | Should Be 'coding'
         & (Get-Module Agent) { param($a, $b, $f) Get-TurnKind $a $b @{ Traits = @(); Paths = @() } $f } $s 'what meetings do I have' 'work' | Should Be 'assistant'
+    }
+}
+
+Describe 'Code quality rules' {
+    It 'go with requests that build or change code, not with fixes or questions' {
+        (Get-PromptModules 'Add a dark mode toggle to the settings page' @{ Traits = @('code'); Paths = @('a.js') }) -contains 'rules:quality' | Should Be $true
+        (Get-PromptModules 'Refactor the parser' @{ Traits = @('code'); Paths = @('a.js') }) -contains 'rules:quality' | Should Be $true
+        (Get-PromptModules 'Fix the build' @{ Traits = @('code'); Paths = @('a.js') }) -contains 'rules:quality' | Should Be $false
+        (Get-PromptModules 'Why does the test fail?' @{ Traits = @('code'); Paths = @('a.js') }) -contains 'rules:quality' | Should Be $false
+        $part = Get-PromptPart $root 'rules:quality' @{}
+        $part | Should Match 'never an empty catch'
+        $part | Should Not Match '(?i)ccbridge|streamhub'
+        $part.Length -lt 900 | Should Be $true
     }
 }

@@ -22,6 +22,8 @@ $script:MovePattern = '(?i)\b(move|moving|split|extract|separate|refactor|offloa
 $script:PythonPattern = '(?i)\b(python|pip|django|flask|pandas|pytest)\b|\.pyw?\b'
 $script:PowerShellPattern = '(?i)\b(powershell|pester|cmdlets?)\b|\.ps[md]?1\b'
 $script:RunbookPattern = '(?i)\b(runbooks?|draaiboek(en)?)\b'
+# Requests that build or change code get the code quality rules (rules/quality.md), once per chat.
+$script:BuildPattern = '(?i)\b(build\s+(a|an|me|the|new|it)|create|add|implement|make|write|develop|extend|refactor|rewrite|clean ?up|improve|feature|component|module|function|class|page|app|tool|script|bouw|maak|voeg|schrijf|verbeter)\b'
 # Requests for online information (with Get-NamedSites: a website or address in the request).
 $script:WebLookupPattern = '(?i)\b(online|on the (web|internet)|internet|websites?|web ?pages?|web ?sites?|look (it |this |that )?up|latest (version|release)s?|release notes|documentation|docs (for|of)|price ?lists?|pricing|exchange rates?|news (about|on)|wikipedia)\b|https?://|\bwww\.'
 
@@ -78,6 +80,7 @@ function Get-PromptModules {
     if (($traits -contains 'python') -or ($Text -match $script:PythonPattern)) { $ids.Add('rules:python') }
     if (($traits -contains 'powershell') -or ($Text -match $script:PowerShellPattern)) { $ids.Add('rules:powershell') }
     if ($traits -contains 'source') { $ids.Add('rules:source') }
+    if ($Text -match $script:BuildPattern) { $ids.Add('rules:quality') }
     if ($Text -match $script:RunbookPattern) { $ids.Add('rules:runbook') }
     # Online information: how to use web sources, and the web action for the exact text of a page.
     if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }

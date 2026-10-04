@@ -395,6 +395,13 @@ export interface RunbookTemplate {
   title: string;
 }
 
+/** Edge's caches in StreamHub's profile: their size, the whole profile, and a clear waiting for the next start. */
+export interface EdgeCacheInfo {
+  cacheBytes: number;
+  profileBytes: number;
+  pending: boolean;
+}
+
 /** An adjustable setting (config\harness.local.json). */
 export interface Setting {
   key: string;
@@ -549,6 +556,9 @@ export const api = {
   approve: (id: string, decision: "approve" | "reject", note = "") =>
     call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user" }),
   setMode: (mode: Mode) => call<{ ok: boolean }>("POST", "/api/mode", { mode }),
+  /** Edge's caches in StreamHub's own profile (never the sign-in). */
+  edgeCache: () => call<EdgeCacheInfo>("GET", "/api/edge-cache"),
+  clearEdgeCache: () => call<{ freedNow: number; pending: boolean; info: EdgeCacheInfo }>("POST", "/api/edge-cache/clear"),
   newChat: () => call<{ ok: boolean }>("POST", "/api/newchat"),
   undo: () => call<{ ok: boolean }>("POST", "/api/undo"),
   stop: () => call<{ ok: boolean }>("POST", "/api/stop"),

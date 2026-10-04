@@ -6,6 +6,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.63] - 2026-10-04
+
+### Added
+
+- Settings > Privacy > *Clear Edge's cache*: removes the caches in StreamHub's own Edge profile (stored web files, compiled code, graphics caches, downloaded updates; about 320 MB of 810 MB here), never the Copilot sign-in, cookies or settings. The web cache is cleared at once; folders Edge keeps locked while it runs are removed the next time StreamHub starts Edge. The setting shows the cache and profile size.
+- Code quality rules for Copilot (`prompts/rules/quality.md`), sent once per chat with requests that build or change code: reuse existing helpers, short focused functions, data out of code, no empty catch, no debug leftovers, no personal paths or secrets, no new packages unless needed, alt text and labels on pages, tests for changed logic when the project has tests.
+
+### Changed
+
+- The GitHub release notes of v0.1.50, v0.1.51 and v0.1.53 now match their changelog sections (entries added to the changelog after those releases).
+
 ## [v0.1.62] - 2026-10-04
 
 ### Added
@@ -723,7 +734,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.62...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.63...HEAD
+[v0.1.63]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.63
 [v0.1.62]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.62
 [v0.1.61]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.61
 [v0.1.60]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.60
