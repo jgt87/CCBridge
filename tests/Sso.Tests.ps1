@@ -18,6 +18,28 @@ Describe 'Select-SsoSwitch' {
     }
 }
 
+Describe 'Single sign-on that Edge turned on itself, and the profile account' {
+    $dir = Join-Path $env:TEMP ('ccb-sso-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory (Join-Path $dir 'Default') -Force | Out-Null
+    It 'reads aad_sso_algo_state 2 as on, 1 as off' {
+        [IO.File]::WriteAllText((Join-Path $dir 'Default\Preferences'), '{ "edge": { "profile_sso_info": { "aad_sso_algo_state": 2, "aad_sso_state_reached_by": 3 } } }')
+        Test-ProfileSsoAuto $dir | Should Be $true
+        [IO.File]::WriteAllText((Join-Path $dir 'Default\Preferences'), '{ "edge": { "profile_sso_info": { "aad_sso_algo_state": 1 } } }')
+        Test-ProfileSsoAuto $dir | Should Be $false
+        Test-ProfileSsoAuto (Join-Path $dir 'missing') | Should Be $false
+    }
+    It 'tells a work account from a personal one or none' {
+        $ls = Join-Path $dir 'Local State'
+        [IO.File]::WriteAllText($ls, '{ "profile": { "info_cache": { "Default": { "edge_account_type": 1, "edge_account_tenant_id": "9188040d-6c67-4c5b-b112-36a304b66dad" } } } }')
+        Get-ProfileAccount $dir | Should Be 'personal'
+        [IO.File]::WriteAllText($ls, '{ "profile": { "info_cache": { "Default": { "edge_account_type": 2, "edge_account_tenant_id": "11111111-2222-3333-4444-555555555555" } } } }')
+        Get-ProfileAccount $dir | Should Be 'work'
+        [IO.File]::WriteAllText($ls, '{ "profile": { "info_cache": { "Default": { "edge_account_type": 0 } } } }')
+        Get-ProfileAccount $dir | Should Be 'none'
+    }
+    Remove-Item $dir -Recurse -Force
+}
+
 Describe 'Get-CopilotSignInState' {
     $page = { param($url) [pscustomobject]@{ type = 'page'; url = $url } }
     It 'tells a signed-in chat from a sign-in page' {

@@ -376,7 +376,9 @@ export interface Setting {
  */
 export interface SsoStatus {
   workAccount: boolean;
-  profileSso: "on" | "off" | "managed" | "not-found" | "unavailable" | "edge-not-running" | "unknown";
+  profileSso: "on" | "on-auto" | "off" | "managed" | "signed-in-work" | "not-found" | "unavailable" | "edge-not-running" | "unknown";
+  /** The account StreamHub's Edge profile is signed in with. */
+  profileAccount?: "work" | "personal" | "none" | "unknown";
   switchLabel?: string;
   copilot: "chat" | "sign-in page" | "no tab" | "edge not running";
   checkedAt?: string;

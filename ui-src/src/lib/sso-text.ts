@@ -8,6 +8,10 @@ export function ssoStateText(s: SsoStatus | null): string {
       return "On in StreamHub's Edge profile.";
     case "off":
       return "Off in StreamHub's Edge profile.";
+    case "on-auto":
+      return "On: Edge turned single sign-on for work sites on by itself for StreamHub's profile, so there is nothing to change. If Copilot still asks after a restart, sign in once and choose \"Stay signed in\".";
+    case "signed-in-work":
+      return "Not needed: StreamHub's Edge profile is signed in with your work account, so work sites sign in with it already. If Copilot still asks after a restart, sign in once and choose \"Stay signed in\".";
     case "managed":
       return "Set by your organisation (policy); it cannot be changed here.";
     case "not-found":

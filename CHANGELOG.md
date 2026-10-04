@@ -6,6 +6,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.54] - 2026-10-04
+
+### Changed
+
+- Settings: the window is wider (up to 880 px), and every row has the same layout: label and help on the left, one control column of fixed width and height, and the same place for reset and "Saved". All on/off choices use the same switch, also Desktop notifications and the on/off settings that were drop-downs; drop-down values show capitalised.
+- Settings > Sign-in reports single sign-on as on when Edge turned it on by itself for StreamHub's profile (on a work PC with one profile), instead of "the switch is not offered", and shows which account the Edge profile uses. The setup log names the profile's account kind and the open tabs (site and path only).
+
+### Fixed
+
+- Settings > Sign-in said "no Copilot tab open" when the Copilot tab was on another Copilot page than the chat; it now uses the same sites as the bridge.
+
 ## [v0.1.53] - 2026-10-04
 
 ### Added
@@ -620,7 +631,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.53...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.54...HEAD
+[v0.1.54]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.54
 [v0.1.53]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.53
 [v0.1.52]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.52
 [v0.1.51]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.51

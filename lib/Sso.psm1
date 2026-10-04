@@ -6,7 +6,8 @@
 # (Server.psm1, /api/sso) and by sso-setup.cmd.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'Prereq') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'Prereq', 'Config', 'CopilotBridge') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+$script:MsaTenant = '9188040d-6c67-4c5b-b112-36a304b66dad'   # the tenant of personal Microsoft accounts
 
 $script:SettingsUrl = 'edge://settings/profiles/multiProfileSettings'
 # The switch's label in the languages seen so far (Edge's own text).
@@ -49,8 +50,42 @@ function Get-CopilotSignInState {
     }
     $urls = @($Pages | ForEach-Object { "$($_.url)" })
     if (@($urls | Where-Object { $_ -match '^(?i)https://(login\.microsoftonline\.com|login\.live\.com|login\.microsoft\.com|login\.windows\.net)/' }).Count) { return 'sign-in page' }
-    if (@($urls | Where-Object { $_ -match '^(?i)https://([a-z0-9-]+\.)?(microsoft365\.com|m365\.cloud\.microsoft|office\.com)/(chat|copilot|launch/copilot)' }).Count) { return 'chat' }
+    $sel = try { Get-CCBridgeConfig selectors (Split-Path -Parent $PSScriptRoot) } catch { $null }
+    $onCopilot = @($urls | Where-Object { if ($sel) { Test-CopilotUrl $_ $sel } else { $_ -match '^(?i)https://([a-z0-9-]+\.)*(microsoft365\.com|m365\.cloud\.microsoft|office\.com)/' } })
+    if ($onCopilot.Count) { return 'chat' }
     'no tab'
+}
+
+function Get-TabAddresses([int]$Port = 9333) {
+    # Where StreamHub's Edge tabs are: site and path only (no query, no ids), for the setup log.
+    if (-not (Test-CdpEndpoint $Port)) { return @() }
+    @((Invoke-RestMethod "http://127.0.0.1:$Port/json/list") | Where-Object { $_.type -eq 'page' } | ForEach-Object {
+        try { $u = [Uri]"$($_.url)"; if ($u.Scheme -in 'http', 'https') { "$($u.Host)$(($u.AbsolutePath -replace '/[0-9a-fA-F-]{16,}', '/*'))" } else { "$($u.Scheme):$($u.AbsolutePath)" } } catch { '?' }
+    })
+}
+
+function Test-ProfileSsoAuto {
+    <# Whether Edge turned single sign-on for work sites on by itself for StreamHub's profile:
+       Preferences edge.profile_sso_info.aad_sso_algo_state = 2 ("intelligent enablement" for a
+       single profile on a work PC; 1 = off). Read only. #>
+    param([string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'))
+    try { $p = [IO.File]::ReadAllText((Join-Path $ProfileDir 'Default\Preferences')) | ConvertFrom-Json } catch { return $false }
+    "$($p.edge.profile_sso_info.aad_sso_algo_state)" -eq '2'
+}
+
+function Get-ProfileAccount {
+    <# Which account StreamHub's Edge profile is signed in with: 'work' (work or school account),
+       'personal' (Microsoft account), 'none' or 'unknown'. Only the account type is read. #>
+    param([string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'))
+    try { $j = [IO.File]::ReadAllText((Join-Path $ProfileDir 'Local State')) | ConvertFrom-Json } catch { return 'unknown' }
+    $d = $j.profile.info_cache.Default
+    if (-not $d) { return 'unknown' }
+    $type = "$($d.edge_account_type)"
+    $tenant = "$($d.edge_account_tenant_id)"
+    if ($type -eq '2' -or ($tenant -and $tenant -ne $script:MsaTenant -and $type -ne '1' -and $type -ne '0')) { return 'work' }
+    if ($type -eq '1') { return 'personal' }
+    if ($type -in '', '0') { return 'none' }
+    'unknown'
 }
 
 function Open-BackgroundTab([int]$Port, [string]$Url) {
@@ -93,14 +128,16 @@ function Get-SsoStatus {
     param([int]$Port = 9333, [switch]$NoPage)
     $join = Get-DeviceJoinStatus
     $work = $join['AzureAdPrt'] -eq 'YES'
-    $st = [ordered]@{ workAccount = $work; join = $join; profileSso = 'unknown'; switchLabel = ''; copilot = (Get-CopilotSignInState $Port); checkedAt = (Get-Date).ToString('s') }
+    $st = [ordered]@{ workAccount = $work; join = $join; profileSso = 'unknown'; switchLabel = ''; profileAccount = (Get-ProfileAccount); copilot = (Get-CopilotSignInState $Port); checkedAt = (Get-Date).ToString('s') }
     if (-not $work) { $st.profileSso = 'unavailable'; return $st }
     if (-not (Test-CdpEndpoint $Port)) { $st.profileSso = 'edge-not-running'; return $st }
     if ($NoPage) { return $st }
     $tab = Open-BackgroundTab $Port $script:SettingsUrl
     try {
         $sw = Select-SsoSwitch (Get-PageSwitches $tab.Session)
-        if (-not $sw) { $st.profileSso = 'not-found' }
+        # Edge offers the switch only for profiles without a work account; signed in with one, work
+        # sites already sign in with it.
+        if (-not $sw) { $st.profileSso = $(if (Test-ProfileSsoAuto) { 'on-auto' } elseif ($st.profileAccount -eq 'work') { 'signed-in-work' } else { 'not-found' }) }
         else { $st.switchLabel = "$($sw.label)"; $st.profileSso = if ($sw.disabled) { 'managed' } elseif ($sw.on) { 'on' } else { 'off' } }
     } finally { Close-BackgroundTab $tab }
     $st
@@ -136,7 +173,7 @@ function Get-SsoKeys([string]$ProfileDir) {
         foreach ($q in $o.PSObject.Properties) {
             $k = if ($p) { "$p.$($q.Name)" } else { $q.Name }
             if ($q.Value -is [pscustomobject]) { & $walk $q.Value $k }
-            elseif ($k -match '(?i)sso|single_sign|aad|implicit_signin' -and ($q.Value -is [bool] -or $q.Value -is [int] -or $q.Value -is [long] -or "$($q.Value)" -match '^[A-Za-z]{1,20}$')) { $out[$k] = "$($q.Value)" }
+            elseif ($k -match '(?i)sso|single_sign|aad|implicit_signin|edge_account_type$' -and $k -notmatch '(?i)arbitration_experiences' -and ($q.Value -is [bool] -or $q.Value -is [int] -or $q.Value -is [long] -or "$($q.Value)" -match '^[A-Za-z]{1,20}$')) { $out[$k] = "$($q.Value)" }
         }
     }
     foreach ($f in @(@{ n = 'Local State'; p = (Join-Path $ProfileDir 'Local State') }, @{ n = 'Preferences'; p = (Join-Path $ProfileDir 'Default\Preferences') })) {
@@ -155,6 +192,9 @@ function Invoke-SsoSetup {
     $log.Add("StreamHub single sign-on setup $(Get-Date -Format 'yyyy-MM-dd HH:mm'). Names and yes/no values only.")
     $join = Get-DeviceJoinStatus
     $log.Add('This PC: ' + (($join.Keys | ForEach-Object { "$_=$($join[$_])" }) -join ', '))
+    $account = Get-ProfileAccount $ProfileDir
+    $log.Add("StreamHub's Edge profile is signed in with: $(switch ($account) { 'work' { 'a work or school account' } 'personal' { 'a personal Microsoft account' } 'none' { 'no account' } default { 'unknown' } })")
+    $log.Add('Edge tabs (site and path): ' + ((@(Get-TabAddresses $Port)) -join ', '))
     $result = 'unavailable'
     $before = Get-SsoKeys $ProfileDir
     if ($join['AzureAdPrt'] -ne 'YES') {
@@ -167,7 +207,9 @@ function Invoke-SsoSetup {
             $all = Get-PageSwitches $tab.Session
             foreach ($w in $all) { $log.Add("  switch: [$(if ($w.on) { 'on' } else { 'off' })$(if ($w.disabled) { ', managed or disabled' })] $($w.label)") }
             $sw = Select-SsoSwitch $all
-            if (-not $sw) { $result = 'not-found'; $log.Add('The single sign-on switch is not on Edge''s profile page (Edge shows it only for a profile that is not signed in with a work account).') }
+            if (-not $sw -and (Test-ProfileSsoAuto $ProfileDir)) { $result = 'already on'; $log.Add('Already on: Edge turned single sign-on for work sites on by itself for this profile (edge.profile_sso_info.aad_sso_algo_state = 2), so there is no switch to change. If Copilot still asks to sign in after a restart, sign in once and choose "Stay signed in".') }
+            elseif (-not $sw -and $account -eq 'work') { $result = 'signed-in-work'; $log.Add('No switch needed: the profile is signed in with a work account, so Edge signs work sites in with it already. If Copilot still asks to sign in after a restart, choose "Stay signed in" once.') }
+            elseif (-not $sw) { $result = 'not-found'; $log.Add("The single sign-on switch is not on Edge's profile page ($(@($all).Count) switch(es) found; Edge shows it only for a profile that is not signed in with a work account).") }
             elseif ([bool]$sw.on -eq $On) { $result = $(if ($On) { 'already on' } else { 'already off' }) }
             elseif ($sw.disabled) { $result = 'managed'; $log.Add('The switch is managed by your organisation (policy) and cannot be changed here.') }
             elseif ($Confirm -and -not (& $Confirm)) { $result = 'declined' }
@@ -203,4 +245,4 @@ function Open-SsoSettingsPage([int]$Port = 9333) {
     $true
 }
 
-Export-ModuleMember -Function Select-SsoSwitch, Get-CopilotSignInState, Get-SsoStatus, Set-ProfileSso, Invoke-SsoSetup, Open-SsoSettingsPage
+Export-ModuleMember -Function Select-SsoSwitch, Get-CopilotSignInState, Test-ProfileSsoAuto, Get-ProfileAccount, Get-TabAddresses, Get-SsoStatus, Set-ProfileSso, Invoke-SsoSetup, Open-SsoSettingsPage
