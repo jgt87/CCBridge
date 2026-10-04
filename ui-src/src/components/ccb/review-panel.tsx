@@ -108,12 +108,12 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
   return (
     <div className="space-y-2">
       <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
-        <select className={field} onChange={(e) => setScope(e.target.value as Scope)} value={scope}>
+        <select aria-label="What to review" className={field} onChange={(e) => setScope(e.target.value as Scope)} value={scope}>
           <option value="all">Whole project</option>
           <option value="changes">Changes since you opened the project</option>
           <option value="paths">Chosen files or folders</option>
         </select>
-        {scope === "paths" && <input className={field} onChange={(e) => setPaths(e.target.value)} placeholder="e.g. src, index.html" value={paths} />}
+        {scope === "paths" && <input aria-label="Files or folders to review" className={field} onChange={(e) => setPaths(e.target.value)} placeholder="e.g. src, index.html" value={paths} />}
         <div className="flex flex-wrap gap-1">
           {FOCUS.map((f) => (
             <button

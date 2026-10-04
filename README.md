@@ -21,6 +21,7 @@ Automating Copilot Chat may be subject to your organisation's policies; check be
 
 - [Quick start](#quick-start)
 - [Features](#features)
+- [Limitations](#limitations)
 - [Using the web app](#using-the-web-app)
 - [MCP server](#mcp-server)
 - [Microsoft 365 data (Work IQ) and human in the loop](#microsoft-365-data-work-iq-and-human-in-the-loop)
@@ -95,6 +96,21 @@ Copilot works through fenced *action blocks* that StreamHub executes and answers
 - **Read-only source data**: files you add with *Add source data* go to the project's `source/` folder. Copilot may read them but never change, move or delete them: writes there are refused, and after every command StreamHub restores anything that was changed or deleted from a backup copy (files dropped into `source/` are moved to `work/`).
 - **Human in the loop for Microsoft 365** (see [below](#microsoft-365-data-work-iq-and-human-in-the-loop)).
 - The web API only accepts requests from the StreamHub page itself (per-installation token, localhost only).
+- **Coding guardrails**: fixed rules that only look at what a change adds.
+
+  | What the change adds | What happens |
+  |---|---|
+  | A write into generated folders (`node_modules/`, `dist/`, `.git/`, `__pycache__`, and in projects with a build tool also `build/`, `out/`, `bin/`, `obj/`) or a lock file (`package-lock.json`, `poetry.lock`, ...) | Refused, with the reason |
+  | A new dependency: a package in `package.json`, `requirements*.txt`, `pyproject.toml` or a `.csproj`, or a script, stylesheet or module from another site | You approve it first, also in auto mode |
+  | Risky code: `eval` / `new Function`, `innerHTML` from a variable, `document.write`, `dangerouslySetInnerHTML`, `Invoke-Expression`, `shell=True`, `os.system`, `pickle`, `yaml.load` without `SafeLoader`, SQL built from strings | You approve it first, also in auto mode |
+  | Debug leftovers (`debugger`, `alert`, `.only` / `fit` in tests, `breakpoint()`) and swallowed errors (an empty `catch`, `except: pass`, a bare `except:`) | Copilot is asked to fix them in the next round |
+  | A new `.env` file that `.gitignore` does not exclude, in a project that uses git | Copilot is asked to add it to `.gitignore` |
+  | Non-ASCII text in a PowerShell file without a BOM | The file is saved with a BOM, so Windows PowerShell 5.1 reads it correctly |
+  | An absolute path into a user's folder (`C:\Users\NAME`, `/home/NAME`, `/Users/NAME`) in code or config | Copilot is asked to use a relative path, an environment variable or a setting |
+  | A code file pushed over 400 lines, or a block of more than 120 lines of inline data | Copilot is asked to split the file, or to move the data to `data/` |
+  | An image without `alt`, a button without text or label, a form field without a label | Copilot is asked to add them |
+  | A new helper script in `Scripts/` without a short header, or that does not stop on errors (`$ErrorActionPreference = 'Stop'`, `set -e`) | Copilot is asked to add them |
+  | "done" after code changed without a test, in a project that has tests; or a new part in `src/` or `Scripts/` without a README line | One reminder per task. Copilot adds the test or line, or says why it is not needed |
 
 ### Copilot handling
 - **Reply repair**: Copilot's own link/citation filter deletes code such as `[name]:` or `[guid]::NewGuid()` from its final text. StreamHub rebuilds replies from the raw stream and flags the rare cases where it had to guess.
@@ -110,6 +126,15 @@ The same bridge and agent loop for MCP clients (Claude Code, VS Code, ...), in a
 - Diagnostic log with masking of personal data and a one-click diagnostics bundle for hand-off.
 
 ---
+
+## Limitations
+
+The start screen lists these as well, once Copilot is connected (`ui-src/src/lib/limitations.ts`):
+
+- **No Git integration**: commits, branches and pushes happen outside StreamHub.
+- **No MCP support**: MCP servers cannot be connected to StreamHub, so their tools are not available in a task. (Other programs can still use StreamHub itself as an MCP server; see [MCP server](#mcp-server).)
+- **No skill support**: there are no reusable skill packages. Project notes (`AGENTS.md`), runbooks and fetch prompts carry instructions instead.
+- **No artefact generator**: StreamHub does not generate documents, slides or images; Copilot writes text and code files.
 
 ## Using the web app
 

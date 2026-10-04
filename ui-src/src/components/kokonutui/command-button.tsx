@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
  * @date: 2025-06-26
  * @license: MIT
  * @website: https://kokonutui.com
- * @github: https://github.com/kokonut-labs/kokonutui
  */
 
 export default function CommandButton({

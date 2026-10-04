@@ -1,0 +1,345 @@
+# Coding guardrails: fixed rules on what a change adds (never on what was already there).
+#   Test-GeneratedPath   writes into build output, package folders, .git or lock files: refused
+#                        (Assert-Writable, Executor)
+#   Find-NewDependencies a new package (package.json, requirements, pyproject, .csproj) or a script
+#                        or stylesheet from another site: a person approves, also in auto mode
+#   Find-RiskyCode       eval, new Function, innerHTML from a variable, document.write,
+#                        Invoke-Expression, shell=True, os.system, pickle, SQL built from strings:
+#                        a person approves, also in auto mode
+#   Find-ChangeSmells    debug leftovers (debugger, alert, .only, breakpoint) and swallowed errors
+#                        (empty catch, except: pass): sent back to Copilot to fix
+#   Find-UnignoredEnv    a new .env file that .gitignore does not cover: sent back to Copilot
+# The approval and fix flows are in Agent.psm1 (Invoke-AgentAction, the round's file check).
+
+$ErrorActionPreference = 'Stop'
+
+$script:AlwaysGenerated = '(?i)(^|/)(node_modules|\.git|__pycache__|\.next|\.nuxt|\.svelte-kit|\.parcel-cache|\.turbo|dist|coverage)(/|$)'
+$script:BuildDirs = '(?i)(^|/)(build|out|bin|obj|target)(/|$)'
+$script:LockFiles = '(?i)(^|/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Pipfile\.lock|composer\.lock|Cargo\.lock|packages\.lock\.json|Gemfile\.lock|bun\.lockb?)$'
+$script:BuildMarkers = 'package.json', 'tsconfig.json', 'pyproject.toml', 'setup.py', 'Cargo.toml', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'Makefile'
+
+function Test-GeneratedPath {
+    <# Why a project path must not be written by hand, or $null. build/, out/, bin/, obj/ and
+       target/ count only in a project with a build tool (package.json, *.csproj, ...), since a
+       plain project may keep its own files there. #>
+    param([Parameter(Mandatory)][string]$Rel, [string]$ProjectRoot = '')
+    $p = $Rel.Replace('\', '/').TrimStart('/')
+    if ($p -match $script:LockFiles) { return "$p is a lock file that the package manager writes; change the dependency list (for example package.json) and let the package manager update it" }
+    if ($p -match $script:AlwaysGenerated) { return "$p is in a folder that tools generate ($($Matches[2])/); hand edits there are lost or break the tools. Change the source files instead" }
+    if ($p -match $script:BuildDirs -and $ProjectRoot) {
+        $tool = @($script:BuildMarkers | Where-Object { Test-Path -LiteralPath (Join-Path $ProjectRoot $_) -PathType Leaf }).Count -gt 0 -or
+            @(Get-ChildItem -LiteralPath $ProjectRoot -Filter '*.*proj' -File -ErrorAction SilentlyContinue).Count -gt 0
+        if ($tool) { return "$p is in the build output folder ($($Matches[2])/), which the build writes; change the source files instead" }
+    }
+    $null
+}
+
+function Get-Multiset([string[]]$Items) {
+    $h = @{}; foreach ($i in @($Items | Where-Object { $_ })) { $h[$i] = 1 + [int]$h[$i] }; $h
+}
+
+function Get-Added([string[]]$Old, [string[]]$New) {
+    # Items of $New that $Old did not have (as many times as they were added).
+    $o = Get-Multiset $Old
+    foreach ($i in @($New | Where-Object { $_ })) { if ($o[$i]) { $o[$i]-- } else { $i } }
+}
+
+function Get-DependencyList([string]$Rel, [string]$Text) {
+    # "kind name" for each dependency the file declares.
+    $t = "$Text"
+    if (-not $t.Trim()) { return }
+    $leaf = [IO.Path]::GetFileName($Rel).ToLowerInvariant()
+    if ($leaf -eq 'package.json') {
+        try { $j = $t | ConvertFrom-Json } catch { return }
+        foreach ($sec in 'dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies') {
+            $d = $j.$sec
+            if ($d -is [pscustomobject]) { foreach ($p in $d.PSObject.Properties) { "npm $($p.Name)@$($p.Value)" } }
+        }
+        return
+    }
+    if ($leaf -match '^requirements.*\.txt$') {
+        foreach ($l in $t.Split("`n")) {
+            $x = ($l -replace '#.*$', '').Trim()
+            if ($x -and $x -notmatch '^-') { "pip $(($x -split '[\s;]')[0])" }
+        }
+        return
+    }
+    if ($leaf -eq 'pyproject.toml') {
+        foreach ($m in [regex]::Matches($t, '(?s)\bdependencies\s*=\s*\[(.*?)\]')) { foreach ($q in [regex]::Matches($m.Groups[1].Value, '"([^"]+)"|''([^'']+)''')) { "pip $($q.Groups[1].Value)$($q.Groups[2].Value)" } }
+        foreach ($m in [regex]::Matches($t, '(?ms)^\[tool\.poetry\.(?:group\.[\w-]+\.)?(?:dev-)?dependencies\]\s*\n(.*?)(?=^\[|\z)')) {
+            foreach ($q in [regex]::Matches($m.Groups[1].Value, '(?m)^\s*([A-Za-z0-9_.-]+)\s*=\s*(.+)$')) { if ($q.Groups[1].Value -ne 'python') { "pip $($q.Groups[1].Value) $($q.Groups[2].Value.Trim())" } }
+        }
+        return
+    }
+    if ($leaf -match '\.(cs|fs|vb)proj$|^directory\.packages\.props$') {
+        foreach ($m in [regex]::Matches($t, '(?i)<Package(?:Reference|Version)\s+Include\s*=\s*"([^"]+)"(?:[^>]*\bVersion\s*=\s*"([^"]+)")?')) { "nuget $($m.Groups[1].Value)$(if ($m.Groups[2].Value) { '@' + $m.Groups[2].Value })" }
+        return
+    }
+    if ($Rel -match '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$') {
+        foreach ($m in [regex]::Matches($t, '(?i)<script\b[^>]*\bsrc\s*=\s*["''](https?:)?//([^"'']+)')) { "script https://$($m.Groups[2].Value)" }
+        foreach ($m in [regex]::Matches($t, '(?i)<link\b[^>]*\bhref\s*=\s*["''](https?:)?//([^"'']+\.css[^"'']*)')) { "stylesheet https://$($m.Groups[2].Value)" }
+        foreach ($m in [regex]::Matches($t, '(?i)\bimport\b[^;\n]*?["'']https?://([^"'']+)["'']')) { "module https://$($m.Groups[1].Value)" }
+    }
+}
+
+function Get-DependencyName([string]$Dep) {
+    # The package without its version: "npm @scope/name", "pip name", "nuget name"; URLs as they are.
+    $kind, $rest = $Dep.Split(' ', 2)
+    switch ($kind) {
+        'npm' { return "npm $($rest -replace '(?<=.)@[^@/\s]*$', '')" }
+        'nuget' { return "nuget $($rest -replace '@[^@\s]*$', '')" }
+        'pip' { return "pip $((($rest -split '[<>=~!^\s\[;@]')[0]).ToLowerInvariant())" }
+        default { return $Dep }
+    }
+}
+
+function Find-NewDependencies {
+    <# Dependencies a change adds: "npm name@version", "pip name", "nuget name@version",
+       "script https://...", "stylesheet https://...", "module https://...". #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    $oldList = @(Get-DependencyList $Rel $Old)
+    $newList = @(Get-DependencyList $Rel $New)
+    # A version change of a package already there is not a new dependency.
+    $names = @{}; foreach ($d in $oldList) { $names[(Get-DependencyName $d)] = $true }
+    @(Get-Added $oldList $newList | Where-Object { -not $names.ContainsKey((Get-DependencyName $_)) })
+}
+
+$script:RiskRules = @(
+    @{ ext = '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$'; re = '\beval\s*\('; why = 'eval() runs text as code' }
+    @{ ext = '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$'; re = '\bnew\s+Function\s*\('; why = 'new Function() runs text as code' }
+    @{ ext = '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$'; re = '\.(?:inner|outer)HTML\s*\+?=(?!\s*[''"][^''"\n]*[''"]\s*;?\s*$)\s*[^\s\n][^\n]*'; why = 'innerHTML set from a variable can run injected HTML and scripts (use textContent, or build elements)' }
+    @{ ext = '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$'; re = '\binsertAdjacentHTML\s*\(|\bdocument\.write(?:ln)?\s*\('; why = 'insertAdjacentHTML / document.write insert raw HTML' }
+    @{ ext = '(?i)\.(jsx|tsx)$'; re = 'dangerouslySetInnerHTML'; why = 'dangerouslySetInnerHTML inserts raw HTML' }
+    @{ ext = '(?i)\.ps[md]?1$'; re = '(?i)^\s*([^''"#\n]*[;|{(=]\s*)?(Invoke-Expression|iex)(\s|$)'; why = 'Invoke-Expression runs text as a command' }
+    @{ ext = '(?i)\.pyw?$'; re = '(?<![\w.])(eval|exec)\s*\('; why = 'eval()/exec() run text as code' }
+    @{ ext = '(?i)\.pyw?$'; re = '\bshell\s*=\s*True\b'; why = 'shell=True passes the command through the shell (injection risk)' }
+    @{ ext = '(?i)\.pyw?$'; re = '\bos\.(system|popen)\s*\('; why = 'os.system/os.popen run a shell command' }
+    @{ ext = '(?i)\.pyw?$'; re = '\b(c?pickle|marshal)\.loads?\s*\('; why = 'unpickling data can run code' }
+    @{ ext = '(?i)\.pyw?$'; re = '\byaml\.load\s*\((?![^)\n]*Loader\s*=\s*(yaml\.)?SafeLoader)'; why = 'yaml.load without SafeLoader can run code (use yaml.safe_load)' }
+    @{ ext = '(?i)\.(pyw?|m?js|cjs|jsx|tsx?|php|cs|java|rb|go)$'; re = '(?i)(\.(execute|query|raw|exec|executemany)\s*\(|\bSqlCommand\s*\()\s*(f["'']|["''][^"''\n]*\b(select|insert|update|delete)\b[^"''\n]*["'']\s*(\+|%|\.format)|`[^`\n]*\b(select|insert|update|delete)\b[^`\n]*\$\{)'; why = 'SQL built from strings is open to SQL injection (use query parameters)' }
+)
+
+function Get-RiskHits([string]$Rel, [string]$Text) {
+    # "why|line text" for each risky line, so the same line elsewhere still counts as the same.
+    if (-not "$Text") { return }
+    $lines = "$Text".Replace("`r`n", "`n").Split("`n")
+    foreach ($r in $script:RiskRules) {
+        if ($Rel -notmatch $r.ext) { continue }
+        foreach ($l in $lines) { if ($l -match $r.re -and $l.Trim() -notmatch '^(//|#|\*|<!--)') { "$($r.why)|$($l.Trim())" } }
+    }
+}
+
+function Find-RiskyCode {
+    <# Risky constructs a change adds: "line N: WHY". Comment lines do not count. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    $added = @(Get-Added @(Get-RiskHits $Rel $Old) @(Get-RiskHits $Rel $New))
+    if (-not $added.Count) { return }
+    $lines = "$New".Replace("`r`n", "`n").Split("`n")
+    $used = @{}
+    foreach ($a in $added) {
+        $why, $text = $a.Split('|', 2)
+        $n = 0
+        for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i].Trim() -eq $text -and -not $used["$i|$why"]) { $n = $i + 1; $used["$i|$why"] = $true; break } }
+        "line ${n}: $why"
+    }
+}
+
+$script:SmellRules = @(
+    @{ ext = '(?i)\.(m?js|cjs|jsx|tsx?|vue|svelte|html?)$'; re = '^\s*debugger\s*;?\s*$'; why = 'a debugger statement left in (it stops the page when developer tools are open)' }
+    @{ ext = '(?i)\.(m?js|cjs|jsx|tsx?|vue|svelte|html?)$'; re = '(?<![\w.$])alert\s*\('; why = 'an alert() pop-up (debug leftover?); show messages in the page instead' }
+    @{ ext = '(?i)\.(m?js|cjs|jsx|tsx?)$'; re = '\b(it|describe|test|context|suite)\.only\s*\(|\b(fit|fdescribe)\s*\('; why = 'a focused test (.only / fit) makes every other test skip' }
+    @{ ext = '(?i)\.pyw?$'; re = '^\s*(breakpoint\(\)|import\s+i?pdb\b|(i?pdb)\.set_trace\(\))'; why = 'a debugger breakpoint left in' }
+    @{ ext = '(?i)\.ps[md]?1$'; re = '(?i)^\s*(Wait-Debugger|Set-PSBreakpoint)\b'; why = 'a debugger breakpoint left in' }
+    @{ ext = '(?i)\.(cs|vb)$'; re = '\bDebugger\.(Break|Launch)\s*\('; why = 'a debugger break left in' }
+)
+
+function Find-ChangeSmells {
+    <# Debug leftovers and swallowed errors a change adds: "line N: WHY". Empty catch blocks and
+       except-pass are counted per file (a comment inside the catch explains it and is fine). #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    $out = New-Object System.Collections.Generic.List[string]
+    $newText = "$New".Replace("`r`n", "`n"); $oldText = "$Old".Replace("`r`n", "`n")
+    $newLines = $newText.Split("`n")
+    foreach ($r in $script:SmellRules) {
+        if ($Rel -notmatch $r.ext) { continue }
+        $hits = { param($t) foreach ($l in $t.Split("`n")) { if ($l -match $r.re -and $l.Trim() -notmatch '^(//|#)') { $l.Trim() } } }
+        foreach ($a in @(Get-Added @(& $hits $oldText) @(& $hits $newText))) {
+            $n = 0; for ($i = 0; $i -lt $newLines.Count; $i++) { if ($newLines[$i].Trim() -eq $a) { $n = $i + 1; break } }
+            $out.Add("line ${n}: $($r.why)")
+        }
+    }
+    # Swallowed errors: count before and after; report the added ones at their line.
+    $swallow = $null
+    if ($Rel -match '(?i)\.(m?js|cjs|jsx|tsx?|vue|svelte|cs|java|kt|php|ps[md]?1)$') { $swallow = '\bcatch\s*(\([^)]*\))?\s*\{\s*\}' }
+    elseif ($Rel -match '(?i)\.pyw?$') { $swallow = '(?m)^[ \t]*except\b[^:\n]*:[ \t]*(\n[ \t]*)?pass\b|(?m)^[ \t]*except[ \t]*:' }
+    if ($swallow) {
+        $before = ([regex]::Matches($oldText, $swallow)).Count
+        $ms = @([regex]::Matches($newText, $swallow))
+        if ($ms.Count -gt $before) {
+            foreach ($m in ($ms | Select-Object -Last ($ms.Count - $before))) {
+                $n = ([regex]::Matches($newText.Substring(0, $m.Index), "`n")).Count + 1
+                $out.Add("line ${n}: an error is caught and silently ignored (empty catch / except: pass / bare except); handle it, log it, or catch only the expected error, and add a comment if ignoring is really right")
+            }
+        }
+    }
+    $out.ToArray()
+}
+
+function Find-UnignoredEnv {
+    <# .env files among $Paths that .gitignore does not cover, in a project that uses git or has a
+       .gitignore: "PATH: ..." for each. .env.example / .env.sample / .env.template are meant to be shared. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths)
+    $envs = @($Paths | Where-Object { $_ } | ForEach-Object { $_.Replace('\', '/') } | Where-Object { [IO.Path]::GetFileName($_) -match '^\.env(\..+)?$' -and [IO.Path]::GetFileName($_) -notmatch '(?i)\.(example|sample|template|dist)$' } |
+        Where-Object { Test-Path -LiteralPath (Join-Path $ProjectRoot $_.Replace('/', '\')) -PathType Leaf })
+    if (-not $envs.Count) { return }
+    $gi = Join-Path $ProjectRoot '.gitignore'
+    $usesGit = (Test-Path -LiteralPath (Join-Path $ProjectRoot '.git')) -or (Test-Path -LiteralPath $gi)
+    if (-not $usesGit) { return }
+    $rules = if (Test-Path -LiteralPath $gi) { @([IO.File]::ReadAllLines($gi) | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') }) } else { @() }
+    foreach ($e in $envs) {
+        $leaf = [IO.Path]::GetFileName($e)
+        $covered = $false
+        foreach ($r in $rules) {
+            if ($r.StartsWith('!')) { continue }
+            $pat = $r.TrimStart('/')
+            if (($pat -eq $e) -or ($pat -eq $leaf) -or ($pat.Contains('*') -and (($leaf -like $pat) -or ($e -like $pat)))) { $covered = $true; break }
+        }
+        if (-not $covered) { "${e}: holds settings and secrets but .gitignore does not exclude it, so it would end up in git; add the line $leaf (or .env*) to .gitignore" }
+    }
+}
+
+# --- Second batch: personal paths, large files and inline data, HTML basics, helper scripts,
+# --- and the reminders at "done" (tests, README).
+
+$script:QualityCodeExt = '(?i)\.(m?js|cjs|jsx|tsx?|vue|svelte|html?|css|scss|py|pyw|ps[md]?1|cs|java|kt|go|rs|php|rb|sh|bash|cmd|bat|json|ya?ml|toml|ini|config|xml)$'
+$script:TestPathPattern = '(?i)(^|/)(tests?|__tests__|specs?)/|[._-](test|spec)s?\.[a-z0-9]+$|(^|/)test_[^/]+\.py$|_test\.(py|go)$|\.Tests\.ps1$'
+
+function Get-LineIndex([string]$Text, [int]$Index) { ([regex]::Matches($Text.Substring(0, [Math]::Min($Index, $Text.Length)), "`n")).Count + 1 }
+
+function Find-AddedKeyed {
+    # Hits as "key|line" from both texts; returns "line N: message" for the hits the new text added.
+    param([scriptblock]$Hits, [string]$Old, [string]$New)
+    $oldKeys = @(& $Hits $Old | ForEach-Object { $_.key })
+    $o = Get-Multiset $oldKeys
+    foreach ($h in @(& $Hits $New)) { if ($o[$h.key]) { $o[$h.key]-- } else { "line $($h.line): $($h.msg)" } }
+}
+
+function Find-PersonalPaths {
+    <# Absolute paths into a user's own folders (C:\Users\NAME, /home/NAME, /Users/NAME) that a
+       change adds to code or config: the code breaks on any other PC and shows the user name. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch $script:QualityCodeExt -or $Rel -match '(?i)(^|/)\.env') { return }
+    $hits = {
+        param($t)
+        foreach ($m in [regex]::Matches("$t", '(?i)(?<![\w%$])([a-z]:[\\/]+Users[\\/]+(?!Public\b|Default\b|All Users\b)[^\\/\s"''`<>|]+|/(home|Users)/(?!runner\b|shared\b)[a-z][\w.-]*)')) {
+            $v = $m.Value
+            @{ key = $v.ToLowerInvariant(); line = (Get-LineIndex "$t" $m.Index); msg = "an absolute path into a user's folder ($v...): it breaks on any other PC and shows the user name. Use a path relative to the project, or an environment variable or setting" }
+        }
+    }
+    Find-AddedKeyed $hits $Old $New
+}
+
+function Find-LargeCode {
+    <# A code file that a change makes longer than $MaxLines (split it), and a block of inline data
+       of more than $MaxDataLines lines (move it to a data file). Data folders, tests, JSON and
+       generated files are not counted. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [int]$MaxLines = 400, [int]$MaxDataLines = 120)
+    if ($Rel -notmatch '(?i)\.(m?js|cjs|jsx|tsx?|vue|svelte|py|ps[md]?1|cs|java|kt|go|rs|php|rb)$' -or $Rel -match $script:TestPathPattern -or $Rel -match '(?i)(^|/)data/|\.min\.|\.d\.ts$') { return }
+    $count = { param($t) if ("$t") { "$t".Replace("`r`n", "`n").TrimEnd("`n").Split("`n").Length } else { 0 } }
+    $n = & $count $New; $o = & $count $Old
+    if ($n -gt $MaxLines -and $o -le $MaxLines) { "the file now has $n lines (over $MaxLines): split it into smaller files with one part each, joined by imports" }
+    $run = {
+        param($t)
+        $best = 0; $cur = 0
+        foreach ($l in "$t".Replace("`r`n", "`n").Split("`n")) {
+            $x = $l.Trim()
+            if ($x -match '^([\[\]{}](,|;)?|["''][^"'']*["'']\s*:.*|[\w$]+\s*:\s*(["''\d\[{-]|true|false|null).*|-?\d+(\.\d+)?\s*,?|["''][^"'']*["'']\s*,?|\{.*\},?|\[.*\],?)$') { $cur++; if ($cur -gt $best) { $best = $cur } } else { $cur = 0 }
+        }
+        $best
+    }
+    $nb = & $run $New; $ob = & $run $Old
+    if ($nb -gt $MaxDataLines -and $ob -le $MaxDataLines) { "the file holds a block of $nb lines of inline data: move the data to a file in data/ (a .json file, or a data module for pages opened from disk) and load it" }
+}
+
+function Find-HtmlBasics {
+    <# Accessibility basics a change adds to markup: an image without alt text, a button without
+       text or label, a form field without a label. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(html?|jsx|tsx|vue|svelte)$') { return }
+    $hits = {
+        param($t)
+        $t = "$t"
+        foreach ($m in [regex]::Matches($t, '(?is)<img\b((?:\{(?:[^{}]|\{[^{}]*\})*\}|=>|[^>{])*)>')) {
+            if ($m.Groups[1].Value -notmatch '(?i)\balt\s*=' -and $m.Groups[1].Value -notmatch '\{\s*\.\.\.') { @{ key = 'img|' + ($m.Value -replace '\s+', ' '); line = (Get-LineIndex $t $m.Index); msg = 'an image without alt text (alt="what it shows", or alt="" when it is decoration)' } }
+        }
+        foreach ($m in [regex]::Matches($t, '(?is)<button\b((?:\{(?:[^{}]|\{[^{}]*\})*\}|=>|[^>{])*)>(.*?)</button>')) {
+            $attrs = $m.Groups[1].Value
+            $inner = ($m.Groups[2].Value -replace '(?s)<svg\b.*?</svg>', '' -replace '<[^>]+>', '').Trim()
+            if (-not $inner -and $attrs -notmatch '(?i)\b(aria-label|aria-labelledby|title)\s*=' -and $attrs -notmatch '\{\s*\.\.\.') { @{ key = 'btn|' + ($m.Value -replace '\s+', ' '); line = (Get-LineIndex $t $m.Index); msg = 'a button without text or aria-label (screen readers announce it as just "button")' } }
+        }
+        $forIds = @{}; foreach ($l in [regex]::Matches($t, '(?i)\b(for|htmlFor)\s*=\s*\{?["'']([^"'']+)["'']')) { $forIds[$l.Groups[2].Value] = $true }
+        foreach ($m in [regex]::Matches($t, '(?is)<(input|select|textarea)\b((?:\{(?:[^{}]|\{[^{}]*\})*\}|=>|[^>{])*)>')) {
+            $attrs = $m.Groups[2].Value
+            if ($m.Groups[1].Value -ieq 'input' -and $attrs -match '(?i)\btype\s*=\s*["'']?(hidden|submit|button|image|reset)\b') { continue }
+            if ($attrs -match '(?i)\b(aria-label|aria-labelledby|title)\s*=' -or $attrs -match '\{\s*\.\.\.') { continue }
+            $id = [regex]::Match($attrs, '(?i)\bid\s*=\s*\{?["'']([^"'']+)["'']').Groups[1].Value
+            if ($id -and $forIds.ContainsKey($id)) { continue }
+            $before = $t.Substring(0, $m.Index)
+            $open = $before.LastIndexOf('<label', [StringComparison]::OrdinalIgnoreCase)
+            if ($open -ge 0 -and $before.IndexOf('</label', $open, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }   # inside a <label>
+            @{ key = 'field|' + ($m.Value -replace '\s+', ' '); line = (Get-LineIndex $t $m.Index); msg = "a form field ($($m.Groups[1].Value.ToLowerInvariant())) without a label (a <label for=...>, a wrapping <label>, or aria-label)" }
+        }
+    }
+    Find-AddedKeyed $hits $Old $New
+}
+
+function Find-ScriptBasics {
+    <# A new helper script in Scripts/ needs a short header (what it does, how to run it) and must
+       stop on errors (PowerShell: $ErrorActionPreference = 'Stop'; shell: set -e). #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ("$Old".Trim() -or $Rel -notmatch '(?i)^Scripts/.+\.(ps1|py|sh|bash|cmd|bat|m?js)$') { return }
+    $head = (@("$New".Replace("`r`n", "`n").Split("`n") | Select-Object -First 15) -join "`n")
+    $hasHeader = switch -Regex ($Rel) {
+        '(?i)\.ps1$' { $head -match '(?m)^\s*(<#|#\s*\S)' }
+        '(?i)\.py$' { $head -match '(?m)^\s*("""|''''''|#\s*\S)' }
+        '(?i)\.(sh|bash)$' { $head -match '(?m)^\s*#(?!!)\s*\S' }
+        '(?i)\.(cmd|bat)$' { $head -match '(?im)^\s*(@?rem\s+\S|::\s*\S)' }
+        default { $head -match '(?m)^\s*(//\s*\S|/\*)' }
+    }
+    if (-not $hasHeader) { 'a new helper script needs a short comment at the top: what it does and how to run it' }
+    if ($Rel -match '(?i)\.ps1$' -and "$New" -notmatch '(?i)\$ErrorActionPreference\s*=\s*[''"]Stop[''"]') { "the script does not stop on errors: add `$ErrorActionPreference = 'Stop' near the top" }
+    if ($Rel -match '(?i)\.(sh|bash)$' -and "$New" -notmatch '(?m)^\s*set\s+-[a-z]*e') { 'the script does not stop on errors: add set -e (or set -euo pipefail) near the top' }
+}
+
+function Find-QualityIssues {
+    <# The second batch, for the round's file check: what a change adds, as "line N: ..." or a
+       whole-file note. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) | Where-Object { $_ }
+}
+
+function Get-DoneReminders {
+    <# One reminder when a task says done (sent once per task): code changed but no test, in a
+       project that has tests; a new part in src/ or Scripts/ while README.md stayed the same.
+       $Files: rel path -> 'new' or 'existed' (the task's change set). Returns '' when all is well. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, $Files, [string[]]$ProjectPaths)
+    $changed = @($Files.Keys | ForEach-Object { "$_".Replace('\', '/') })
+    if (-not $changed.Count) { return '' }
+    if (-not $PSBoundParameters.ContainsKey('ProjectPaths')) { $ProjectPaths = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\(node_modules|\.git|dist|\.streamhub|source)\\' } | Select-Object -First 3000 | ForEach-Object { $_.FullName.Substring($ProjectRoot.TrimEnd('\').Length + 1).Replace('\', '/') }) }
+    $notes = New-Object System.Collections.Generic.List[string]
+    $code = @($changed | Where-Object { $_ -match '(?i)\.(m?js|cjs|jsx|tsx?|vue|svelte|py|ps[md]?1|cs|java|kt|go|rs|php|rb)$' -and $_ -notmatch $script:TestPathPattern -and $_ -notmatch '(?i)^(Scripts|Runbooks|History|Logs|docs)/' })
+    $tests = @($changed | Where-Object { $_ -match $script:TestPathPattern })
+    $hasTests = @($ProjectPaths | Where-Object { $_ -match $script:TestPathPattern }).Count -gt 0
+    if ($code.Count -and -not $tests.Count -and $hasTests) {
+        $notes.Add("You changed code ($(($code | Select-Object -First 4) -join ', ')) but no test, and this project has tests. Add or update a test for the change; if no test is needed, say why in your done block.")
+    }
+    $readme = @($ProjectPaths | Where-Object { $_ -match '(?i)^README\.md$' }) | Select-Object -First 1
+    $newParts = @($changed | Where-Object { $Files[$_] -eq 'new' -and $_ -match '(?i)^(src|Scripts)/' -and $_ -notmatch $script:TestPathPattern })
+    if ($readme -and $newParts.Count -and -not @($changed | Where-Object { $_ -match '(?i)^README\.md$' }).Count) {
+        $notes.Add("You added $(($newParts | Select-Object -First 4) -join ', '), and README.md does not mention the change. Add a short line to README.md if users or developers need to know about it; if not, say so in your done block.")
+    }
+    if (-not $notes.Count) { return '' }
+    "Before finishing, one check:`n- " + ($notes -join "`n- ") + "`nThen send done again."
+}
+
+Export-ModuleMember -Function Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders

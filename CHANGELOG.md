@@ -6,6 +6,26 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.52] - 2026-10-04
+
+### Added
+
+- Coding guardrails, on what a change adds:
+  - writes into generated folders (`node_modules/`, `dist/`, `.git/`, build output) and lock files are refused;
+  - new dependencies (packages, or scripts and stylesheets from other sites) and risky code (`eval`, `innerHTML` from a variable, `Invoke-Expression`, `shell=True`, SQL built from strings, ...) need your approval, also in auto mode;
+  - debug leftovers and swallowed errors are sent back to Copilot to fix;
+  - a new `.env` that `.gitignore` does not exclude is sent back to Copilot;
+  - a PowerShell file that gets non-ASCII text is saved with a BOM, so Windows PowerShell 5.1 reads it correctly;
+  - absolute paths into a user's folder, code files pushed over 400 lines, large blocks of inline data, images without alt text, buttons and form fields without a label, and new helper scripts without a header or without stopping on errors are sent back to Copilot;
+  - at "done", one reminder per task when code changed without a test (in a project with tests), or a new part was added without a README line.
+- A test that keeps the repository and the built interface free of links to other GitHub repositories.
+
+### Changed
+
+- The start screen lists StreamHub's limitations once Copilot is connected: no Git integration, no MCP support, no skill support, no artefact generator. The README has the same list.
+- Accessibility: every form field and icon-only button in the app now has a label for screen readers (22 places, no visible change).
+- Links to other GitHub repositories were removed: the Kokonut UI component headers (author, licence and website stay), the interface's template README, and the bundled libraries' messages in the build.
+
 ## [v0.1.51] - 2026-10-04
 
 ### Added
@@ -586,7 +606,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.51...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.52...HEAD
+[v0.1.52]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.52
 [v0.1.51]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.51
 [v0.1.50]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.50
 [v0.1.49]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.49

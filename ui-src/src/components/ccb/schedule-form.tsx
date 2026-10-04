@@ -159,7 +159,7 @@ export function ScheduleForm({
       <div className="space-y-1">
         <span className="text-muted-foreground text-xs">What runs</span>
         <div className="flex gap-1">
-        <select className={field} onChange={(e) => setTarget(e.target.value)} value={target}>
+        <select aria-label="What runs" className={field} onChange={(e) => setTarget(e.target.value)} value={target}>
           <option value="chat">A message to Copilot</option>
           {/* A runbook picked with @ that the list does not have (yet) still shows. */}
           {target.startsWith("runbook:") && !runbooks.some((r) => `runbook:${r.name}` === target) && (
@@ -196,7 +196,7 @@ export function ScheduleForm({
         </div>
         {picking && (
           <div className="rounded-md border border-black/10 dark:border-white/10">
-            <input
+            <input aria-label="Find a project file"
               autoFocus
               className="w-full border-black/10 border-b bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
               onChange={(e) => setFilter(e.target.value)}
@@ -229,7 +229,7 @@ export function ScheduleForm({
         )}
       </div>
       {target === "chat" && (
-        <textarea className={cn(field, "min-h-16 resize-y")} onChange={(e) => setText(e.target.value)} placeholder="The message to send, e.g. Update the weekly report" value={text} />
+        <textarea aria-label="Message to send" className={cn(field, "min-h-16 resize-y")} onChange={(e) => setText(e.target.value)} placeholder="The message to send, e.g. Update the weekly report" value={text} />
       )}
 
       <div className="flex gap-1">
@@ -241,7 +241,7 @@ export function ScheduleForm({
       </div>
 
       {mode === "once" ? (
-        <input className={field} onChange={(e) => setAt(e.target.value)} type="datetime-local" value={at} />
+        <input aria-label="Date and time" className={field} onChange={(e) => setAt(e.target.value)} type="datetime-local" value={at} />
       ) : (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-1">
@@ -274,7 +274,7 @@ export function ScheduleForm({
                 </button>
               </span>
             ))}
-            <input
+            <input aria-label="Time to add"
               className="rounded-md border border-black/10 bg-transparent px-1.5 py-0.5 text-xs outline-none dark:border-white/10"
               onChange={(e) => setNewTime(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addTime()}
@@ -288,7 +288,7 @@ export function ScheduleForm({
         </div>
       )}
 
-      <input className={field} onChange={(e) => setTitle(e.target.value)} placeholder="Name (optional)" value={title} />
+      <input aria-label="Schedule name" className={field} onChange={(e) => setTitle(e.target.value)} placeholder="Name (optional)" value={title} />
       <KeepOpenNote>{SCHEDULE_NOTE}</KeepOpenNote>
       {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
       <div className="flex items-center justify-end gap-1">

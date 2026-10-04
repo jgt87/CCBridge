@@ -196,7 +196,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
               )}
               {/* The note goes with Reject only, so it reads as the other choice. */}
               <span className="text-muted-foreground text-xs">or</span>
-              <Input
+              <Input aria-label="Note for Copilot, sent when rejecting"
                 className="h-10 min-w-48 flex-1 text-xs"
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="Optional note for Copilot (sent when rejecting)"

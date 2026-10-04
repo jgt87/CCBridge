@@ -64,13 +64,13 @@ export function FetchPanel({
 
       {adding ? (
         <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
-          <input
+          <input aria-label="Fetch prompt name"
             className="w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30"
             onChange={(e) => setName(e.target.value)}
             placeholder="Name, e.g. meetings today"
             value={name}
           />
-          <textarea
+          <textarea aria-label="Fetch prompt"
             className="min-h-24 w-full resize-y rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30"
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="Prompt, e.g. List my meetings for today with times, attendees and the agenda."

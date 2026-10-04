@@ -82,7 +82,7 @@ export function ClarifyCard({
                 ))}
               </div>
             )}
-            <input className={field} disabled={sent} onChange={(e) => set(i, e.target.value)} placeholder="Your answer" value={answers[i]} />
+            <input aria-label={`Answer to question ${i + 1}`} className={field} disabled={sent} onChange={(e) => set(i, e.target.value)} placeholder="Your answer" value={answers[i]} />
           </div>
         ))}
       </div>
@@ -133,7 +133,7 @@ export function PlanCard({
       </div>
       <div className="whitespace-pre-wrap text-sm">{plan}</div>
       {changing && !sent && (
-        <textarea className={cn(field, "mt-2 min-h-16 resize-y")} onChange={(e) => setFeedback(e.target.value)} placeholder="What should be different?" value={feedback} />
+        <textarea aria-label="What should be different" className={cn(field, "mt-2 min-h-16 resize-y")} onChange={(e) => setFeedback(e.target.value)} placeholder="What should be different?" value={feedback} />
       )}
       <div className="mt-3 flex flex-wrap justify-end gap-1">
         {planId && <span className="mr-auto"><PlanLink onOpenFile={onOpenFile} /></span>}

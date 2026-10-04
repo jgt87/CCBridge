@@ -7,7 +7,6 @@
  * @date: 2025-06-26
  * @license: MIT
  * @website: https://kokonutui.com
- * @github: https://github.com/kokonut-labs/kokonutui
  */
 
 import { cva, type VariantProps } from "class-variance-authority";

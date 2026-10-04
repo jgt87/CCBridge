@@ -1,32 +1,17 @@
-# React + TypeScript + Vite
+# StreamHub web interface
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The source of StreamHub's web app. It builds into `../ui`, which the app serves; target PCs never need Node.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+npm install        # once, on a development PC
+npm run build      # writes ../ui (commit it)
+npm test           # unit tests (Vitest)
+npm run dev        # development server; /api goes to the running app on port 8765
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+- Stack: React, TypeScript, Vite, Tailwind CSS, Kokonut UI components (adapted in `src/components/kokonutui`).
+- Layout: components in `src/components/ccb`, the API client in `src/lib/api.ts`, helpers in `src/lib`.
+- Style: monochrome white and grey, flat buttons; one part per file.
+- The build replaces links to other GitHub repositories in the bundled libraries' messages with plain words (`vite.config.ts`), so the app refers to no repository but its own.
+
+See the main [README](../README.md) and [AGENTS.md](../AGENTS.md) for the whole app.

@@ -69,7 +69,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
       <div className="py-2">
         {about}
         <div className="mt-1.5 flex items-start gap-1">
-          <textarea
+          <textarea aria-label={s.label}
             className={cn(field, "min-h-[4.5rem] w-full flex-1 font-mono text-xs")}
             onBlur={() => draft !== asDraft(s.value) && save(draft.split("\n").map((l) => l.trim()).filter(Boolean))}
             onChange={(e) => setDraft(e.target.value)}
@@ -106,7 +106,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
             ))}
           </div>
         ) : s.type === "select" ? (
-          <select className={field} onChange={(e) => save(e.target.value)} value={draft}>
+          <select aria-label={s.label} className={field} onChange={(e) => save(e.target.value)} value={draft}>
             {(s.options ?? []).map((o) => (
               <option key={o} value={o}>
                 {o}
@@ -114,7 +114,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
             ))}
           </select>
         ) : (
-          <input
+          <input aria-label={s.label}
             className={field}
             max={s.max}
             min={s.min}

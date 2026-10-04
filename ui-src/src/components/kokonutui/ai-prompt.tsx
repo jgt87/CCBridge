@@ -7,7 +7,6 @@
  * @date: 2025-06-26
  * @license: MIT
  * @website: https://kokonutui.com
- * @github: https://github.com/kokonut-labs/kokonutui
  *
  * CCBridge: the model selector became the agent mode selector (ask / auto / plan),
  * the paperclip attaches a project file as @path, and the value is controlled by the parent.
@@ -276,7 +275,7 @@ export default function AI_Prompt({
         <div className="relative">
           <div className="relative flex flex-col">
             <div className="overflow-y-auto" style={{ maxHeight: "400px" }}>
-              <Textarea
+              <Textarea aria-label="Message"
                 className={cn(
                   "w-full resize-none rounded-xl rounded-b-none border-none bg-black/5 px-4 py-3 placeholder:text-black/70 focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-white/5 dark:text-white dark:placeholder:text-white/50",
                   "min-h-[72px]"

@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -1492,7 +1492,7 @@ function Invoke-AgentAction {
         if (-not $Action.arg) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed' }); return @{ ok = $false; summary = "$($Action.type) without a path"; output = 'error: the block needs a path after the action name' } }
         try { $null = Assert-Writable $root $Action.arg } catch {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = $_.Exception.Message })
-            return @{ ok = $false; summary = "$($Action.type) refused (source data)"; output = "error: $($_.Exception.Message)" }
+            return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused"; output = "error: $($_.Exception.Message)" }
         }
         if ($Action.type -eq 'write') {
             $content = $Action.body
@@ -1543,6 +1543,17 @@ function Invoke-AgentAction {
         $newSecrets = @(foreach ($s in @(Find-Secrets $newText)) { $k = $s -replace '^line \d+: ', ''; if ($oldSecrets[$k]) { $oldSecrets[$k]-- } else { $s } })
         if ($newSecrets.Count) {
             $riskWarning = "This change adds what looks like a secret ($(($newSecrets | Select-Object -First 3) -join '; ')). Secrets in project files end up in OneDrive and in any copy of the project; prefer a setting or environment variable. Approve only if it is meant."
+        }
+        # New dependencies and risky code (eval, innerHTML from a variable, shell=True, SQL from
+        # strings, ...): a person approves them, also in auto mode (Guardrails.psm1).
+        $guard = @()
+        $deps = @(Find-NewDependencies $Action.arg $oldText $newText)
+        if ($deps.Count) { $guard += "This change adds $(if ($deps.Count -eq 1) { 'a dependency' } else { "$($deps.Count) dependencies" }): $(($deps | Select-Object -First 5) -join ', '). Each one brings someone else's code into the project; approve only what you trust." }
+        $risky = @(Find-RiskyCode $Action.arg $oldText $newText)
+        if ($risky.Count) { $guard += "This change adds risky code: $(($risky | Select-Object -First 4) -join '; '). Approve only if it is needed and its input is trusted." }
+        if ($guard.Count) {
+            Write-CCBLog info agent "Guardrail approval needed for $($Action.arg)" @{ dependencies = $deps.Count; risky = $risky.Count }
+            $riskWarning = (@(@($riskWarning) + $guard) | Where-Object { $_ }) -join ' '
         }
         # Code left out with a placeholder ("// rest of the code unchanged") would be lost: refuse.
         $ph = Find-PlaceholderLine $oldText $newText
@@ -1843,6 +1854,7 @@ function Invoke-AgentTurn {
         $failSeen = @{}; $stopLoop = $false   # the same step failing the same way: warn at 2, stop at 3
         $syntaxNudges = 0   # times "done" was refused because a changed file has a syntax error
         $verifyNudges = 0   # times "done" was refused because the project's verify command failed
+        $doneReminded = $false   # the one reminder at "done" (tests, README) was sent
         $ev = @{ syntaxLast = $null; page = $null; reviewed = $false; verify = $null }   # for the evidence file
         $msgStart = [int]$State.MessagesSent
         $lastReply = ''; $doneText = ''   # for the suggested next steps after the turn
@@ -1957,12 +1969,14 @@ function Invoke-AgentTurn {
                         $rel = $p.Replace('\', '/')
                         $before = ''
                         if ($checkpoint.Files[$rel] -eq 'existed') { $bk = Join-Path $checkpoint.Dir ($rel.Replace('/', '\')); if (Test-Path -LiteralPath $bk) { $before = (Read-TextFile $bk).Text } }
-                        foreach ($issue in @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot)) { "${rel}: $issue" }
+                        foreach ($issue in @(@(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot) + @(Find-ChangeSmells $rel $before $now.Text) + @(Find-QualityIssues $rel $before $now.Text))) { "${rel}: $issue" }
                     } catch { Write-CCBLogError agent "File check $p" $_ }
                 }) + @(if ("$($State.Config.pageCheck)" -ne 'off') { Test-ScriptSyntax $State $roundChanged }))
                 # Import index: the changed files again, and what the round broke elsewhere (an import
                 # of a moved file, an id, function or hook others still use).
                 try { $syntax = @($syntax) + @(Update-ImportsAfterRound $State.ProjectRoot $roundChanged) } catch { Write-CCBLogError agent 'import index' $_ }
+                # A new .env file that .gitignore does not cover would end up in git.
+                try { $syntax = @($syntax) + @(Find-UnignoredEnv $State.ProjectRoot $roundChanged) } catch { Write-CCBLogError agent 'env check' $_ }
                 $ev.syntaxLast = @($syntax)
                 if ($syntax.Count) {
                     Write-CCBLog info agent 'File check problems after this round' @{ count = $syntax.Count }
@@ -1974,6 +1988,17 @@ function Invoke-AgentTurn {
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
             if ($stopLoop) { break }
             if ($isDone) {
+                # Once per task: code changed without a test (in a project with tests), or a new part
+                # in src/ or Scripts/ without a README line (Get-DoneReminders). Not for issue fixes.
+                if (-not $doneReminded -and $checkpoint.Files.Count -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.Cancel) {
+                    $doneReminded = $true
+                    $reminder = try { Get-DoneReminders $State.ProjectRoot $checkpoint.Files } catch { Write-CCBLogError agent 'done reminders' $_; '' }
+                    if ($reminder) {
+                        Add-AgentEvent $State 'status' @{ text = 'Before finishing: Copilot is reminded once about tests or the README.' }
+                        $message = $reminder
+                        continue
+                    }
+                }
                 # The project's own check (verify: in AGENTS.md) after a task that changed files.
                 $verifyCmd = Get-ProjectVerify $State.ProjectRoot
                 if ($verifyCmd -and $checkpoint.Files.Count -and $State.Mode -ne 'plan') {

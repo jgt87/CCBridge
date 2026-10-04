@@ -20,6 +20,7 @@ import ActionSearchBar, { type Action } from "@/components/kokonutui/action-sear
 import AI_Prompt, { type PromptMode } from "@/components/kokonutui/ai-prompt";
 import CommandButton from "@/components/kokonutui/command-button";
 import Loader from "@/components/kokonutui/loader";
+import { LimitationsNote } from "@/components/ccb/limitations-note";
 import { ErrorBoundary } from "@/components/ccb/error-boundary";
 import { CopilotStatus } from "@/components/ccb/copilot-status";
 import { SettingsPanel } from "@/components/ccb/settings-panel";
@@ -412,7 +413,7 @@ export default function App() {
                 Show in folder
               </button>
             )}
-            <button onClick={() => setNotice(null)} type="button">
+            <button aria-label="Dismiss" title="Dismiss" onClick={() => setNotice(null)} type="button">
               <X className="h-4 w-4" />
             </button>
           </span>
@@ -422,7 +423,7 @@ export default function App() {
       {error && (
         <div className="flex items-center justify-between bg-rose-500/10 px-4 py-2 text-rose-600 text-sm dark:text-rose-400">
           {error}
-          <button onClick={() => setError("")} type="button">
+          <button aria-label="Dismiss the error" title="Dismiss" onClick={() => setError("")} type="button">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -539,6 +540,7 @@ export default function App() {
                             Type <span className="font-mono">@</span> or use the @ button to attach files.
                           </p>
                         </div>
+                        {state.copilot === "ready" && <LimitationsNote />}
                       </>
                     )}
                   </div>

@@ -59,14 +59,14 @@ export function RunbooksPanel({
 
       {adding ? (
         <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
-          <select className={field} onChange={(e) => setTemplate(e.target.value)} value={chosen}>
+          <select aria-label="Runbook template" className={field} onChange={(e) => setTemplate(e.target.value)} value={chosen}>
             {templates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.title}
               </option>
             ))}
           </select>
-          <input className={field} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. meetings next week" value={name} />
+          <input aria-label="Runbook name" className={field} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. meetings next week" value={name} />
           {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
           <div className="flex justify-end gap-1">
             <button className={flatButton} onClick={() => setAdding(false)} type="button">

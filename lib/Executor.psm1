@@ -4,6 +4,7 @@
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Log.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Guardrails.psm1')
 
 $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
@@ -40,7 +41,12 @@ function Read-TextFile([string]$Path) {
 
 function Write-TextFile([string]$Path, [string]$Text, [bool]$Bom = $false, [bool]$Crlf = $false, [string]$Encoding = '') {
     <# Writes in the given encoding (as read, or the default for a new file); without one, UTF-8
-       with or without BOM. #>
+       with or without BOM. A PowerShell file in UTF-8 without BOM that now holds non-ASCII text
+       gets a BOM: Windows PowerShell 5.1 reads BOM-less files as ANSI and would garble it. #>
+    if ($Path -match '(?i)\.ps[md]?1$' -and $Encoding -in '', 'utf8' -and $Text -match '[^\x00-\x7F]') {
+        if ($Encoding -eq 'utf8' -or -not $Bom) { Write-CCBLog verbose executor "Saved with a BOM so Windows PowerShell 5.1 reads its non-ASCII text: $Path" }
+        $Bom = $true; $Encoding = 'utf8bom'
+    }
     $dir = Split-Path -Parent $Path
     if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir -Force }
     $t = $Text.Replace("`r`n", "`n")
@@ -798,6 +804,8 @@ function Assert-Writable([string]$ProjectRoot, [string]$Path) {
     if ($rel -match '(?i)^\.streamhub(/|$)') {
         throw "$Path is in .streamhub/, which holds the helper program's own records (issues, schedules). Do not write there; put your file elsewhere in the project."
     }
+    $generated = Test-GeneratedPath $rel $ProjectRoot
+    if ($generated) { throw "not written: $generated." }
     if (Test-InSource $ProjectRoot $full) {
         throw "$Path is in source/, which holds the user's source data and is read-only. Leave it unchanged and write your own working file elsewhere in the project (for example work/$([IO.Path]::GetFileName($full)))."
     }

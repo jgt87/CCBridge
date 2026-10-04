@@ -53,7 +53,7 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
           if (name.trim()) create();
         }}
       >
-        <Input
+        <Input aria-label="New project name"
           className="h-12 flex-1"
           onChange={(e) => setName(e.target.value)}
           placeholder="New project name, e.g. budget-tracker"
