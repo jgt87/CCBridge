@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import { Input } from "@/components/ui/input";
 import { api, type ProjectInfo } from "@/lib/api";
+import { overviewText } from "@/lib/project-overview";
 
 export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
   const [root, setRoot] = useState("");
@@ -76,6 +77,7 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
             <span className="flex-1">
               <span className="block font-medium text-sm">{p.name}</span>
               <span className="block text-muted-foreground text-xs">changed {p.modified.replace("T", " ")}</span>
+              {overviewText(p.overview) && <span className="block text-muted-foreground text-xs">{overviewText(p.overview)}</span>}
             </span>
             <FolderOpen className="h-4 w-4 text-muted-foreground" />
           </button>

@@ -6,6 +6,7 @@
   "promptCharBudget": 75000,
   "resultCharBudget": 60000,
   "replyTimeoutSec": 300,
+  "agentTimeoutSec": 1800,
   "commandTimeoutSec": 180,
   "rolloverMargin": 2,
   "messagesPerChat": 30,

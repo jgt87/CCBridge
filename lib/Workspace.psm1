@@ -25,6 +25,33 @@ function Test-UnderOneDrive([string]$Path) {
     $full.StartsWith($od + '\', [StringComparison]::OrdinalIgnoreCase)
 }
 
+$script:LanguageByExt = @{
+    '.html' = 'HTML'; '.htm' = 'HTML'; '.css' = 'CSS'; '.scss' = 'CSS'; '.less' = 'CSS'
+    '.js' = 'JavaScript'; '.mjs' = 'JavaScript'; '.cjs' = 'JavaScript'; '.jsx' = 'JavaScript'
+    '.ts' = 'TypeScript'; '.tsx' = 'TypeScript'; '.vue' = 'Vue'; '.svelte' = 'Svelte'
+    '.py' = 'Python'; '.pyw' = 'Python'; '.ps1' = 'PowerShell'; '.psm1' = 'PowerShell'; '.psd1' = 'PowerShell'
+    '.cs' = 'C#'; '.java' = 'Java'; '.go' = 'Go'; '.rs' = 'Rust'; '.php' = 'PHP'; '.rb' = 'Ruby'
+    '.sql' = 'SQL'; '.sh' = 'Shell'; '.cmd' = 'Batch'; '.bat' = 'Batch'
+}
+
+function Get-ProjectOverview {
+    <# Size and type of a project for the project list: files, bytes, the main languages (most
+       files first, at most 3) and whether it has source data. Reads file names and sizes only
+       (nothing is opened, so OneDrive downloads nothing). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot)
+    $files = @(Get-ProjectFiles $ProjectRoot)
+    $count = @{}
+    $bytes = [int64]0; $source = 0
+    foreach ($f in $files) {
+        $bytes += [int64]$f.size
+        if ($f.path -match '(?i)^source/') { $source++; continue }
+        $lang = $script:LanguageByExt[[IO.Path]::GetExtension($f.path).ToLowerInvariant()]
+        if ($lang) { $count[$lang] = 1 + [int]$count[$lang] }
+    }
+    $top = @($count.GetEnumerator() | Sort-Object @{ Expression = 'Value'; Descending = $true }, @{ Expression = 'Key' } | Select-Object -First 3 | ForEach-Object { $_.Key })
+    [pscustomobject]@{ files = $files.Count; bytes = $bytes; languages = $top; sourceFiles = $source; capped = ($files.Count -ge 5000) }
+}
+
 function Get-CCBridgeProjects {
     param([string]$FolderName = 'CCBridge')
     $root = Get-ProjectsRoot $FolderName
@@ -288,6 +315,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile

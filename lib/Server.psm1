@@ -145,7 +145,13 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ events = @(Get-AgentEvents $State $after); state = (Get-StateSnapshot $State) }
         }
         '^GET /api/projects$' {
-            return Send-Json $Ctx @{ root = (Get-ProjectsRoot $State.Config.projectsFolder); projects = @(Get-CCBridgeProjects $State.Config.projectsFolder) }
+            # Each project with its size and type (file names and sizes only).
+            $list = @(Get-CCBridgeProjects $State.Config.projectsFolder | ForEach-Object {
+                $pr = $_; $o = $null
+                try { $o = Get-ProjectOverview $pr.path } catch { Write-CCBLogError server "project overview $($pr.name)" $_ }
+                [pscustomobject]@{ name = $pr.name; path = $pr.path; modified = $pr.modified; overview = $o }
+            })
+            return Send-Json $Ctx @{ root = (Get-ProjectsRoot $State.Config.projectsFolder); projects = $list }
         }
         '^POST /api/projects$' {
             $b = Read-JsonBody $Ctx
@@ -382,6 +388,12 @@ function Invoke-ApiRequest($Ctx, $State) {
             if (-not $b.text -or -not $b.text.Trim()) { throw 'Empty message' }
             # While Copilot is busy the message waits in the queue.
             $task = @{ kind = 'chat'; text = [string]$b.text }
+            # A message to one of Copilot's agents (picked in the message box), or an answer to its plan.
+            if ("$($b.agent)" -in 'researcher', 'analyst') {
+                $t = @{ kind = 'agent'; agent = [string]$b.agent; text = [string]$b.text; followUp = [bool]$b.agentAnswer }
+                $null = Submit-AgentTask $State $t 'user'
+                return Send-Json $Ctx @{ ok = $true }
+            }
             $title = ''
             # The request's section in PLAN.md, when this message belongs to a clarify-first flow.
             $planId = if ($b.planId -and (Test-PlanId ([string]$b.planId))) { [string]$b.planId } else { $null }

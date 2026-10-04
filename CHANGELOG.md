@@ -6,6 +6,18 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.61] - 2026-10-04
+
+### Added
+
+- Researcher and Analyst in StreamHub: the *Ask* menu in the message box (next to *Response*) sends the next message to Copilot, Researcher or Analyst. An agent gets the message as typed, in a new Copilot chat, mentioned the way a person does it (picked from Copilot's `@` list); when the agent is not available nothing is sent. StreamHub waits up to 30 minutes for an agent (new setting Agent timeout). Researcher's research plan gets a card to answer its questions or let it go ahead with its own assumptions (StreamHub never answers for you). Each answer is tagged with the agent that gave it, read from Copilot's reply, with a note when Copilot answered itself instead.
+- Choose a project: each project shows its size and type under the last-changed date, for example "42 files · 1.2 MB · HTML, JavaScript, CSS · source data" (the main languages by number of files). Only file names and sizes are read, so OneDrive downloads nothing.
+
+### Fixed
+
+- `agent-test.cmd`: the agent check now reads the agent name the reply stream gives (`compliantAgentName`, for example `ResearcherAgent` or `AnalystAgent`). It said there was "no sign that Analyst answered" for a run where Analyst did answer, because the page does not show the agent's name for Analyst.
+- `agent-test.cmd` still kept waiting after a finished Researcher run: Teams' notification connection counted as reply data, and the empty reply Copilot adds after an agent's report kept the reply text from settling. Only Copilot's own connections count now, and Copilot's completion record after the last message also ends the run.
+
 ## [v0.1.60] - 2026-10-04
 
 ### Changed
@@ -703,7 +715,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.60...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.61...HEAD
+[v0.1.61]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.61
 [v0.1.60]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.60
 [v0.1.59]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.59
 [v0.1.58]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.58

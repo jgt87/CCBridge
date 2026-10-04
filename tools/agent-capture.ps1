@@ -92,6 +92,9 @@ function Add-Payload([string]$Conn, [string]$Dir, [string]$Payload) {
     # Keep-alive pings (SignalR type 6, empty records) arrive every few seconds after a reply; they
     # are not activity, so they do not count for "the run is quiet" or the silent gaps.
     $active = @($Payload.Split($sep) | Where-Object { $_.Trim() -and $_.Trim() -notmatch '^\{\s*"type"\s*:\s*6\s*\}$' -and $_.Trim() -ne '{}' }).Count -gt 0
+    # Only Copilot's own connections carry the reply; others (Teams notifications on ws1 and the
+    # like) send keep-alives that must not keep a finished run open.
+    if ($Conn -notin 'chathub', 'streamhub', 'sse') { $active = $false }
     if ($Dir -eq 'in') {
         if ($active) {
             if ($stats.lastFrame -gt 0 -and ($now - $stats.lastFrame) -ge 15) { $stats.gaps.Add(('{0:N0}s at {1:N0}s' -f ($now - $stats.lastFrame), $stats.lastFrame)) }
@@ -107,7 +110,7 @@ function Add-Payload([string]$Conn, [string]$Dir, [string]$Payload) {
         try { $o = $rec | ConvertFrom-Json } catch { $parts.Add("non-json($($rec.Length))"); continue }
         $kind = if ($null -ne $o.type) { "type$($o.type)$(if ($o.target) { ":$($o.target)" })" } elseif ($o -is [pscustomobject]) { '{' + ((@($o.PSObject.Properties.Name) | Select-Object -First 3) -join ',') + '}' } else { 'value' }
         $stats.kinds[$kind] = 1 + [int]$stats.kinds[$kind]
-        if ($kind -like 'type2*' -and $Dir -eq 'in') { $stats.type2.Add((T)) }
+        if ($kind -like 'type2*' -and $Dir -eq 'in') { $stats.type2.Add((T)); $stats.lastType2 = $clock.Elapsed.TotalSeconds }
         $words = New-Object 'System.Collections.Generic.HashSet[string]'
         $newPaths = New-Object System.Collections.Generic.List[string]
         $steps = New-Object System.Collections.Generic.List[string]
@@ -487,7 +490,10 @@ while ($clock.Elapsed.TotalSeconds -lt $deadline) {
                 # (length 0 or still moving): Stop gone after it showed and 30 s without reply data
                 # also counts as finished.
                 $textDone = $po.lastTextLen -gt 0 -and $po.lastTextLen -eq $auto.lastLen -and ($quietFrames -ge 20 -or ($auto.sawStop -and ($now - $auto.stableSince) -ge 20))
-                $settled = -not $po.stop -and ($textDone -or ($auto.sawStop -and $quietFrames -ge 30))
+                # Copilot's completion record (type2) after the last send also ends it: agents add an
+                # empty reply after their report, so the page's last reply can stay empty.
+                $completed = $auto.sawStop -and [double]$stats.lastType2 -gt $auto.sentAt -and $quietFrames -ge 20   # Researcher sends one before its plan, so not at once
+                $settled = -not $po.stop -and ($textDone -or $completed -or ($auto.sawStop -and $quietFrames -ge 30))
                 $auto.why = "reply text $($po.lastTextLen) chars, stable $([int]($now - $auto.stableSince)) s, Stop $(if ($po.stop) { 'showing' } elseif ($auto.sawStop) { 'gone' } else { 'not seen yet' })"
                 $auto.lastLen = $po.lastTextLen
                 if (-not $settled) { $auto.doneSince = $null }
@@ -561,6 +567,12 @@ if ($Agent -and -not $SkipMention) {
     # Did the agent answer? Words in the reply stream that name it, and its name next to the reply.
     $want = $AgentName.ToLowerInvariant()
     $wire = @($stats.words.Keys | Where-Object { $_.ToLowerInvariant() -match [regex]::Escape($want) -or $_ -match '(?i)research|analyst|deep.?reason' })
+    # The stream names the agent that answered: "compliantAgentName":"ResearcherAgent" / "AnalystAgent".
+    try {
+        $framesFile = Join-Path $out 'frames.jsonl'   # closed (and so complete) by now
+        $agents = @([regex]::Matches([IO.File]::ReadAllText($framesFile), '"compliantAgentName"\s*:\s*"([A-Za-z]{1,40})"') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+        foreach ($a in $agents) { $wire += "compliantAgentName=$a" }
+    } catch { }
     $pageSays = [bool]$agentPageSays
     $verdict = if ($wire.Count -or $pageSays) { "the agent answered" } else { "no sign that $AgentName answered (it may have been plain Copilot)" }
     $runLog.Add("$(T)  agent check: stream words naming it: $(if ($wire.Count) { $wire -join ', ' } else { 'none' }); name shown with the reply: $(if ($pageSays) { 'yes' } else { 'no' }) => $verdict")

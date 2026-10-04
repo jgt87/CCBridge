@@ -13,6 +13,36 @@ export interface ClarifyQuestion {
   options: string[];
 }
 
+/** Researcher's research plan waits for the person: answer its questions, or let it go ahead. */
+export function AgentPlanCard({ agent, onSend }: { agent: string; onSend: (text: string, opts: ChatOptions) => void }) {
+  const [answer, setAnswer] = useState("");
+  const [sent, setSent] = useState(false);
+  const key = agent.toLowerCase() === "analyst" ? "analyst" : "researcher";
+  const go = (text: string) => {
+    setSent(true);
+    onSend(text, { agent: key, agentAnswer: true });
+  };
+  return (
+    <div className="space-y-2 rounded-lg border border-black/10 p-3 dark:border-white/10">
+      <div className="flex items-center gap-2 font-medium text-sm">
+        <MessageCircleQuestion className="h-4 w-4 text-muted-foreground" /> {agent} made a research plan and waits for you
+      </div>
+      <p className="text-muted-foreground text-xs">
+        The plan and its questions are above. Answer them here, or let {agent} go ahead with its own assumptions. It then works for several minutes.
+      </p>
+      <textarea aria-label={`Your answer to ${agent}`} className={cn(field, "min-h-[72px]")} disabled={sent} onChange={(e) => setAnswer(e.target.value)} placeholder="Your answers, e.g. the period, the sources to use" value={answer} />
+      <div className="flex justify-end gap-1">
+        <button className={flatButton} disabled={sent} onClick={() => go("Proceed with your best assumptions and list them at the start of the report.")} type="button">
+          Go ahead with its assumptions
+        </button>
+        <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={sent || !answer.trim()} onClick={() => go(answer.trim())} type="button">
+          {sent ? "Sent" : "Send answer"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Clarify first: Copilot's questions as a short form; the answers start a plan. */
 /** "Open PLAN.md": every decision of this request is collected there. */
 function PlanLink({ onOpenFile }: { onOpenFile?: (path: string) => void }) {

@@ -89,6 +89,8 @@ export interface AgentEvent {
     | "clarify"
     | "plan-ready"
     | "next-steps"
+    /** Researcher made a research plan and waits for the person's answers. */
+    | "agent-plan"
     /** Settings > Privacy > Clear chat history: the chat shows nothing from before it. */
     | "history-cleared";
   time: string;
@@ -123,6 +125,8 @@ export interface AgentEvent {
   hint?: string;
   detail?: string;
   version?: string;
+  /** user: the agent the message went to; assistant: the agent that answered (from Copilot's stream). */
+  agent?: string;
   name?: string;
   path?: string;
   /** undo: per file what came back and what went. */
@@ -221,10 +225,22 @@ export interface Reference {
   kind: string | null;
 }
 
+/** Size and type of a project, from its file names and sizes. */
+export interface ProjectOverview {
+  files: number;
+  bytes: number;
+  /** Main languages, most files first (at most 3). */
+  languages: string[];
+  sourceFiles: number;
+  /** The listing stopped at 5000 files. */
+  capped: boolean;
+}
+
 export interface ProjectInfo {
   name: string;
   path: string;
   modified: string;
+  overview?: ProjectOverview | null;
 }
 
 /** How a message is sent: as a coding task, clarify first, plan first, with Think deeper. */
@@ -241,6 +257,10 @@ export interface ChatOptions {
   skipped?: boolean;
   feedback?: string;
   approve?: boolean;
+  /** Ask one of Copilot's agents (it is mentioned in the message). */
+  agent?: "researcher" | "analyst";
+  /** An answer to the agent's plan: goes into the agent's chat, without a new mention. */
+  agentAnswer?: boolean;
 }
 
 /** A saved code review (reviews/<id>.json) in the list. */

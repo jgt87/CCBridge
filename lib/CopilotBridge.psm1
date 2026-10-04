@@ -437,10 +437,92 @@ function Send-CdpKey {
     $null = Invoke-Cdp $Session 'Input.dispatchKeyEvent' @{ type = 'keyUp'; key = $Key; code = $Code; windowsVirtualKeyCode = $KeyCode; modifiers = $Modifiers }
 }
 
+function Get-AgentDisplayName([string]$Name) {
+    <# 'researcher' / 'ResearcherAgent' -> 'Researcher'; 'analyst' / 'AnalystAgent' -> 'Analyst'. #>
+    $n = ("$Name" -replace '(?i)agent$', '').Trim()
+    if (-not $n) { return '' }
+    $n.Substring(0, 1).ToUpperInvariant() + $n.Substring(1).ToLowerInvariant()
+}
+
+function Get-ReplyAgent($Item) {
+    <# The agent that answered, from the completion record: the turn's messages carry
+       gptIdentifiers with compliantAgentName (for example ResearcherAgent, AnalystAgent). '' for
+       Copilot itself. #>
+    foreach ($m in @($Item.messages)) {
+        foreach ($g in @($m.gptIdentifiers)) {
+            if ($g -and $g.compliantAgentName) { return (Get-AgentDisplayName ([string]$g.compliantAgentName)) }
+        }
+    }
+    ''
+}
+
+function Add-CopilotMention {
+    <# Starts the message with a real mention of an agent (Researcher, Analyst): types @ and the
+       name, finds the entry in the list that opens (by its visible name; it has no standard role)
+       and clicks it with the mouse, as a person would. Plain "@Name" text does not invoke the agent.
+       Throws when the list has no such entry (the agent is not available for this account). #>
+    param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)][string]$Name)
+    $s = $Bridge.Session
+    $editorSel = ConvertTo-JsString $Bridge.Selectors.editor
+    $null = Invoke-CdpEval $s "(() => { const e = document.querySelector($editorSel); if (e) e.focus(); return !!e; })()"
+    for ($try = 0; $try -lt 3 -and (Get-CopilotInputLength $Bridge) -gt 0; $try++) {
+        Send-CdpKey $s 'a' 'KeyA' 65 2 @('selectAll')
+        Send-CdpKey $s 'Backspace' 'Backspace' 8
+        Start-Sleep -Milliseconds 150
+    }
+    $null = Invoke-Cdp $s 'Input.insertText' @{ text = '@' }
+    Start-Sleep -Milliseconds 1200
+    $null = Invoke-Cdp $s 'Input.insertText' @{ text = $Name }
+    $want = ConvertTo-JsString $Name.ToLowerInvariant()
+    $findJs = @"
+(() => {
+  const want = $want;
+  const editor = document.querySelector($editorSel);
+  const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const first = (e) => ((e.innerText || '').trim().split('\n')[0] || '').trim().toLowerCase();
+  const all = [...document.querySelectorAll('body *')].filter(e => !(editor && (editor === e || editor.contains(e))) && vis(e) && first(e) === want);
+  const inner = all.filter(e => !all.some(o => o !== e && e.contains(o)));
+  if (!inner.length) return '';
+  const inPopup = (e) => !!e.closest('[role=menu], [role=listbox], [id^=input-listbox], [id^=peek-listbox], [role=dialog], [data-portal-node]');
+  inner.sort((a, b) => inPopup(b) - inPopup(a));
+  if (!inPopup(inner[0])) return '';
+  const hit = inner[0].closest('[role=menuitem], [role=option], [role=button], button, li, [tabindex]') || inner[0];
+  hit.scrollIntoView({ block: 'nearest' });
+  const r = hit.getBoundingClientRect();
+  return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+})()
+"@
+    $found = $null
+    $until = (Get-Date).AddSeconds(6)
+    while (-not $found -and (Get-Date) -lt $until) {
+        $j = Invoke-CdpEval $s $findJs
+        if ($j) { $found = $j | ConvertFrom-Json } else { Start-Sleep -Milliseconds 300 }
+    }
+    if (-not $found) {
+        Send-CdpKey $s 'a' 'KeyA' 65 2 @('selectAll'); Send-CdpKey $s 'Backspace' 'Backspace' 8
+        Write-CCBLog info bridge "No entry named $Name in Copilot's @ list"
+        throw "Copilot's @ list has no entry named ${Name}: the agent is not available for this account (or Copilot names it differently)."
+    }
+    # A real mouse click: the list ignores a scripted click. Never press Enter here (it sends).
+    foreach ($t in 'mouseMoved', 'mousePressed', 'mouseReleased') {
+        $ev = @{ type = $t; x = [double]$found.x; y = [double]$found.y; button = 'left'; clickCount = 1 }
+        if ($t -eq 'mouseMoved') { $ev.button = 'none'; $ev.clickCount = 0 }
+        $null = Invoke-Cdp $s 'Input.dispatchMouseEvent' $ev
+        Start-Sleep -Milliseconds 60
+    }
+    Start-Sleep -Milliseconds 1000
+    $plainJs = "(() => { const e = document.querySelector($editorSel); return !!e && [...e.querySelectorAll('[data-lexical-text=true]')].some(x => (x.innerText || '').toLowerCase().includes('@' + $want)) })()"
+    if (Invoke-CdpEval $s $plainJs) {
+        Send-CdpKey $s 'a' 'KeyA' 65 2 @('selectAll'); Send-CdpKey $s 'Backspace' 'Backspace' 8
+        throw "Copilot did not turn @$Name into a mention; the message was not sent."
+    }
+    Write-CCBLog info bridge "Mentioned $Name in the message box"
+}
+
 function Set-CopilotInput {
     <# Replaces the message box contents with $Text. The box is a Lexical editor, which ignores
        execCommand, so it is cleared with real key presses and the result is verified. #>
-    param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)][string]$Text)
+    param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)][string]$Text, [switch]$Append)
     $Text = $Text.Replace("`r`n", "`n")   # a CR would land in the editor as an extra character
     $s = $Bridge.Session
     $editorSel = ConvertTo-JsString $Bridge.Selectors.editor
@@ -449,14 +531,21 @@ function Set-CopilotInput {
         if (-not (Wait-CopilotEditor $Bridge -TimeoutSec 15)) { throw "Copilot message box not found; $(Format-PageSnapshot (Get-CopilotPageSnapshot $Bridge))" }
         $null = Invoke-CdpEval $s "(() => { const e = document.querySelector($editorSel); if (e) e.focus(); return !!e; })()"
     }
-    for ($try = 0; $try -lt 3 -and (Get-CopilotInputLength $Bridge) -gt 0; $try++) {
-        Send-CdpKey $s 'a' 'KeyA' 65 2 @('selectAll')   # modifiers 2 = Ctrl
-        Send-CdpKey $s 'Backspace' 'Backspace' 8
-        Start-Sleep -Milliseconds 150
+    $before = 0
+    if ($Append) {
+        # After a mention: type behind it (Add-CopilotMention left the cursor there).
+        $before = Get-CopilotInputLength $Bridge
+        $Text = ' ' + $Text
+    } else {
+        for ($try = 0; $try -lt 3 -and (Get-CopilotInputLength $Bridge) -gt 0; $try++) {
+            Send-CdpKey $s 'a' 'KeyA' 65 2 @('selectAll')   # modifiers 2 = Ctrl
+            Send-CdpKey $s 'Backspace' 'Backspace' 8
+            Start-Sleep -Milliseconds 150
+        }
+        if ((Get-CopilotInputLength $Bridge) -gt 0) { Write-CCBLog info bridge 'Could not clear the message box' @{ chars = (Get-CopilotInputLength $Bridge) }; throw 'could not clear the Copilot message box' }
     }
-    if ((Get-CopilotInputLength $Bridge) -gt 0) { Write-CCBLog info bridge 'Could not clear the message box' @{ chars = (Get-CopilotInputLength $Bridge) }; throw 'could not clear the Copilot message box' }
 
-    $expected = $Text.Replace("`r", '').Replace("`n", '').Length
+    $expected = $before + $Text.Replace("`r", '').Replace("`n", '').Length
     # The page can rebuild the message box just after it appeared (first prompt after connecting);
     # text typed into the old box is then lost. An empty box after typing is retried.
     for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -471,7 +560,9 @@ function Set-CopilotInput {
         $null = Wait-CopilotEditor $Bridge -TimeoutSec 10
         $null = Invoke-CdpEval $s "(() => { const e = document.querySelector($editorSel); if (!e) return false; e.focus(); return true; })()"
     }
-    if ($actual -ne $expected) {
+    # A mention counts as a few characters of its own (Copilot shows it as a chip).
+    $fits = if ($Append) { $actual -ge $expected -and $actual -le $expected + 4 } else { $actual -eq $expected }
+    if (-not $fits) {
         # An empty box is often Copilot refusing input: its daily limit is reached (it shows a banner).
         $st = try { Get-PageReplyState $Bridge } catch { $null }
         if ($st -and $st.bar -and $st.bar -match $script:LimitPattern) { Write-CCBLog info bridge 'Copilot shows a usage limit; it does not accept a prompt' @{ message = $st.bar }; throw "Copilot does not accept prompts: $($st.bar)" }
@@ -721,6 +812,10 @@ function Complete-Reply {
         References     = @(Get-ReplyReferences $botMsg)          # emails, files, chats or web pages Copilot cited
         ProposedActions = @(Get-ProposedActions $Item)           # Microsoft 365 actions waiting for a person
         ActionClaims   = @(Get-ActionClaims $text)
+        Agent          = (Get-ReplyAgent $Item)                 # Researcher, Analyst, or '' for Copilot itself
+        Origin         = [string]$botMsg.contentOrigin
+        # Researcher first answers with a research plan and questions, then waits for the person.
+        IsPlan         = ([string]$botMsg.contentOrigin -match '(?i)researcher-planning')
     }
 }
 
@@ -991,17 +1086,18 @@ function Send-CopilotPrompt {
         [int]$TimeoutSec = 300,
         [scriptblock]$OnProgress,
         [scriptblock]$CancelCheck,   # returns $true to stop now: Copilot's Stop is pressed and Cancelled = $true is returned
-        [int]$StallSec = 90          # no data from Copilot this long: it hangs; press Stop and report NoAnswer
+        [int]$StallSec = 90,         # no data from Copilot this long: it hangs; press Stop and report NoAnswer
+        [string]$Agent = ''          # Researcher or Analyst: mentioned at the start of the message
     )
     Use-CopilotLock {
-        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec
+        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
         if ($r.Result -eq 'Lost') {
             # The request never reached Copilot's answer stream (seen when the page opens that
             # connection only at the first send). The connection exists now: send it once more.
             Write-CCBLog info bridge 'No part of the reply arrived; sending the prompt again'
             Add-TimelineEvent $Bridge 'resent' $null
-            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -LostSec 0
+            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -LostSec 0
             if ($r.Result -eq 'Lost') { $r.Result = 'NoAnswer' }
         }
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
@@ -1017,7 +1113,8 @@ function Send-CopilotPromptUnlocked {
         [scriptblock]$OnProgress,
         [scriptblock]$CancelCheck,
         [int]$StallSec = 90,
-        [int]$LostSec = 25     # no part of the reply this long after sending: the request was lost (0 = off)
+        [int]$LostSec = 25,    # no part of the reply this long after sending: the request was lost (0 = off)
+        [string]$Agent = ''    # Researcher or Analyst: the message starts with a mention of that agent
     )
     $s = $Bridge.Session
     $replyRecords = 0      # records that belong to a reply (not handshakes or keep-alive pings)
@@ -1034,7 +1131,8 @@ function Send-CopilotPromptUnlocked {
         if ($left -gt 0) { Write-CCBLog verbose bridge "Pause $([Math]::Round($left, 1)) s (gap after the previous reply)"; $until = (Get-Date).AddSeconds($left); while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $s 200 } }
     }
     Add-TimelineEvent $Bridge 'typing' $null
-    Set-CopilotInput $Bridge $Text
+    if ($Agent) { Add-CopilotMention $Bridge $Agent; Set-CopilotInput $Bridge $Text -Append }
+    else { Set-CopilotInput $Bridge $Text }
     Wait-Pacing $Bridge 'beforeSendSec' 'prompt typed, before Send'
     Invoke-CopilotSend $Bridge
     $sendWatch.Restart()   # timings and the lost-request check count from Send
@@ -1506,4 +1604,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

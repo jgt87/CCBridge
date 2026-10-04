@@ -77,6 +77,7 @@ $script:SettingDefs = @(
     @{ key = 'messagesPerChat'; group = 'Waiting for Copilot'; label = 'Messages per chat'; help = 'Copilot''s limit per chat when it does not report one; StreamHub continues in a new chat before it.'; type = 'number'; min = 5; max = 300 }
     @{ key = 'actionRetries'; group = 'Getting changes made'; label = 'Retries when Copilot only explains'; help = 'How often a task is sent again when Copilot describes the change instead of writing action blocks.'; type = 'number'; min = 0; max = 5 }
     @{ key = 'maxRounds'; group = 'Getting changes made'; label = 'Rounds per message'; help = 'Most back-and-forth rounds (read, edit, run) for one message.'; type = 'number'; min = 1; max = 50 }
+    @{ key = 'agentTimeoutSec'; group = 'Waiting for Copilot'; label = 'Agent timeout (s)'; help = 'Longest wait for one answer from Researcher or Analyst; they often work for several minutes.'; type = 'number'; min = 300; max = 7200 }
     @{ key = 'commandTimeoutSec'; group = 'Getting changes made'; label = 'Command timeout (s)'; help = 'Longest time a run command may take.'; type = 'number'; min = 10; max = 3600 }
     @{ key = 'reviewAfterChanges'; group = 'Checks'; label = 'Review after changes'; help = 'Ask Copilot to review changed files for leftovers, dead code and broken references.'; type = 'select'; options = @('big', 'always', 'off') }
     @{ key = 'reviewMinLines'; group = 'Checks'; label = 'Big change from (lines)'; help = 'Changed lines from which a change counts as big.'; type = 'number'; min = 5; max = 1000 }

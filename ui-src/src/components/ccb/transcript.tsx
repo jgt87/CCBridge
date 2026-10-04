@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
-import { ClarifyCard, type ClarifyQuestion, PlanCard } from "./plan-cards";
+import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MarkdownView } from "./markdown-view";
@@ -14,8 +14,9 @@ import { ActionCard, type ActionItem } from "./action-card";
 type NoteTone = "info" | "error" | "done" | "undo" | "human";
 
 export type TranscriptItem =
-  | { kind: "user"; seq: number; text: string; taskKind?: string }
-  | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[] }
+  | { kind: "user"; seq: number; text: string; taskKind?: string; agent?: string }
+  | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[]; agent?: string }
+  | { kind: "agentPlan"; seq: number; agent: string }
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string; path?: string }
   | { kind: "undo"; seq: number; text: string; changes: UndoChange[] }
@@ -91,7 +92,8 @@ function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
 }
 
 const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildContext) => void>> = {
-  user: (e, ctx) => ctx.items.push({ kind: "user", seq: e.seq, text: e.text ?? "" }),
+  user: (e, ctx) => ctx.items.push({ kind: "user", seq: e.seq, text: e.text ?? "", ...(e.agent ? { agent: e.agent } : {}) }),
+  "agent-plan": (e, ctx) => ctx.items.push({ kind: "agentPlan", seq: e.seq, agent: e.agent || "Researcher" }),
   // How the last message was sent (chat, project, coding, ...): shown under it.
   kind: (e, ctx) => {
     for (let i = ctx.items.length - 1; i >= 0; i--) {
@@ -117,7 +119,7 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
     if (e.steps?.length) ctx.items.push({ kind: "next", seq: e.seq, steps: e.steps });
   },
   assistant: (e, ctx) =>
-    ctx.items.push({ kind: "assistant", seq: e.seq, text: e.text ?? "", uncertain: e.uncertain ?? 0, references: e.references ?? [] }),
+    ctx.items.push({ kind: "assistant", seq: e.seq, text: e.text ?? "", uncertain: e.uncertain ?? 0, references: e.references ?? [], ...(e.agent ? { agent: e.agent } : {}) }),
   action: mergeAction,
   "action-result": mergeActionResult,
   undo: addUndo,
@@ -173,10 +175,11 @@ const NOTE_STYLE = {
 
 const KIND_LABEL: Record<string, string> = { chat: "sent as plain chat", project: "sent as project work (no code instructions)", assistant: "sent as a Microsoft 365 question" };
 
-function UserMessage({ text, taskKind, onResendAsCoding }: { text: string; taskKind?: string; onResendAsCoding?: (text: string) => void }) {
+function UserMessage({ text, taskKind, agent, onResendAsCoding }: { text: string; taskKind?: string; agent?: string; onResendAsCoding?: (text: string) => void }) {
   const label = taskKind ? KIND_LABEL[taskKind] : undefined;
   return (
     <div className="flex flex-col items-end gap-1">
+      {agent && <span className="rounded-full border border-black/15 px-2 py-0.5 text-muted-foreground text-xs dark:border-white/20">to {agent}</span>}
       <div className="flex max-w-[85%] items-start gap-2 rounded-2xl rounded-tr-sm bg-black/5 px-4 py-2.5 text-sm dark:bg-white/10">
         <span className="whitespace-pre-wrap">{text}</span>
         <User className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-50" />
@@ -193,11 +196,16 @@ function UserMessage({ text, taskKind, onResendAsCoding }: { text: string; taskK
   );
 }
 
-function AssistantMessage({ text, references }: { text: string; references: Reference[] }) {
+function AssistantMessage({ text, references, agent }: { text: string; references: Reference[]; agent?: string }) {
   const visible = stripActionBlocks(text);
   if (!visible && !references.length) return null;
   return (
     <div className="px-1">
+      {agent && (
+        <span className="mb-1 inline-block rounded-full border border-black/15 px-2 py-0.5 text-muted-foreground text-xs dark:border-white/20" title={`Answered by Copilot's ${agent} agent (from Copilot's reply)`}>
+          {agent}
+        </span>
+      )}
       {visible && <Markdown text={visible} />}
       {references.length > 0 && <Sources refs={references} />}
     </div>
@@ -293,9 +301,11 @@ function TranscriptRow({
 }) {
   switch (item.kind) {
     case "user":
-      return <UserMessage onResendAsCoding={onResendAsCoding} taskKind={item.taskKind} text={item.text} />;
+      return <UserMessage agent={item.agent} onResendAsCoding={onResendAsCoding} taskKind={item.taskKind} text={item.text} />;
     case "assistant":
-      return <AssistantMessage references={item.references} text={item.text} />;
+      return <AssistantMessage agent={item.agent} references={item.references} text={item.text} />;
+    case "agentPlan":
+      return onSend ? <AgentPlanCard agent={item.agent} onSend={onSend} /> : null;
     case "action":
       return <ActionCard item={item.item} />;
     case "note":

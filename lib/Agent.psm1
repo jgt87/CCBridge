@@ -39,6 +39,7 @@ function New-AgentState {
         Activity = [hashtable]::Synchronized(@{ label = ''; done = 0; total = 0; current = '' })
         Indexing = [hashtable]::Synchronized(@{ running = $false; label = ''; done = 0; total = 0; current = ''; project = $null; last = $null; error = $null })
         IssueFix = $null; IssueFixHandled = $false
+        AgentChat = $null   # the agent (Researcher) whose plan waits for the person's answer in the current chat
         InChain = $false   # a chain is running: its runbook/fetch steps leave Busy and Stop to it
         SaveHistory = $false   # set by the web app: the chat is kept per project (Save-ChatEvent / Restore-ChatHistory)
     })
@@ -281,7 +282,7 @@ function Reset-Bridge($State) {
 }
 
 function Send-ToCopilot {
-    param($State, [string]$Message)
+    param($State, [string]$Message, [string]$Agent = '', [switch]$Long)   # -Agent mentions Researcher/Analyst; -Long: agent runs take minutes
     $bridge = Get-Bridge $State
     if ($State.ResponseMode -in 'auto', 'quick', 'deep') {
         try { $State.ResponseModeActual = Set-CopilotResponseMode $bridge $State.ResponseMode } catch { Write-CCBLogError agent 'Response mode' $_ }
@@ -298,9 +299,15 @@ function Send-ToCopilot {
     $cancel = { [bool]$State.Cancel }.GetNewClosure()
     try {
         $stall = if ($State.Config.PSObject.Properties['stallSec']) { [int]$State.Config.stallSec } else { 90 }
+        $timeout = [int]$State.Config.replyTimeoutSec
+        if ($Long) {
+            # Agents work for minutes and can be quiet for half a minute or more in between.
+            $timeout = if ([int]$State.Config.agentTimeoutSec -gt 0) { [int]$State.Config.agentTimeoutSec } else { 1800 }
+            $stall = [Math]::Max($stall, 300)
+        }
         $r = $null
         try {
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $State.Config.replyTimeoutSec -OnProgress $progress -CancelCheck $cancel -StallSec $stall
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent
         } catch {
             if (-not (Test-ConnectionLost $_) -or $State.ChatStarted) { throw }
             # First message of a chat: reconnect, start a fresh chat and send it once more.
@@ -309,7 +316,7 @@ function Send-ToCopilot {
             Reset-Bridge $State
             Start-NewChat $State
             $bridge = Get-Bridge $State
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $State.Config.replyTimeoutSec -OnProgress $progress -CancelCheck $cancel -StallSec $stall
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent
         }
     } catch {
         if (Test-ConnectionLost $_) {
@@ -349,7 +356,7 @@ function Submit-AgentTask {
     $id = 'q-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     if (-not $Title) {
         $Title = switch ($Task.kind) {
-            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Fetch: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'chain' { "Chain: $($Task.name)" } 'review' { 'Code review' }
+            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Fetch: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'chain' { "Chain: $($Task.name)" } 'agent' { "$(Get-AgentDisplayName $Task.agent): $($Task.text)" } 'review' { 'Code review' }
             'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } default { "$($Task.kind)" }
         }
     }
@@ -1154,6 +1161,60 @@ function Invoke-ChainScript {
     if ($fixed.Count) { $out += "`nsource/ is read-only; StreamHub put back: $($fixed -join '; ')" }
     Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = "ran $($sc.path): $status"; output = (Limit-Text $out 4000); changed = $true }
     @{ ok = $ok; why = $status }
+}
+
+function Invoke-AgentRun {
+    <# Sends a message to one of Copilot's agents (Researcher, Analyst) by mentioning it, as typed:
+       no coding instructions or project context. A new run starts a fresh Copilot chat; -FollowUp
+       continues the agent's chat (answers to Researcher's plan), without a new mention. The reply
+       says which agent answered; Researcher's plan and questions end with an 'agent-plan' event,
+       so the person answers them (StreamHub never answers for them). #>
+    param($State, [Parameter(Mandatory)][string]$Agent, [Parameter(Mandatory)][string]$Text, [switch]$FollowUp)
+    $name = Get-AgentDisplayName $Agent
+    $State.Busy = $true; $State.Cancel = $false
+    try {
+        Add-AgentEvent $State 'user' @{ text = $Text; agent = $name }
+        Add-AgentEvent $State 'kind' @{ taskKind = 'agent'; agent = $name }
+        if (-not $FollowUp -or -not $State.AgentChat) { Start-NewChat $State }
+        $State.AgentChat = $name
+        Add-AgentEvent $State 'status' @{ text = $(if ($FollowUp) { "Sending your answer to $name; it works on it now (this can take several minutes)." } else { "Asking $name (this can take several minutes)..." }) }
+        Write-CCBLog info agent "Agent run: $name" @{ chars = $Text.Length; followUp = [bool]$FollowUp }
+        $r = Send-ToCopilot $State $Text -Agent $(if ($FollowUp) { '' } else { $name }) -Long
+        if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "$name stopped." }; $State.AgentChat = $null; $State.NeedNewChat = $true; return }
+        if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
+            Add-AgentEvent $State 'error' @{ text = "$name gave no usable answer ($($r.Result): $($r.ResultMessage))."; code = 'AGENT' }
+            $State.AgentChat = $null; $State.NeedNewChat = $true
+            return
+        }
+        $by = "$($r.Agent)"
+        Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; used = $State.Throttle.used; max = $State.Throttle.max; references = @($r.References); agent = $by }
+        if (-not $by -and $r.PSObject.Properties['Source'] -and $r.Source -eq 'page') {
+            # Read from the page: Copilot's stream did not say who answered.
+        } elseif ($by -ne $name) {
+            Add-AgentEvent $State 'status' @{ text = "This answer came from $(if ($by) { $by } else { 'Copilot itself' }), not from $name. The agent may not have run; check the Copilot window." }
+        }
+        # Human in the loop: an agent never gets a Microsoft 365 action confirmed by StreamHub.
+        if (@($r.ProposedActions).Count) {
+            $what = (@($r.ProposedActions) | ForEach-Object { $_.title } | Where-Object { $_ } | Select-Object -Unique) -join '; '
+            Add-AgentEvent $State 'human-required' @{ text = "$name proposed an action in Microsoft 365 ($what). StreamHub never confirms Microsoft 365 actions. Look at it in the Copilot window in Edge and confirm or cancel it yourself." }
+        }
+        foreach ($claim in @($r.ActionClaims)) {
+            Add-AgentEvent $State 'human-required' @{ text = "$name's reply says: ""$claim"" StreamHub did not confirm any Microsoft 365 action. Check Outlook / Teams if this is unexpected." }
+        }
+        if ($r.IsPlan) {
+            # Researcher waits for the person: the plan card asks for answers (or "go ahead").
+            Add-AgentEvent $State 'agent-plan' @{ agent = $name }
+        } else {
+            $State.AgentChat = $null
+            $State.NeedNewChat = $true   # the next message starts its own chat
+        }
+    } catch {
+        Write-CCBLogError agent "Agent run $name failed" $_
+        Add-AgentEvent $State 'error' @{ text = "$name could not be asked: $($_.Exception.Message)"; record = $_ }
+        $State.AgentChat = $null; $State.NeedNewChat = $true
+    } finally {
+        $State.Busy = $false; $State.Cancel = $false
+    }
 }
 
 function Get-WebSourcePrompt($State, $Spec) {
@@ -2390,6 +2451,7 @@ function Start-AgentWorker {
                 }
                 'fetch' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-FetchJob $State $task.name }
                 'runbook' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-RunbookJob $State $task.name }
+                'agent' { Invoke-AgentRun $State ([string]$task.agent) ([string]$task.text) -FollowUp:([bool]$task.followUp) }
                 'chain' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ChainJob $State $task.name }
                 'review' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ReviewJob $State $task }
                 'ask' {
@@ -2460,4 +2522,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

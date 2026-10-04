@@ -37,6 +37,8 @@ import { buildTranscript, Transcript } from "@/components/ccb/transcript";
 import { type AgentEvent, type AppState, api, type ChainItem, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
 
+type AgentChoice = "copilot" | "researcher" | "analyst";
+
 const MODES: PromptMode[] = [
   { id: "ask", label: "Ask before changes", description: "Approve every file change and command", icon: <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" /> },
   { id: "auto", label: "Auto-accept edits", description: "Apply file changes directly; still ask for commands", icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" /> },
@@ -286,9 +288,27 @@ export default function App() {
     return list;
   }, [projectEvents]);
 
+  // Who answers the next message (the agent picker next to Response); kept per browser.
+  const [agent, setAgentState] = useState<AgentChoice>(() => {
+    try {
+      const v = localStorage.getItem("ccb.agent");
+      return v === "researcher" || v === "analyst" ? v : "copilot";
+    } catch {
+      return "copilot";
+    }
+  });
+  const setAgent = (v: AgentChoice) => {
+    setAgentState(v);
+    try {
+      localStorage.setItem("ccb.agent", v);
+    } catch {
+      /* storage blocked */
+    }
+  };
+
   const send = async (text: string) => {
     try {
-      await api.chat(text, { clarify: clarifyFirst });
+      await api.chat(text, agent === "copilot" ? { clarify: clarifyFirst } : { agent });
       setDraft("");
       // Sent while busy = queued: say when it runs (only while StreamHub stays open).
       if (state.busy) {
@@ -615,6 +635,17 @@ export default function App() {
                           Work IQ {state.workIq === "on" ? "on" : state.workIq === "off" ? "off" : "(page setting)"}
                         </button>
                       )}
+                      <select
+                        aria-label="Who answers"
+                        className="rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                        onChange={(e) => setAgent(e.target.value as AgentChoice)}
+                        title="Who answers the next message: Copilot (with StreamHub's instructions), or one of Copilot's agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat."
+                        value={agent}
+                      >
+                        <option value="copilot">Ask: Copilot</option>
+                        <option value="researcher">Ask: Researcher</option>
+                        <option value="analyst">Ask: Analyst</option>
+                      </select>
                       <select
                         className="rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                         onChange={(e) => api.setResponseMode(e.target.value).catch((err) => setError((err as Error).message))}
