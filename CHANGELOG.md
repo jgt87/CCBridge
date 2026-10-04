@@ -6,6 +6,14 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.60] - 2026-10-04
+
+### Changed
+
+- StreamHub's own records are no longer mixed with the project's code: evidence, code review reports, earlier versions of runbook and fetch data, and the clarify-first plans now live in `.streamhub/` (`.streamhub/Evidence/`, `.streamhub/Reviews/`, `.streamhub/History/`, `.streamhub/PLAN.md`). Existing projects are moved once when they open; only files StreamHub made are moved, so a project's own `evidence/` or `reviews/` files stay. Copilot's searches and the issue and review scans no longer see them. The chat's *Evidence saved* line has an *Open* link, and the plan cards open the plan in its new place.
+- StreamHub's folders start with a capital: `Source/` (read-only source data), `Scripts/`, `Logs/`, `Work/`, and inside `.streamhub/` `Evidence/`, `Reviews/`, `History/`. Existing lowercase folders are renamed once when the project opens. `src/` and conventional code folders such as `tests/`, `docs/` and `data/` keep their lowercase names, because tools expect them. The project's own code follows the move: links, imports, `fetch()` calls, script paths and Markdown links that point into a moved or renamed folder are rewritten to the new place in the same style (relative, root-relative, backslashes), web addresses and `Source/` stay as they are, the import index is rebuilt, and the chat lists the files that changed (their earlier versions are kept in StreamHub's local data folder).
+- Files tab: the button that opens the project folder in File Explorer moved from the FILES header to the project's own row at the top of the tree.
+
 ## [v0.1.59] - 2026-10-04
 
 ### Added
@@ -695,7 +703,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.59...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.60...HEAD
+[v0.1.60]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.60
 [v0.1.59]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.59
 [v0.1.58]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.58
 [v0.1.57]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.57

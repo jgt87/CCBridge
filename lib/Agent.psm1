@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -807,11 +807,11 @@ function Get-ProjectVerify([string]$ProjectRoot) {
 }
 
 function Save-TaskEvidence {
-    <# evidence/task-<stamp>.md in the project: what was asked, what changed, which checks ran and
+    <# .streamhub/evidence/task-<stamp>.md in the project: what was asked, what changed, which checks ran and
        their results, Copilot's summary. Returns the relative path. #>
     param($State, [string]$Request, $Changes, $Ev, [string]$Done, [int]$Messages)
     $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
-    $rel = "evidence/task-$stamp.md"
+    $rel = Get-LayoutPath Evidence "task-$stamp.md"
     $sb = New-Object Text.StringBuilder
     [void]$sb.AppendLine("# Task evidence $((Get-Date).ToString('yyyy-MM-dd HH:mm'))").AppendLine()
     [void]$sb.AppendLine('## Request').AppendLine().AppendLine($Request.Trim()).AppendLine()
@@ -874,7 +874,7 @@ function Invoke-ReviewJob {
        each with findings as JSON (one correction round), every finding is checked against the file
        (Test-ReviewQuote), then one whole-project pass. Progress is kept after every batch, so a
        review stopped by Copilot's daily limit (the queue pauses and runs it again) or a restart
-       continues where it was. Saves reviews/review-<stamp>.md and .json. #>
+       continues where it was. Saves .streamhub/reviews/review-<stamp>.md and .json. #>
     param($State, $Task)
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
     $State.Busy = $true; $State.Cancel = $false
@@ -893,7 +893,7 @@ function Invoke-ReviewJob {
             Add-AgentEvent $State 'status' @{ text = "Continuing the code review where it stopped ($($rv.done.Count) part(s) done)." }
         } else {
             $sc = Get-ReviewScope $State ([string]$Task.scope) @($Task.paths)
-            if (-not $sc.files.Count) { Add-AgentEvent $State 'error' @{ text = "Nothing to review in $($sc.text): no code files found."; code = 'REVIEW'; hint = 'Pick another scope; build output, lock files, data and source/ are never reviewed.' }; return }
+            if (-not $sc.files.Count) { Add-AgentEvent $State 'error' @{ text = "Nothing to review in $($sc.text): no code files found."; code = 'REVIEW'; hint = 'Pick another scope; build output, lock files, data and Source/ are never reviewed.' }; return }
             $rv = @{ id = $id; created = (Get-Date).ToString('s'); scope = "$($Task.scope)"; scopeText = $sc.text; focus = @($focus.Split(',') | ForEach-Object { $_.Trim() }); files = @($sc.files); skipped = @($sc.skipped)
                 messages = 0; done = @(); summaries = @(); findings = @(); overall = $null }
         }
@@ -1297,7 +1297,7 @@ function Get-StepFailureInfo {
         'matches \d+ places|matches more than once' { @{ code = 'EDIT-AMBIGUOUS'; reasons = @('The SEARCH text occurs more than once in the file (for example a repeated closing tag or line).', 'Copilot copied too few lines to point at one place.'); next = "Nothing was changed. $copilotRetries" }; break }
         'no SEARCH/REPLACE pairs' { @{ code = 'EDIT-FORMAT'; reasons = @('Copilot''s edit block had no <<<<<<< SEARCH / ======= / >>>>>>> REPLACE markers (or they were not at the start of a line).', 'Copilot meant to replace the whole file; that needs a write block.'); next = "Nothing was changed. $copilotRetries" }; break }
         'SEARCH text not found' { @{ code = 'EDIT-NOT-FOUND'; reasons = @('The file changed since Copilot read it: an earlier edit in this task, or you edited it.', 'Copilot''s SEARCH lines differ slightly from the file: spaces, quotes, or a line it remembered differently.', 'The change was already made earlier, but with different text.', 'Copilot shortened SEARCH without a line containing only ... (only its first lines were given).'); next = "Nothing was changed. Copilot gets the reason plus the file's closest current lines. $copilotRetries" }; break }
-        'is in source/|read-only' { @{ code = 'SOURCE-DATA'; reasons = @('The step tried to change a file in source/, which holds your source data and is read-only.'); next = 'Nothing was changed. Copilot is told to write its result elsewhere (for example work/ or output/).' }; break }
+        'is in Source/|read-only' { @{ code = 'SOURCE-DATA'; reasons = @('The step tried to change a file in Source/, which holds your source data and is read-only.'); next = 'Nothing was changed. Copilot is told to write its result elsewhere (for example Work/ or output/).' }; break }
         'file not found|\(file not found\)' { @{ code = 'FILE-NOT-FOUND'; reasons = @('The path does not exist in the project: a typo, another folder, or a file that was never created.', 'For a new file Copilot should use a write block, not an edit.'); next = $copilotRetries }; break }
         'without a path' { @{ code = 'STEP-FORMAT'; reasons = @('The block had no file name after the action name (for example ````edit with nothing after it).'); next = $copilotRetries }; break }
         'plan mode' { @{ code = 'PLAN-MODE'; reasons = @('"Plan only" mode is on, so changes and commands are not carried out.'); next = 'Switch the mode to "Ask before changes" or "Auto-accept edits" and ask again to carry out the plan.' }; break }
@@ -1861,7 +1861,7 @@ function Invoke-AgentAction {
                 $fixed = @(Restore-SourceData $root)
                 if ($fixed.Count) {
                     Add-AgentEvent $State 'status' @{ text = "Source data is read-only; StreamHub undid what the command did to it: " + ($fixed -join '; ') }
-                    $out += "`nNote: source/ is the user's read-only source data. This command changed it, so it was put back: " + ($fixed -join '; ') + '. Work on copies outside source/.'
+                    $out += "`nNote: Source/ is the user's read-only source data. This command changed it, so it was put back: " + ($fixed -join '; ') + '. Work on copies outside Source/.'
                 }
                 if ($runChanged.Count) { $out += "`nFiles this command changed: " + ($runChanged -join ', ') }
                 return @{ ok = (-not $r.timedOut -and -not $r.cancelled -and $r.exitCode -eq 0); summary = "ran: $status"; output = $out; changed = [bool]$runChanged.Count }
@@ -2284,7 +2284,7 @@ function Invoke-AgentTurn {
                 $chg = @(Get-CheckpointChanges $State.ProjectRoot $checkpoint | Where-Object { $_.added -or $_.removed -or $_.created -or $_.deleted })
                 if ($chg.Count) {
                     $evPath = Save-TaskEvidence $State $Text $chg $ev $doneText ([int]$State.MessagesSent - $msgStart)
-                    Add-AgentEvent $State 'status' @{ text = "Evidence saved: $evPath" }
+                    Add-AgentEvent $State 'status' @{ text = "Evidence saved: $evPath"; path = $evPath }
                 }
             } catch { Write-CCBLogError agent 'evidence' $_ }
         }
@@ -2447,7 +2447,7 @@ function Start-AgentWorker {
                 Write-CCBLog info agent "Queue $($entry.id) $($entry.status)" @{ messages = $entry.messages }
                 Save-AgentQueue $State
             }
-            # Retention: old History/, evidence/, reviews/ and undo backups of the project go now.
+            # Retention: old .streamhub/History, evidence and reviews and undo backups of the project go now.
             if ($State.ProjectRoot -and $task.kind -ne 'connect') { try { $null = Invoke-ProjectRetention $State.ProjectRoot $State.Config } catch { Write-CCBLogError agent 'retention' $_ } }
             $State.CurrentQueueId = $null
             $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller; $State.ResponseMode = $saved.ResponseMode

@@ -73,7 +73,7 @@ Describe 'Runbooks in a project' {
         @(Get-Runbooks $p).Count | Should Be 1
         $saved = Save-RunbookOutput $p 'meetings-next-week' 'Runbooks/Exports/meetings-next-week.json' '{ "meetings": [] }'
         Test-Path (Join-Path $p 'Runbooks\Exports\meetings-next-week.json') | Should Be $true
-        $saved.history | Should Match '^History/meetings-next-week-\d{8}-\d{6}\.json$'
+        $saved.history | Should Match '^\.streamhub/History/meetings-next-week-\d{8}-\d{6}\.json$'
         (Get-Runbooks $p)[0].lastRun | Should Not BeNullOrEmpty
     }
     It 'sends the runbook with the assistant role, the read-only rule and the JSON instruction' {

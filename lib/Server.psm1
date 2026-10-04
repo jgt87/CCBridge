@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -214,7 +214,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $op = $Matches[1]
             $b = Read-JsonBody $Ctx
             if ("$($b.id)" -notmatch '^review-[\d-]+$') { throw "Unknown review '$($b.id)'" }
-            $jsonPath = Resolve-ProjectPath $State.ProjectRoot "reviews/$($b.id).json"
+            $jsonPath = Resolve-ProjectPath $State.ProjectRoot (Get-LayoutPath Reviews "$($b.id).json")
             if (-not (Test-Path -LiteralPath $jsonPath)) { throw "Unknown review '$($b.id)'" }
             $rv = [IO.File]::ReadAllText($jsonPath) | ConvertFrom-Json
             if ($op -eq 'get') { return Send-Json $Ctx @{ review = $rv } }
@@ -576,10 +576,19 @@ function Set-Project($State, [string]$Path) {
     $State.Todos = @()
     $State.NeedNewChat = $State.NeedNewChat -or $State.ChatStarted   # a new project starts a fresh Copilot chat
     Add-AgentEvent $State 'project' @{ name = (Split-Path $Path -Leaf); path = $Path }
-    # Older projects: fetch prompts, runbooks and their data move to Runbooks/ and History/ (once).
+    # Older projects move to the current layout once (Runbooks/, StreamHub's records in .streamhub/,
+    # capitalised folders); then the project's own code and documents follow the moves.
     try {
-        $moved = @(Move-ProjectLayout $State.ProjectRoot)
-        if ($moved.Count) { Add-AgentEvent $State 'status' @{ text = "Project folders tidied to the new layout: fetch prompts and runbooks are in Runbooks/, their data in Runbooks/Exports/, earlier versions in History/ ($($moved.Count) item(s) moved)." } }
+        $moves = New-Object System.Collections.ArrayList
+        $moved = @(Move-ProjectLayout $State.ProjectRoot -Moves $moves)
+        if ($moved.Count) { Add-AgentEvent $State 'status' @{ text = "Project folders tidied to the current layout: fetch prompts and runbooks in Runbooks/, their data in Runbooks/Exports/, StreamHub's own records (evidence, reviews, plans, earlier data versions) in .streamhub/, folder names with a capital ($($moved.Count) item(s))." } }
+        if ($moves.Count) {
+            $re = Update-MovedReferences $State.ProjectRoot $moves
+            if (@($re.files).Count) {
+                $list = (@($re.files) | ForEach-Object { "$($_.path) ($($_.count))" }) -join ', '
+                Add-AgentEvent $State 'status' @{ text = "Links and references in the project's code now point at the new folders: $list. The earlier versions of these files are kept in $($re.backup)." }
+            }
+        }
     } catch { Write-CCBLogError server 'project layout' $_ }
     try { $null = Invoke-ProjectRetention $State.ProjectRoot $State.Config } catch { Write-CCBLogError server 'retention' $_ }
     $mark = $State.Seq

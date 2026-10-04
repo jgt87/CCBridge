@@ -116,7 +116,7 @@ Describe 'Invoke-ReviewJob (Copilot mocked)' {
         Invoke-ReviewJob $s $task
         $global:ccbReviewCalls.Count | Should Be 2
         @(Get-AgentEvents $s 0 | Where-Object { $_.type -eq 'error' })[-1].text | Should Match 'OutOfCredits'
-        Test-Path (Join-Path $p 'reviews\review-20261002-120000.json') | Should Be $false
+        Test-Path (Join-Path $p '.streamhub\Reviews\review-20261002-120000.json') | Should Be $false
     }
 
     It 'continues with part 2 (asking once for valid JSON), runs the whole-project pass and saves a checked report' {
@@ -124,14 +124,14 @@ Describe 'Invoke-ReviewJob (Copilot mocked)' {
         $global:ccbReviewCalls.Clear()
         Invoke-ReviewJob $s $task
         @($global:ccbReviewCalls | Where-Object { $_ -match 'part 1 of' }).Count | Should Be 0
-        $rv = [IO.File]::ReadAllText((Join-Path $p 'reviews\review-20261002-120000.json')) | ConvertFrom-Json
+        $rv = [IO.File]::ReadAllText((Join-Path $p '.streamhub\Reviews\review-20261002-120000.json')) | ConvertFrom-Json
         $rv.overall | Should Be 'Small project with two real issues.'
         @($rv.findings | Where-Object { $_.status -eq 'verified' }).Count | Should Be 2
         @($rv.findings | Where-Object { $_.status -eq 'unverified' }).title | Should Be 'Invented'
         @($rv.findings | Where-Object { $_.status -eq 'general' }).title | Should Be 'No tests'
         $rv.findings[0].id | Should Be 'f1'
         $rv.findings[0].severity | Should Be 'high'
-        $md = [IO.File]::ReadAllText((Join-Path $p 'reviews\review-20261002-120000.md'))
+        $md = [IO.File]::ReadAllText((Join-Path $p '.streamhub\Reviews\review-20261002-120000.md'))
         $md | Should Match '## High'
         $md | Should Match '## Unverified'
         (@(Get-Reviews $p))[0].high | Should Be 2

@@ -18,7 +18,7 @@ export interface ClarifyQuestion {
 function PlanLink({ onOpenFile }: { onOpenFile?: (path: string) => void }) {
   if (!onOpenFile) return null;
   return (
-    <button className={flatButton} onClick={() => onOpenFile("PLAN.md")} title="Every question, answer, plan version and approval of this request" type="button">
+    <button className={flatButton} onClick={() => onOpenFile(".streamhub/PLAN.md")} title="Every question, answer, plan version and approval of this request" type="button">
       <FileText className="h-3 w-3" /> PLAN.md
     </button>
   );

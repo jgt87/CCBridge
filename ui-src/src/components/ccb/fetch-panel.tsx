@@ -80,7 +80,7 @@ export function FetchPanel({
   return (
     <div className="space-y-2">
       <p className="text-muted-foreground text-xs">
-        Saved prompts that fetch current data, such as today's meetings. Each run writes Copilot's answer to a file in <span className="font-mono">Runbooks/Exports/</span> (earlier answers in <span className="font-mono">History/</span>); attach it to a message with @.
+        Saved prompts that fetch current data, such as today's meetings. Each run writes Copilot's answer to a file in <span className="font-mono">Runbooks/Exports/</span> (earlier answers in <span className="font-mono">.streamhub/History/</span>); attach it to a message with @.
       </p>
 
       {adding ? (

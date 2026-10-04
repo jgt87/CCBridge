@@ -175,7 +175,7 @@ function ClearHistoryRow() {
           </button>
         )
       }
-      help="Removes the open project's kept conversation from this computer and empties the chat view. Change sets and PLAN.md stay."
+      help="Removes the open project's kept conversation from this computer and empties the chat view. Change sets and the plans in .streamhub/PLAN.md stay."
       notes={note ? <div className="text-muted-foreground text-xs">{note}</div> : null}
       title="Clear chat history"
     />

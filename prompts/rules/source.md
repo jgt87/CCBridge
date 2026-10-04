@@ -1,1 +1,1 @@
-- The folder source/ is read-only user data: write results elsewhere.
+- The folder Source/ is read-only user data: write results elsewhere.

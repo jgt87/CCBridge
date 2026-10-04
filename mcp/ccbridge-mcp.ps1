@@ -555,7 +555,7 @@ $tools = @(
            think_deeper = @{ type = 'boolean'; description = 'true: use Copilot''s Think deeper mode for this request (slower, for hard problems). Default: the app''s setting.' }
            timeout_sec = @{ type = 'integer'; description = 'Seconds to wait for the reply (default 240).' } } } }
     @{ name = 'copilot_start_task'
-       description = 'Like copilot_run_task, but returns at once with a job id; then call copilot_task_status until it is finished. Use copilot_run_task instead unless you want to do other work meanwhile. Safety: paths stay inside the project, source/ is read-only user data, every task is one undoable change set.'
+       description = 'Like copilot_run_task, but returns at once with a job id; then call copilot_task_status until it is finished. Use copilot_run_task instead unless you want to do other work meanwhile. Safety: paths stay inside the project, Source/ is read-only user data, every task is one undoable change set.'
        inputSchema = @{ type = 'object'; required = @('project_path', 'task'); properties = @{
            project_path = @{ type = 'string'; description = 'Absolute path of the project folder (created if missing).' }
            task = @{ type = 'string'; description = 'What to build or change, with acceptance criteria and how to verify.' }

@@ -19,12 +19,40 @@ function Add-TestFile($Root, $Rel, $Text = 'x') {
 Describe 'Get-LayoutPath' {
     It 'gives the project-relative folders' {
         Get-LayoutPath Exports 'a.json' | Should BeExactly 'Runbooks/Exports/a.json'
-        Get-LayoutPath History | Should BeExactly 'History'
+        Get-LayoutPath History | Should BeExactly '.streamhub/History'
+        Get-LayoutPath Evidence | Should BeExactly '.streamhub/Evidence'
+        Get-LayoutPath Source | Should BeExactly 'Source'
         { Get-LayoutPath Nope } | Should Throw
     }
 }
 
 Describe 'Move-ProjectLayout' {
+    It 'moves StreamHub records into .streamhub and capitalises its folders, leaving the project''s own files' {
+        $p = New-LayoutProject
+        Add-TestFile $p 'evidence\task-20261003-091500.md' 'e'
+        Add-TestFile $p 'evidence\photo.png' 'mine'
+        Add-TestFile $p 'reviews\review-20261002-120000.md' 'r'
+        Add-TestFile $p 'reviews\review-20261002-120000.json' '{}'
+        Add-TestFile $p 'History\prices-20261001-080000.md' 'h'
+        Add-TestFile $p 'PLAN.md' "# Plan`n<!-- plan:abc -->"
+        Add-TestFile $p 'source\keep.csv' 'a,b'
+        Add-TestFile $p 'scripts\make.ps1' 'x'
+        Add-TestFile $p 'data\d.json' '{}'
+        $null = @(Move-ProjectLayout $p)
+        Test-Path (Join-Path $p '.streamhub\Evidence\task-20261003-091500.md') | Should Be $true
+        Test-Path (Join-Path $p 'evidence\photo.png') | Should Be $true          # not StreamHub's: stays
+        Test-Path (Join-Path $p '.streamhub\Reviews\review-20261002-120000.json') | Should Be $true
+        Test-Path (Join-Path $p 'reviews') | Should Be $false
+        Test-Path (Join-Path $p '.streamhub\History\prices-20261001-080000.md') | Should Be $true
+        Test-Path (Join-Path $p '.streamhub\PLAN.md') | Should Be $true
+        Test-Path (Join-Path $p 'PLAN.md') | Should Be $false
+        @([IO.Directory]::GetDirectories($p, 'Source') | Split-Path -Leaf) | Should BeExactly 'Source'
+        @([IO.Directory]::GetDirectories($p, 'Scripts') | Split-Path -Leaf) | Should BeExactly 'Scripts'
+        @([IO.Directory]::GetDirectories($p, 'data') | Split-Path -Leaf) | Should BeExactly 'data'          # code folders keep their name
+        Test-Path (Join-Path $p 'Source\keep.csv') | Should Be $true
+        Remove-Item $p -Recurse -Force
+    }
+
     It 'moves fetch prompts, runbooks, exports and history into the new folders' {
         $p = New-LayoutProject
         Add-TestFile $p 'fetch\today.prompt.md' 'List my meetings.'
@@ -38,8 +66,8 @@ Describe 'Move-ProjectLayout' {
         Test-Path (Join-Path $p 'Runbooks\today.prompt.md') | Should Be $true
         Test-Path (Join-Path $p 'Runbooks\Exports\today.md') | Should Be $true
         Test-Path (Join-Path $p 'Runbooks\Exports\meetings.json') | Should Be $true
-        Test-Path (Join-Path $p 'History\meetings-20261001-080000.json') | Should Be $true
-        (Get-Item (Join-Path $p 'Runbooks')).Name | Should BeExactly 'Runbooks'
+        Test-Path (Join-Path $p '.streamhub\History\meetings-20261001-080000.json') | Should Be $true
+        @([IO.Directory]::GetDirectories($p, 'Runbooks') | Split-Path -Leaf) | Should BeExactly 'Runbooks'
         [IO.File]::ReadAllText((Join-Path $p 'Runbooks\meetings.runbook.md')) | Should Match '(?m)^output: Runbooks/Exports/meetings\.json'
         Test-Path (Join-Path $p 'fetch') | Should Be $false
         Test-Path (Join-Path $p 'exports') | Should Be $false

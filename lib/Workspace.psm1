@@ -185,7 +185,7 @@ function Format-ProjectTree {
 # write/edit actions there are refused, and a copy in %LOCALAPPDATA% (the vault) is used
 # to restore anything a command changed or deleted.
 
-$script:SourceFolderName = 'source'
+$script:SourceFolderName = 'Source'
 Import-Module (Join-Path $PSScriptRoot 'Log.psm1')
 
 function Get-SourceDir([string]$ProjectRoot) { Join-Path $ProjectRoot $script:SourceFolderName }
@@ -217,7 +217,7 @@ function Set-ReadOnly([string]$Path, [bool]$On) {
 }
 
 function Sync-SourceVault {
-    <# Accepts the current source/ as the truth (called when the USER acts: turn start, upload). #>
+    <# Accepts the current Source/ as the truth (called when the USER acts: turn start, upload). #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
     $src = Get-SourceDir $ProjectRoot
     $vault = Get-SourceVaultDir $ProjectRoot
@@ -240,7 +240,7 @@ function Sync-SourceVault {
 
 function Restore-SourceData {
     <# Called after AGENT activity: puts back changed or deleted source files and moves files the
-       agent added to source/ into work/. Returns a list of what was fixed. #>
+       agent added to Source/ into Work/. Returns a list of what was fixed. #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
     $src = Get-SourceDir $ProjectRoot
     $vault = Get-SourceVaultDir $ProjectRoot
@@ -255,23 +255,23 @@ function Restore-SourceData {
         Set-ReadOnly $s $false
         [IO.File]::Copy($v, $s, $true)
         Set-ReadOnly $s $true
-        $fixed.Add("restored source/$($rel.Replace('\', '/')) ($state)")
+        $fixed.Add("restored Source/$($rel.Replace('\', '/')) ($state)")
     }
     foreach ($rel in Get-RelativeFiles $src) {
         if ($vaultFiles -contains $rel) { continue }
         $s = Join-Path $src $rel
-        $dest = Join-Path (Join-Path $ProjectRoot 'work') $rel
+        $dest = Join-Path (Join-Path $ProjectRoot 'Work') $rel
         $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest)
         if (Test-Path -LiteralPath $dest) { [IO.File]::Delete($dest) }
         [IO.File]::Move($s, $dest)
-        $fixed.Add("moved new file source/$($rel.Replace('\', '/')) to work/$($rel.Replace('\', '/'))")
+        $fixed.Add("moved new file Source/$($rel.Replace('\', '/')) to Work/$($rel.Replace('\', '/'))")
     }
     if ($fixed.Count) { Write-CCBLog info source 'Source data restored after agent activity' @{ fixed = @($fixed) } }
     @($fixed)
 }
 
 function Save-SourceFile {
-    <# Stores an uploaded file in source/ (never overwriting) and adds it to the vault. #>
+    <# Stores an uploaded file in Source/ (never overwriting) and adds it to the vault. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][IO.Stream]$Content)
     $leaf = [IO.Path]::GetFileName($Name.Replace('/', '\'))
     if (-not $leaf -or $leaf.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) { throw "Invalid file name '$Name'" }

@@ -570,7 +570,7 @@ export const api = {
   setLogging: (level: "off" | "info" | "verbose" | "trace") => call<{ ok: boolean }>("POST", "/api/logging", { level }),
   diagnostics: () => call<{ ok: boolean; path: string; fullPath: string }>("POST", "/api/diagnostics"),
   showDiagnostics: (path: string) => call<{ ok: boolean }>("POST", "/api/diagnostics/show", { path }),
-  /** Uploads a file into the project's read-only source/ folder, reporting progress 0-100. */
+  /** Uploads a file into the project's read-only Source/ folder, reporting progress 0-100. */
   uploadSource: (file: File, onProgress: (percent: number) => void) =>
     new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();

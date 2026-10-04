@@ -54,12 +54,12 @@ Describe 'Format-FetchResult and Save-FetchResult' {
         $item.outputSize -gt 0 | Should Be $true
         Remove-Item $p -Recurse -Force
     }
-    It 'keeps the answer it replaces in History/' {
+    It 'keeps the answer it replaces in .streamhub/History/' {
         $p = New-TempProject
         $null = Save-FetchResult $p 'today' 'first'
         $null = Save-FetchResult $p 'today' 'second'
         [IO.File]::ReadAllText((Join-Path $p 'Runbooks\Exports\today.md')) | Should BeExactly 'second'
-        $old = @(Get-ChildItem (Join-Path $p 'History') -Filter 'today-*.md')
+        $old = @(Get-ChildItem (Join-Path $p '.streamhub\History') -Filter 'today-*.md')
         $old.Count | Should Be 1
         [IO.File]::ReadAllText($old[0].FullName) | Should BeExactly 'first'
         Remove-Item $p -Recurse -Force

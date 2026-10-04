@@ -3,7 +3,7 @@
 # to later messages with @.
 #   Runbooks/<name>.prompt.md   the prompt (plain text, editable)
 #   Runbooks/Exports/<name>.md  the latest answer, with a short header (when, from which prompt)
-#   History/<name>-<stamp>.md   earlier answers (Layout.psm1 has the folders)
+#   .streamhub/History/<name>-<stamp>.md   earlier answers (Layout.psm1 has the folders)
 # A prompt may start with a header between --- lines: sources (web, work, both), sites (only these
 # websites) and pages (addresses the helper reads itself and adds as data); see WebFetch.psm1.
 
@@ -108,12 +108,12 @@ function Format-FetchResult {
 }
 
 function Save-FetchResult {
-    <# Writes the answer to Runbooks/Exports/<name>.md; the answer it replaces goes to History/. #>
+    <# Writes the answer to Runbooks/Exports/<name>.md; the answer it replaces goes to .streamhub/History/. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Content)
     $rel = "$($script:AnswerDir)/$Name.md"
     $full = Assert-Writable $ProjectRoot $rel
     if (Test-Path -LiteralPath $full -PathType Leaf) {
-        $old = Assert-Writable $ProjectRoot (Get-LayoutPath History "$Name-$((Get-Item -LiteralPath $full).LastWriteTime.ToString('yyyyMMdd-HHmmss')).md")
+        $old = Resolve-ProjectPath $ProjectRoot (Get-LayoutPath History "$Name-$((Get-Item -LiteralPath $full).LastWriteTime.ToString('yyyyMMdd-HHmmss')).md")
         $null = New-Item -ItemType Directory -Force -Path (Split-Path $old)
         [IO.File]::Copy($full, $old, $true)
     }

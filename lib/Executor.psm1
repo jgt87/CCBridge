@@ -186,7 +186,7 @@ function Save-CheckpointFile($Checkpoint, [string]$ProjectRoot, [string]$FullPat
 # Before a run command, the project's files are listed (size and time) and the ones not yet in
 # the change set are copied aside (prerun\, once per step). After the command, every file it
 # changed or deleted gets its old copy in the change set, and every file it created is marked new,
-# so Undo restores them like a write or an edit. source/ is left out (its own restore covers it).
+# so Undo restores them like a write or an edit. Source/ is left out (its own restore covers it).
 
 $script:SnapshotMaxFileBytes = 20MB
 $script:SnapshotMaxTotalBytes = 300MB
@@ -853,12 +853,12 @@ function Assert-Writable([string]$ProjectRoot, [string]$Path) {
     $full = Resolve-ProjectPath $ProjectRoot $Path
     $rel = (ConvertTo-RelativePath $ProjectRoot $full)
     if ($rel -match '(?i)^\.streamhub(/|$)') {
-        throw "$Path is in .streamhub/, which holds the helper program's own records (issues, schedules). Do not write there; put your file elsewhere in the project."
+        throw "$Path is in .streamhub/, which holds the helper program's own records (issues, schedules, evidence, reviews, plans, earlier data versions). Do not write there; put your file elsewhere in the project."
     }
     $generated = Test-GeneratedPath $rel $ProjectRoot
     if ($generated) { throw "not written: $generated." }
     if (Test-InSource $ProjectRoot $full) {
-        throw "$Path is in source/, which holds the user's source data and is read-only. Leave it unchanged and write your own working file elsewhere in the project (for example work/$([IO.Path]::GetFileName($full)))."
+        throw "$Path is in Source/, which holds the user's source data and is read-only. Leave it unchanged and write your own working file elsewhere in the project (for example Work/$([IO.Path]::GetFileName($full)))."
     }
     $full
 }
@@ -1564,5 +1564,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

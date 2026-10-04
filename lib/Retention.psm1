@@ -1,11 +1,11 @@
 # Retention: how much of what StreamHub generates per project is kept (Settings > Retention).
-#   History/            earlier versions of runbook and fetch data, per runbook or fetch prompt
-#   evidence/           one file per task
-#   reviews/            code review reports (NAME.md and NAME.json count as one)
+#   .streamhub/History/ earlier versions of runbook and fetch data, per runbook or fetch prompt
+#   .streamhub/evidence/ one file per task
+#   .streamhub/reviews/ code review reports (NAME.md and NAME.json count as one)
 #   undo backups        change sets in %LOCALAPPDATA%\CCBridge\projects\...\backups (the newest
 #                       one always stays, so "Undo last change set" keeps working)
 # Per item: keep the newest COUNT and nothing older than DAYS (0 = no limit). Runs when a project
-# opens and after each task. Only these generated files are ever removed: never source/, Logs/ or
+# opens and after each task. Only these generated files are ever removed: never Source/, Logs/ or
 # any other file of the project.
 
 $ErrorActionPreference = 'Stop'
@@ -70,13 +70,13 @@ function Invoke-ProjectRetention {
         foreach ($g in ($files | Group-Object Group)) { & $apply 'history' (Select-Expired $g.Group $r.historyCount $r.historyDays -Now $Now) }
     }
     # evidence/: one file per task.
-    $ev = Join-Path $ProjectRoot 'evidence'
+    $ev = Join-Path $ProjectRoot ((Get-LayoutPath Evidence).Replace('/', '\'))
     if (Test-Path -LiteralPath $ev) {
         $files = @(Get-ChildItem -LiteralPath $ev -File -Filter 'task-*.md' | ForEach-Object { [pscustomobject]@{ Time = $_.LastWriteTime; Paths = @($_.FullName) } })
         & $apply 'evidence' (Select-Expired $files $r.evidenceCount $r.evidenceDays -Now $Now)
     }
     # reviews/: NAME.md and NAME.json are one report.
-    $rv = Join-Path $ProjectRoot 'reviews'
+    $rv = Join-Path $ProjectRoot ((Get-LayoutPath Reviews).Replace('/', '\'))
     if (Test-Path -LiteralPath $rv) {
         $reports = @(Get-ChildItem -LiteralPath $rv -File | Where-Object { $_.Extension -in '.md', '.json' } | Group-Object BaseName | ForEach-Object {
             [pscustomobject]@{ Time = ($_.Group | Measure-Object LastWriteTime -Maximum).Maximum; Paths = @($_.Group | ForEach-Object FullName) } })

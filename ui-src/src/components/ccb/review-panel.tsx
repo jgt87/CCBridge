@@ -135,7 +135,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
               ? estimate.files
                 ? `${estimate.files} file(s), about ${estimate.messages} Copilot message(s). Read-only: nothing is changed.`
                 : `No code files in ${estimate.scopeText}.`
-              : "Build output, lock files, data and source/ are never reviewed.")}
+              : "Build output, lock files, data and Source/ are never reviewed.")}
         </p>
         <button
           className={cn(flatButton, "w-full justify-center border border-black/10 py-1.5 dark:border-white/10")}

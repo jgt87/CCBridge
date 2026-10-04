@@ -1,4 +1,4 @@
-# PLAN.md in the project root collects every decision of the clarify-first flow: per request a
+# .streamhub/PLAN.md in the project collects every decision of the clarify-first flow: per request a
 # section ("## <date> - <request>", newest at the bottom) with the request, Copilot's questions,
 # the user's answers, each plan version, the changes asked for, the approval and the result.
 # StreamHub writes it as the steps happen; Copilot only reads it. A request's section is found by
@@ -7,7 +7,7 @@
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 
-$script:PlanFileName = 'PLAN.md'
+$script:PlanFileName = '.streamhub\PLAN.md'   # StreamHub's own record (Layout: Plan)
 $script:PlanHeader = "# PLAN`n`nEvery request made with Clarify first: Copilot's questions, the answers, each version of the plan, the changes asked for, the approval and the result. Newest at the bottom.`n"
 
 function Get-PlanSlug([string]$Text) {
@@ -26,7 +26,9 @@ function Get-PlanText([string]$ProjectRoot) {
 }
 
 function Set-PlanText([string]$ProjectRoot, [string]$Text) {
-    [IO.File]::WriteAllText((Join-Path $ProjectRoot $script:PlanFileName), $Text.TrimEnd("`n") + "`n", (New-Object Text.UTF8Encoding($false)))
+    $full = Join-Path $ProjectRoot $script:PlanFileName
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $full)
+    [IO.File]::WriteAllText($full, $Text.TrimEnd("`n") + "`n", (New-Object Text.UTF8Encoding($false)))
 }
 
 function Get-PlanBlock([string]$Text, [string]$PlanId) {

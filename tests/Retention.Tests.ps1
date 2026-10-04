@@ -7,7 +7,7 @@ Import-Module (Join-Path $root 'lib\Workspace.psm1') -Force
 
 function New-RetentionProject {
     $p = Join-Path $env:TEMP ('ccb-ret-' + [guid]::NewGuid().ToString('N'))
-    foreach ($d in 'History', 'evidence', 'reviews', 'Logs', 'source') { New-Item -ItemType Directory (Join-Path $p $d) -Force | Out-Null }
+    foreach ($d in '.streamhub\History', '.streamhub\Evidence', '.streamhub\Reviews', 'Logs', 'Source') { New-Item -ItemType Directory (Join-Path $p $d) -Force | Out-Null }
     $p
 }
 function Add-Aged($Path, [int]$DaysOld) { [IO.File]::WriteAllText($Path, 'x'); (Get-Item $Path).LastWriteTime = (Get-Date).AddDays(-$DaysOld) }
@@ -25,10 +25,10 @@ Describe 'Select-Expired' {
 Describe 'Invoke-ProjectRetention' {
     It 'cleans History per item, evidence and reviews, and leaves other files alone' {
         $p = New-RetentionProject
-        foreach ($i in 1..4) { Add-Aged (Join-Path $p "History\meetings-2026100$i-080000.json") (4 - $i) }
-        Add-Aged (Join-Path $p 'History\prices-20260101-080000.md') 200
-        foreach ($i in 1..3) { Add-Aged (Join-Path $p "evidence\task-2026100$i-080000.md") (3 - $i) }
-        foreach ($i in 1..3) { Add-Aged (Join-Path $p "reviews\r$i.md") (3 - $i); Add-Aged (Join-Path $p "reviews\r$i.json") (3 - $i) }
+        foreach ($i in 1..4) { Add-Aged (Join-Path $p ".streamhub\History\meetings-2026100$i-080000.json") (4 - $i) }
+        Add-Aged (Join-Path $p '.streamhub\History\prices-20260101-080000.md') 200
+        foreach ($i in 1..3) { Add-Aged (Join-Path $p ".streamhub\Evidence\task-2026100$i-080000.md") (3 - $i) }
+        foreach ($i in 1..3) { Add-Aged (Join-Path $p ".streamhub\Reviews\r$i.md") (3 - $i); Add-Aged (Join-Path $p ".streamhub\Reviews\r$i.json") (3 - $i) }
         Add-Aged (Join-Path $p 'Logs\old.log') 900
         Add-Aged (Join-Path $p 'source\data.csv') 900
         $cfg = @{ retention = @{ historyCount = 2; historyDays = 90; evidenceCount = 1; evidenceDays = 0; reviewsCount = 2; reviewsDays = 0; backupsCount = 0; backupsDays = 0 } }
@@ -36,9 +36,9 @@ Describe 'Invoke-ProjectRetention' {
         $r.history | Should Be 3          # two oldest meetings versions, and prices (older than 90 days)
         $r.evidence | Should Be 2
         $r.reviews | Should Be 1          # one report = its .md and .json
-        @(Get-ChildItem (Join-Path $p 'History')).Count | Should Be 2
-        Test-Path (Join-Path $p 'reviews\r1.md') | Should Be $false
-        Test-Path (Join-Path $p 'reviews\r1.json') | Should Be $false
+        @(Get-ChildItem (Join-Path $p '.streamhub\History')).Count | Should Be 2
+        Test-Path (Join-Path $p '.streamhub\Reviews\r1.md') | Should Be $false
+        Test-Path (Join-Path $p '.streamhub\Reviews\r1.json') | Should Be $false
         Test-Path (Join-Path $p 'Logs\old.log') | Should Be $true
         Test-Path (Join-Path $p 'source\data.csv') | Should Be $true
         Remove-Item $p -Recurse -Force

@@ -17,7 +17,7 @@ export type TranscriptItem =
   | { kind: "user"; seq: number; text: string; taskKind?: string }
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[] }
   | { kind: "action"; seq: number; item: ActionItem }
-  | { kind: "note"; seq: number; tone: NoteTone; text: string }
+  | { kind: "note"; seq: number; tone: NoteTone; text: string; path?: string }
   | { kind: "undo"; seq: number; text: string; changes: UndoChange[] }
   | { kind: "next"; seq: number; steps: string[] }
   | { kind: "clarify"; seq: number; request: string; questions: ClarifyQuestion[]; summary?: string; planId?: string }
@@ -57,7 +57,7 @@ function addNote(e: AgentEvent, ctx: BuildContext) {
   if (!note) return;
   // "done" also replaces an empty string; the other notes only replace a missing text.
   const text = note.keepEmpty === false ? e.text || note.fallback : (e.text ?? note.fallback);
-  ctx.items.push({ kind: "note", seq: e.seq, tone: note.tone, text });
+  ctx.items.push({ kind: "note", seq: e.seq, tone: note.tone, text, ...(typeof e.path === "string" && e.path ? { path: e.path } : {}) });
 }
 
 /** An action event creates the card the first time and updates it afterwards. */
@@ -204,12 +204,17 @@ function AssistantMessage({ text, references }: { text: string; references: Refe
   );
 }
 
-function NoteLine({ tone, text }: { tone: NoteTone; text: string }) {
+function NoteLine({ tone, text, path, onOpenFile }: { tone: NoteTone; text: string; path?: string; onOpenFile?: (path: string) => void }) {
   const style = NOTE_STYLE[tone];
   return (
     <div className={cn("flex items-start gap-2 px-1 text-sm", style.cls)}>
       <span className="mt-0.5">{style.icon}</span>
       <span className="whitespace-pre-wrap">{text}</span>
+      {path && onOpenFile && (
+        <button className="shrink-0 rounded-md px-1.5 text-xs underline-offset-2 hover:underline" onClick={() => onOpenFile(path)} title={`Open ${path}`} type="button">
+          Open
+        </button>
+      )}
     </div>
   );
 }
@@ -294,7 +299,7 @@ function TranscriptRow({
     case "action":
       return <ActionCard item={item.item} />;
     case "note":
-      return <NoteLine text={item.text} tone={item.tone} />;
+      return <NoteLine onOpenFile={onOpenFile} path={item.path} text={item.text} tone={item.tone} />;
     case "undo":
       return <UndoCard changes={item.changes} text={item.text} />;
     case "next":

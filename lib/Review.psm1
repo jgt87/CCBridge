@@ -4,12 +4,13 @@
 #   Test-ReviewOutput the JSON Copilot sends back (findings + summary)
 #   Test-ReviewQuote  a finding counts as verified only when the lines it quotes are in the file;
 #                     its line number is corrected to where they are
-#   Format-ReviewReport / Save-Review  reviews/review-<date>.md and .json in the project
+#   Format-ReviewReport / Save-Review  .streamhub/reviews/review-<date>.md and .json in the project
 #   New-ReviewFixTasks the coding tasks for the findings the user picks
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Executor.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Layout.psm1')
 
 $script:ReviewExt = '(?i)\.(ps1|psm1|psd1|py|pyw|js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|html?|css|scss|less|json|cs|java|kt|go|rs|rb|php|sh|bash|cmd|bat|sql|ya?ml|toml|ini|xml|c|cpp|h|hpp|swift|dart|lua|r)$'
 $script:ReviewSkipPath = '(?i)(^|/)(source|\.streamhub|reviews|evidence|exports|fetch|runbooks|History|Logs|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.next|\.venv|venv|__pycache__)/|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|poetry\.lock)$|\.min\.(js|css)$|\.map$'
@@ -18,7 +19,7 @@ $script:Severity = @{ high = 0; medium = 1; low = 2 }
 function Get-ReviewFiles {
     <# Files to review: code and configuration under the project, without build output, lock files,
        minified files, StreamHub's own folders (reviews, Runbooks, History, Logs), read-only
-       source/ data and binaries. Larger than $MaxBytes is skipped as probably generated.
+       Source/ data and binaries. Larger than $MaxBytes is skipped as probably generated.
        Returns @{ files; skipped }. With $Paths only those files and folders are taken. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths, [int]$MaxBytes = 300000)
     $all = @(Get-ProjectFiles $ProjectRoot)
@@ -177,11 +178,11 @@ function Get-SortedFindings($Findings) {
 }
 
 function Save-Review {
-    <# Writes reviews/review-<stamp>.md and .json in the project. Returns the two relative paths. #>
+    <# Writes .streamhub/reviews/review-<stamp>.md and .json in the project. Returns the two relative paths. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)]$Review)
-    $dir = Join-Path $ProjectRoot 'reviews'
+    $dir = Join-Path $ProjectRoot ((Get-LayoutPath Reviews).Replace('/', '\'))
     $null = New-Item -ItemType Directory -Force -Path $dir
-    $md = "reviews/$($Review.id).md"; $json = "reviews/$($Review.id).json"
+    $md = Get-LayoutPath Reviews "$($Review.id).md"; $json = Get-LayoutPath Reviews "$($Review.id).json"
     $enc = New-Object Text.UTF8Encoding($false)
     [IO.File]::WriteAllText((Resolve-ProjectPath $ProjectRoot $md), (Format-ReviewReport $Review), $enc)
     [IO.File]::WriteAllText((Resolve-ProjectPath $ProjectRoot $json), (ConvertTo-Json -InputObject $Review -Depth 6), $enc)
@@ -191,7 +192,7 @@ function Save-Review {
 function Get-Reviews {
     <# The project's reviews, newest first: id, created, scope, counts, report path. #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
-    $dir = Join-Path $ProjectRoot 'reviews'
+    $dir = Join-Path $ProjectRoot ((Get-LayoutPath Reviews).Replace('/', '\'))
     if (-not (Test-Path -LiteralPath $dir)) { return }
     foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter 'review-*.json' -File | Sort-Object Name -Descending)) {
         try {
@@ -199,7 +200,7 @@ function Get-Reviews {
             $ok = @($r.findings | Where-Object { $_.status -ne 'unverified' })
             [pscustomobject]@{ id = $r.id; created = $r.created; scopeText = $r.scopeText; files = @($r.files).Count; messages = $r.messages
                 high = @($ok | Where-Object severity -eq 'high').Count; medium = @($ok | Where-Object severity -eq 'medium').Count; low = @($ok | Where-Object severity -eq 'low').Count
-                unverified = @($r.findings).Count - $ok.Count; report = "reviews/$($r.id).md" }
+                unverified = @($r.findings).Count - $ok.Count; report = (Get-LayoutPath Reviews "$($r.id).md") }
         } catch { }
     }
 }

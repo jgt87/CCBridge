@@ -235,10 +235,10 @@ function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) =>
             <button
               className={ROW}
               onClick={() => onOpen(n.path)}
-              title={`${n.path} (${n.size} bytes)${n.path.startsWith("source/") ? " - source data, read-only for Copilot" : ""}`}
+              title={`${n.path} (${n.size} bytes)${/^source\//i.test(n.path) ? " - source data, read-only for Copilot" : ""}`}
               type="button"
             >
-              {n.path.startsWith("source/") ? (
+              {/^source\//i.test(n.path) ? (
                 <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               ) : (
                 <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -263,6 +263,15 @@ function ProjectRoot({ project, children }: { project: { name: string; path: str
       <div className="flex h-7 items-center gap-1.5 rounded-md px-1.5 text-sm" title={`${where}\n${project.path}`}>
         <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate font-medium">{project.name}</span>
+        <button
+          aria-label="Open the project folder in File Explorer"
+          className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+          onClick={() => void api.showProject()}
+          title="Open the project folder in File Explorer"
+          type="button"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </button>
       </div>
       <div className={cn("ml-[13px]", LINE)}>{children}</div>
     </div>
@@ -338,7 +347,7 @@ function FilesPanel({
         id="files.source"
         onOpenChange={setUploadOpen}
         open={uploadOpen}
-        summary="Read-only files for Copilot, in source/. Drop files here."
+        summary="Read-only files for Copilot, in Source/. Drop files here."
         title="Add data"
       >
         <FileUpload
@@ -364,13 +373,6 @@ function FilesPanel({
         </PanelSection>
       )}
       <PanelSection
-        actions={
-          project && (
-            <SectionButton onClick={() => void api.showProject()} title="Open the project folder in File Explorer">
-              <ExternalLink className="h-3.5 w-3.5" />
-            </SectionButton>
-          )
-        }
         id="files.tree"
         title="Files"
       >

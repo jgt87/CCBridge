@@ -98,7 +98,7 @@ $script:ErrorHelp = @(
     @{ re = 'No complete reply within'; code = 'TIMEOUT'; hint = 'Copilot took longer than replyTimeoutSec. Raise it in config\harness.local.json, or split the task into smaller steps.' }
     @{ re = '(?i)NoAnswer|stopped without answering|finished without a reply|no usable answer'; code = 'NO-ANSWER'; hint = 'Copilot did not answer. Usually a source it needed was unavailable or the request was blocked. Try again, rephrase, or start a New chat.' }
     @{ re = 'SEARCH text|SEARCH/REPLACE|edit block|half open|does not contain them yet|matches \d+ places'; code = 'EDIT'; hint = 'An edit could not be applied safely and nothing was changed. Copilot gets the reason and usually corrects it in its next reply.' }
-    @{ re = 'source/|source data'; code = 'SOURCE-DATA'; hint = 'Files in source/ are read-only. Ask for the result in another folder (for example work/ or output/).' }
+    @{ re = 'Source/|source data'; code = 'SOURCE-DATA'; hint = 'Files in Source/ are read-only. Ask for the result in another folder (for example Work/ or output/).' }
     @{ re = 'Open or create a project'; code = 'NO-PROJECT'; hint = 'Open or create a project first (Switch worktree).' }
     @{ re = 'still working on the previous message'; code = 'BUSY'; hint = 'Wait until the current task has finished, or press Stop.' }
     @{ re = '(?i)fetch prompt|Fetch '''; code = 'FETCH'; hint = 'The fetch did not complete; the previous answer file was kept. Try Refresh again later.' }

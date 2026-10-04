@@ -71,7 +71,7 @@ Describe 'Save-TaskEvidence' {
         $s = New-AgentState -Config $config -AppRoot $root
         $s.ProjectRoot = $p
         $rel = Save-TaskEvidence $s 'Fix the total' @([pscustomobject]@{ path = 'js/app.js'; added = 3; removed = 1; created = $false; deleted = $false }) @{ syntaxLast = @(); page = $null; reviewed = $true; verify = @{ command = 'npm test'; passed = $false; exit = 1; tail = 'FAIL total' } } 'Fixed the off-by-one.' 4
-        $rel | Should Match '^evidence/task-\d{8}-\d{6}\.md$'
+        $rel | Should Match '^\.streamhub/Evidence/task-\d{8}-\d{6}\.md$'
         $t = [IO.File]::ReadAllText((Join-Path $p $rel))
         $t | Should Match 'Fix the total'
         $t | Should Match '`js/app\.js` \+3 -1'
@@ -117,7 +117,7 @@ Describe 'Invoke-ClarifyStep (Copilot mocked)' {
         @($e[0].questions)[0].options -join ',' | Should Be 'Header,Settings'
         $e[0].summary | Should Be 'Add a dark mode toggle.'
         $e[0].planId | Should Match '^\d{8}-\d{4}-add-dark-mode$'
-        $plan = [IO.File]::ReadAllText((Join-Path $p 'PLAN.md'))
+        $plan = [IO.File]::ReadAllText((Join-Path $p '.streamhub\PLAN.md'))
         $plan | Should Match '(?s)## \d{4}-\d\d-\d\d \d\d:\d\d - Add dark mode\n<!-- plan:\d{8}-\d{4}-add-dark-mode -->\n\nStatus: waiting for your answers'
         $plan | Should Match '(?s)### Copilot''s questions\n\n1\. Where should the toggle go\?\n   Suggested answers: Header / Settings'
     }
@@ -132,7 +132,7 @@ Describe 'Invoke-ClarifyStep (Copilot mocked)' {
         $plan.Count | Should Be 1
         $plan[0].plan | Should Match 'header'
         $plan[0].request | Should Be 'Add dark mode'
-        $md = [IO.File]::ReadAllText((Join-Path $p 'PLAN.md'))
+        $md = [IO.File]::ReadAllText((Join-Path $p '.streamhub\PLAN.md'))
         $md | Should Match '(?s)### Copilot''s questions\n\nNone: the request was clear\..*### Plan \(version 1\)\n\nAdd a toggle in the header'
         $md | Should Match 'Status: waiting for approval'
     }
@@ -176,7 +176,7 @@ Describe 'PLAN.md' {
         Add-PlanSection $p $a 'Change requested' 'Also remember the choice' 'planning'
         Add-PlanSection $p $a "Plan (version $((Get-PlanVersionCount $p $a) + 1))" "1. Toggle in the header`n2. Store it" 'waiting for approval'
         Add-PlanSection $p $a 'Approved' 'Approved; building started.' 'building'
-        $md = [IO.File]::ReadAllText((Join-Path $p 'PLAN.md'))
+        $md = [IO.File]::ReadAllText((Join-Path $p '.streamhub\PLAN.md'))
         $md | Should Match '^# PLAN\n'
         # dark mode first, then CSV; each with its own steps in order
         $md | Should Match "(?s)## 2026-10-03 09:15 - Add dark mode\n<!-- plan:$a -->\n\nStatus: building\n\n### Request\n\nAdd dark mode\n\n### Copilot's questions.*### Your answers\n\n1\. Where\?\n   Answer: Header\n\n### Plan \(version 1\).*### Change requested\n\nAlso remember the choice\n\n### Plan \(version 2\)\n\n1\. Toggle in the header\n2\. Store it\n\n### Approved.*\n## 2026-10-03 09:20 - Export to CSV\n<!-- plan:$b -->\n\nStatus: waiting for approval\n\n### Request\n\nExport to CSV\n\n### Plan \(version 1\)\n\n1\. Add a button\n$"
@@ -197,7 +197,7 @@ Describe 'PLAN.md' {
         Add-AgentEvent $s 'checkpoint' @{ files = @('css/theme.css', 'js/app.js') }
         Add-AgentEvent $s 'status' @{ text = 'Evidence saved: evidence/task-20261003-091500.md' }
         & (Get-Module Agent) { param($st, $i, $f) Write-PlanResult $st $i $f } $s $id $from
-        $md = [IO.File]::ReadAllText((Join-Path $p 'PLAN.md'))
+        $md = [IO.File]::ReadAllText((Join-Path $p '.streamhub\PLAN.md'))
         $md | Should Match 'Status: done'
         $md | Should Match '(?s)### Result \(\d{4}-\d\d-\d\d \d\d:\d\d\)\n\nAdded the toggle\.\n\nFiles changed: `css/theme\.css`, `js/app\.js`\n\nEvidence: evidence/task-20261003-091500\.md'
         cmd /c "rmdir /s /q ""$p"" >nul 2>&1"

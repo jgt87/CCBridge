@@ -1,7 +1,7 @@
 # Runbooks: repeatable, read-only exports of Microsoft 365 data (via Copilot with Work IQ) to JSON.
 #   templates\runbooks\*.runbook.md    ready-made runbooks shipped with the app
 #   Runbooks\<name>.runbook.md         the project's runbooks (header + instructions for Copilot)
-#   <output> (e.g. Runbooks\Exports\<name>.json) the latest valid result, plus History\<name>-<stamp>.json
+#   <output> (e.g. Runbooks\Exports\<name>.json) the latest valid result, plus .streamhub\History\<name>-<stamp>.json
 #   (the folders come from Layout.psm1)
 # The header (between --- lines) is read here: title, output, itemsKey, required, requiredItemFields;
 # other header lines become {{placeholders}}. HTML comments are notes for the person and not sent.
@@ -211,14 +211,14 @@ function Test-RunbookOutput {
 }
 
 function Save-RunbookOutput {
-    <# Writes the validated JSON to the runbook's output file and a dated copy to History/. #>
+    <# Writes the validated JSON to the runbook's output file and a dated copy to .streamhub/History/. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Output, [Parameter(Mandatory)][string]$Json)
     $enc = New-Object Text.UTF8Encoding($false)
     $full = Assert-Writable $ProjectRoot $Output
     $dir = Split-Path $full; if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -ItemType Directory -Path $dir }
     [IO.File]::WriteAllText($full, $Json.Trim() + "`n", $enc)
     $hist = Get-LayoutPath History "$Name-$((Get-Date).ToString('yyyyMMdd-HHmmss')).json"
-    $hfull = Assert-Writable $ProjectRoot $hist
+    $hfull = Resolve-ProjectPath $ProjectRoot $hist   # StreamHub's own record (in .streamhub/)
     $hdir = Split-Path $hfull; if (-not (Test-Path -LiteralPath $hdir)) { $null = New-Item -ItemType Directory -Path $hdir }
     [IO.File]::WriteAllText($hfull, $Json.Trim() + "`n", $enc)
     @{ output = $Output; history = $hist }
