@@ -6,6 +6,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.65] - 2026-10-04
+
+### Changed
+
+- Side panel: *Code health* has a Beta tag and is the last tab, spanning the free width of its row so its name and the tag fit; *Automation* moved up next to *Changes*. Tabs have slightly less padding.
+- Menu: *Settings* no longer has a description (it listed only a few of the settings).
+- Settings in 8 groups instead of 17: This browser, Sign-in, Copilot, Timing, Changes and commands, Checks and issues, Privacy and retention, App. Only their place changed: every setting keeps its value.
+- Clearer names: *Switch project* (was Switch worktree; StreamHub has no Git); the agent menu reads *Agent: none (Copilot) / Researcher / Analyst* (was *Ask:*, which clashed with the mode *Ask before changes*); Tasks > *Checklist* (was Plan, which clashed with Plan only and the clarify-first plans); *as set in Copilot* everywhere (was "page setting" in the message box and the Work IQ button); *New chat* in the Menu as in the message box; Settings > *Copilot checks its big changes* (was Review after changes, easily mixed up with Code review); Retention > *Earlier runbook results* (was History).
+- *Task report (evidence)*: the setting, its retention numbers and the chat line ("Task report saved: ...", with *Open*) use one name, with a one-line explanation of what the report holds (was Evidence per task / Evidence saved).
+- The Files tree shows the project's `.streamhub` folder (StreamHub's own records), closed at first and marked with a cog icon and an explanation; Copilot's file list still leaves it out.
+- The read-only `Source/` folder has its lock icon in the tree again (it was lost when the folder got its capital).
+- Start screen: the limitation reads *No artifact generator* and says that charts in Analyst answers are saved as images.
+
 ## [v0.1.64] - 2026-10-04
 
 ### Changed
@@ -754,7 +767,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.64...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.65...HEAD
+[v0.1.65]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.65
 [v0.1.64]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.64
 [v0.1.63]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.63
 [v0.1.62]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.62

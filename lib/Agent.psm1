@@ -735,12 +735,12 @@ function Write-PlanResult {
         $events = @(Get-AgentEvents $State $FromSeq)
         $done = @($events | Where-Object { $_.type -eq 'done' } | Select-Object -Last 1)
         $files = @($events | Where-Object { $_.type -eq 'checkpoint' } | ForEach-Object { $_.files } | Where-Object { $_ } | Select-Object -Unique)
-        $evidence = @($events | Where-Object { $_.type -eq 'status' -and "$($_.text)" -like 'Evidence saved: *' } | Select-Object -Last 1)
+        $evidence = @($events | Where-Object { $_.type -eq 'status' -and ("$($_.text)" -like 'Task report saved: *' -or "$($_.text)" -like 'Evidence saved: *') } | Select-Object -Last 1)
         $failed = @($events | Where-Object { $_.type -eq 'error' } | Select-Object -Last 1)
         $body = New-Object System.Collections.Generic.List[string]
         $body.Add($(if ($done.Count) { "$($done[0].text)".Trim() } elseif ($failed.Count) { "Not finished: $($failed[0].text)" } else { 'Copilot did not report the task as done.' }))
         if ($files.Count) { $body.Add(''); $body.Add('Files changed: ' + (($files | ForEach-Object { "``$_``" }) -join ', ')) }
-        if ($evidence.Count) { $body.Add(''); $body.Add('Evidence: ' + ("$($evidence[0].text)" -replace '^Evidence saved: ', '')) }
+        if ($evidence.Count) { $body.Add(''); $body.Add('Task report: ' + ("$($evidence[0].text)" -replace '^(Task report|Evidence) saved: ', '')) }
         Add-PlanSection $State.ProjectRoot $PlanId "Result ($((Get-Date).ToString('yyyy-MM-dd HH:mm')))" ($body -join "`n") $(if ($done.Count) { 'done' } else { 'not finished' })
     } catch { Write-CCBLogError agent 'PLAN.md result' $_ }
 }
@@ -2465,7 +2465,7 @@ function Invoke-AgentTurn {
                 $chg = @(Get-CheckpointChanges $State.ProjectRoot $checkpoint | Where-Object { $_.added -or $_.removed -or $_.created -or $_.deleted })
                 if ($chg.Count) {
                     $evPath = Save-TaskEvidence $State $Text $chg $ev $doneText ([int]$State.MessagesSent - $msgStart)
-                    Add-AgentEvent $State 'status' @{ text = "Evidence saved: $evPath"; path = $evPath }
+                    Add-AgentEvent $State 'status' @{ text = "Task report saved: $evPath"; path = $evPath }
                 }
             } catch { Write-CCBLogError agent 'evidence' $_ }
         }

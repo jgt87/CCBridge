@@ -178,6 +178,14 @@ function Invoke-ApiRequest($Ctx, $State) {
                 $s = $stats[$_.path]
                 if ($s) { [pscustomobject]@{ path = $_.path; size = $_.size; added = $s.added; removed = $s.removed; created = [bool]$s.created } } else { $_ }
             })
+            # StreamHub's own records (.streamhub/) show in the tree too, though Copilot's file list
+            # leaves them out: issues, imports, schedules, task reports, reviews, earlier results, plans.
+            $own = Join-Path $State.ProjectRoot '.streamhub'
+            if (Test-Path -LiteralPath $own -PathType Container) {
+                $base = $State.ProjectRoot.TrimEnd('\').Length + 1
+                $files += @(Get-ChildItem -LiteralPath $own -Recurse -File -Force -ErrorAction SilentlyContinue | Select-Object -First 2000 | ForEach-Object {
+                    [pscustomobject]@{ path = $_.FullName.Substring($base).Replace('\', '/'); size = $_.Length; own = $true } })
+            }
             return Send-Json $Ctx @{ files = $files }
         }
         '^GET /api/file$' {

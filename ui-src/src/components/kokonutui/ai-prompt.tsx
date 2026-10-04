@@ -312,7 +312,7 @@ export default function AI_Prompt({
                     </ToolButton>
                   )}
                   {onSchedule && (
-                    <ToolButton label="Schedule this message" onClick={() => onSchedule(value)} title="Schedule: send this message (or run a runbook or fetch) on set days and times">
+                    <ToolButton label="Schedule this message" onClick={() => onSchedule(value)} title="Schedule: send this message (or run a runbook or chain) on set days and times">
                       <CalendarClock className="h-4 w-4 transition-colors" />
                     </ToolButton>
                   )}

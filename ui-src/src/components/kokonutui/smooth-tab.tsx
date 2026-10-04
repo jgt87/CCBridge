@@ -19,6 +19,8 @@ export interface TabItem {
   title: string;
   description?: string;
   icon?: LucideIcon;
+  /** Shown after the title, for example a Beta tag. */
+  badge?: React.ReactNode;
   content?: React.ReactNode;
   cardContent?: React.ReactNode;
   color: string;
@@ -286,15 +288,17 @@ export default function SmoothTab({
           className="relative z-[2] grid w-full gap-1"
           style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
         >
-          {items.map((item) => {
+          {items.map((item, index) => {
             const isSelected = selected === item.id;
+            // The last tab spans the columns its row leaves free (room for a badge).
+            const spare = index === items.length - 1 ? (cols - (items.length % cols)) % cols : 0;
             const Icon = item.icon;
             return (
               <motion.button
                 aria-controls={`panel-${item.id}`}
                 aria-selected={isSelected}
                 className={cn(
-                  "relative flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5",
+                  "relative flex items-center justify-center gap-1 rounded-lg px-1 py-1.5",
                   "font-medium text-sm transition-all duration-300",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   "truncate",
@@ -311,11 +315,13 @@ export default function SmoothTab({
                   else buttonRefs.current.delete(item.id);
                 }}
                 role="tab"
+                style={spare ? { gridColumn: `span ${spare + 1} / span ${spare + 1}` } : undefined}
                 tabIndex={isSelected ? 0 : -1}
                 type="button"
               >
                 {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
                 <span className="truncate">{item.title}</span>
+                {item.badge && <span className="shrink-0">{item.badge}</span>}
               </motion.button>
             );
           })}

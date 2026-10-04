@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, File, FileClock, Folder, FolderLock, FolderOpen, FolderTree, HeartPulse, ListTodo, Lock, Plus, RefreshCw, RotateCcw, SquareCheck, Square, Workflow } from "lucide-react";
+import { ChevronRight, ExternalLink, File, FileClock, Folder, FolderCog, FolderLock, FolderOpen, FolderTree, HeartPulse, ListTodo, Lock, Plus, RefreshCw, RotateCcw, SquareCheck, Square, Workflow } from "lucide-react";
 import type React from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import FileUpload from "@/components/kokonutui/file-upload";
@@ -189,13 +189,17 @@ function useClosedFolders(projectPath: string | undefined) {
       return {};
     }
   };
-  const [closed, setClosed] = useState<Record<string, boolean>>(read);
+  const [stored, setClosed] = useState<Record<string, boolean>>(read);
   useEffect(() => setClosed(read()), [key]);
+  // StreamHub's own folder starts closed; every other folder starts open.
+  const byDefault = (path: string) => path === ".streamhub";
+  const closed = new Proxy(stored, { get: (t, p: string) => (p in t ? t[p] : byDefault(p)) }) as Record<string, boolean>;
   const toggle = (path: string) =>
     setClosed((c) => {
       const next = { ...c };
-      if (next[path]) delete next[path];
-      else next[path] = true;
+      const now = path in next ? next[path] : byDefault(path);
+      if (!now === byDefault(path)) delete next[path];
+      else next[path] = !now;
       try {
         localStorage.setItem(key, JSON.stringify(next));
       } catch {
@@ -214,10 +218,18 @@ function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) =>
         <li className={ITEM} key={n.path}>
           {n.children ? (
             <>
-              <button aria-expanded={!closed[n.path]} className={ROW} onClick={() => toggle(n.path)} title={n.path} type="button">
+              <button
+                aria-expanded={!closed[n.path]}
+                className={ROW}
+                onClick={() => toggle(n.path)}
+                title={n.path === ".streamhub" ? "StreamHub's own records: issues, imports, schedules, task reports, code reviews, earlier runbook results and plans. Not part of the project's code; Copilot does not see or change them." : n.path}
+                type="button"
+              >
                 <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !closed[n.path] && "rotate-90")} />
-                {n.path === "source" ? (
+                {/^source$/i.test(n.path) ? (
                   <FolderLock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : n.path === ".streamhub" ? (
+                  <FolderCog className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 ) : (
                   <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 )}
@@ -502,7 +514,7 @@ export function SidePanel({
 
   const tasksPanel = (
     <div>
-      <PanelSection badge={todos.length ? <SectionCount n={todos.filter((t) => !t.done).length} /> : null} id="tasks.plan" title="Plan">
+      <PanelSection badge={todos.length ? <SectionCount n={todos.filter((t) => !t.done).length} /> : null} id="tasks.plan" title="Checklist">
       <div className="space-y-1">
       {todos.length ? (
         todos.map((t, i) => (
@@ -516,7 +528,7 @@ export function SidePanel({
           </div>
         ))
       ) : (
-        <p className="text-muted-foreground text-sm">Copilot's plan for the current task shows up here.</p>
+        <p className="text-muted-foreground text-sm">Copilot's checklist for the current task shows up here.</p>
       )}
       </div>
       </PanelSection>
@@ -617,7 +629,6 @@ export function SidePanel({
         { id: "files", title: "Files", icon: FolderTree, color: "bg-zinc-700", content: filesPanel },
         { id: "tasks", title: "Tasks", icon: ListTodo, color: "bg-zinc-700", content: tasksPanel },
         { id: "changes", title: "Changes", icon: FileClock, color: "bg-zinc-700", content: changesPanel },
-        { id: "health", title: "Code health", icon: HeartPulse, color: "bg-zinc-700", content: healthPanel },
         {
           id: "automation",
           title: "Automation",
@@ -668,6 +679,14 @@ export function SidePanel({
               )}
             </div>
           ),
+        },
+        {
+          id: "health",
+          title: "Code health",
+          icon: HeartPulse,
+          color: "bg-zinc-700",
+          badge: <BetaTag title="Beta: Issues and Code review are still being refined; their checks run without a language model and can miss problems or report ones that are not real." />,
+          content: healthPanel,
         },
       ]}
     />

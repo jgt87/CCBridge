@@ -83,7 +83,7 @@ export function TextRunbookForm({ onSave, onCancel }: { onSave: (name: string, p
         <input aria-label="Only these websites" className={field} onChange={(e) => setSites(e.target.value)} placeholder="Optional: only these websites, e.g. nodejs.org, python.org" value={sites} />
         <span className="text-muted-foreground">Pages</span>
         <input aria-label="Pages to read" className={field} onChange={(e) => setPages(e.target.value)} placeholder="Optional: pages to read exactly, e.g. https://nodejs.org/en/about/previous-releases" value={pages} />
-        <span className="text-muted-foreground">Ask</span>
+        <span className="text-muted-foreground">Agent</span>
         <select aria-label="Who answers" className={field} onChange={(e) => setAgent(e.target.value as NonNullable<FetchWeb["agent"]>)} title="Researcher or Analyst answer instead of Copilot itself; they take several minutes" value={agent}>
           <option value="">Copilot</option>
           <option value="researcher">Researcher</option>

@@ -354,10 +354,10 @@ export default function App() {
   }));
 
   const commandActions: Action[] = [
-    { id: "new-chat", label: "New Copilot chat", description: "Start fresh; the project stays open", icon: <MessageSquarePlus className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: startNewChat },
+    { id: "new-chat", label: "New chat", description: "Start a fresh Copilot chat; the project stays open", icon: <MessageSquarePlus className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: startNewChat },
     { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: <RotateCcw className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => api.undo() },
-    { id: "settings", label: "Settings", description: "Pacing, retries, checks, timeouts and sizes for this computer", icon: <Settings className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setShowSettings(true), 0) },
-    { id: "project", label: "Switch worktree", description: "Open or create a OneDrive project folder", icon: <FolderOpen className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setShowPicker(true) },
+    { id: "settings", label: "Settings", icon: <Settings className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setShowSettings(true), 0) },
+    { id: "project", label: "Switch project", description: "Open or create a OneDrive project folder", icon: <FolderOpen className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setShowPicker(true) },
     { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: <AtSign className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setPalette("attach"), 0) },
     {
       id: "logging",
@@ -414,7 +414,7 @@ export default function App() {
             type="button"
           >
             <FolderOpen className="h-4 w-4" />
-            <span className="truncate">Switch worktree</span>
+            <span className="truncate">Switch project</span>
           </button>
         )}
         <div className="flex-1" />
@@ -646,7 +646,7 @@ export default function App() {
                           title="Work IQ lets Copilot use your Microsoft 365 data: Outlook, Teams, calendar, OneDrive and SharePoint"
                           type="button"
                         >
-                          Work IQ {state.workIq === "on" ? "on" : state.workIq === "off" ? "off" : "(page setting)"}
+                          Work IQ {state.workIq === "on" ? "on" : state.workIq === "off" ? "off" : "(as set in Copilot)"}
                         </button>
                       )}
                       <select
@@ -656,9 +656,9 @@ export default function App() {
                         title="Who answers the next message: Copilot (with StreamHub's instructions), or one of Copilot's agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat."
                         value={agent}
                       >
-                        <option value="copilot">Ask: Copilot</option>
-                        <option value="researcher">Ask: Researcher</option>
-                        <option value="analyst">Ask: Analyst</option>
+                        <option value="copilot">Agent: none (Copilot)</option>
+                        <option value="researcher">Agent: Researcher</option>
+                        <option value="analyst">Agent: Analyst</option>
                       </select>
                       <select
                         className="rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
@@ -666,7 +666,7 @@ export default function App() {
                         title={`Copilot's response mode (Auto / Quick response / Think deeper)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
                         value={state.responseMode ?? "leave"}
                       >
-                        <option value="leave">Response: page setting</option>
+                        <option value="leave">Response: as set in Copilot</option>
                         <option value="auto">Response: Auto</option>
                         <option value="quick">Response: Quick</option>
                         <option value="deep">Response: Think deeper</option>

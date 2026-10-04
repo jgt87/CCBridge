@@ -157,7 +157,7 @@ export interface AppState {
   version: string;
   /** Every task, newest first, whatever started it (you, an MCP client, ...). */
   queue?: QueueEntry[];
-  /** Copilot's response mode: leave (page setting), auto, quick or deep (Think deeper). */
+  /** Copilot's response mode: leave (as set in Copilot), auto, quick or deep (Think deeper). */
   responseMode?: string;
   responseModeActual?: string | null;
   /** The project's own check from "verify:" in AGENTS.md, if any. */

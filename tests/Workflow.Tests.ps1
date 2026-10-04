@@ -199,7 +199,7 @@ Describe 'PLAN.md' {
         & (Get-Module Agent) { param($st, $i, $f) Write-PlanResult $st $i $f } $s $id $from
         $md = [IO.File]::ReadAllText((Join-Path $p '.streamhub\PLAN.md'))
         $md | Should Match 'Status: done'
-        $md | Should Match '(?s)### Result \(\d{4}-\d\d-\d\d \d\d:\d\d\)\n\nAdded the toggle\.\n\nFiles changed: `css/theme\.css`, `js/app\.js`\n\nEvidence: evidence/task-20261003-091500\.md'
+        $md | Should Match '(?s)### Result \(\d{4}-\d\d-\d\d \d\d:\d\d\)\n\nAdded the toggle\.\n\nFiles changed: `css/theme\.css`, `js/app\.js`\n\nTask report: evidence/task-20261003-091500\.md'
         cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
     }
 }

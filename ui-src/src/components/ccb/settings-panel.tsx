@@ -344,8 +344,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               {list.map((s) => (
                 <SettingRow key={s.key} onSaved={setSettings} s={s} />
               ))}
-              {group === "Privacy" && <ClearHistoryRow />}
-              {group === "Privacy" && <ClearEdgeCacheRow />}
+              {group === "Privacy and retention" && <ClearHistoryRow />}
+              {group === "Privacy and retention" && <ClearEdgeCacheRow />}
             </SettingsGroup>
           ))}
         </div>
