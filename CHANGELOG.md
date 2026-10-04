@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.74] - 2026-10-04
+
+### Changed
+
+- Code health > Issues shows only the open project; the list of all projects at the bottom is gone. The empty-list line "No problems of the shown kinds." is gone too.
+
 ## [v0.1.73] - 2026-10-04
 
 ### Added
@@ -847,7 +853,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.73...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.74...HEAD
+[v0.1.74]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.74
 [v0.1.73]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.73
 [v0.1.72]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.72
 [v0.1.71]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.71

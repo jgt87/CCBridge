@@ -125,8 +125,6 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
     }
   };
 
-  const others = (report?.projects ?? []).filter((p) => p.root !== report?.summary?.root);
-
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -193,7 +191,6 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
           {allOpen ? "Collapse all" : "Expand all"}
         </button>
       )}
-      {byFile.length === 0 && report && !indexing && <div className="text-muted-foreground text-xs">No problems of the shown kinds.</div>}
       <div className="flex flex-col gap-1">
         {byFile.map(([path, items]) => {
           const isOpen = allOpen ? !open.has(path) : open.has(path);
@@ -242,19 +239,6 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
         })}
       </div>
 
-      {others.length > 0 && (
-        <div className="pt-1">
-          <div className="text-muted-foreground text-xs uppercase tracking-wide">All projects</div>
-          {others.map((p) => (
-            <div className="flex items-center justify-between gap-2 py-0.5 text-xs" key={p.root} title={p.root}>
-              <span className="truncate">{p.name}</span>
-              <span className="shrink-0 text-muted-foreground">
-                {p.open.error} errors · {p.open.secret} secrets · {p.open.health} health · {timeOf(p.updated)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
