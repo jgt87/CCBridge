@@ -1,0 +1,1 @@
+Format: answer in Markdown with a title and a short summary first, then sections with headings. Put figures and comparisons in Markdown tables and give a link for each source. If the answer contains data, end with the same data in one ```json code block (a list of objects with clear field names), so it can be reused.

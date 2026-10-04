@@ -1275,6 +1275,17 @@ function Send-AgentJobMessage {
     $r
 }
 
+function Add-AgentOutputFormat {
+    <# A message to Researcher or Analyst with the expected output added (prompts/agent-output.md),
+       so the answer can be reused: unless the message already says how the answer should look. #>
+    param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+    if ($Text -match '(?i)\b(format|formatted|json|csv|markdown|tables?|bullets?|bullet points|columns?|yaml|xml|spreadsheet)\b') { return $Text }
+    $file = Join-Path $AppRoot 'prompts\agent-output.md'
+    $line = if (Test-Path -LiteralPath $file) { [IO.File]::ReadAllText($file).Trim() } else { '' }
+    if (-not $line) { return $Text }
+    "$($Text.TrimEnd())`n`n$line"
+}
+
 function Invoke-AgentRun {
     <# Sends a message to one of Copilot's agents (Researcher, Analyst) by mentioning it, as typed:
        no coding instructions or project context. A new run starts a fresh Copilot chat; -FollowUp
@@ -1295,7 +1306,9 @@ function Invoke-AgentRun {
         $att = Get-AgentAttachments $State.ProjectRoot $Text
         $files = @(Resolve-AgentFiles $State.ProjectRoot $att.names)
         if ($files.Count) { Add-AgentEvent $State 'status' @{ text = "Attaching $($att.names -join ', ') (Copilot keeps a copy in your OneDrive, as with its own + button)." } }
-        $r = Send-ToCopilot $State $att.text -Agent $(if ($FollowUp) { '' } else { $name }) -Long -Files $files
+        # A new question gets the expected output format (unless it states one); an answer to the plan goes as typed.
+        $message = if ($FollowUp) { $att.text } else { Add-AgentOutputFormat $State.AppRoot $att.text }
+        $r = Send-ToCopilot $State $message -Agent $(if ($FollowUp) { '' } else { $name }) -Long -Files $files
         if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "$name stopped." }; $State.AgentChat = $null; $State.NeedNewChat = $true; return }
         if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {
             Add-AgentEvent $State 'error' @{ text = "$name gave no usable answer ($($r.Result): $($r.ResultMessage))."; code = 'AGENT' }
@@ -2642,4 +2655,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

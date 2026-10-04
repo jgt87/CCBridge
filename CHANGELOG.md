@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.66] - 2026-10-04
+
+### Changed
+
+- A message to Researcher or Analyst now states the expected output, so the answer can be reused: Markdown with a title and short summary, figures and comparisons in tables, a link for each source, and the data at the end in one JSON block (`prompts/agent-output.md`). It is left out when your message already says how the answer should look (table, JSON, CSV, format, bullets, ...), and your answer to Researcher's plan goes as typed.
+
 ## [v0.1.65] - 2026-10-04
 
 ### Changed
@@ -767,7 +773,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.65...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.66...HEAD
+[v0.1.66]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.66
 [v0.1.65]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.65
 [v0.1.64]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.64
 [v0.1.63]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.63

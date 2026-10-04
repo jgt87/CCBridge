@@ -65,7 +65,8 @@ Describe 'Invoke-AgentRun (Copilot mocked)' {
         Invoke-AgentRun $s 'researcher' 'Compare three generators'
         $global:ccbSent[0].agent | Should Be 'Researcher'
         $global:ccbSent[0].long | Should Be $true
-        $global:ccbSent[0].text | Should Be 'Compare three generators'   # sent as typed
+        $global:ccbSent[0].text | Should Match '^Compare three generators\r?\n\r?\nFormat: answer in Markdown'   # the expected output added
+        $global:ccbSent[0].text | Should Match 'json code block'
         $global:ccbNewChats | Should Be 1
         @($s.Events | Where-Object type -eq 'agent-plan').Count | Should Be 1
         ($s.Events | Where-Object type -eq 'assistant').agent | Should Be 'Researcher'
@@ -74,9 +75,15 @@ Describe 'Invoke-AgentRun (Copilot mocked)' {
         $global:ccbReply = New-Reply '# Report' 'Researcher'
         Invoke-AgentRun $s 'researcher' 'Last 12 months' -FollowUp
         $global:ccbSent[1].agent | Should Be ''
+        $global:ccbSent[1].text | Should Be 'Last 12 months'                     # an answer to the plan goes as typed
         $global:ccbNewChats | Should Be 1
         $s.AgentChat | Should Be $null
         $s.NeedNewChat | Should Be $true
+    }
+    It 'adds the expected output only when the message does not state a format' {
+        Add-AgentOutputFormat $root 'Monthly revenue per product as a table' | Should Be 'Monthly revenue per product as a table'
+        Add-AgentOutputFormat $root 'Give it as JSON' | Should Be 'Give it as JSON'
+        Add-AgentOutputFormat $root 'Monthly revenue per product' | Should Match '^Monthly revenue per product\r?\n\r?\nFormat: '
     }
     It 'warns when Copilot itself answered instead of the agent' {
         $global:ccbSent = @(); $global:ccbNewChats = 0
