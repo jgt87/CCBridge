@@ -609,6 +609,38 @@ function Get-LastChangeStart {
     if ($last -and $last -ge $OpenedAt) { $last } else { '99999999' }
 }
 
+function Add-CheckpointCount {
+    <# Adds one write or edit to the change set's running line counts (counts.json in the
+       checkpoint): every change counts, also one that rewrites lines an earlier change in the same
+       set added, so the Files tab's "last change" counts add up all changes of one instruction. #>
+    param($Checkpoint, [string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if (-not $Checkpoint -or -not $Checkpoint.Dir) { return }
+    $file = Join-Path $Checkpoint.Dir 'counts.json'
+    $all = @{}
+    if (Test-Path -LiteralPath $file) { try { foreach ($p in ([IO.File]::ReadAllText($file) | ConvertFrom-Json).PSObject.Properties) { $all[$p.Name] = @{ added = [int]$p.Value.added; removed = [int]$p.Value.removed } } } catch { } }
+    $m = Measure-LineChanges $Old $New
+    $key = $Rel.Replace('\', '/')
+    if (-not $all.ContainsKey($key)) { $all[$key] = @{ added = 0; removed = 0 } }
+    $all[$key].added += [int]$m.added; $all[$key].removed += [int]$m.removed
+    [IO.File]::WriteAllText($file, (ConvertTo-Json -InputObject $all -Depth 3), (New-Object Text.UTF8Encoding($false)))
+}
+
+function Get-LastChangeStats {
+    <# "Last change" line counts per file: the change set's running counts (Add-CheckpointCount)
+       where it has them, otherwise the net change against the version before it. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string]$SinceId)
+    $stats = Get-SessionChangeStats $ProjectRoot $SinceId
+    if (-not $SinceId -or $SinceId -eq '99999999') { return $stats }
+    $file = Join-Path (Join-Path (Get-ProjectStateDir $ProjectRoot) "backups\$SinceId") 'counts.json'
+    if (-not (Test-Path -LiteralPath $file)) { return $stats }
+    try { $counts = [IO.File]::ReadAllText($file) | ConvertFrom-Json } catch { return $stats }
+    foreach ($p in $counts.PSObject.Properties) {
+        if (-not $stats.ContainsKey($p.Name)) { continue }   # deleted or undone since: nothing to show
+        $stats[$p.Name].added = [int]$p.Value.added; $stats[$p.Name].removed = [int]$p.Value.removed
+    }
+    $stats
+}
+
 function Get-SessionChangeStats {
     <# Per changed file: lines added/removed since $SinceId (a checkpoint id, yyyyMMdd-HHmmss-fff),
        measured against the version before the first change in that period (from the undo backups).
@@ -1532,5 +1564,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

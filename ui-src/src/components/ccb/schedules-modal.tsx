@@ -1,7 +1,7 @@
 import { CalendarClock, ChevronRight, Plus, X } from "lucide-react";
 import { ModalBackdrop } from "./modal-backdrop";
 import { useEffect, useState } from "react";
-import type { FetchItem, FileInfo, RunbookItem, ScheduleItem, ScheduleSpec } from "@/lib/api";
+import type { ChainItem, FetchItem, FileInfo, RunbookItem, ScheduleItem, ScheduleSpec } from "@/lib/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ScheduleForm, type ScheduleTarget } from "./schedule-form";
@@ -37,6 +37,7 @@ export function SchedulesModal({
   schedules,
   fetchItems,
   runbooks,
+  chains = [],
   files,
   initial,
   onCreate,
@@ -45,6 +46,7 @@ export function SchedulesModal({
   schedules: ScheduleItem[];
   fetchItems: FetchItem[];
   runbooks: RunbookItem[];
+  chains?: ChainItem[];
   files: FileInfo[];
   /** Opened to schedule something specific (from the message box, a runbook or a fetch prompt). */
   initial: ScheduleTarget | null;
@@ -100,6 +102,7 @@ export function SchedulesModal({
                 setEditing(null);
               }}
               runbooks={runbooks}
+              chains={chains}
             />
           ) : target ? (
             <ScheduleForm
@@ -113,6 +116,7 @@ export function SchedulesModal({
                 setTarget(null);
               }}
               runbooks={runbooks}
+              chains={chains}
             />
           ) : (
             <SchedulesList onEdit={setEditing} schedules={schedules} />

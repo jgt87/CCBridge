@@ -24,6 +24,22 @@ Describe 'Line counts per change' {
         $one['b.txt'].created | Should Be $true
     }
 
+    It 'adds up every change of one change set in "last change" counts' {
+        $cp = New-Checkpoint $p 'two edits'
+        $f = Join-Path $p 'c.txt'
+        [IO.File]::WriteAllText($f, "a`nb`nc`n")
+        $null = Invoke-WriteAction $p 'c.txt' "a`nb`nc`n" $cp
+        Add-CheckpointCount $cp 'c.txt' "a`nb`nc`n" "a`nB1`nB2`nc`n"
+        [IO.File]::WriteAllText($f, "a`nB1`nB2`nc`n")
+        Add-CheckpointCount $cp 'c.txt' "a`nB1`nB2`nc`n" "a`nB1`nX`nc`n"
+        [IO.File]::WriteAllText($f, "a`nB1`nX`nc`n")
+        # Net against the original: +2 -1; added up per change: +3 -2.
+        (Get-SessionChangeStats $p $cp.Id)['c.txt'].added | Should Be 2
+        $s = Get-LastChangeStats $p $cp.Id
+        $s['c.txt'].added | Should Be 3
+        $s['c.txt'].removed | Should Be 2
+    }
+
     It 'shows no "last change" counts from before the project was opened' {
         $opened = (Get-Date).AddSeconds(1).ToString('yyyyMMdd-HHmmss-fff')
         $since = Get-LastChangeStart $p $opened

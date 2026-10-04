@@ -83,6 +83,7 @@ export interface AgentEvent {
     | "newchat"
     | "fetch"
     | "runbook"
+    | "chain"
     | "review"
     | "kind"
     | "clarify"
@@ -286,7 +287,7 @@ export interface ReviewDetail {
 export interface ScheduleItem {
   id: string;
   title: string;
-  kind: "chat" | "fetch" | "runbook";
+  kind: "chat" | "fetch" | "runbook" | "chain";
   name: string;
   /** The message, for a scheduled message. */
   text?: string;
@@ -305,7 +306,7 @@ export interface ScheduleItem {
 }
 
 export interface ScheduleSpec {
-  kind: "chat" | "fetch" | "runbook";
+  kind: "chat" | "fetch" | "runbook" | "chain";
   text?: string;
   name?: string;
   title?: string;
@@ -346,6 +347,27 @@ export interface RunbookItem {
   path: string;
   output: string;
   lastRun: string | null;
+}
+
+/** One step of a chain. */
+export interface ChainStep {
+  kind: "runbook" | "fetch" | "script";
+  target: string;
+  /** Files from earlier steps a runbook step gets as data. */
+  with?: string[];
+  /** Plain arguments of a script step. */
+  args?: string;
+}
+
+/** A chain (Runbooks/<name>.chain.md): runbooks, fetch prompts and scripts run one after another. */
+export interface ChainItem {
+  name: string;
+  title: string;
+  path: string;
+  stopOnError: boolean;
+  steps: ChainStep[];
+  /** Why it cannot run now (unknown runbook, missing script...). */
+  problems: string[];
 }
 
 export interface RunbookTemplate {
@@ -490,6 +512,13 @@ export const api = {
     })),
   createRunbook: (template: string, name: string) => call<{ ok: boolean; item: RunbookItem }>("POST", "/api/runbooks", { template, name }),
   runRunbook: (name: string) => call<{ ok: boolean }>("POST", "/api/runbooks/run", { name }),
+  chains: () =>
+    call<{ chains: ChainItem[]; scripts: string[] }>("GET", "/api/chains").then((r) => ({
+      chains: asList(r.chains).map((c) => ({ ...c, steps: asList(c.steps), problems: asList(c.problems) })),
+      scripts: asList(r.scripts),
+    })),
+  createChain: (name: string) => call<{ ok: boolean }>("POST", "/api/chains", { name }),
+  runChain: (name: string) => call<{ ok: boolean }>("POST", "/api/chains/run", { name }),
   approve: (id: string, decision: "approve" | "reject", note = "") =>
     call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user" }),
   setMode: (mode: Mode) => call<{ ok: boolean }>("POST", "/api/mode", { mode }),

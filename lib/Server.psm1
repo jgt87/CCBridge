@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -164,8 +164,10 @@ function Invoke-ApiRequest($Ctx, $State) {
             if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ files = @() } }
             # Line counts for the whole session, or only for the last change (setting fileChangeCounts).
             $since = [string]$State.SessionSince
-            if ("$($State.Config.fileChangeCounts)" -eq 'last-change') { $since = Get-LastChangeStart $State.ProjectRoot ([string]$State.OpenedAt) }
-            $stats = Get-SessionChangeStats $State.ProjectRoot $since
+            if ("$($State.Config.fileChangeCounts)" -eq 'last-change') {
+                $since = Get-LastChangeStart $State.ProjectRoot ([string]$State.OpenedAt)
+                $stats = Get-LastChangeStats $State.ProjectRoot $since   # every change of the last instruction added up
+            } else { $stats = Get-SessionChangeStats $State.ProjectRoot $since }
             $files = @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object {
                 $s = $stats[$_.path]
                 if ($s) { [pscustomobject]@{ path = $_.path; size = $_.size; added = $s.added; removed = $s.removed; created = [bool]$s.created } } else { $_ }
@@ -340,6 +342,22 @@ function Invoke-ApiRequest($Ctx, $State) {
             if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
             $b = Read-JsonBody $Ctx
             $null = Submit-AgentTask $State @{ kind = 'runbook'; name = [string]$b.name } 'user'
+            return Send-Json $Ctx @{ ok = $true }
+        }
+        '^GET /api/chains$' {
+            $list = @(if ($State.ProjectRoot) { Get-Chains $State.ProjectRoot })
+            return Send-Json $Ctx @{ chains = $list; scripts = @(if ($State.ProjectRoot) { Get-ProjectScripts $State.ProjectRoot }) }
+        }
+        '^POST /api/chains$' {
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            $item = New-ChainFile $State.AppRoot $State.ProjectRoot ([string]$b.name)
+            return Send-Json $Ctx @{ ok = $true; item = $item }
+        }
+        '^POST /api/chains/run$' {
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            $null = Submit-AgentTask $State @{ kind = 'chain'; name = [string]$b.name } 'user'
             return Send-Json $Ctx @{ ok = $true }
         }
         '^GET /api/fetch$' {

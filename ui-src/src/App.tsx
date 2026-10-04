@@ -34,7 +34,7 @@ import { ModalBackdrop } from "@/components/ccb/modal-backdrop";
 import { notifyEvents, notifyQueue } from "@/lib/notify";
 import type { ChatOptions } from "@/lib/api";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
-import { type AgentEvent, type AppState, api, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
+import { type AgentEvent, type AppState, api, type ChainItem, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
 
 const MODES: PromptMode[] = [
@@ -58,6 +58,8 @@ export default function App() {
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [fetchItems, setFetchItems] = useState<FetchItem[]>([]);
   const [runbooks, setRunbooks] = useState<RunbookItem[]>([]);
+  const [chains, setChains] = useState<ChainItem[]>([]);
+  const [scripts, setScripts] = useState<string[]>([]);
   const [runbookTemplates, setRunbookTemplates] = useState<RunbookTemplate[]>([]);
   const [draft, setDraft] = useState("");
   // Schedules modal: closed (null), the list ({ target: null }) or a form for a target.
@@ -133,6 +135,10 @@ export default function App() {
       setRunbooks(r.runbooks);
       setRunbookTemplates(r.templates);
     }, () => {});
+    api.chains().then((r) => {
+      setChains(r.chains);
+      setScripts(r.scripts);
+    }, () => {});
   }, []);
 
   // Poll the server: new events plus a state snapshot.
@@ -159,7 +165,7 @@ export default function App() {
           notifyEvents(r.events);
           // New and changed files show in the tree right away: after each action that changed files,
           // and at the end of every step (its change set).
-          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || e.type === "runbook" || e.type === "review" || e.type === "checkpoint" || (e.type === "action-result" && e.changed))) refreshFiles();
+          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || e.type === "runbook" || e.type === "chain" || e.type === "review" || e.type === "checkpoint" || (e.type === "action-result" && e.changed))) refreshFiles();
           if (r.events.some((e) => e.type === "review" || e.type === "project" || (e.type === "action-result" && e.changed))) setReviewTick((t) => t + 1);
           if (r.events.some((e) => e.type === "newchat" || e.type === "error")) setNewChatPending(false);
         }
@@ -473,6 +479,13 @@ export default function App() {
                   refreshFiles();
                 }}
                 onRunRunbook={(name) => api.runRunbook(name).catch((e) => setError((e as Error).message))}
+                chains={chains}
+                scripts={scripts}
+                onCreateChain={async (name) => {
+                  await api.createChain(name);
+                  refreshFiles();
+                }}
+                onRunChain={(name) => api.runChain(name).catch((e) => setError((e as Error).message))}
                 project={state.project}
                 queue={queueHere}
                 schedules={schedulesHere}
@@ -570,6 +583,7 @@ export default function App() {
                       if (spec.kind === "chat" && spec.text === draft) setDraft("");
                     }}
                     runbooks={runbooks}
+                    chains={chains}
                     schedules={schedulesHere}
                   />
                 )}

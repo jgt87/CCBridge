@@ -6,6 +6,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.59] - 2026-10-04
+
+### Added
+
+- Chains (Fetch tab > Chains): runbooks, fetch prompts and scripts from the project's `Scripts/` folder that run one after another, as a file `Runbooks/NAME.chain.md` with one step per numbered line. A runbook step can take files from earlier steps as data (`with Runbooks/Exports/FILE.json`); `stopOnError: no` carries on after a failing step. Run, schedule (schedules now also run chains) or ask Copilot to write one. Scripts (`.ps1`, `.cmd`, `.bat`, `.py`, plain arguments only) follow the same safety rules as Copilot's commands: never deleting or moving outside the project, a person approves scripts that delete data or use Microsoft 365 every time, and `source/` is put back. New setting Settings > Chains > Scripts in chains: approve-once (default: a person approves a script the first time and after it changed, then it runs from a schedule without asking), always-ask or off. What the scripts change is one change set for Undo.
+- `render-test.cmd`: shows how Copilot's page displays code blocks per label (a plain code block, a "not fully supported" note, or a Chart.js chart with "Invalid JSON"), one short message per label, with a report in `C:	emp`. On this tenant `read` gets a note, while `text`, `plaintext` and `text read` show as plain code.
+
+### Fixed
+
+- Files tab with line counts set to "last change": when one instruction made several changes to a file, a later change that rewrote lines an earlier one had added did not show. The counts now add up every write and edit of the instruction (each change as shown on its card).
+
 ## [v0.1.58] - 2026-10-04
 
 ### Fixed
@@ -684,7 +695,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.58...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.59...HEAD
+[v0.1.59]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.59
 [v0.1.58]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.58
 [v0.1.57]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.57
 [v0.1.56]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.56

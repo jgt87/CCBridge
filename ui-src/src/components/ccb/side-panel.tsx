@@ -6,9 +6,10 @@ import GradientButton from "@/components/kokonutui/gradient-button";
 import { api } from "@/lib/api";
 import { ChangePill } from "./change-pill";
 import SmoothTab from "@/components/kokonutui/smooth-tab";
-import type { FetchItem, FetchWeb, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
+import type { ChainItem, FetchItem, FetchWeb, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
 import { FetchPanel } from "./fetch-panel";
 import { RunbooksPanel } from "./runbooks-panel";
+import { ChainsPanel } from "./chains-panel";
 import { QueuePanel } from "./queue-panel";
 import { SchedulesSummary } from "./schedules-modal";
 import { BetaTag } from "./beta-tag";
@@ -410,6 +411,10 @@ export function SidePanel({
   runbookTemplates,
   onCreateRunbook,
   onRunRunbook,
+  chains = [],
+  scripts = [],
+  onCreateChain,
+  onRunChain,
   queue,
   schedules,
   pausedUntil,
@@ -446,6 +451,11 @@ export function SidePanel({
   runbookTemplates: RunbookTemplate[];
   onCreateRunbook: (template: string, name: string) => Promise<void>;
   onRunRunbook: (name: string) => void;
+  chains?: ChainItem[];
+  /** Script files in Scripts/ a chain can run. */
+  scripts?: string[];
+  onCreateChain?: (name: string) => Promise<void>;
+  onRunChain?: (name: string) => void;
   queue: QueueEntry[];
 }) {
   // "N file(s) with issues" on the Files tab leads to Changes > Issues: the section is opened,
@@ -598,6 +608,19 @@ export function SidePanel({
                   templates={runbookTemplates}
                 />
               </PanelSection>
+              {onCreateChain && onRunChain && (
+                <PanelSection badge={chains.length ? <SectionCount n={chains.length} /> : null} id="fetch.chains" title="Chains">
+                  <ChainsPanel
+                    busy={busy}
+                    chains={chains}
+                    onCreate={onCreateChain}
+                    onOpen={onOpenFile}
+                    onRun={onRunChain}
+                    onSchedule={(name) => onSchedule({ kind: "chain", name })}
+                    scripts={scripts}
+                  />
+                </PanelSection>
+              )}
               <PanelSection badge={fetchItems.length ? <SectionCount n={fetchItems.length} /> : null} id="fetch.prompts" title="Fetch prompts">
                 <FetchPanel busy={busy} items={fetchItems} onAttach={onAttach} onOpen={onOpenFile} onRun={onRunFetch} onSave={onSaveFetch} onSchedule={(name) => onSchedule({ kind: "fetch", name })} />
               </PanelSection>

@@ -1,6 +1,6 @@
 import { AtSign, FileText, Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { FetchItem, FileInfo, RunbookItem, ScheduleItem, ScheduleSpec } from "@/lib/api";
+import type { ChainItem, FetchItem, FileInfo, RunbookItem, ScheduleItem, ScheduleSpec } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { KeepOpenNote, SCHEDULE_NOTE } from "./keep-open-note";
 
@@ -23,7 +23,7 @@ const WEEKDAYS = [1, 2, 3, 4, 5];
 
 /** What a schedule starts: a message, a saved fetch prompt or a runbook (Runbooks/*.runbook.md). */
 export interface ScheduleTarget {
-  kind: "chat" | "fetch" | "runbook";
+  kind: "chat" | "fetch" | "runbook" | "chain";
   text?: string;
   name?: string;
 }
@@ -52,6 +52,7 @@ export function ScheduleForm({
   existing,
   fetchItems,
   runbooks,
+  chains = [],
   files = [],
   onSave,
   onCancel,
@@ -61,6 +62,7 @@ export function ScheduleForm({
   existing?: ScheduleItem;
   fetchItems: FetchItem[];
   runbooks: RunbookItem[];
+  chains?: ChainItem[];
   /** Project files for the @ picker: a runbook from Runbooks/ runs as a runbook, any other file is attached to the message. */
   files?: FileInfo[];
   onSave: (spec: ScheduleSpec) => Promise<void>;
@@ -170,6 +172,15 @@ export function ScheduleForm({
               {runbooks.map((r) => (
                 <option key={r.name} value={`runbook:${r.name}`}>
                   {r.title}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {chains.length > 0 && (
+            <optgroup label="Chains (Runbooks/*.chain.md)">
+              {chains.map((c) => (
+                <option key={c.name} value={`chain:${c.name}`}>
+                  {c.title}
                 </option>
               ))}
             </optgroup>

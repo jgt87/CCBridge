@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const flatButton =
   "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
 
-const KIND: Record<ScheduleItem["kind"], string> = { chat: "Message", fetch: "Fetch", runbook: "Runbook" };
+const KIND: Record<ScheduleItem["kind"], string> = { chat: "Message", fetch: "Fetch", runbook: "Runbook", chain: "Chain" };
 
 /** "today 08:00", "tomorrow 13:00", "Mon 6 Oct 08:00". */
 export function formatWhen(iso: string | null): string {

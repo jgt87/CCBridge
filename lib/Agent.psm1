@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -39,6 +39,7 @@ function New-AgentState {
         Activity = [hashtable]::Synchronized(@{ label = ''; done = 0; total = 0; current = '' })
         Indexing = [hashtable]::Synchronized(@{ running = $false; label = ''; done = 0; total = 0; current = ''; project = $null; last = $null; error = $null })
         IssueFix = $null; IssueFixHandled = $false
+        InChain = $false   # a chain is running: its runbook/fetch steps leave Busy and Stop to it
         SaveHistory = $false   # set by the web app: the chat is kept per project (Save-ChatEvent / Restore-ChatHistory)
     })
 }
@@ -348,7 +349,7 @@ function Submit-AgentTask {
     $id = 'q-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     if (-not $Title) {
         $Title = switch ($Task.kind) {
-            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Fetch: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'review' { 'Code review' }
+            'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Fetch: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'chain' { "Chain: $($Task.name)" } 'review' { 'Code review' }
             'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } default { "$($Task.kind)" }
         }
     }
@@ -700,7 +701,7 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     <# Status and result of a finished task, from the events it produced. #>
     $events = @(Get-AgentEvents $State $FromSeq)
     $err = @($events | Where-Object { $_.type -eq 'error' } | Select-Object -Last 1)
-    $done = @($events | Where-Object { $_.type -in 'done', 'fetch', 'runbook', 'review', 'undo', 'newchat' } | Select-Object -Last 1)
+    $done = @($events | Where-Object { $_.type -in 'done', 'fetch', 'runbook', 'chain', 'review', 'undo', 'newchat' } | Select-Object -Last 1)
     $last = @($events | Where-Object { $_.type -eq 'assistant' } | Select-Object -Last 1)
     $Entry.messages = [int]$State.MessagesSent - $MessagesBefore
     $Entry.finished = (Get-Date).ToString('s')
@@ -979,8 +980,9 @@ function Invoke-RunbookJob {
     <# Runs a project runbook in a fresh Copilot chat (read-only), takes the JSON from the reply,
        checks it against the runbook header, asks Copilot once to correct it when it does not match,
        and saves a valid result to the runbook's output file (plus a dated copy in History/).
-       An existing output file is kept when the run fails. #>
-    param($State, [string]$Name)
+       An existing output file is kept when the run fails. $Inputs (a chain step's "with" files)
+       go with the prompt as data. #>
+    param($State, [string]$Name, [string[]]$Inputs = @())
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
     $item = Get-Runbooks $State.ProjectRoot | Where-Object name -eq $Name | Select-Object -First 1
     if (-not $item) { Add-AgentEvent $State 'error' @{ text = "There is no runbook named '$Name'." }; return }
@@ -993,7 +995,9 @@ function Invoke-RunbookJob {
         Start-NewChat $State   # a runbook never mixes with the conversation
         $spec = Get-WebSourceSpec $rb.meta
         $web = Get-WebSourcePrompt $State $spec
-        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind 'runbook' -Text "$body$(if ($web.text) { "`n`n$($web.text)" })" -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
+        $inp = New-ChainInputBlock $State.ProjectRoot $Inputs ([int]$State.Config.resultCharBudget)
+        foreach ($n in @($inp.notes)) { Add-AgentEvent $State 'status' @{ text = "Runbook '$($item.title)': $n." } }
+        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind 'runbook' -Text "$body$(if ($web.text) { "`n`n$($web.text)" })$(if ($inp.text) { "`n`n$($inp.text)" })" -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
         $check = $null
         for ($attempt = 1; $attempt -le 2; $attempt++) {
             $r = Send-WithSources $State $spec $message
@@ -1025,8 +1029,131 @@ function Invoke-RunbookJob {
         Add-AgentEvent $State 'error' @{ text = "Runbook '$Name' failed: $($_.Exception.Message)"; record = $_ }
     } finally {
         $State.NeedNewChat = $true
+        if (-not $State.InChain) { $State.Busy = $false; $State.Cancel = $false }   # a chain carries on (and keeps a Stop)
+    }
+}
+
+function Invoke-ChainJob {
+    <# Runs a chain (Runbooks/NAME.chain.md): its runbooks, fetch prompts and scripts one after
+       another. With stopOnError (the default) the first failing step ends the chain. Scripts run
+       through Invoke-ChainScript; what they change is one change set, so Undo restores it. #>
+    param($State, [string]$Name)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
+    $root = $State.ProjectRoot
+    $item = Get-Chains $root | Where-Object name -eq $Name | Select-Object -First 1
+    if (-not $item) { Add-AgentEvent $State 'error' @{ text = "There is no chain named '$Name'." }; return }
+    if (@($item.problems).Count) {
+        Add-AgentEvent $State 'error' @{ text = "Chain '$($item.title)' cannot start: $(@($item.problems) -join '; ')."; code = 'CHAIN'; hint = "Fix the steps in $($item.path) and run it again." }
+        return
+    }
+    $chain = Read-Chain ([IO.File]::ReadAllText((Resolve-ProjectPath $root $item.path)))
+    $total = @($chain.steps).Count
+    $lines = New-Object System.Collections.Generic.List[string]
+    $failed = 0; $stopped = $false
+    $cp = [pscustomobject]@{ Value = $null }   # the change set, made at the first script step
+    $State.InChain = $true; $State.Busy = $true; $State.Cancel = $false
+    try {
+        Add-AgentEvent $State 'status' @{ text = "Running chain '$($item.title)' ($total step(s))..." }
+        Write-CCBLog info agent "Chain $Name" @{ steps = $total }
+        foreach ($step in @($chain.steps)) {
+            if ($State.Cancel -or $State.Stop) { $stopped = $true; break }
+            $label = "$($step.kind) $($step.target)"
+            Add-AgentEvent $State 'status' @{ text = "Chain '$($item.title)', step $($step.n) of ${total}: $label" }
+            $from = [int]$State.Seq
+            $ok = $true; $why = ''
+            switch ($step.kind) {
+                'runbook' { Invoke-RunbookJob $State $step.target -Inputs @($step.with) }
+                'fetch' { Invoke-FetchJob $State $step.target }
+                'script' { $r = Invoke-ChainScript $State $item $step $cp; $ok = $r.ok; $why = $r.why }
+            }
+            if ($step.kind -ne 'script') {
+                $errs = @(Get-AgentEvents $State $from | Where-Object { $_.type -eq 'error' })
+                if ($errs.Count) { $ok = $false; $why = 'see the error above' }
+            }
+            if ($State.Cancel -or $State.Stop) { $stopped = $true; $lines.Add("$($step.n). $label - stopped"); break }
+            $lines.Add("$($step.n). $label - $(if ($ok) { 'done' } else { "failed: $why" })")
+            if (-not $ok) {
+                $failed++
+                if ($chain.stopOnError) { break }
+            }
+        }
+        $done = $lines.Count
+        $head = if ($stopped) { "Chain '$($item.title)' stopped by the user after $done of $total step(s)." }
+            elseif ($failed -and $chain.stopOnError) { "Chain '$($item.title)' stopped at a failing step ($done of $total step(s) run)." }
+            elseif ($failed) { "Chain '$($item.title)' finished with $failed failed step(s)." }
+            else { "Chain '$($item.title)' finished: all $total step(s) done." }
+        if ($failed -and -not $stopped) {
+            Add-AgentEvent $State 'error' @{ text = "$head`n" + ($lines -join "`n"); code = 'CHAIN'; hint = 'The step list says which step failed and why; fix it and run the chain again.' }
+        } else {
+            Add-AgentEvent $State $(if ($stopped) { 'status' } else { 'chain' }) @{ name = $Name; text = "$head`n" + ($lines -join "`n") }
+        }
+    } catch {
+        Write-CCBLogError agent "Chain $Name failed" $_
+        Add-AgentEvent $State 'error' @{ text = "Chain '$Name' failed: $($_.Exception.Message)"; record = $_ }
+    } finally {
+        if ($cp.Value) {
+            try { Clear-RunSnapshot $cp.Value } catch { Write-CCBLogError agent 'run snapshot' $_ }
+            if (-not $cp.Value.Files.Count) { Remove-Item $cp.Value.Dir -Recurse -Force -ErrorAction SilentlyContinue }
+            else { Add-AgentEvent $State 'status' @{ text = "Files the chain's scripts changed: $(@($cp.Value.Files.Keys) -join ', '). Undo restores them." } }
+        }
+        try {
+            $fixed = @(Restore-SourceData $root)
+            if ($fixed.Count) { Add-AgentEvent $State 'status' @{ text = 'Source data is read-only; StreamHub undid changes to it: ' + ($fixed -join '; ') } }
+        } catch { Write-CCBLogError agent 'source data' $_ }
+        $State.InChain = $false; $State.NeedNewChat = $true
         $State.Busy = $false; $State.Cancel = $false
     }
+}
+
+function Invoke-ChainScript {
+    <# One script step of a chain. Same rules as Copilot's commands: deleting or moving outside the
+       project is refused; scripts that delete data or use Microsoft 365 need a person every time
+       (refused without one, as in MCP). Other scripts: setting chainScripts approve-once (a person
+       approves a script the first time and after it changed), always-ask, or off. Returns @{ ok; why }. #>
+    param($State, $Chain, $Step, $CheckpointBox)
+    $root = $State.ProjectRoot
+    $mode = "$($State.Config.chainScripts)"; if (-not $mode) { $mode = 'approve-once' }
+    if ($mode -eq 'off') { return @{ ok = $false; why = 'scripts in chains are turned off (Settings > Chains)' } }
+    $sc = Resolve-ChainScript $root $Step.target $Step.args
+    if ($sc.error) { return @{ ok = $false; why = $sc.error } }
+    $outside = Test-DeleteScope $root $sc.command
+    if ($outside) { return @{ ok = $false; why = "refused: $outside" } }
+    $text = (Read-TextFile $sc.full).Text
+    $risk = Get-CommandRisk "$($sc.command)`n$text"
+    $risky = [bool]($risk.m365 -or $risk.destructive)
+    if ($risky -and $State.Headless) { return @{ ok = $false; why = "this script $($risk.reasons -join ', '); that needs a person in the StreamHub window" } }
+    $id = 'chain-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $preview = if ($text.Length -gt 20000) { $text.Substring(0, 20000) + "`n..." } else { $text }
+    $evt = @{ id = $id; action = 'run'; target = $sc.command; preview = $preview }
+    $hash = Get-ScriptHash $sc.full
+    $ask = $risky -or $mode -eq 'always-ask' -or -not (Test-ScriptApproved $root $sc.path $hash)
+    if ($ask) {
+        $warn = if ($risky) { "Human in the loop: this script $($risk.reasons -join ', '). Only approve it if you want exactly this to happen; it is asked every time." }
+            elseif ($mode -eq 'approve-once') { "Chain '$($Chain.title)' runs $($sc.path) for the first time, or the script changed since it was approved. Check it: once approved, it runs without asking until it changes." }
+            else { "Chain '$($Chain.title)' runs $($sc.path)." }
+        Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; warning = $warn })
+        $d = Wait-Approval $State $id $true
+        if ($d.decision -ne 'approve') {
+            Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }
+            return @{ ok = $false; why = 'not approved' }
+        }
+        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'running'; decidedBy = $d.by }
+        if (-not $risky -and $mode -eq 'approve-once') { Add-ApprovedScript $root $sc.path $hash }
+    } else {
+        Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'running' })
+    }
+    if (-not $CheckpointBox.Value) { $CheckpointBox.Value = New-Checkpoint $root "Chain: $($Chain.title)" }
+    $cp = $CheckpointBox.Value
+    $snap = try { Start-RunSnapshot $cp $root } catch { Write-CCBLogError agent 'run snapshot' $_; $null }
+    $r = Invoke-RunAction $root $sc.command -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
+    if ($snap) { try { $null = Complete-RunSnapshot $cp $root $snap } catch { Write-CCBLogError agent 'run snapshot' $_ } }
+    $fixed = @(Restore-SourceData $root)
+    $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
+    $ok = (-not $r.timedOut) -and (-not $r.cancelled) -and ($r.exitCode -eq 0)
+    $out = "$status`n$($r.output)"
+    if ($fixed.Count) { $out += "`nsource/ is read-only; StreamHub put back: $($fixed -join '; ')" }
+    Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = "ran $($sc.path): $status"; output = (Limit-Text $out 4000); changed = $true }
+    @{ ok = $ok; why = $status }
 }
 
 function Get-WebSourcePrompt($State, $Spec) {
@@ -1088,7 +1215,7 @@ function Invoke-FetchJob {
         Add-AgentEvent $State 'error' @{ text = "Fetch '$Name' failed: $($_.Exception.Message)"; record = $_ }
     } finally {
         $State.NeedNewChat = $true   # the next message starts its own chat
-        $State.Busy = $false; $State.Cancel = $false
+        if (-not $State.InChain) { $State.Busy = $false; $State.Cancel = $false }   # a chain carries on (and keeps a Stop)
     }
 }
 
@@ -1701,7 +1828,9 @@ function Invoke-AgentAction {
     try {
         switch ($Action.type) {
             'write' {
+                $before = try { $wf = Resolve-ProjectPath $root $Action.arg; if (Test-Path -LiteralPath $wf -PathType Leaf) { (Read-TextFile $wf).Text } else { '' } } catch { '' }
                 $out = Invoke-WriteAction $root $Action.arg $Action.body $Checkpoint
+                try { Add-CheckpointCount $Checkpoint $Action.arg $before (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text } catch { Write-CCBLogError agent 'line counts' $_ }
                 if (@($artNote).Count) { $out += '; ' + ($artNote -join '; ') }
                 return @{ ok = $true; summary = $out; output = $out; changed = $true; path = $Action.arg }
             }
@@ -1712,6 +1841,7 @@ function Invoke-AgentAction {
                 if (@($artNote).Count) { $out += '; ' + ($artNote -join '; ') }
                 # The changed lines as they are now, so the next edit starts from the current text.
                 $view = try { $now = (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text; Get-ChangedView $before $now (Resolve-ProjectPath $root $Action.arg) $Action.arg } catch { '' }
+                try { Add-CheckpointCount $Checkpoint $Action.arg $before (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text } catch { Write-CCBLogError agent 'line counts' $_ }
                 return @{ ok = $true; summary = $out; output = $(if ($view) { "$out`n$view" } else { $out }); changed = $true; path = $Action.arg }
             }
             'run'   {
@@ -2218,7 +2348,7 @@ function Start-AgentWorker {
         $State.ReviewByCaller = [bool]$task.reviewByCaller
         $foreign = $task.source -and $task.source -ne 'user'
         if ($task.mode) { $State.Mode = $task.mode }
-        if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook', 'review' -and $task.projectRoot -ne $State.ProjectRoot) {
+        if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook', 'chain', 'review' -and $task.projectRoot -ne $State.ProjectRoot) {
             if (-not (Test-Path -LiteralPath $task.projectRoot -PathType Container)) { $task.missingProject = $true }
             else { $State.ProjectRoot = $task.projectRoot }
         }
@@ -2260,6 +2390,7 @@ function Start-AgentWorker {
                 }
                 'fetch' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-FetchJob $State $task.name }
                 'runbook' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-RunbookJob $State $task.name }
+                'chain' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ChainJob $State $task.name }
                 'review' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ReviewJob $State $task }
                 'ask' {
                     # A plain question to Copilot, without project context or actions.
@@ -2329,4 +2460,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

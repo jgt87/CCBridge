@@ -24,6 +24,7 @@
   "reviewMinLines": 40,
   "appWindow": "copilot-tab",
   "responseMode": "leave",
+  "chainScripts": "approve-once",
   "evidence": "on",
   "pageCheck": "on",
   "issues": {
