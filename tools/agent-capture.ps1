@@ -19,7 +19,7 @@
     -Seconds N stops after N seconds and -NoPicker skips the @ step (for unattended tests).
 
     -Agent Researcher|Analyst runs the test by itself, the way StreamHub will: a new chat, the
-    prompt starting with "@Name" (-PickFromList picks the agent from the @ list), a fixed harmless test
+    agent picked from the @ list after typing "@Name" (a real mention; -TypeOnly leaves it as text), a fixed harmless test
     prompt (Analyst: a made-up CSV is attached), Send, one automatic answer if the agent first
     asks questions or shows a plan, and stop when the run has finished (or -RunMinutes).
     Every step goes to run.log (no reply text), and the zip includes it. -AgentName sets the
@@ -33,7 +33,7 @@
 param([string]$Label = 'agent', [int]$MaxMinutes = 90, [string]$OutRoot = 'C:\temp', [switch]$KeepStepText, [int]$Seconds = 0, [switch]$NoPicker,
     [ValidateSet('', 'Researcher', 'Analyst')][string]$Agent = '', [string]$AgentName = '', [int]$RunMinutes = 40,
     [switch]$SkipMention,   # test aid: the same run in a plain chat, without the agent
-    [switch]$PickFromList)  # pick the agent from the @ list instead of typing "@Name" in the prompt
+    [switch]$TypeOnly)      # type "@Name" as plain text instead of picking the agent from the @ list
 if ($Agent) { $Label = $Agent; if (-not $AgentName) { $AgentName = $Agent }; $MaxMinutes = $RunMinutes }
 
 $ErrorActionPreference = 'Stop'
@@ -89,9 +89,14 @@ function Get-RecordInfo($Node, [string]$Path, $Words, $NewPaths, [ref]$TextLen, 
 $stats = @{ frames = 0; bytes = 0; kinds = @{}; words = @{}; sockets = @{}; lastFrame = 0.0; gaps = New-Object System.Collections.Generic.List[string]; firstIn = $null; type2 = New-Object System.Collections.Generic.List[string] }
 function Add-Payload([string]$Conn, [string]$Dir, [string]$Payload) {
     $now = $clock.Elapsed.TotalSeconds
+    # Keep-alive pings (SignalR type 6, empty records) arrive every few seconds after a reply; they
+    # are not activity, so they do not count for "the run is quiet" or the silent gaps.
+    $active = @($Payload.Split($sep) | Where-Object { $_.Trim() -and $_.Trim() -notmatch '^\{\s*"type"\s*:\s*6\s*\}$' -and $_.Trim() -ne '{}' }).Count -gt 0
     if ($Dir -eq 'in') {
-        if ($stats.lastFrame -gt 0 -and ($now - $stats.lastFrame) -ge 15) { $stats.gaps.Add(('{0:N0}s at {1:N0}s' -f ($now - $stats.lastFrame), $stats.lastFrame)) }
-        $stats.lastFrame = $now
+        if ($active) {
+            if ($stats.lastFrame -gt 0 -and ($now - $stats.lastFrame) -ge 15) { $stats.gaps.Add(('{0:N0}s at {1:N0}s' -f ($now - $stats.lastFrame), $stats.lastFrame)) }
+            $stats.lastFrame = $now
+        } else { $stats.pings = 1 + [int]$stats.pings }
         if ($null -eq $stats.firstIn) { $stats.firstIn = $now }
         $stats.frames++; $stats.bytes += $Payload.Length
         $framesW.WriteLine($Payload.Replace("`r", ' ').Replace("`n", ' '))
@@ -294,10 +299,24 @@ function Invoke-Mention([string]$Name) {
     $true
 }
 function Invoke-Send {
-    for ($i = 0; $i -lt 40; $i++) {
-        $r = Invoke-CdpEval $s "(() => { const b = document.querySelector('$sendSel'); if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true') return false; b.click(); return true })()"
-        if ($r) { return $true }
-        Start-Sleep -Milliseconds 250
+    # Click Send, then check that it went: the message box empties or Copilot's Stop button shows.
+    # Copilot ignores Send while an attachment is still uploading, so a click that did not take is
+    # tried again (up to 5 times, a few seconds apart).
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $clicked = $false
+        for ($i = 0; $i -lt 40 -and -not $clicked; $i++) {
+            $clicked = Invoke-CdpEval $s "(() => { const b = document.querySelector('$sendSel'); if (!b || b.disabled || b.getAttribute('aria-disabled') === 'true') return false; b.click(); return true })()"
+            if (-not $clicked) { Start-Sleep -Milliseconds 250 }
+        }
+        if (-not $clicked) { Write-Run "Send is not clickable (attempt $attempt)" 'Yellow'; continue }
+        for ($w = 0; $w -lt 12; $w++) {
+            Start-Sleep -Milliseconds 500
+            $len = Get-EditorLength
+            $stop = Invoke-CdpEval $s "!!document.querySelector('$stopSel')"
+            if ($len -eq 0 -or $stop) { if ($attempt -gt 1) { Write-Run "sent on attempt $attempt" }; return $true }
+        }
+        Write-Run "Send was clicked but the message is still in the box (attempt $attempt); trying again" 'Yellow'
+        Start-Sleep -Seconds 3
     }
     $false
 }
@@ -312,12 +331,16 @@ function Add-FileUpload([string]$Path) {
         if ($acc -and $acc -notmatch '(?i)csv|text|\*|spreadsheet|excel|xlsx') { Write-Run "  skipped an input that accepts: $acc"; continue }
         $null = Invoke-Cdp $s 'DOM.setFileInputFiles' @{ nodeId = $id; files = @($Path) }
         Write-Run "  file handed to an input (accept='$acc'); waiting for the attachment to show"
-        for ($w = 0; $w -lt 40; $w++) {
+        for ($w = 0; $w -lt 120; $w++) {
             Start-Sleep -Milliseconds 500
-            $chip = Invoke-CdpEval $s "(() => [...document.querySelectorAll('[data-testid]')].filter(e => /attach|file|chip|upload|reference/i.test(e.getAttribute('data-testid'))).map(e => e.getAttribute('data-testid')).slice(0, 10).join(', '))()"
-            if ($chip) { Write-Run "  attachment elements: $chip"; return $true }
+            # The file's name shows in the composer and nothing is uploading any more (no progress
+            # bar or busy element left, no "Uploading" text).
+            $stem = ([IO.Path]::GetFileNameWithoutExtension($Path) -replace "'", "\'").Substring(0, [Math]::Min(10, [IO.Path]::GetFileNameWithoutExtension($Path).Length))
+            $state = Invoke-CdpEval $s "(() => { const named = [...document.querySelectorAll('body *')].some(e => e.children.length === 0 && (e.innerText || '').includes('$stem')); const busy = !!document.querySelector('[role=progressbar], [aria-busy=true]') || /uploading/i.test((document.querySelector('$editorSel') || {}).closest ? ((document.querySelector('$editorSel').closest('form, [role=group], footer, div') || {}).innerText || '') : ''); return named ? (busy ? 'uploading' : 'ready') : '' })()"
+            if ($state -eq 'ready') { Write-Run "  attachment shown and uploaded after $([Math]::Round(($w + 1) * 0.5, 1)) s"; Start-Sleep -Seconds 2; return $true }
         }
-        Write-Run '  no attachment element appeared' 'Yellow'
+        Write-Run "  the attachment did not show as uploaded within 60 s (state: $state); sending anyway" 'Yellow'
+        return $true
     }
     $false
 }
@@ -342,11 +365,12 @@ if ($Agent) {
     if ($stable -lt 6) { Write-Run 'the message box did not appear; is this window signed in?' 'Red' }
     Start-Sleep -Seconds 2
     $pageLog.Add('Agent links on the page: ' + (Invoke-CdpEval $s $agentsJs))
-    # "@Name" at the start of the prompt invokes the agent; -PickFromList uses the @ list instead.
+    # The agent is picked from the @ list (a real mention: plain "@Name" text does not invoke it);
+    # -TypeOnly types it as text instead.
     $prefix = ''
     $mentioned = if ($SkipMention) { Write-Run 'mention skipped (-SkipMention): plain chat'; $true }
-        elseif ($PickFromList) { Invoke-Mention $AgentName }
-        else { $prefix = "@$AgentName"; $null = Clear-Editor; Write-Run "the prompt starts with '@$AgentName' (typed as text)"; $true }
+        elseif ($TypeOnly) { $prefix = "@$AgentName"; $null = Clear-Editor; Write-Run "the prompt starts with '@$AgentName' (typed as text, -TypeOnly)"; $true }
+        else { Invoke-Mention $AgentName }
     if (-not $mentioned) { Write-Run 'stopped without sending anything' 'Red' }
     if ($mentioned -and $key -eq 'analyst') {
         if (-not (Add-FileUpload (Join-Path $out 'sample-sales.csv'))) {
@@ -456,7 +480,10 @@ while ($clock.Elapsed.TotalSeconds -lt $deadline) {
             if ($auto -and -not $auto.finished) {
                 if ($po.stop) { $auto.sawStop = $true }
                 $quietFrames = $now - [Math]::Max($stats.lastFrame, $auto.sentAt)
-                $settled = -not $po.stop -and $po.lastTextLen -gt 0 -and $po.lastTextLen -eq $auto.lastLen -and $quietFrames -ge 20
+                # Finished when no reply data came for 20 s, or (late status frames can keep coming)
+                # when Copilot's Stop button is gone and the reply text has not changed for 20 s.
+                if ($po.stop -or $po.lastTextLen -ne $auto.lastLen) { $auto.stableSince = $now } elseif (-not $auto.stableSince) { $auto.stableSince = $now }
+                $settled = -not $po.stop -and $po.lastTextLen -gt 0 -and $po.lastTextLen -eq $auto.lastLen -and ($quietFrames -ge 20 -or ($auto.sawStop -and ($now - $auto.stableSince) -ge 20))
                 $auto.lastLen = $po.lastTextLen
                 if (-not $settled) { $auto.doneSince = $null }
                 elseif (-not $auto.doneSince) { $auto.doneSince = $now }
@@ -485,7 +512,7 @@ while ($clock.Elapsed.TotalSeconds -lt $deadline) {
     if ($now -ge $nextBeat) {
         $nextBeat = $now + 15
         $quiet = if ($stats.lastFrame) { [int]($now - $stats.lastFrame) } else { [int]$now }
-        Write-Host ("  {0:N0}s: {1} frames received, last one {2}s ago{3}" -f $now, $stats.frames, $quiet, $(if ($stopSince) { ', Stop button showing' } else { '' }))
+        Write-Host ("  {0:N0}s: {1} frames received, last reply data {2}s ago{3}" -f $now, $stats.frames, $quiet, $(if ($stopSince) { ', Stop button showing' } else { '' }))
     }
 }
 if ($stopSince) { $stopWindows.Add(('{0:N1}s-(still showing)' -f $stopSince)) }

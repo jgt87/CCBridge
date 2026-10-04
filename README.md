@@ -372,7 +372,7 @@ The same run measures speed. For every step it records the exact time (`HH:mm:ss
 **Reply format of your tenant (`stream-shape.cmd`).** Writes the structure of Copilot's recent replies (field names, types, lengths and status words; no answer text) to `C:\temp\CCBridge-stream-shape-<date>.txt`. Sending that file lets StreamHub support your tenant's reply format (for example StreamHub) directly, which is faster and gives back the chat message count and remaining credits.
 
 **Researcher and Analyst test (`agent-test.cmd`).** Runs Copilot's Researcher and then its Analyst agent the way StreamHub will invoke them:
-- a new chat, with the prompt starting with `@Researcher` or `@Analyst` (`-PickFromList` picks the agent from the `@` list instead);
+- a new chat, with the agent picked from the `@` list after typing `@Researcher` or `@Analyst`, so Copilot inserts a real mention (`-TypeOnly` leaves it as plain text, which does not invoke the agent);
 - a fixed, harmless test prompt (web sources only for Researcher; for Analyst, a made-up `sample-sales.csv` is attached);
 - one automatic answer if the agent first asks questions or shows a plan;
 - a stop once the run has finished, or after 40 minutes;

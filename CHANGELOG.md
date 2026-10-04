@@ -6,6 +6,14 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.57] - 2026-10-04
+
+### Fixed
+
+- `agent-test.cmd` kept waiting after the agent had finished: the connection's keep-alive pings counted as activity, so the run never looked quiet. Pings no longer count, and the progress line shows how long ago real reply data came in. A run also counts as finished once Copilot's Stop button is gone and the reply text has not changed for 20 seconds.
+- `agent-test.cmd` (Analyst) clicked Send while the attached file was still uploading, so Copilot ignored it while the test logged "sent". It now waits until the file shows as uploaded, checks after Send that the message left the box (or Copilot's Stop button shows), and tries again up to 5 times.
+- `agent-test.cmd` invokes Researcher and Analyst by picking them from the `@` list again (found by name, selected with a real click): typed `@Researcher` text reached plain Copilot, not the agent. `-TypeOnly` keeps the typed variant.
+
 ## [v0.1.56] - 2026-10-04
 
 ### Added
@@ -667,7 +675,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.56...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.57...HEAD
+[v0.1.57]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.57
 [v0.1.56]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.56
 [v0.1.55]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.55
 [v0.1.54]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.54
