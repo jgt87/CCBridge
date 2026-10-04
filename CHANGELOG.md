@@ -6,6 +6,18 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.71] - 2026-10-04
+
+### Changed
+
+- The Progress tab is now called Actions (Checklist and Runs); messages that pointed at it say Actions > Runs.
+- The Changes tab is now called History, and its change sets no longer have an icon before the time.
+
+### Fixed
+
+- Chat messages after a code review or an issue scan pointed at the Changes tab; issues and code reviews are under Code health.
+- The single sign-on setup log listed every switch on Edge's profile page as "switch: [off]", which read as if single sign-on were off. Each line now says whether it is the single sign-on switch or another setting.
+
 ## [v0.1.70] - 2026-10-04
 
 ### Fixed
@@ -815,7 +827,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.70...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.71...HEAD
+[v0.1.71]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.71
 [v0.1.70]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.70
 [v0.1.69]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.69
 [v0.1.68]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.68

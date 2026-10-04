@@ -75,7 +75,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
     setNotice("");
     try {
       await api.runReview(scope, pathList, focus);
-      setNotice("Added to Runs (Progress tab). Progress shows in the chat; the report appears here.");
+      setNotice("Added to Runs (Actions tab). Progress shows in the chat; the report appears here.");
     } catch (e) {
       setNotice((e as Error).message);
     } finally {

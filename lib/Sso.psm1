@@ -224,8 +224,12 @@ function Invoke-SsoSetup {
         $tab = Open-BackgroundTab $Port $script:SettingsUrl
         try {
             $all = Get-PageSwitches $tab.Session
-            foreach ($w in $all) { $log.Add("  switch: [$(if ($w.on) { 'on' } else { 'off' })$(if ($w.disabled) { ', managed or disabled' })] $($w.label)") }
             $sw = Select-SsoSwitch $all
+            # Every switch on Edge's profile page; only the one labelled for single sign-on counts.
+            foreach ($w in $all) {
+                $what = $(if ($sw -and $w.i -eq $sw.i) { ' (the single sign-on switch)' } else { ' (another setting, not single sign-on)' })
+                $log.Add("  switch on the page: [$(if ($w.on) { 'on' } else { 'off' })$(if ($w.disabled) { ', managed or disabled' })] $(if ("$($w.label)".Trim()) { $w.label } else { '(no label)' })$what")
+            }
             if (-not $sw -and (Test-ProfileSsoAuto $ProfileDir)) { $result = 'already on'; $log.Add('Already on: Edge turned single sign-on for work sites on by itself for this profile (edge.profile_sso_info.aad_sso_algo_state = 2), so there is no switch to change. If Copilot still asks to sign in after a restart, sign in once and choose "Stay signed in".') }
             elseif (-not $sw -and $account -eq 'work') { $result = 'signed-in-work'; $log.Add('No switch needed: the profile is signed in with a work account, so Edge signs work sites in with it already. If Copilot still asks to sign in after a restart, choose "Stay signed in" once.') }
             elseif (-not $sw) { $result = 'not-found'; $log.Add("The single sign-on switch is not on Edge's profile page ($(@($all).Count) switch(es) found; Edge shows it only for a profile that is not signed in with a work account).") }

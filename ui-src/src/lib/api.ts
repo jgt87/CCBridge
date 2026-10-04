@@ -352,7 +352,7 @@ export interface ChangeCount {
   deleted?: boolean;
 }
 
-/** A change set in the Changes tab. */
+/** A change set in the History tab. */
 export interface ChangeSetView {
   seq: number;
   time: string;
@@ -382,7 +382,7 @@ export interface QueueEntry {
   /** E.g. why it waits, or that a schedule was missed while StreamHub was closed. */
   note?: string | null;
   changed?: string[];
-  /** The change set this task made (its card on the Changes tab). */
+  /** The change set this task made (its card on the History tab). */
   changeSeq?: number | null;
   jobId?: string | null;
 }

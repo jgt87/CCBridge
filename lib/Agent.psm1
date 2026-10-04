@@ -352,7 +352,7 @@ function Test-ConnectionLost($ErrorRecord) {
 }
 
 function Submit-AgentTask {
-    <# Puts a task in the worker's queue and records it in $State.Queue (shown under Progress > Runs):
+    <# Puts a task in the worker's queue and records it in $State.Queue (shown under Actions > Runs):
        what was asked, where it came from (user, mcp, api), status, timing, Copilot messages used,
        result or error. Returns the queue entry. #>
     param($State, [hashtable]$Task, [string]$Source = 'user', [string]$Title = '')
@@ -442,7 +442,7 @@ function Restore-AgentQueue {
     }
     while ($State.Queue.Count -gt 100) { $State.Queue.RemoveAt(0) }
     Write-CCBLog info agent "Queue restored" @{ entries = $State.Queue.Count; requeued = $requeued }
-    if ($requeued) { Add-AgentEvent $State 'status' @{ text = "Picked up $requeued waiting task(s) from before the restart; they run in order (remove one under Progress > Runs with its x)." } }
+    if ($requeued) { Add-AgentEvent $State 'status' @{ text = "Picked up $requeued waiting task(s) from before the restart; they run in order (remove one under Actions > Runs with its x)." } }
     $requeued
 }
 
@@ -724,7 +724,7 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     $changed = @($events | Where-Object { $_.type -eq 'checkpoint' } | ForEach-Object { $_.files }) | Select-Object -Unique
     if ($changed) { $Entry.changed = @($changed) }
     $sets = @($events | Where-Object { $_.type -eq 'checkpoint' })
-    if ($sets.Count) { $Entry.changeSeq = [int]$sets[-1].seq }   # the Changes tab's card of this task
+    if ($sets.Count) { $Entry.changeSeq = [int]$sets[-1].seq }   # the History tab's card of this task
 }
 
 function Write-PlanResult {
@@ -987,7 +987,7 @@ function Invoke-ReviewJob {
         $ok = @($rv.findings | Where-Object { $_.status -ne 'unverified' })
         $counts = "$(@($ok | Where-Object severity -eq 'high').Count) high, $(@($ok | Where-Object severity -eq 'medium').Count) medium, $(@($ok | Where-Object severity -eq 'low').Count) low"
         $unv = @($rv.findings).Count - $ok.Count
-        Add-AgentEvent $State 'review' @{ id = $rv.id; path = $paths.md; json = $paths.json; text = "Code review done: $($ok.Count) finding(s) ($counts)$(if ($unv) { "; $unv unverified" })$(if ([int]$rv.ignored) { "; $($rv.ignored) left out because you ignored them before" }) in $(@($rv.files).Count) file(s), $($rv.messages) Copilot message(s). Report: $($paths.md). Pick findings to fix in the Changes tab." }
+        Add-AgentEvent $State 'review' @{ id = $rv.id; path = $paths.md; json = $paths.json; text = "Code review done: $($ok.Count) finding(s) ($counts)$(if ($unv) { "; $unv unverified" })$(if ([int]$rv.ignored) { "; $($rv.ignored) left out because you ignored them before" }) in $(@($rv.files).Count) file(s), $($rv.messages) Copilot message(s). Report: $($paths.md). Pick findings to fix under Code health > Code review." }
         if ($Task.jobId -and $State.Jobs[$Task.jobId]) { $State.Jobs[$Task.jobId].reviewPath = (Resolve-ProjectPath $State.ProjectRoot $paths.json); $State.Jobs[$Task.jobId].reviewReport = $paths.md }
     } catch {
         Write-CCBLogError agent "Code review $id failed" $_
@@ -1092,7 +1092,7 @@ function Sync-DataMirrors {
 }
 
 function Add-ChangeSetEvent {
-    <# The 'checkpoint' event of a finished change set (Changes tab): its files, what asked for it
+    <# The 'checkpoint' event of a finished change set (History tab): its files, what asked for it
        (title) and the lines added and removed per file. $Extra adds fields (contents for MCP). #>
     param($State, $Checkpoint, [string]$Title, [hashtable]$Extra = @{})
     if (-not $Checkpoint -or -not $Checkpoint.Files.Count) { return }
@@ -2185,7 +2185,7 @@ function Invoke-IssueCycle {
             else { $notes.Add("Issue fix: $($left.Count) problem(s) left in $($Fix.path); a fix for that file is already waiting in the queue.") }
         } else {
             Set-IssueState $root $leftIds 'gave up' -Attempts ([int]$Fix.attempt) -Note "still there after $($Fix.attempt) attempt(s)"
-            $notes.Add("Issue fix: $($left.Count) problem(s) in $($Fix.path) are still there after $($Fix.attempt) attempt(s); marked 'gave up'. They are listed under Issues in the Changes tab.")
+            $notes.Add("Issue fix: $($left.Count) problem(s) in $($Fix.path) are still there after $($Fix.attempt) attempt(s); marked 'gave up'. They are listed under Code health > Issues.")
         }
     }
     $new = @($report | Where-Object { -not $Baseline.ContainsKey($_.id) -and $_.status -eq 'open' -and (-not $Fix -or $_.path -ne $Fix.path) })
@@ -2196,7 +2196,7 @@ function Invoke-IssueCycle {
     if ($new.Count) {
         $files = @($new | Group-Object path).Count
         $reported = $new.Count - @($groups | ForEach-Object { $_.Group }).Count
-        $notes.Add("Issue scan: $($new.Count) new problem(s) in $files $(if ($Fix) { 'other ' })changed file(s)$(if ($groups.Count) { "; queued a fix for $($groups.Count) file(s)" })$(if ($reported) { "; $reported only reported (Issues in the Changes tab)" }).")
+        $notes.Add("Issue scan: $($new.Count) new problem(s) in $files $(if ($Fix) { 'other ' })changed file(s)$(if ($groups.Count) { "; queued a fix for $($groups.Count) file(s)" })$(if ($reported) { "; $reported only reported (Code health > Issues)" }).")
     } elseif (-not $Fix) { $notes.Add("Issue scan: no new problems in the $($list.Count) changed file(s).") }
     foreach ($n in $notes) { Add-AgentEvent $State 'status' @{ text = $n; issues = $true } }
     @($notes)

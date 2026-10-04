@@ -240,7 +240,7 @@ export default function App() {
     return idx >= 0 ? projectEvents.slice(idx + 1) : projectEvents;
   }, [projectEvents]);
 
-  // The chat view starts at the last explicit "New chat"; the Changes tab keeps the whole project session.
+  // The chat view starts at the last explicit "New chat"; the History tab keeps the whole project session.
   const chatEvents = useMemo(() => {
     let idx = -1;
     keptEvents.forEach((e, i) => {

@@ -105,7 +105,7 @@ export function QueuePanel({ queue, onOpen, pausedUntil, onShowChange }: { queue
                     <button
                       className="rounded-md px-1.5 py-0.5 text-muted-foreground text-xs hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
                       onClick={() => onShowChange(e.changeSeq!)}
-                      title={`Show this change set on the Changes tab:\n${e.changed.join("\n")}`}
+                      title={`Show this change set on the History tab:\n${e.changed.join("\n")}`}
                       type="button"
                     >
                       {e.changed.length} file(s) changed

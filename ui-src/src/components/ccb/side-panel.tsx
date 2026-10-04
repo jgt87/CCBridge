@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, File, FileClock, Folder, FolderCog, FolderLock, FolderOpen, FolderTree, HeartPulse, ListTodo, Lock, Plus, RefreshCw, RotateCcw, SquareCheck, Square, Workflow } from "lucide-react";
+import { ChevronRight, ExternalLink, File, FileClock, Folder, FolderCog, FolderLock, FolderOpen, FolderTree, HeartPulse, ListTodo, Lock, Plus, RefreshCw, SquareCheck, Square, Workflow } from "lucide-react";
 import type React from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import FileUpload from "@/components/kokonutui/file-upload";
@@ -98,7 +98,7 @@ function IssueBadge({ path }: { path: string }) {
   const n = useContext(IssueCounts).get(path);
   if (!n) return null;
   return (
-    <span className="ml-auto shrink-0 rounded px-1 text-[10px] text-muted-foreground ring-1 ring-black/10 dark:ring-white/15" title={`${n} open issue(s); see Issues in the Changes tab`}>
+    <span className="ml-auto shrink-0 rounded px-1 text-[10px] text-muted-foreground ring-1 ring-black/10 dark:ring-white/15" title={`${n} open issue(s); see Issues in the Code health tab`}>
       {n}
     </span>
   );
@@ -127,8 +127,8 @@ function IndexBar({
           <>
             <span className="shrink-0">{`Indexed${when ? ` at ${when}` : ""},`}</span>
             {onShowIssues ? (
-              // The issue count leads to the issues overview (Changes tab > Issues).
-              <button className="min-w-0 truncate underline-offset-2 hover:text-foreground hover:underline" onClick={onShowIssues} title="Show the issues (Changes tab)" type="button">
+              // The issue count leads to the issues overview (Code health > Issues).
+              <button className="min-w-0 truncate underline-offset-2 hover:text-foreground hover:underline" onClick={onShowIssues} title="Show the issues (Code health tab)" type="button">
                 {`${withIssues} file(s) with issues`}
               </button>
             ) : (
@@ -500,7 +500,7 @@ export function SidePanel({
     setTabRequest((r) => ({ id: "health", n: (r?.n ?? 0) + 1 }));
     window.setTimeout(() => document.getElementById("section-health.issues")?.scrollIntoView({ behavior: "smooth", block: "start" }), 450);
   };
-  // From Runs: the Changes tab, scrolled to that task's change set, which lights up briefly.
+  // From Runs: the History tab, scrolled to that task's change set, which lights up briefly.
   const [litChange, setLitChange] = useState<number | null>(null);
   const showChange = (seq: number) => {
     setTabRequest((r) => ({ id: "changes", n: (r?.n ?? 0) + 1 }));
@@ -562,7 +562,7 @@ export function SidePanel({
               key={c.seq}
             >
               <div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
-                <RotateCcw className="h-3 w-3 shrink-0" /> {c.time}
+                {c.time}
                 {i === 0 && <span className="ml-auto shrink-0">latest: Undo takes this back</span>}
               </div>
               {c.title && (
@@ -678,8 +678,8 @@ export function SidePanel({
             </div>
           ),
         },
-        { id: "changes", title: "Changes", icon: FileClock, color: "bg-zinc-700", content: changesPanel },
-        { id: "tasks", title: "Progress", icon: ListTodo, color: "bg-zinc-700", content: tasksPanel },
+        { id: "changes", title: "History", icon: FileClock, color: "bg-zinc-700", content: changesPanel },
+        { id: "tasks", title: "Actions", icon: ListTodo, color: "bg-zinc-700", content: tasksPanel },
         {
           id: "health",
           title: "Code health",
