@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { ScheduleForm, type ScheduleTarget } from "./schedule-form";
 import { formatWhen, SchedulesList } from "./schedules-panel";
 
-/** The Scheduled entry in the Tasks tab: how many schedules and the next run; opens the modal. */
+/** The Scheduled entry in the Automation tab: how many schedules and the next run; opens the modal. */
 export function SchedulesSummary({ schedules, onOpen }: { schedules: ScheduleItem[]; onOpen: () => void }) {
   const active = schedules.filter((s) => s.enabled && s.nextRun);
   const next = [...active].sort((a, b) => String(a.nextRun).localeCompare(String(b.nextRun)))[0];

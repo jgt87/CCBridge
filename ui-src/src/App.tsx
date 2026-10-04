@@ -634,11 +634,35 @@ export default function App() {
                   focusKey={focusKey}
                   history={promptHistory}
                   headerLeft={
-                    queuedNote ? (
-                      <span className="truncate font-medium" title="Waiting tasks run while StreamHub is open; if you close it, they continue at the next start.">
-                        Queued: runs after the current task, while StreamHub stays open.
-                      </span>
-                    ) : null
+                    <>
+                      <select
+                        aria-label="Who answers"
+                        className="shrink-0 rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                        onChange={(e) => setAgent(e.target.value as AgentChoice)}
+                        title="Who answers the next message: Copilot (with StreamHub's instructions), or one of Copilot's agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat."
+                        value={agent}
+                      >
+                        <option value="copilot">Agent: none (Copilot)</option>
+                        <option value="researcher">Agent: Researcher</option>
+                        <option value="analyst">Agent: Analyst</option>
+                      </select>
+                      <select
+                        className="shrink-0 rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                        onChange={(e) => api.setResponseMode(e.target.value).catch((err) => setError((err as Error).message))}
+                        title={`Copilot's response mode (Auto / Quick response / Think deeper)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
+                        value={state.responseMode ?? "leave"}
+                      >
+                        <option value="leave">Response: as set in Copilot</option>
+                        <option value="auto">Response: Auto</option>
+                        <option value="quick">Response: Quick</option>
+                        <option value="deep">Response: Think deeper</option>
+                      </select>
+                      {queuedNote && (
+                        <span className="truncate font-medium" title="Waiting tasks run while StreamHub is open; if you close it, they continue at the next start.">
+                          Queued: runs after the current task, while StreamHub stays open.
+                        </span>
+                      )}
+                    </>
                   }
                   headerRight={
                     <span className="flex items-center gap-2">
@@ -657,28 +681,6 @@ export default function App() {
                           Work IQ {state.workIq === "on" ? "on" : state.workIq === "off" ? "off" : "(as set in Copilot)"}
                         </button>
                       )}
-                      <select
-                        aria-label="Who answers"
-                        className="rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
-                        onChange={(e) => setAgent(e.target.value as AgentChoice)}
-                        title="Who answers the next message: Copilot (with StreamHub's instructions), or one of Copilot's agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat."
-                        value={agent}
-                      >
-                        <option value="copilot">Agent: none (Copilot)</option>
-                        <option value="researcher">Agent: Researcher</option>
-                        <option value="analyst">Agent: Analyst</option>
-                      </select>
-                      <select
-                        className="rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
-                        onChange={(e) => api.setResponseMode(e.target.value).catch((err) => setError((err as Error).message))}
-                        title={`Copilot's response mode (Auto / Quick response / Think deeper)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
-                        value={state.responseMode ?? "leave"}
-                      >
-                        <option value="leave">Response: as set in Copilot</option>
-                        <option value="auto">Response: Auto</option>
-                        <option value="quick">Response: Quick</option>
-                        <option value="deep">Response: Think deeper</option>
-                      </select>
                       {state.credits && state.credits.remaining <= 10 && (
                         <span
                           className={state.credits.remaining === 0 ? "text-rose-500" : "text-muted-foreground"}

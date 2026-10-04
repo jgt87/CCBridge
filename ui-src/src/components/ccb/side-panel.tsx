@@ -500,7 +500,7 @@ export function SidePanel({
     setTabRequest((r) => ({ id: "health", n: (r?.n ?? 0) + 1 }));
     window.setTimeout(() => document.getElementById("section-health.issues")?.scrollIntoView({ behavior: "smooth", block: "start" }), 450);
   };
-  // From the Queue: the Changes tab, scrolled to that task's change set, which lights up briefly.
+  // From Runs: the Changes tab, scrolled to that task's change set, which lights up briefly.
   const [litChange, setLitChange] = useState<number | null>(null);
   const showChange = (seq: number) => {
     setTabRequest((r) => ({ id: "changes", n: (r?.n ?? 0) + 1 }));
@@ -535,7 +535,7 @@ export function SidePanel({
       <PanelSection
         badge={queue.some((q) => q.status === "queued" || q.status === "running") ? <SectionCount n={queue.filter((q) => q.status === "queued" || q.status === "running").length} /> : null}
         id="tasks.queue"
-        title="Queue"
+        title="Runs"
       >
         <QueuePanel onOpen={onOpenFile} onShowChange={showChange} pausedUntil={pausedUntil} queue={queue} />
       </PanelSection>
@@ -573,7 +573,7 @@ export function SidePanel({
               {c.files.map((f) => {
                 const n = counts.get(f);
                 return (
-                  <button className="flex w-full items-center gap-2 text-left font-mono text-xs hover:underline" key={f} onClick={() => onOpenFile(f)} type="button">
+                  <button className="flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs hover:underline" key={f} onClick={() => onOpenFile(f)} type="button">
                     <span className="min-w-0 flex-1 truncate">{f}</span>
                     {n && (n.deleted ? <span className="shrink-0 font-sans text-muted-foreground">deleted</span> : <ChangePill added={n.added} removed={n.removed} />)}
                   </button>
@@ -627,8 +627,6 @@ export function SidePanel({
       }}
       items={[
         { id: "files", title: "Files", icon: FolderTree, color: "bg-zinc-700", content: filesPanel },
-        { id: "tasks", title: "Tasks", icon: ListTodo, color: "bg-zinc-700", content: tasksPanel },
-        { id: "changes", title: "Changes", icon: FileClock, color: "bg-zinc-700", content: changesPanel },
         {
           id: "automation",
           title: "Automation",
@@ -680,6 +678,8 @@ export function SidePanel({
             </div>
           ),
         },
+        { id: "changes", title: "Changes", icon: FileClock, color: "bg-zinc-700", content: changesPanel },
+        { id: "tasks", title: "Progress", icon: ListTodo, color: "bg-zinc-700", content: tasksPanel },
         {
           id: "health",
           title: "Code health",

@@ -6,6 +6,16 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.69] - 2026-10-04
+
+### Changed
+
+- The Tasks tab is now called Progress, and its Queue section is now called Runs (it lists every task waiting, running and done). Messages that pointed at the Queue say Progress > Runs.
+- The Agent and Response pickers above the message box sit on the left; Work IQ, credits, the message count and New chat stay on the right.
+- File lines in a change set (Changes tab) have a little more space, so their `+added -removed` counts no longer touch (1 pixel between them).
+- Side panel tab order: Files and Automation on the top row, then Changes and Progress, then Code health.
+- A chat note about a saved file (task report, saved chart) no longer has an "Open" link after it: the note itself opens the file (underlined on hover).
+
 ## [v0.1.68] - 2026-10-04
 
 ### Changed
@@ -799,7 +809,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.68...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.69...HEAD
+[v0.1.69]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.69
 [v0.1.68]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.68
 [v0.1.67]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.67
 [v0.1.66]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.66

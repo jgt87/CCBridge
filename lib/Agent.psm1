@@ -352,7 +352,7 @@ function Test-ConnectionLost($ErrorRecord) {
 }
 
 function Submit-AgentTask {
-    <# Puts a task in the worker's queue and records it in $State.Queue (shown in the Queue tab):
+    <# Puts a task in the worker's queue and records it in $State.Queue (shown under Progress > Runs):
        what was asked, where it came from (user, mcp, api), status, timing, Copilot messages used,
        result or error. Returns the queue entry. #>
     param($State, [hashtable]$Task, [string]$Source = 'user', [string]$Title = '')
@@ -442,7 +442,7 @@ function Restore-AgentQueue {
     }
     while ($State.Queue.Count -gt 100) { $State.Queue.RemoveAt(0) }
     Write-CCBLog info agent "Queue restored" @{ entries = $State.Queue.Count; requeued = $requeued }
-    if ($requeued) { Add-AgentEvent $State 'status' @{ text = "Picked up $requeued waiting task(s) from before the restart; they run in order (remove one in the Queue with its x)." } }
+    if ($requeued) { Add-AgentEvent $State 'status' @{ text = "Picked up $requeued waiting task(s) from before the restart; they run in order (remove one under Progress > Runs with its x)." } }
     $requeued
 }
 

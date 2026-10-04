@@ -218,11 +218,13 @@ function NoteLine({ tone, text, path, onOpenFile }: { tone: NoteTone; text: stri
   return (
     <div className={cn("flex items-start gap-2 px-1 text-sm", style.cls)}>
       <span className="mt-0.5">{style.icon}</span>
-      <span className="whitespace-pre-wrap">{text}</span>
-      {path && onOpenFile && (
-        <button className="shrink-0 rounded-md px-1.5 text-xs underline-offset-2 hover:underline" onClick={() => onOpenFile(path)} title={`Open ${path}`} type="button">
-          Open
+      {/* A note about a saved file (task report, chart): the note itself opens it. */}
+      {path && onOpenFile ? (
+        <button className="whitespace-pre-wrap text-left underline-offset-2 hover:underline" onClick={() => onOpenFile(path)} title={`Open ${path}`} type="button">
+          {text}
         </button>
+      ) : (
+        <span className="whitespace-pre-wrap">{text}</span>
       )}
     </div>
   );
