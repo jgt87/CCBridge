@@ -458,7 +458,9 @@ export interface SsoStatus {
   /** The account StreamHub's Edge profile is signed in with. */
   profileAccount?: "work" | "personal" | "none" | "unknown";
   switchLabel?: string;
-  copilot: "chat" | "sign-in page" | "no tab" | "edge not running";
+  copilot: "chat" | "sign-in page" | "other page" | "no tab" | "edge not running";
+  /** With "other page": the site the Copilot tab is on instead (host only). */
+  copilotHost?: string | null;
   checkedAt?: string;
 }
 

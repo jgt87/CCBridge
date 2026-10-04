@@ -18,7 +18,8 @@ describe("sign-in texts", () => {
   });
   it("describe the Copilot tab", () => {
     expect(copilotText("chat")).toBe("signed in");
-    expect(copilotText("sign-in page")).toBe("on a sign-in page");
+    expect(copilotText("sign-in page")).toBe("on Microsoft's sign-in page");
+    expect(copilotText("other page", "sso.example.org")).toMatch(/^on sso.example.org: probably your organisation/);
     expect(copilotText(undefined)).toBe("-");
   });
 });

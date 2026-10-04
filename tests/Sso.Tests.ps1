@@ -46,6 +46,11 @@ Describe 'Get-CopilotSignInState' {
         Get-CopilotSignInState -Pages @((& $page 'https://m365.cloud.microsoft/chat?x=1')) | Should Be 'chat'
         Get-CopilotSignInState -Pages @((& $page 'https://login.microsoftonline.com/common/oauth2/authorize?x')) | Should Be 'sign-in page'
         Get-CopilotSignInState -Pages @((& $page 'http://localhost:8765/'), (& $page 'about:blank')) | Should Be 'no tab'
+        # Copilot's tab on another site (an organisation's own sign-in page): said, with the site.
+        $other = @((& $page 'http://localhost:8765/'), (& $page 'https://sso.example.org/app/signin?x=1'))
+        Get-CopilotSignInState -Pages $other | Should Be 'other page'
+        Get-OtherPageHost -Pages $other | Should Be 'sso.example.org'
+        Get-OtherPageHost -Pages @((& $page 'https://m365.cloud.microsoft/chat')) | Should Be $null
     }
     It 'counts a sign-in page first, even when a chat tab is also open' {
         Get-CopilotSignInState -Pages @((& $page 'https://www.microsoft365.com/chat'), (& $page 'https://login.live.com/x')) | Should Be 'sign-in page'

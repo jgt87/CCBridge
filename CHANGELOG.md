@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.70] - 2026-10-04
+
+### Fixed
+
+- Settings > Sign-in said "no Copilot tab open" when Copilot's tab was on a sign-in page outside Microsoft's own (for example an organisation's sign-in page). It now names that site, so it is clear single sign-on did not sign in and where it stopped.
+
 ## [v0.1.69] - 2026-10-04
 
 ### Changed
@@ -809,7 +815,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.69...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.70...HEAD
+[v0.1.70]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.70
 [v0.1.69]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.69
 [v0.1.68]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.68
 [v0.1.67]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.67

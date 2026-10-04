@@ -28,9 +28,10 @@ export function ssoStateText(s: SsoStatus | null): string {
 }
 
 /** Where the Copilot tab is, in words. */
-export function copilotText(c: SsoStatus["copilot"] | undefined): string {
+export function copilotText(c: SsoStatus["copilot"] | undefined, host?: string | null): string {
   if (c === "chat") return "signed in";
-  if (c === "sign-in page") return "on a sign-in page";
+  if (c === "sign-in page") return "on Microsoft's sign-in page";
+  if (c === "other page") return `on ${host || "another site"}: probably your organisation's sign-in page, so single sign-on did not sign in`;
   if (c === "no tab") return "no Copilot tab open";
   if (c === "edge not running") return "Edge not running";
   return "-";
@@ -75,7 +76,7 @@ export function ssoStatusRows(s: SsoStatus): { label: string; value: string }[] 
     { label: "Single sign-on", value: ssoShortText(s) },
     { label: "Work account on this PC", value: s.workAccount ? "yes" : "no" },
     { label: "Edge profile", value: accountText(s.profileAccount) },
-    { label: "Copilot", value: copilotText(s.copilot) },
+    { label: "Copilot", value: copilotText(s.copilot, s.copilotHost) },
     { label: "Copilot session", value: s.signIn === "private" ? "private, you sign in yourself" : "StreamHub's Edge profile" },
   ];
 }

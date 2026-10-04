@@ -41,8 +41,9 @@ function Select-SsoSwitch {
 }
 
 function Get-CopilotSignInState {
-    <# Where StreamHub's Copilot tab is: 'chat' (signed in), 'sign-in page', 'no tab' or 'edge not
-       running'. Only the tab addresses are looked at. $Pages is for tests. #>
+    <# Where StreamHub's Copilot tab is: 'chat' (signed in), 'sign-in page' (Microsoft's), 'other page'
+       (a web page on another site, such as an organisation's own sign-in page: Get-OtherPageHost
+       names it), 'no tab' or 'edge not running'. Only the tab addresses are looked at. $Pages is for tests. #>
     param([int]$Port = 9333, $Pages)
     if (-not $PSBoundParameters.ContainsKey('Pages')) {
         if (-not (Test-CdpEndpoint $Port)) { return 'edge not running' }
@@ -53,7 +54,25 @@ function Get-CopilotSignInState {
     $sel = try { Get-CCBridgeConfig selectors (Split-Path -Parent $PSScriptRoot) } catch { $null }
     $onCopilot = @($urls | Where-Object { if ($sel) { Test-CopilotUrl $_ $sel } else { $_ -match '^(?i)https://([a-z0-9-]+\.)*(microsoft365\.com|m365\.cloud\.microsoft|office\.com)/' } })
     if ($onCopilot.Count) { return 'chat' }
+    if (Get-OtherPageHost -Pages $Pages) { return 'other page' }
     'no tab'
+}
+
+function Get-OtherPageHost {
+    <# The site of a web page in StreamHub's Edge that is neither Copilot, Microsoft's sign-in nor the
+       app itself: where Copilot's tab went instead (often the organisation's sign-in page). Host only. #>
+    param([int]$Port = 9333, $Pages)
+    if (-not $PSBoundParameters.ContainsKey('Pages')) {
+        if (-not (Test-CdpEndpoint $Port)) { return $null }
+        $Pages = @((Invoke-RestMethod "http://127.0.0.1:$Port/json/list") | Where-Object { $_.type -eq 'page' })
+    }
+    foreach ($p in @($Pages)) {
+        $u = $null; try { $u = [Uri]"$($p.url)" } catch { continue }
+        if ($u.Scheme -notin 'http', 'https' -or $u.Host -match '^(localhost|127\.0\.0\.1|\[::1\])$') { continue }
+        if ($u.Host -match '(?i)(^|\.)(microsoft365\.com|m365\.cloud\.microsoft|office\.com)$') { continue }
+        return $u.Host
+    }
+    $null
 }
 
 function Get-TabAddresses([int]$Port = 9333) {
@@ -128,7 +147,7 @@ function Get-SsoStatus {
     param([int]$Port = 9333, [switch]$NoPage)
     $join = Get-DeviceJoinStatus
     $work = $join['AzureAdPrt'] -eq 'YES'
-    $st = [ordered]@{ workAccount = $work; join = $join; profileSso = 'unknown'; switchLabel = ''; profileAccount = (Get-ProfileAccount); copilot = (Get-CopilotSignInState $Port); checkedAt = (Get-Date).ToString('s') }
+    $st = [ordered]@{ workAccount = $work; join = $join; profileSso = 'unknown'; switchLabel = ''; profileAccount = (Get-ProfileAccount); copilot = (Get-CopilotSignInState $Port); copilotHost = (Get-OtherPageHost $Port); checkedAt = (Get-Date).ToString('s') }
     if (-not $work) { $st.profileSso = 'unavailable'; return $st }
     if (-not (Test-CdpEndpoint $Port)) { $st.profileSso = 'edge-not-running'; return $st }
     if ($NoPage) { return $st }
@@ -245,4 +264,4 @@ function Open-SsoSettingsPage([int]$Port = 9333) {
     $true
 }
 
-Export-ModuleMember -Function Select-SsoSwitch, Get-CopilotSignInState, Test-ProfileSsoAuto, Get-ProfileAccount, Get-TabAddresses, Get-SsoStatus, Set-ProfileSso, Invoke-SsoSetup, Open-SsoSettingsPage
+Export-ModuleMember -Function Select-SsoSwitch, Get-CopilotSignInState, Get-OtherPageHost, Test-ProfileSsoAuto, Get-ProfileAccount, Get-TabAddresses, Get-SsoStatus, Set-ProfileSso, Invoke-SsoSetup, Open-SsoSettingsPage
