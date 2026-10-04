@@ -164,7 +164,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ files = @() } }
             # Line counts for the whole session, or only for the last change (setting fileChangeCounts).
             $since = [string]$State.SessionSince
-            if ("$($State.Config.fileChangeCounts)" -eq 'last-change') { $last = Get-LastChangeSetId $State.ProjectRoot; $since = $(if ($last) { $last } else { '99999999' }) }
+            if ("$($State.Config.fileChangeCounts)" -eq 'last-change') { $since = Get-LastChangeStart $State.ProjectRoot ([string]$State.OpenedAt) }
             $stats = Get-SessionChangeStats $State.ProjectRoot $since
             $files = @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object {
                 $s = $stats[$_.path]
@@ -554,6 +554,7 @@ function Invoke-ApiRequest($Ctx, $State) {
 function Set-Project($State, [string]$Path) {
     $State.ProjectRoot = $Path.TrimEnd('\')
     $State.SessionSince = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')   # line-change counts start here
+    $State.OpenedAt = $State.SessionSince   # "last change" counts only changes made after this open
     $State.Todos = @()
     $State.NeedNewChat = $State.NeedNewChat -or $State.ChatStarted   # a new project starts a fresh Copilot chat
     Add-AgentEvent $State 'project' @{ name = (Split-Path $Path -Leaf); path = $Path }

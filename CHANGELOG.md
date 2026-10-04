@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.58] - 2026-10-04
+
+### Fixed
+
+- Download folders of earlier updates (`%LOCALAPPDATA%\Temp\ccbridge-update-*`) that could not be deleted right away, for example while a virus scanner still had the zip open, are removed at the next start (those older than an hour). A failed delete no longer marks a good update as skipped.
+- `agent-test.cmd` did not see a Researcher report as finished: the report is not always where the reply text is measured. A run now also ends when Copilot's Stop button has gone and no reply data came for 30 seconds, and `timeline.txt` notes every 15 seconds what the test is waiting for.
+- Files tab with line counts set to "last change": right after the app started, the counts of the last change from an earlier run still showed. They now start empty when a project opens and show only changes made since.
+- Settings > Response mode: the option "Leave" is now called "As set in Copilot" (StreamHub leaves Copilot's picker alone), "Quick" and "Deep" read "Quick response" and "Think deeper" like in Copilot, and the help text explains each.
+
 ## [v0.1.57] - 2026-10-04
 
 ### Fixed
@@ -675,7 +684,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.57...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.58...HEAD
+[v0.1.58]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.58
 [v0.1.57]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.57
 [v0.1.56]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.56
 [v0.1.55]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.55

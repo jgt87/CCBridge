@@ -483,7 +483,12 @@ while ($clock.Elapsed.TotalSeconds -lt $deadline) {
                 # Finished when no reply data came for 20 s, or (late status frames can keep coming)
                 # when Copilot's Stop button is gone and the reply text has not changed for 20 s.
                 if ($po.stop -or $po.lastTextLen -ne $auto.lastLen) { $auto.stableSince = $now } elseif (-not $auto.stableSince) { $auto.stableSince = $now }
-                $settled = -not $po.stop -and $po.lastTextLen -gt 0 -and $po.lastTextLen -eq $auto.lastLen -and ($quietFrames -ge 20 -or ($auto.sawStop -and ($now - $auto.stableSince) -ge 20))
+                # Agents (Researcher) can render their report where the reply text is not measured
+                # (length 0 or still moving): Stop gone after it showed and 30 s without reply data
+                # also counts as finished.
+                $textDone = $po.lastTextLen -gt 0 -and $po.lastTextLen -eq $auto.lastLen -and ($quietFrames -ge 20 -or ($auto.sawStop -and ($now - $auto.stableSince) -ge 20))
+                $settled = -not $po.stop -and ($textDone -or ($auto.sawStop -and $quietFrames -ge 30))
+                $auto.why = "reply text $($po.lastTextLen) chars, stable $([int]($now - $auto.stableSince)) s, Stop $(if ($po.stop) { 'showing' } elseif ($auto.sawStop) { 'gone' } else { 'not seen yet' })"
                 $auto.lastLen = $po.lastTextLen
                 if (-not $settled) { $auto.doneSince = $null }
                 elseif (-not $auto.doneSince) { $auto.doneSince = $now }
@@ -513,6 +518,7 @@ while ($clock.Elapsed.TotalSeconds -lt $deadline) {
         $nextBeat = $now + 15
         $quiet = if ($stats.lastFrame) { [int]($now - $stats.lastFrame) } else { [int]$now }
         Write-Host ("  {0:N0}s: {1} frames received, last reply data {2}s ago{3}" -f $now, $stats.frames, $quiet, $(if ($stopSince) { ', Stop button showing' } else { '' }))
+        if ($auto -and $auto.why) { Add-Line "wait      $($auto.why)" }
     }
 }
 if ($stopSince) { $stopWindows.Add(('{0:N1}s-(still showing)' -f $stopSince)) }

@@ -23,6 +23,14 @@ Describe 'Line counts per change' {
         @($one.Keys) -join ',' | Should Be 'b.txt'
         $one['b.txt'].created | Should Be $true
     }
+
+    It 'shows no "last change" counts from before the project was opened' {
+        $opened = (Get-Date).AddSeconds(1).ToString('yyyyMMdd-HHmmss-fff')
+        $since = Get-LastChangeStart $p $opened
+        $since | Should Be '99999999'
+        @((Get-SessionChangeStats $p $since).Keys).Count | Should Be 0
+        Get-LastChangeStart $p $start | Should Be (Get-LastChangeSetId $p)
+    }
     Remove-Item $p -Recurse -Force
 }
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

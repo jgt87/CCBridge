@@ -27,7 +27,15 @@ export function isOnOff(options: string[] | undefined): boolean {
 }
 
 /** How an option shows in a list: first letter capitalised, dashes as spaces ("named-sites" -> "Named sites"). */
+// Values whose plain capitalised form would not say what they do.
+const OPTION_LABELS: Record<string, string> = {
+  leave: "As set in Copilot",
+  quick: "Quick response",
+  deep: "Think deeper",
+};
+
 export function optionLabel(o: string): string {
+  if (OPTION_LABELS[o]) return OPTION_LABELS[o];
   const t = o.replace(/-/g, " ");
   return t.charAt(0).toUpperCase() + t.slice(1);
 }

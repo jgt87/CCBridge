@@ -58,6 +58,17 @@ try {
         return
     }
 
+    # Release install: first remove download folders that earlier updates could not delete (a
+    # virus scanner still had the zip open, or the window closed mid-update); only ones older than
+    # an hour, so an update running in another window is left alone.
+    foreach ($old in @(Get-ChildItem -LiteralPath $env:TEMP -Directory -Filter 'ccbridge-update-*' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-1) })) {
+        try {
+            Get-ChildItem -LiteralPath $old.FullName -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { try { $_.Attributes = 'Normal' } catch { } }
+            [IO.Directory]::Delete($old.FullName, $true)
+            Write-CCBLog verbose update "removed an old update folder: $($old.Name)"
+        } catch { Write-CCBLog verbose update "could not remove $($old.Name) yet: $($_.Exception.Message)" }
+    }
+
     # Release install: compare with the latest GitHub Release.
     $verFile = Join-Path $root 'version.txt'
     $current = if (Test-Path $verFile) { ([IO.File]::ReadAllText($verFile)).Trim() } else { '' }
@@ -82,7 +93,9 @@ try {
         [IO.File]::WriteAllText($verFile, $latest)
         Say "updated $(if ($current) { $current } else { '(unknown)' }) -> $latest"
     } finally {
-        [IO.Directory]::Delete($tmp, $true)
+        # A file still open (virus scan) must not turn a good update into "skipped"; the folder is
+        # removed at a later start.
+        try { [IO.Directory]::Delete($tmp, $true) } catch { Write-CCBLog verbose update "update folder left for a later start: $($_.Exception.Message)" }
     }
 } catch {
     Say "update check skipped: $($_.Exception.Message)"
