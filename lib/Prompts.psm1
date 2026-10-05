@@ -23,6 +23,11 @@ $script:MovePattern = '(?i)\b(move|moving|split|extract|separate|refactor|offloa
 $script:PythonPattern = '(?i)\b(python|pip|django|flask|pandas|pytest)\b|\.pyw?\b'
 $script:PowerShellPattern = '(?i)\b(powershell|pester|cmdlets?)\b|\.ps[md]?1\b'
 $script:RunbookPattern = '(?i)\b(runbooks?|draaiboek(en)?)\b'
+$script:FixPattern = '(?i)\b(fix|fixes|fixing|repair|solve|debug|repareer|herstel|los .{0,20} op)\b'
+$script:TestPattern = '(?i)\b(tests?|testing|unit ?tests?|pester|pytest|jest|vitest|spec|specs)\b'
+$script:SecurityPattern = '(?i)\b(login|log ?in|sign ?in|auth|authentication|passwords?|tokens?|api ?keys?|secrets?|sql|query|queries|database|user input|forms?|uploads?|cookies?|sessions?|permissions?|encrypt|xss|injection|sanitize|wachtwoord)\b'
+$script:JsPattern = '(?i)\b(javascript|typescript|node(\.?js)?|npm|react|vue|svelte|angular)\b|\.(m?js|cjs|jsx?|tsx?)\b'
+$script:BatchPattern = '(?i)\b(batch ?(file|script)s?|cmd ?files?)\b|\.(cmd|bat)\b'
 # Requests that build or change code get the code quality rules (rules/quality.md), once per chat.
 $script:BuildPattern = '(?i)\b(build\s+(a|an|me|the|new|it)|create|add|implement|make|write|develop|extend|refactor|rewrite|clean ?up|improve|feature|component|module|function|class|page|app|tool|script|bouw|maak|voeg|schrijf|verbeter)\b'
 # Requests for online information (with Get-NamedSites: a website or address in the request).
@@ -62,7 +67,27 @@ function Get-ProjectTraits {
     if (@($Paths | Where-Object { $_ -match '(?i)\.pyw?$|(^|/)requirements\.txt$|(^|/)pyproject\.toml$' }).Count) { $t.Add('python') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.ps[md]?1$' }).Count) { $t.Add('powershell') }
     if (@($Paths | Where-Object { $_ -match '(?i)^source/' }).Count) { $t.Add('source') }
+    if (@($Paths | Where-Object { $_ -match '(?i)\.(m?js|cjs|jsx?|tsx?)$' -and $_ -notmatch '(?i)(^|/)(node_modules|dist|build)/|\.min\.js$' }).Count) { $t.Add('javascript') }
+    if (@($Paths | Where-Object { $_ -match '(?i)\.(cmd|bat)$' }).Count) { $t.Add('batch') }
+    if (@($Paths | Where-Object { $_ -match '(?i)\.Tests\.ps1$|(^|/)test_[^/]+\.py$|_test\.py$|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)(tests?|__tests__)/' }).Count) { $t.Add('tests') }
     $t.ToArray()
+}
+
+function Get-EnvironmentText {
+    <# What this computer can run, so Copilot does not suggest tools that are not there. Looked up
+       once per run of the helper program (the Store's python.exe stub does not count). #>
+    # Looked up again when PATH changed (a tool installed from Settings > This computer).
+    if ($script:EnvText -and $script:EnvPath -eq $env:Path) { return $script:EnvText }
+    $script:EnvPath = $env:Path
+    $tools = [ordered]@{ python = 'python'; node = 'node'; npm = 'npm'; dotnet = 'dotnet (.NET SDK)'; git = 'git' }
+    $have = New-Object System.Collections.Generic.List[string]; $miss = New-Object System.Collections.Generic.List[string]
+    foreach ($k in $tools.Keys) {
+        $c = Get-Command $k -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
+        if ($c) { $have.Add($tools[$k]) } else { $miss.Add($tools[$k]) }
+    }
+    $script:EnvText = "- This computer: Windows PowerShell 5.1 and Edge$(if ($have.Count) { "; also $($have -join ', ')" })." +
+        $(if ($miss.Count) { " Not installed: $($miss -join ', '): do not use or suggest them, and do not install software." } else { '' })
+    $script:EnvText
 }
 
 function Get-PromptModules {
@@ -74,6 +99,7 @@ function Get-PromptModules {
     $ids = New-Object System.Collections.Generic.List[string]
     if ($traits -notcontains 'nocommands') { $ids.Add('actions:run') }
     $ids.Add('rules:folders')   # where each kind of file goes (Layout.psm1)
+    $ids.Add('rules:environment')   # what this computer has installed (Get-EnvironmentText)
     # find and remember: only useful once the project has files.
     if (@($Context.Paths | Where-Object { $_ }).Count -or $traits -contains 'code') { $ids.Add('actions:project') }
     if ($web) { $ids.Add('rules:web') }
@@ -82,6 +108,11 @@ function Get-PromptModules {
     if (($traits -contains 'powershell') -or ($Text -match $script:PowerShellPattern)) { $ids.Add('rules:powershell') }
     if ($traits -contains 'source') { $ids.Add('rules:source') }
     if ($Text -match $script:BuildPattern) { $ids.Add('rules:quality') }
+    if (($Text -match $script:ProblemPattern) -or ($Text -match $script:FixPattern)) { $ids.Add('rules:debugging') }
+    if (($traits -contains 'tests') -or ($Text -match $script:TestPattern)) { $ids.Add('rules:testing') }
+    if (($Text -match $script:SecurityPattern) -or ($web -and $Text -match $script:BuildPattern)) { $ids.Add('rules:security') }
+    if (($traits -contains 'javascript') -or ($Text -match $script:JsPattern)) { $ids.Add('rules:javascript') }
+    if (($traits -contains 'batch') -or ($Text -match $script:BatchPattern)) { $ids.Add('rules:batch') }
     if ($Text -match $script:RunbookPattern) { $ids.Add('rules:runbook') }
     # Online information: how to use web sources, and the web action for the exact text of a page.
     if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }
@@ -135,6 +166,7 @@ function Get-PromptPart {
         '^role:(.+)$' { return Read-PromptPart $AppRoot "roles\$($Matches[1]).md" }
         '^actions$'   { return Read-PromptPart $AppRoot 'actions.md' }
         '^rules$'     { return Read-PromptPart $AppRoot 'rules.md' }
+        '^rules:environment$' { return Get-EnvironmentText }
         '^rules:runbook$' {
             # With the blank template, in a four-backtick fence (the template has ```json blocks).
             $tpl = Join-Path $AppRoot 'templates\runbooks\blank.runbook.md'
@@ -211,4 +243,4 @@ function New-PromptMessage {
     $body
 }
 
-Export-ModuleMember -Function Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage
+Export-ModuleMember -Function Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage

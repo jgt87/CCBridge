@@ -10,6 +10,7 @@ import type { ChainItem, ChangeSetView, FetchItem, FetchWeb, FileInfo, RunbookIt
 
 import { RunbooksPanel, runbookRows } from "./runbooks-panel";
 import { ScriptsPanel } from "./scripts-panel";
+import { HooksPanel } from "./hooks-panel";
 import { ChainsPanel } from "./chains-panel";
 import { QueuePanel } from "./queue-panel";
 import { SchedulesList } from "./schedules-panel";
@@ -416,6 +417,7 @@ export function SidePanel({
   changes,
   onOpenFile,
   onUndo,
+  onUndoTo,
   onUploaded,
   busy,
   fetchItems,
@@ -459,6 +461,8 @@ export function SidePanel({
   changes: ChangeSetView[];
   onOpenFile: (path: string) => void;
   onUndo: () => void;
+  /** Undoes this change set and every newer one (History > Restore). */
+  onUndoTo?: (changeSet: string) => void;
   onUploaded: () => void;
   busy: boolean;
   fetchItems: FetchItem[];
@@ -506,6 +510,7 @@ export function SidePanel({
   };
   // From Runs: the History tab, scrolled to that task's change set, which lights up briefly.
   const [litChange, setLitChange] = useState<number | null>(null);
+  const [confirmUndo, setConfirmUndo] = useState<number | null>(null);
   const showChange = (seq: number) => {
     setTabRequest((r) => ({ id: "changes", n: (r?.n ?? 0) + 1 }));
     setLitChange(seq);
@@ -568,6 +573,35 @@ export function SidePanel({
               <div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
                 {c.time}
                 {i === 0 && <span className="ml-auto shrink-0">latest: Undo takes this back</span>}
+                {i > 0 && onUndoTo && c.changeSet && confirmUndo !== c.seq && (
+                  <button
+                    className="ml-auto shrink-0 rounded px-1 hover:bg-black/5 hover:text-foreground disabled:opacity-40 dark:hover:bg-white/5"
+                    disabled={busy}
+                    onClick={() => setConfirmUndo(c.seq)}
+                    title={`Put the files back as they were before this change set: undoes it and the ${i} newer one(s), newest first`}
+                    type="button"
+                  >
+                    Restore
+                  </button>
+                )}
+                {i > 0 && confirmUndo === c.seq && c.changeSet && (
+                  <span className="ml-auto flex shrink-0 items-center gap-1">
+                    <span>Restore: undo {i + 1} change sets?</span>
+                    <button
+                      className="rounded bg-black/10 px-1.5 text-foreground hover:bg-black/15 dark:bg-white/15 dark:hover:bg-white/20"
+                      onClick={() => {
+                        setConfirmUndo(null);
+                        onUndoTo?.(c.changeSet as string);
+                      }}
+                      type="button"
+                    >
+                      Yes
+                    </button>
+                    <button className="rounded px-1.5 hover:bg-black/5 dark:hover:bg-white/5" onClick={() => setConfirmUndo(null)} type="button">
+                      Cancel
+                    </button>
+                  </span>
+                )}
               </div>
               {c.title && (
                 <div className="mb-1 line-clamp-2 text-sm" title={c.title}>
@@ -669,6 +703,9 @@ export function SidePanel({
                   <ScriptsPanel busy={busy} onOpen={onOpenFile} onRun={onRunScript} onSchedule={(path) => onSchedule({ kind: "script", name: path })} scripts={scripts} />
                 </PanelSection>
               )}
+              <PanelSection id="automation.hooks" title="Hooks">
+                <HooksPanel onOpen={onOpenFile} refreshKey={files} />
+              </PanelSection>
               {onCreateChain && onRunChain && (
                 <PanelSection badge={chains.length ? <SectionCount n={chains.length} /> : null} id="automation.chains" title="Chains">
                   <ChainsPanel

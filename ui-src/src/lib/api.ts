@@ -353,6 +353,28 @@ export interface ChangeCount {
   deleted?: boolean;
 }
 
+/** An optional tool on this computer (Settings > This computer). */
+export interface ToolItem {
+  name: string;
+  label: string;
+  status: "OK" | "INFO" | "WARN";
+  detail: string;
+  hint: string;
+  canInstall: boolean;
+  /** The newest release from the tool's official source, and whether it is newer than the installed one. */
+  latest?: string | null;
+  update?: boolean;
+  install: { state: "running" | "done" | "failed"; message: string; at: string } | null;
+}
+
+/** One of the project's hooks (.streamhub/hooks.json). */
+export interface HookItem {
+  event: "afterEdit" | "beforeDone" | "afterTask";
+  run: string;
+  match: string;
+  name: string;
+}
+
 /** A change set in the History tab. */
 export interface ChangeSetView {
   seq: number;
@@ -360,6 +382,8 @@ export interface ChangeSetView {
   files: string[];
   title?: string;
   counts?: ChangeCount[];
+  /** The change set's id (its backup), for Undo to here. */
+  changeSet?: string;
 }
 
 /** A task in the queue. */
@@ -437,7 +461,9 @@ export interface Setting {
   label: string;
   help: string;
   /** number / select; toggle (on or off); commands (a list, one per line); info (shown, not changeable). */
-  type: "number" | "select" | "toggle" | "commands" | "info";
+  type: "number" | "select" | "toggle" | "commands" | "list" | "info";
+  /** For a list: what the empty box says. */
+  placeholder?: string;
   value: string | number | boolean | string[] | null;
   default: string | number | boolean | string[] | null;
   custom: boolean;
@@ -584,6 +610,11 @@ export const api = {
   createChain: (name: string) => call<{ ok: boolean }>("POST", "/api/chains", { name }),
   runChain: (name: string) => call<{ ok: boolean }>("POST", "/api/chains/run", { name }),
   runScript: (path: string) => call<{ ok: boolean }>("POST", "/api/scripts/run", { path }),
+  hooks: () =>
+    call<{ exists: boolean; error: string | null; hooks: HookItem[]; path: string }>("GET", "/api/hooks").then((r) => ({ ...r, hooks: Array.isArray(r.hooks) ? r.hooks : r.hooks ? [r.hooks as unknown as HookItem] : [] })),
+  createHooks: () => call<{ ok: boolean; path: string }>("POST", "/api/hooks/create"),
+  tools: () => call<{ tools: ToolItem[] }>("GET", "/api/tools").then((r) => (Array.isArray(r.tools) ? r.tools : r.tools ? [r.tools as unknown as ToolItem] : [])),
+  installTool: (name: string) => call<{ ok: boolean; started: boolean }>("POST", "/api/tools/install", { name }),
   /** Add a runbook or script step to a chain, or remove / move one (index from 0). */
   chainSteps: (name: string, op: "add" | "remove" | "up" | "down", opts: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number } = {}) =>
     call<{ ok: boolean }>("POST", "/api/chains/steps", { name, op, ...opts }),
@@ -594,7 +625,7 @@ export const api = {
   edgeCache: () => call<EdgeCacheInfo>("GET", "/api/edge-cache"),
   clearEdgeCache: () => call<{ freedNow: number; pending: boolean; info: EdgeCacheInfo }>("POST", "/api/edge-cache/clear"),
   newChat: () => call<{ ok: boolean }>("POST", "/api/newchat"),
-  undo: () => call<{ ok: boolean }>("POST", "/api/undo"),
+  undo: (to?: string) => call<{ ok: boolean }>("POST", "/api/undo", to ? { to } : {}),
   stop: () => call<{ ok: boolean }>("POST", "/api/stop"),
   connect: () => call<{ ok: boolean }>("POST", "/api/connect"),
   cancelQueued: (id: string) => call<{ ok: boolean }>("POST", "/api/queue/cancel", { id }),

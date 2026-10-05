@@ -2,6 +2,7 @@ import { Monitor, Moon, RotateCcw, Sun, X } from "lucide-react";
 import { getThemeChoice, setThemeChoice, type ThemeChoice } from "@/lib/theme";
 import { ModalBackdrop } from "./modal-backdrop";
 import { SsoSection } from "./sso-section";
+import { ToolsSection } from "./tools-section";
 import { actionClass, fieldClass, Segmented, SettingLine, SettingsGroup } from "./settings-ui";
 import { useEffect, useMemo, useState } from "react";
 import { api, type EdgeCacheInfo, type Setting } from "@/lib/api";
@@ -18,7 +19,7 @@ function asDraft(v: Setting["value"]): string {
 }
 
 function defaultText(s: Setting): string {
-  if (s.type === "commands") return Array.isArray(s.default) && s.default.length ? s.default.join(", ") : "none";
+  if (s.type === "commands" || s.type === "list") return Array.isArray(s.default) && s.default.length ? s.default.join(", ") : "none";
   return asDraft(s.default);
 }
 
@@ -89,8 +90,8 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
   );
   const notes = error ? <div className="text-rose-500 text-xs">{error}</div> : null;
 
-  // A list of commands: one per line, the full width under the text, saved when leaving the box.
-  if (s.type === "commands") {
+  // A list (commands, protected paths): one per line, the full width under the text, saved when leaving the box.
+  if (s.type === "commands" || s.type === "list") {
     return (
       <SettingLine
         below={
@@ -99,7 +100,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
             className="min-h-[4.5rem] w-full rounded-md border border-black/10 bg-transparent px-2 py-1 font-mono text-xs outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30"
             onBlur={() => draft !== asDraft(s.value) && save(draft.split("\n").map((l) => l.trim()).filter(Boolean))}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="none (every command asks)"
+            placeholder={s.type === "commands" ? "none (every command asks)" : (s.placeholder ?? "none")}
             spellCheck={false}
             value={draft}
           />
@@ -349,6 +350,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               title="Theme"
             />
             <NotificationSetting />
+          </SettingsGroup>
+          <SettingsGroup title="This computer">
+            <ToolsSection />
           </SettingsGroup>
           <SettingsGroup title="Sign-in">
             <SsoSection />

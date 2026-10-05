@@ -111,7 +111,7 @@ function Connect-Copilot {
                 $target = Get-CopilotTarget -Port $Port -Selectors $sel
             }
             $session = Connect-Cdp $target.webSocketDebuggerUrl
-            $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; SaveFrames = $SaveReplyFrames
+            $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; AttachErrors = @(); SaveFrames = $SaveReplyFrames
         Pacing = (Get-CopilotPacing); LastReplyAt = $null }
             if (-not (Test-CopilotUrl $target.url $sel)) { $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl } }
             $null = Invoke-Cdp $session 'Network.enable'
@@ -527,16 +527,21 @@ function Add-CopilotAttachment {
     param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)][string]$Path, [int]$TimeoutSec = 120)
     $s = $Bridge.Session
     $ext = [IO.Path]::GetExtension($Path).ToLowerInvariant()
-    $doc = Invoke-Cdp $s 'DOM.getDocument' @{ depth = -1; pierce = $true }
-    $ids = @((Invoke-Cdp $s 'DOM.querySelectorAll' @{ nodeId = $doc.root.nodeId; selector = 'input[type=file]' }).nodeIds)
-    $target = $null
-    foreach ($id in $ids) {
-        $a = @((Invoke-Cdp $s 'DOM.getAttributes' @{ nodeId = $id }).attributes)
-        $acc = ''; for ($i = 0; $i + 1 -lt $a.Count; $i += 2) { if ($a[$i] -eq 'accept') { $acc = $a[$i + 1] } }
-        if (-not $acc -or $acc -match '\*' -or @($acc.Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() }) -contains $ext) { $target = $id; break }
-    }
-    if ($null -eq $target) { throw "Copilot does not accept $ext files as attachments here." }
-    $null = Invoke-Cdp $s 'DOM.setFileInputFiles' @{ nodeId = $target; files = @($Path) }
+    # The file input that takes this kind of file, found in the page (also in shadow roots) and
+    # handed over as an object: the whole DOM tree as JSON is too deep for Windows PowerShell 5.1.
+    $extJs = ConvertTo-JsString $ext
+    $find = @"
+(() => {
+  const ext = $extJs, all = [];
+  const walk = (root) => { root.querySelectorAll('input[type=file]').forEach(e => all.push(e)); root.querySelectorAll('*').forEach(e => { if (e.shadowRoot) walk(e.shadowRoot); }); };
+  walk(document);
+  return all.find(e => { const a = (e.getAttribute('accept') || '').toLowerCase(); return !a || a.includes('*') || a.split(',').map(x => x.trim()).includes(ext); }) || null;
+})()
+"@
+    $found = Invoke-Cdp $s 'Runtime.evaluate' @{ expression = $find; returnByValue = $false }
+    $objectId = "$($found.result.objectId)"
+    if (-not $objectId) { throw "Copilot does not accept $ext files as attachments here." }
+    $null = Invoke-Cdp $s 'DOM.setFileInputFiles' @{ objectId = $objectId; files = @($Path) }
     $stem = [IO.Path]::GetFileNameWithoutExtension($Path)
     $stemJs = ConvertTo-JsString $stem.Substring(0, [Math]::Min(10, $stem.Length))
     $editorSel = ConvertTo-JsString $Bridge.Selectors.editor
@@ -545,14 +550,32 @@ function Add-CopilotAttachment {
   const named = [...document.querySelectorAll('body *')].some(e => e.children.length === 0 && (e.innerText || '').includes($stemJs));
   const ed = document.querySelector($editorSel);
   const area = ed ? (ed.closest('form, [role=group], footer') || ed.parentElement) : null;
+  // An image shows as a thumbnail (no file name) in the box around the message editor.
+  let box = ed; for (let i = 0; box && i < 6 && box.parentElement; i++) box = box.parentElement;
+  const thumb = !!(box && box.querySelector('img[src^="blob:"], img[src^="data:"]'));
   const busy = !!document.querySelector('[role=progressbar], [aria-busy=true]') || /uploading/i.test(area ? (area.innerText || '') : '');
-  return named ? (busy ? 'uploading' : 'ready') : '';
+  return (named || thumb) ? (busy ? 'uploading' : 'ready') : '';
 })()
 "@
+    # Copilot asks once per account before it takes images ("Before we get started..."). That
+    # consent is the person's to give: StreamHub closes the question with "Not now" so the message
+    # box stays usable, and says how to give it.
+    $consent = @'
+(() => {
+  const d = [...document.querySelectorAll('[role=dialog], [role=alertdialog]')].find(x => /before we get started|permission of any people in the images/i.test(x.innerText || ''));
+  if (!d) return '';
+  const no = [...d.querySelectorAll('button')].find(x => /^\s*not now\s*$/i.test(x.innerText || ''));
+  if (no) no.click();
+  return 'consent';
+})()
+'@
     $until = (Get-Date).AddSeconds($TimeoutSec)
     $state = ''
     while ((Get-Date) -lt $until) {
         Start-Sleep -Milliseconds 500
+        if ((Invoke-CdpEval $s $consent) -eq 'consent') {
+            throw "Copilot first asks for permission to process images (a one-time question for your account). Give it yourself: in the Copilot window in Edge, add any image with + and choose Confirm and continue. Until then images are left out."
+        }
         $state = Invoke-CdpEval $s $js
         if ($state -eq 'ready') { Start-Sleep -Milliseconds 1500; Write-CCBLog info bridge "Attached $([IO.Path]::GetFileName($Path))"; return }
     }
@@ -1171,17 +1194,18 @@ function Send-CopilotPrompt {
         [int]$StallSec = 90,         # no data from Copilot this long: it hangs; press Stop and report NoAnswer
         [scriptblock]$OnStatus,      # an agent's progress line ("Searching for release details")
         [string]$Agent = '',         # Researcher or Analyst: mentioned at the start of the message
-        [string[]]$Files = @()       # local files to attach
+        [string[]]$Files = @(),      # local files to attach
+        [switch]$OptionalFiles       # a file that cannot be attached is left out (said in $Bridge.AttachErrors)
     )
     Use-CopilotLock {
-        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OnStatus $OnStatus
+        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $OnStatus
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
         if ($r.Result -eq 'Lost') {
             # The request never reached Copilot's answer stream (seen when the page opens that
             # connection only at the first send). The connection exists now: send it once more.
             Write-CCBLog info bridge 'No part of the reply arrived; sending the prompt again'
             Add-TimelineEvent $Bridge 'resent' $null
-            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OnStatus $OnStatus -LostSec 0
+            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $OnStatus -LostSec 0
             if ($r.Result -eq 'Lost') { $r.Result = 'NoAnswer' }
         }
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
@@ -1200,7 +1224,8 @@ function Send-CopilotPromptUnlocked {
         [int]$LostSec = 25,    # no part of the reply this long after sending: the request was lost (0 = off)
         [scriptblock]$OnStatus,  # an agent's progress line, when it changes
         [string]$Agent = '',   # Researcher or Analyst: the message starts with a mention of that agent
-        [string[]]$Files = @() # local files attached to the message (as with Copilot's + button)
+        [string[]]$Files = @(), # local files attached to the message (as with Copilot's + button)
+        [switch]$OptionalFiles  # a file that cannot be attached is left out instead of stopping the send
     )
     $s = $Bridge.Session
     $replyRecords = 0      # records that belong to a reply (not handshakes or keep-alive pings)
@@ -1218,7 +1243,12 @@ function Send-CopilotPromptUnlocked {
     }
     Add-TimelineEvent $Bridge 'typing' $null
     if ($Agent) { Add-CopilotMention $Bridge $Agent }
-    foreach ($f in @($Files | Where-Object { $_ })) { Add-CopilotAttachment $Bridge $f }
+    $Bridge.AttachErrors = @()
+    foreach ($f in @($Files | Where-Object { $_ })) {
+        if (-not $OptionalFiles) { Add-CopilotAttachment $Bridge $f; continue }
+        try { Add-CopilotAttachment $Bridge $f }
+        catch { $Bridge.AttachErrors = @($Bridge.AttachErrors) + @("$([IO.Path]::GetFileName($f)): $($_.Exception.Message)"); Write-CCBLog info bridge "Attachment left out: $($_.Exception.Message)" }
+    }
     if ($Agent) { Set-CopilotInput $Bridge $Text -Append }
     else { Set-CopilotInput $Bridge $Text }
     Wait-Pacing $Bridge 'beforeSendSec' 'prompt typed, before Send'

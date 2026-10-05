@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -390,6 +390,27 @@ function Invoke-ApiRequest($Ctx, $State) {
             $null = Submit-AgentTask $State @{ kind = 'chain'; name = [string]$b.name } 'user'
             return Send-Json $Ctx @{ ok = $true }
         }
+        '^GET /api/tools$' {
+            # Optional tools (Python, Node.js...) with what each install did; Settings > This computer.
+            return Send-Json $Ctx @{ tools = @(Get-InstallableTools) }
+        }
+        '^POST /api/tools/install$' {
+            $b = Read-JsonBody $Ctx
+            $name = "$($b.name)"
+            if ($name -notin 'python', 'pytest', 'node', 'dotnet', 'git') { throw "Unknown tool '$name'." }
+            $started = Start-ToolInstall $name $State.AppRoot
+            return Send-Json $Ctx @{ ok = $true; started = $started }
+        }
+        '^GET /api/hooks$' {
+            if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ exists = $false; hooks = @(); error = $null } }
+            $h = Read-Hooks $State.ProjectRoot
+            return Send-Json $Ctx @{ exists = $h.exists; error = $h.error; hooks = @($h.hooks); path = '.streamhub/hooks.json' }
+        }
+        '^POST /api/hooks/create$' {
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $p = New-HooksFile $State.ProjectRoot
+            return Send-Json $Ctx @{ ok = $true; path = $p }
+        }
         '^POST /api/scripts/run$' {
             # One script from Scripts/ (Automation > Scripts); checked again when it runs.
             if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
@@ -616,10 +637,21 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^POST /api/newchat$' {
             if ($State.Busy) { $State.Cancel = $true }   # stop the current step now; the new chat follows
-            $null = Submit-AgentTask $State @{ kind = 'newchat' } 'user'
+            # The chat view starts over at once (the landing page); Copilot's new chat opens in the
+            # background, and the next message starts one anyway if that has not happened yet.
+            $State.Todos = @(); $State.Summary = $null; $State.NeedNewChat = $true
+            Add-AgentEvent $State 'newchat' @{ text = 'New chat.' }
+            $null = Submit-AgentTask $State @{ kind = 'newchat'; background = $true } 'user'
             return Send-Json $Ctx @{ ok = $true }
         }
-        '^POST /api/undo$'    { $null = Submit-AgentTask $State @{ kind = 'undo' } 'user'; return Send-Json $Ctx @{ ok = $true } }
+        '^POST /api/undo$'    {
+            # Without "to": the newest change set. With "to": that one and every newer one (History > Restore).
+            $b = Read-JsonBody $Ctx
+            $to = "$($b.to)"
+            if ($to -and $to -notmatch '^[\w.-]+$') { throw "Unknown change set '$to'" }
+            $null = Submit-AgentTask $State @{ kind = 'undo'; upTo = $to } 'user'
+            return Send-Json $Ctx @{ ok = $true }
+        }
         '^POST /api/stop$'    { $State.Cancel = $true; return Send-Json $Ctx @{ ok = $true } }
         '^POST /api/connect$' { $State.Tasks.Enqueue(@{ kind = 'connect' }); return Send-Json $Ctx @{ ok = $true } }
     }

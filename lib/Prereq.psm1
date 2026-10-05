@@ -100,10 +100,57 @@ function Invoke-SafeCheck([string]$Name, [scriptblock]$Body) {
     catch { New-Check $Name 'WARN' "could not check: $($_.Exception.Message.Split("`n")[0])" 'This check itself failed; StreamHub may still work.' }
 }
 
+function Get-ToolVersion([string]$Exe, [string[]]$Arguments = @('--version')) {
+    # The first line a tool prints for its version, or $null when it is not installed (the Store's
+    # python.exe stub in WindowsApps does not count: it only offers to install Python).
+    $c = Get-Command $Exe -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
+    if (-not $c) { return $null }
+    $out = try { & $c.Source @Arguments 2>&1 | Select-Object -First 1 } catch { $null }
+    $line = "$out".Trim()
+    if (-not $line) { return '(installed; version unknown)' }
+    $line
+}
+
+function Get-OptionalToolChecks {
+    <# Optional tools StreamHub uses when they are there: Pester (ships with Windows) and Python,
+       Node.js, the .NET SDK and Git for projects that need them. Never a failure: INFO when a tool
+       is missing (with what it would add), WARN only for a version too old to work well. #>
+    $out = New-Object System.Collections.Generic.List[object]
+    $out.Add((Invoke-SafeCheck 'Pester (PowerShell tests)' {
+        $m = Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1
+        if ($m) { New-Check 'Pester (PowerShell tests)' 'OK' "$($m.Version)$(if ($m.Version.Major -eq 3) { ' (ships with Windows)' })" }
+        else { New-Check 'Pester (PowerShell tests)' 'INFO' 'not installed' 'Optional: runs the tests of PowerShell projects after a change. Windows normally includes it.' }
+    }))
+    $out.Add((Invoke-SafeCheck 'Python' {
+        $v = Get-ToolVersion 'python'
+        if (-not $v) { return New-Check 'Python' 'INFO' 'not installed' 'Optional: only for Python projects (running scripts and their tests). StreamHub runs without it.' 'https://www.python.org/downloads/windows/' }
+        # No quotes in the Python code: Windows PowerShell 5.1 drops them when it starts a program.
+        $test = Get-ToolVersion 'python' @('-c', 'import pytest; print(pytest.__version__)')
+        $pytest = if ("$test" -match '^\d+\.\d') { "pytest $test" } else { 'no pytest (tests run with unittest)' }
+        $old = ($v -match '(\d+)\.(\d+)') -and ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 8))
+        New-Check 'Python' $(if ($old) { 'WARN' } else { 'OK' }) "$v, $pytest" $(if ($old) { 'Python 3.8 or newer is recommended.' } else { '' }) $(if ($old) { 'https://www.python.org/downloads/windows/' } else { '' })
+    }))
+    $out.Add((Invoke-SafeCheck 'Node.js' {
+        $v = Get-ToolVersion 'node'
+        if (-not $v) { return New-Check 'Node.js' 'INFO' 'not installed' 'Optional: only for projects with a package.json (npm scripts and tests). StreamHub runs without it.' 'https://nodejs.org/' }
+        $npm = Get-ToolVersion 'npm'
+        $old = ($v -match 'v?(\d+)\.') -and [int]$Matches[1] -lt 18
+        New-Check 'Node.js' $(if ($old) { 'WARN' } else { 'OK' }) "$v$(if ($npm) { ", npm $npm" } else { ', no npm' })" $(if ($old) { 'Node.js 18 or newer is recommended.' } else { '' }) $(if ($old) { 'https://nodejs.org/' } else { '' })
+    }))
+    foreach ($t in @(@('.NET SDK', 'dotnet', 'Optional: only for C# and .NET projects. StreamHub itself uses the .NET Framework that ships with Windows.', 'https://dotnet.microsoft.com/download'),
+                     @('Git', 'git', 'Optional: StreamHub has no Git features, but your own Git tools work next to it.', 'https://git-scm.com/download/win'))) {
+        $out.Add((Invoke-SafeCheck $t[0] {
+            $v = Get-ToolVersion $t[1]
+            if ($v) { New-Check $t[0] 'OK' $v } else { New-Check $t[0] 'INFO' 'not installed' $t[2] $t[3] }
+        }))
+    }
+    $out.ToArray()
+}
+
 function Get-PrereqChecks {
     <# The checks, in order. -Online adds GitHub and Copilot reachability (a few seconds at most).
        Each check runs in its own guard (Invoke-SafeCheck): one that breaks is a WARN, never fatal. #>
-    param([int]$WebPort = 8765, [int]$CdpPort = 9333, [switch]$Online)
+    param([int]$WebPort = 8765, [int]$CdpPort = 9333, [switch]$Online, [switch]$Tools)
     $out = New-Object System.Collections.Generic.List[object]
 
     $out.Add((Invoke-SafeCheck 'Windows PowerShell' {
@@ -206,6 +253,9 @@ function Get-PrereqChecks {
         } catch { New-Check 'Data folder' 'FAIL' $_.Exception.Message.Split("`n")[0] "StreamHub keeps its state in %LOCALAPPDATA%\CCBridge; it must be writable." }
     }))
 
+    # Optional tools (Python, Node.js...): check.cmd and the installer show them; not at every start.
+    if ($Tools) { foreach ($c in @(Get-OptionalToolChecks)) { $out.Add($c) } }
+
     if ($Online) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         foreach ($t in @(@('GitHub (updates)', 'https://api.github.com/repos/jgt87/CCBridge', 'Updates are skipped while GitHub cannot be reached; StreamHub still runs.'),
@@ -269,7 +319,7 @@ function Write-PrereqReport {
     Write-Host $Title
     $w = [Math]::Max(10, (@($Checks | ForEach-Object { $_.name.Length }) | Measure-Object -Maximum).Maximum)
     foreach ($c in $Checks) {
-        $color = switch ($c.status) { 'OK' { 'Green' } 'WARN' { 'Yellow' } default { 'Red' } }
+        $color = switch ($c.status) { 'OK' { 'Green' } 'WARN' { 'Yellow' } 'INFO' { 'Cyan' } default { 'Red' } }
         Write-Host '  [' -NoNewline
         Write-Host $c.status -ForegroundColor $color -NoNewline
         Write-Host ']' -NoNewline
@@ -282,4 +332,4 @@ function Write-PrereqReport {
     -not @($Checks | Where-Object { $_.status -eq 'FAIL' }).Count
 }
 
-Export-ModuleMember -Function Rename-AppShortcuts, Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText
+Export-ModuleMember -Function Get-ToolVersion, Get-OptionalToolChecks, Rename-AppShortcuts, Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText

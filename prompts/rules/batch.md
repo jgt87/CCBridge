@@ -1,0 +1,1 @@
+- Batch files (.cmd, .bat): Windows line endings (CRLF), @echo off and setlocal at the top, quote every path ("%~dp0NAME.ps1" for a file next to the script), check errorlevel after steps that can fail and end with exit /b and that code. Use PowerShell for anything beyond starting programs.

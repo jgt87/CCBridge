@@ -69,6 +69,8 @@ if ($Ping) {
 
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Server.psm1') -Force
+# Tools installed for this user from Settings > This computer (Node.js, .NET SDK...) are found by commands.
+try { Import-Module (Join-Path $root 'lib\ToolInstall.psm1') -Force; Add-ToolPaths } catch { }
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 $config = Get-CCBridgeConfig harness $root
 if ($Port) { $config.port = $Port }

@@ -1,0 +1,1 @@
+- JavaScript and TypeScript: const and let (no var), === and !==, async/await with try/catch around calls that can fail (fetch, storage, parsing), and show the user an error instead of failing silently. Look up page elements only after they exist (scripts at the end of body, or defer). In TypeScript, no any where the type is known.

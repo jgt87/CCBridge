@@ -6,6 +6,32 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.75] - 2026-10-05
+
+### Added
+
+- A new Copilot chat when the work moves to another part of the project (`lib/ChatScope.psm1`): a message that names files only in other folders or modules than the chat worked on so far (not connected through imports), and does not continue the earlier work ("also", "again", "fix it"...), starts a fresh chat, with a line in the chat saying why. Setting *New chat for another part of the project* (Settings > Copilot, on by default).
+- README: a table of the parts of an agentic coding harness and how StreamHub covers each (and which it does not).
+- The project's tests run after a change (`lib/TestRunner.psm1`): without a `verify:` line in AGENTS.md, StreamHub finds the project's own tests for the changed files (Pester `*.Tests.ps1` named after or mentioning a changed script; pytest or unittest when Python is installed; `npm test` when package.json has a real test script and npm is installed) and runs them when Copilot says done; a failure goes back to Copilot, at most twice. Setting *Run the project's tests* (Checks and issues, on).
+- Hooks (`lib/Hooks.psm1`, Automation > Hooks): your own commands from `.streamhub/hooks.json` (Copilot cannot write there) at three moments: `afterEdit` after Copilot writes or edits a matching file (`{file}`), `beforeDone` when Copilot says done (a failure goes back to Copilot), `afterTask` after a task. A person approves the file once per version; deleting or Microsoft 365 commands never run; each run is a card in the chat. *Create hooks file* writes a starting file with examples. Setting *Run the project's hooks* (on) pauses them all.
+- Protected files (Settings > Changes and commands > *Protected files*): files, folders (`docs/`) or patterns (`*.env`), one per line, that are read-only like `Source/`: Copilot's writes and edits are refused, a command that changes or deletes one sees it put back, and Copilot is told which they are. The protected copy is refreshed at the start of every task, so your own edits are kept.
+- History > Restore: any change set but the newest can be restored to, which undoes it and every newer one (newest first) after a confirmation; one undo card per change set.
+- Copilot sees the changed page (setting *Show Copilot the changed page*, on): with the page check, a screenshot of the changed page (1280x800, in `.streamhub/Screenshots/`) goes to Copilot once per task to compare with what was asked. When Copilot asks its one-time question about processing images, StreamHub answers "Not now" (the consent is yours to give in the Copilot window) and sends the message without the screenshot, with a line saying why.
+- Code map (`lib/RepoMap.psm1`, setting *Code map size*, 4000 characters, 0 = off): with the first message of a chat about the project, the functions, classes, ids and headings per file with line numbers, files the message names first, then the files the chat works on, then files many others import; a big project gets a more selective map, not a bigger one.
+- Settings can be lists of lines (type `list`), used by *Protected files*.
+- Six instruction modules for Copilot, each sent once per chat and only when it applies: what this computer has installed (Windows PowerShell 5.1 and Edge, plus Python, Node.js, npm, .NET SDK, Git or Java when present; what is missing is never suggested or installed), a work method in the coding role (change only what was asked, follow the project's style, read before changing, small edits, ask when a guess would be costly), fixing bugs (find and fix the cause, add a test), tests (the project's framework and names the helper finds; failures come back), security (untrusted input, textContent, SQL parameters, no secrets in code), and JavaScript/TypeScript and batch file rules. New project traits: javascript, batch, tests.
+- check.cmd and the installer list optional tools with their versions: Pester, Python (with pytest or not), Node.js with npm, the .NET SDK and Git. A missing tool is information, never a failure (StreamHub runs without it); a version too old to work well (Python before 3.8, Node.js before 18) is a warning.
+- Optional tools on request (`lib/ToolInstall.psm1`, Settings > This computer, `check.cmd -Install NAME`): Python, pytest, Node.js, the .NET SDK and Git install or update for your user only, never with admin rights: winget with --scope user where it works, else the official package checked before use (the Node.js zip by the SHA-256 nodejs.org publishes, the python.org installer and Microsoft's dotnet-install.ps1 by their signature). Each install runs in its own process; a blocked download, a refused winget or a tool the computer's rules do not let run leaves it informational, with the reason, and StreamHub works without it. Installed tools are found at once (added to StreamHub's search path) and the line Copilot gets about this computer follows. Pester is listed, not installed (a newer major version changes how tests run). When the python found first is a virtual environment (often another program's), it is labelled so and StreamHub never installs into it. Updates too: besides the minimum versions (WARN), each tool's newest release is looked up at its official source (python.org, nodejs.org LTS, Microsoft's .NET release index, PyPI, winget for Git; kept 12 hours, skipped offline) and offered as *Update to X* in Settings and in check.cmd. An update of a tool installed for all users goes into StreamHub's own tools folder, used first by StreamHub's commands only; when the older version would still be found first, that is said.
+
+### Changed
+
+- New chat clears the chat view at once and shows the landing page; Copilot's new chat opens in the background (and a message sent before that is ready still goes to a new chat).
+
+### Fixed
+
+- Attaching a file to a Copilot message (Researcher and Analyst files, screenshots) failed with "RecursionLimit exceeded": the whole page structure was read as JSON, too deep for Windows PowerShell 5.1. The file input is now found inside the page.
+- An attached image was not recognised as attached (Copilot shows a thumbnail, not the file name), so the attachment timed out.
+
 ## [v0.1.74] - 2026-10-04
 
 ### Changed
@@ -853,7 +879,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.74...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.75...HEAD
+[v0.1.75]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.75
 [v0.1.74]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.74
 [v0.1.73]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.73
 [v0.1.72]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.72

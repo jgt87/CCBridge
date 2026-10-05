@@ -1,0 +1,1 @@
+- Fixing a problem: find the cause first (read the error and the code it points to, follow the data back), fix it where it starts, never hide errors, add a test that fails without the fix when the project has tests, and name the cause in done.

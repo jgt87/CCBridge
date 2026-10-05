@@ -22,6 +22,7 @@ Automating Copilot Chat may be subject to your organisation's policies; check be
 - [Quick start](#quick-start)
 - [Features](#features)
 - [Limitations](#limitations)
+- [Agentic coding harness: what is covered](#agentic-coding-harness-what-is-covered)
 - [Using the web app](#using-the-web-app)
 - [MCP server](#mcp-server)
 - [Microsoft 365 data (Work IQ) and human in the loop](#microsoft-365-data-work-iq-and-human-in-the-loop)
@@ -135,6 +136,42 @@ The start screen lists these as well, once Copilot is connected (`ui-src/src/lib
 - **No MCP support**: MCP servers cannot be connected to StreamHub, so their tools are not available in a task. (Other programs can still use StreamHub itself as an MCP server; see [MCP server](#mcp-server).)
 - **No skill support**: there are no reusable skill packages. Project notes (`AGENTS.md`) and runbooks carry instructions instead.
 - **No artifact generator**: StreamHub does not generate documents or slides; Copilot writes text and code files. Charts in Analyst answers are saved as images.
+
+## Agentic coding harness: what is covered
+
+The parts a coding harness (an agent that reads, changes and runs a project for you) is usually made of, and how StreamHub covers each. StreamHub has no language model of its own: Copilot does the thinking, and everything StreamHub decides is a fixed, tested rule.
+
+| Aspect | What it means | How StreamHub covers it |
+|---|---|---|
+| Model | The language model that plans and writes the code | Microsoft 365 Copilot Chat in Edge, driven through the DevTools protocol; Copilot's response mode (Auto, Quick, Think deeper) and its agents Researcher and Analyst can be chosen per message |
+| Instructions (system prompt) | What the model is told about its job, tools and rules | Small prompt parts in `prompts/`, put together per request by task kind (chat, assistant, project, coding, mixed); each part is sent once per chat, with a short recap on follow-ups |
+| Tools and actions | How the model asks the harness to do something | `ACTION` blocks in Copilot's reply: `read`, `glob`, `grep`, `find`, `web`, `write`, `edit`, `run`, `remember`, `todo`, `done`; each shows as a card in the chat |
+| Reading and searching code | Getting the right code in front of the model | Reads (whole files or line ranges widened to whole blocks), file lists, text search, symbol lookup, `@path` to attach a file, "Used by" lines from the import index, and a code map (functions and ids with line numbers, within a size budget) with the first message of a chat |
+| Editing files | Applying the model's changes safely | Whole-file writes and SEARCH/REPLACE edits with indentation repair, `&lt;`/`&gt;` repair, a half-block guard, refusal of placeholder lines ("rest of the code unchanged") and of writes that shrink a file below 40% without approval |
+| Running commands | Builds, tests and scripts | The `run` action in the project folder, with a timeout and stop; commands that start with an allowed prefix run without asking |
+| Permissions | Who approves what | Modes Ask, Auto-accept edits and Plan only; commands need approval (hold to run); deleting data and Microsoft 365 access always need a person, never an automatic approval; scripts and the hooks file are approved once per version |
+| Boundaries (sandbox) | What the agent may never touch | Paths stay inside the project (also through links and junctions); deleting or moving outside it is refused; `Source/` and the files you list as protected are read-only and put back after every command; `.streamhub/`, build output and lock files are not written |
+| Checkpoints and undo | Taking a change back | Every message is one change set, also covering what commands changed, created or deleted; History lists them; Undo takes back the latest and Restore goes back to before any earlier one, with per-file details |
+| Checking its own work | Catching mistakes before "done" | After every round: syntax and file checks per file type, missing local files, imports of moved or deleted files, secrets, debug leftovers; "done" is refused while a changed file is broken; at "done" the project's tests for the changed files (or a `verify:` command from AGENTS.md); changed web pages are opened to catch script errors, and a screenshot goes to Copilot to compare with the request |
+| Planning | Thinking before building | Copilot's checklist (Actions > Checklist); Clarify first: questions, then a plan to approve, then the build, all kept in `.streamhub/PLAN.md` |
+| Context management | Keeping the model's context useful | A new Copilot chat with a summary before Copilot's message limit, a new chat when a message is about another part of the project than the chat so far, New chat by hand, recaps instead of repeating all instructions, and a code map sized to a budget |
+| Memory and project notes | What the agent knows about the project across chats | `AGENTS.md` in the project, sent at the start of each chat; the `remember` action adds learned facts to it (with approval) |
+| Codebase index | Knowing how the code fits together | An import index (imports, ids, functions, hooks and who uses them) and an issue index of every file, both updated only for files that changed |
+| Code review | A second look at the code | Code health > Code review: Copilot reviews the code in parts; a finding counts only when the lines it quotes are really in the file; findings can be fixed as tasks or ignored |
+| Finding and fixing problems | Keeping the project healthy | Code health > Issues: errors, secrets and overly complex functions per file; problems a change adds go back to Copilot to fix, a few attempts per file |
+| Sub-agents and parallel work | Delegating work to other agents | Copilot's Researcher and Analyst agents for research and data; StreamHub itself runs one task at a time (Copilot has one chat window), queued under Actions > Runs |
+| Task queue and background work | Work that waits or runs unattended | A queue that survives restarts, pauses at Copilot's daily limit and continues after it; schedules, runbooks, chains and scripts in Automation |
+| Hooks | Your own commands at fixed moments | `.streamhub/hooks.json`: after Copilot edits a matching file, before a task counts as done (a failure goes back to Copilot), after a task; approved once per version, paused with a setting |
+| Web access | Reading pages from the internet | The `web` action: public pages only, sites the message names are read at once, other sites need approval |
+| Other programs | Using the harness from another tool | An MCP server (`mcp/ccbridge-mcp.ps1`) and a local HTTP API; tasks from other programs show in the same queue |
+| Records and logs | Seeing what happened | Chat history per project, a task report per task that changed files (`.streamhub/Evidence/`), a log with levels, and Export diagnostics |
+| Reliability | Coping with a flaky model page | Replies rebuilt from the raw stream (Copilot's link filter damages code), a lost request is sent again, a cut-off last block is not applied, and the same failing step stops after three tries |
+| Settings | Adjusting how it works | Settings in the app (saved per computer, kept across updates) |
+| Version control | Commits, branches, pull requests | Not covered: StreamHub has no Git features (see [Limitations](#limitations)) |
+| Outside tools in a task | Connecting MCP servers so the agent can use their tools | Not covered: StreamHub cannot connect to MCP servers (see [Limitations](#limitations)) |
+| Skills and plugins | Reusable instruction or tool packages | Not covered as such; runbooks, chains and `AGENTS.md` carry reusable instructions |
+
+---
 
 ## Using the web app
 

@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -18,6 +18,7 @@ function New-AgentState {
         Headless = $false; AllowCommands = $false; Jobs = [hashtable]::Synchronized(@{})
         LogLevel = $null   # set by the front end; the worker applies changes on the fly
         ChatKind = $null   # kind of task the current chat is about (chat, assistant, project, coding, mixed)
+        ChatFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)   # what this chat read, changed or named (ChatScope)
         SentParts = (New-Object 'System.Collections.Generic.HashSet[string]')   # prompt parts this chat already has
         PreviewToken = [guid]::NewGuid().ToString('N'); PreviewPort = 0   # page check: project served read-only at /preview/<token>/
         Queue = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList))   # every task, whatever started it (Submit-AgentTask)
@@ -282,7 +283,7 @@ function Reset-Bridge($State) {
 }
 
 function Send-ToCopilot {
-    param($State, [string]$Message, [string]$Agent = '', [switch]$Long, [string[]]$Files = @())   # -Agent mentions Researcher/Analyst; -Long: agent runs take minutes; -Files are attached
+    param($State, [string]$Message, [string]$Agent = '', [switch]$Long, [string[]]$Files = @(), [switch]$OptionalFiles)   # -Agent mentions Researcher/Analyst; -Long: agent runs take minutes; -Files are attached (-OptionalFiles: left out when they cannot be)
     $bridge = Get-Bridge $State
     if ($State.ResponseMode -in 'auto', 'quick', 'deep') {
         try { $State.ResponseModeActual = Set-CopilotResponseMode $bridge $State.ResponseMode } catch { Write-CCBLogError agent 'Response mode' $_ }
@@ -310,7 +311,7 @@ function Send-ToCopilot {
         }
         $r = $null
         try {
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OnStatus $status
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $status
         } catch {
             if (-not (Test-ConnectionLost $_) -or $State.ChatStarted) { throw }
             # First message of a chat: reconnect, start a fresh chat and send it once more.
@@ -319,7 +320,7 @@ function Send-ToCopilot {
             Reset-Bridge $State
             Start-NewChat $State
             $bridge = Get-Bridge $State
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OnStatus $status
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $status
         }
     } catch {
         if (Test-ConnectionLost $_) {
@@ -1172,7 +1173,7 @@ function Invoke-ChainJob {
         }
         try {
             $fixed = @(Restore-SourceData $root)
-            if ($fixed.Count) { Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) file(s) in Source/" 'Source data is read-only; StreamHub undid changes to it.' -Output ($fixed -join "`n") }
+            if ($fixed.Count) { Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) read-only file(s)" 'Source/ and protected files are read-only; StreamHub undid changes to them.' -Output ($fixed -join "`n") }
         } catch { Write-CCBLogError agent 'source data' $_ }
         $State.InChain = $false; $State.NeedNewChat = $true
         $State.Busy = $false; $State.Cancel = $false
@@ -1256,7 +1257,7 @@ function Invoke-ChainScript {
     $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
     $ok = (-not $r.timedOut) -and (-not $r.cancelled) -and ($r.exitCode -eq 0)
     $out = "$status`n$($r.output)"
-    if ($fixed.Count) { $out += "`nsource/ is read-only; StreamHub put back: $($fixed -join '; ')" }
+    if ($fixed.Count) { $out += "`nSource/ and protected files are read-only; StreamHub put back: $($fixed -join '; ')" }
     Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = "ran $($sc.path): $status"; output = (Limit-Text $out 4000); changed = $true }
     @{ ok = $ok; why = $status }
 }
@@ -1586,8 +1587,9 @@ function Test-WebPage {
        and collects what goes wrong while they load: JavaScript errors, console errors, and files
        that fail to load (missing styles.css, a fetch() of a JSON file that is not there). The tab
        is closed afterwards. Returns one line per problem. #>
-    param($State, [string[]]$Pages, [int]$WaitSec = 6)
+    param($State, [string[]]$Pages, [int]$WaitSec = 6, [switch]$Screenshot)
     if (-not $State.PreviewPort) { return }
+    $State.PageShots = @()
     $cdpPort = $State.Config.cdpPort
     foreach ($page in @($Pages | Select-Object -First 3)) {
         $base = "http://localhost:$($State.PreviewPort)/preview/$($State.PreviewToken)/"
@@ -1597,6 +1599,8 @@ function Test-WebPage {
             $target = Invoke-RestMethod -Method Put "http://127.0.0.1:$cdpPort/json/new?about:blank"
             $s = Connect-Cdp $target.webSocketDebuggerUrl
             foreach ($m in 'Runtime.enable', 'Log.enable', 'Network.enable', 'Page.enable') { $null = Invoke-Cdp $s $m }
+            # A desktop-size page, the same every time, for the screenshot.
+            if ($Screenshot) { try { $null = Invoke-Cdp $s 'Emulation.setDeviceMetricsOverride' @{ width = 1280; height = 800; deviceScaleFactor = 1; mobile = $false } } catch { } }
             $null = Invoke-Cdp $s 'Page.navigate' @{ url = $url }
             $problems = New-Object System.Collections.Generic.List[string]
             $urls = @{}
@@ -1635,6 +1639,17 @@ function Test-WebPage {
                 }
             }
             if (-not $loaded) { $problems.Add("$page did not finish loading within $WaitSec seconds") }
+            if ($Screenshot -and $loaded) {
+                # How the page looks now, for Copilot and the user (.streamhub/Screenshots/).
+                try {
+                    $shot = Invoke-Cdp $s 'Page.captureScreenshot' @{ format = 'png' } -TimeoutMs 15000
+                    $dir = Join-Path $State.ProjectRoot '.streamhub\Screenshots'
+                    $null = New-Item -ItemType Directory -Force -Path $dir
+                    $name = 'page-' + (Get-Date).ToString('yyyyMMdd-HHmmss') + '-' + ($(if ($page) { $page } else { 'site' }) -replace '[^\w.-]+', '-').Trim('-') + '.png'
+                    [IO.File]::WriteAllBytes((Join-Path $dir $name), [Convert]::FromBase64String($shot.data))
+                    $State.PageShots = @($State.PageShots) + @(".streamhub/Screenshots/$name")
+                } catch { Write-CCBLogError agent "Screenshot of $page" $_ }
+            }
             foreach ($p in ($problems | Select-Object -Unique -First 20)) { $p }
             Write-CCBLog info agent "Page check $page" @{ problems = $problems.Count }
         } catch {
@@ -1710,6 +1725,127 @@ function New-ReviewMessage {
     (Get-PromptPart $State.AppRoot 'review') + "`n`nChanged files:`n$list`n`n$checks`n`n$contents"
 }
 
+function Invoke-ProjectHooks {
+    <# Runs the project's hooks for one moment (Hooks.psm1): afterEdit for each changed file that
+       matches, beforeDone and afterTask once. The hooks file is approved by a person once per version
+       (it can run any command); commands that delete outside the project, delete data or use
+       Microsoft 365 never run. Each run is a card in the chat. Returns the failures as lines. #>
+    param($State, [string]$Event, [string[]]$Paths = @())
+    $root = $State.ProjectRoot
+    if (-not $root -or $State.NoCommands -or $State.Mode -eq 'plan') { return @() }
+    if ("$($State.Config.hooks)" -in 'False', 'off') { return @() }   # setting: hooks paused
+    $h = try { Read-Hooks $root } catch { Write-CCBLogError agent 'hooks' $_; $null }
+    if (-not $h -or -not $h.exists) { return @() }
+    if ($h.error) { Add-AgentEvent $State 'status' @{ text = "Hooks not run: $($h.error)." }; return @() }
+    $mine = @($h.hooks | Where-Object { $_.event -eq $Event })
+    if (-not $mine.Count) { return @() }
+    $runs = New-Object System.Collections.Generic.List[object]
+    foreach ($k in $mine) {
+        if ($Event -eq 'afterEdit') { foreach ($p in @($Paths | Where-Object { Test-HookMatch $k $_ })) { $runs.Add(@{ hook = $k; path = $p }) } }
+        else { $runs.Add(@{ hook = $k; path = '' }) }
+    }
+    if (-not $runs.Count) { return @() }
+    # The hooks file as a whole is approved once per version, by a person.
+    $file = Get-HooksPath $root
+    $hash = Get-ScriptHash $file
+    if ($State.HooksApproved -ne $hash -and -not (Test-ScriptApproved $root '.streamhub/hooks.json' $hash)) {
+        if ($State.Headless) { Add-AgentEvent $State 'status' @{ text = 'Hooks not run: .streamhub/hooks.json is new or changed and needs a person to approve it in the StreamHub window.' }; return @() }
+        $id = 'hooks-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $text = [IO.File]::ReadAllText($file)
+        Add-AgentEvent $State 'action' @{ id = $id; action = 'run'; target = 'hooks in .streamhub/hooks.json'; status = 'awaiting'; by = 'streamhub'
+            preview = @{ path = '.streamhub/hooks.json'; exists = $true; old = $null; new = (Limit-Text $text 20000) }
+            warning = 'The project''s hooks run these commands at fixed moments of a task. Check them: once approved they run without asking until the file changes.' }
+        $d = Wait-Approval $State $id $true
+        if ($d.decision -ne 'approve') {
+            Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }
+            return @()
+        }
+        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'ok'; summary = 'hooks approved'; decidedBy = $d.by }
+        Add-ApprovedScript $root '.streamhub/hooks.json' $hash
+    }
+    $State.HooksApproved = $hash
+    $fails = New-Object System.Collections.Generic.List[string]
+    foreach ($r in $runs) {
+        if ($State.Cancel) { break }
+        $cmd = Get-HookCommand $r.hook $r.path
+        $label = "$Event hook$(if ($r.hook.name) { " '$($r.hook.name)'" })$(if ($r.path) { " for $($r.path)" })"
+        $id = 'hook-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        Add-AgentEvent $State 'action' @{ id = $id; action = 'run'; target = $cmd; status = 'running'; by = 'streamhub' }
+        $risk = Get-CommandRisk $cmd
+        $outside = Test-DeleteScope $root $cmd
+        if ($outside -or $risk.m365 -or $risk.destructive) {
+            $why = if ($outside) { $outside } else { "it $($risk.reasons -join ', ')" }
+            Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'failed'; summary = "$label not run"; output = "Not run: $why. Hooks never delete data or use Microsoft 365." }
+            continue
+        }
+        $vr = Invoke-RunAction $root $cmd ([int]$State.Config.commandTimeoutSec) 4000 { $State.Cancel }
+        $ok = (-not $vr.timedOut) -and $vr.exitCode -eq 0
+        $status = if ($vr.timedOut) { 'timed out' } else { "exit code $($vr.exitCode)" }
+        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = "${label}: $status"; output = "$label`n$status`n$($vr.output)"; changed = $true }
+        if (-not $ok) {
+            $tail = ("$($vr.output)".Split("`n") | Where-Object { $_.Trim() } | Select-Object -Last 12) -join "`n"
+            $fails.Add("the project's $label failed ($status): $cmd`n$tail")
+        }
+    }
+    try { $null = Restore-SourceData $root } catch { Write-CCBLogError agent 'source data' $_ }
+    @($fails)
+}
+
+function Invoke-UndoTask {
+    <# Undo: the newest change set, or with $UpTo that change set and every newer one, newest first
+       (History > Restore). One undo event per change set, so the History list follows. #>
+    param($State, [string]$UpTo = '')
+    $root = $State.ProjectRoot
+    if ($UpTo) {
+        $have = Test-Path -LiteralPath (Join-Path (Join-Path (Get-ProjectStateDir $root) 'backups') "$UpTo\manifest.json")
+        if (-not $have) { Add-AgentEvent $State 'error' @{ text = 'That change set can no longer be undone (its backup is gone).'; code = 'UNDO'; hint = 'Undo the newer change sets one by one, or restore the files by hand.' }; return }
+    }
+    $count = 0
+    do {
+        $id = Get-LastChangeSetId $root
+        if (-not $id) { break }
+        $details = @(Undo-LastCheckpoint $root -Detailed)
+        $files = @($details | ForEach-Object { $_.path })
+        $count++
+        $text = if ($files.Count) { 'Undid the last change set: ' + ($files -join ', ') } else { 'Nothing to undo.' }
+        if ($UpTo -and $files.Count) { $text = "Restore, change set ${count}: undid " + ($files -join ', ') }
+        # Per file: the lines the undo brought back and took away, with a preview.
+        $changes = @($details | ForEach-Object { @{ path = $_.path; deleted = [bool]$_.deleted; added = [int]$_.added; removed = [int]$_.removed; binary = [bool]$_.binary; preview = $_.preview } })
+        Add-AgentEvent $State 'undo' @{ files = $files; text = $text; changes = $changes }
+    } while ($UpTo -and $id -ne $UpTo -and $count -lt 200)
+    if ($count -eq 0) { Add-AgentEvent $State 'undo' @{ files = @(); text = 'Nothing to undo.' } }
+}
+
+function Test-ChatScopeOn($State) {
+    # Setting newChatOnSwitch (on unless turned off).
+    $v = $State.Config.newChatOnSwitch
+    ($null -eq $v) -or ([bool]$v -and "$v" -ne 'off')
+}
+
+function Update-ChatScope {
+    <# Before a message: a new Copilot chat when it is about another part of the project than the
+       chat so far (ChatScope.psm1). Plain chat and the first message of a chat are left alone. #>
+    param($State, [string]$Text, [string]$ForceKind)
+    if ($State.NeedNewChat -or -not $State.ChatStarted -or $ForceKind -eq 'chat' -or -not (Test-ChatScopeOn $State)) { return }
+    try {
+        $sw = Test-ChatSwitch $State.ProjectRoot $Text @($State.ChatFiles)
+        Write-CCBLog verbose agent 'Chat scope' @{ switch = $sw.switch; reason = $sw.reason }
+        if ($sw.switch) {
+            $State.NeedNewChat = $true
+            Add-AgentEvent $State 'status' @{ text = "New Copilot chat: this message is about $(@($sw.to) -join ', '), the chat so far was about $(@($sw.from) -join ', '). A fresh chat keeps the earlier work from crowding Copilot's context (Settings > Copilot > New chat for another part of the project)." }
+        }
+    } catch { Write-CCBLogError agent 'chat scope' $_ }
+}
+
+function Add-ChatScopeFiles($State, [string]$Text) {
+    # The files a message names belong to its chat too.
+    if ($null -eq $State.ChatFiles -or -not (Test-ChatScopeOn $State) -or -not $State.ProjectRoot) { return }
+    try {
+        $files = @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object { $_.path })
+        foreach ($n in @(Get-NamedFiles $Text $files)) { [void]$State.ChatFiles.Add($n) }
+    } catch { Write-CCBLogError agent 'chat scope' $_ }
+}
+
 function Start-NewChat($State) {
     try { New-CopilotChat (Get-Bridge $State) }
     catch {
@@ -1724,6 +1860,7 @@ function Start-NewChat($State) {
             New-CopilotChat (Get-Bridge $State)
             $State.ChatStarted = $false; $State.ChatKind = $null
             $State.SentParts = New-Object 'System.Collections.Generic.HashSet[string]'
+            $State.ChatFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
             $State.FollowUps = 0; $State.LastTurnActed = $null; $State.NeedNewChat = $false
             $State.Throttle = @{ used = 0; max = $State.Throttle.max }
             return
@@ -1737,6 +1874,7 @@ function Start-NewChat($State) {
     $State.ChatStarted = $false
     $State.ChatKind = $null
     $State.SentParts = New-Object 'System.Collections.Generic.HashSet[string]'
+    $State.ChatFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     $State.FollowUps = 0; $State.LastTurnActed = $null
     $State.NeedNewChat = $false
     $State.Throttle = @{ used = 0; max = $State.Throttle.max }
@@ -1779,6 +1917,14 @@ function Get-ProjectContext($State) {
     $files = if ($paths.Count) { "Files:`n" + (Format-ProjectTree $root -MaxChars $budget) } else { 'The folder is empty.' }
     $notes = Get-ProjectNotes $root
     $full = "$location`n$files" + $(if ($notes) { "`n`nProject notes (AGENTS.md):`n$notes" } else { '' })
+    # A code map within its budget (setting repoMapChars), for work on the project's code.
+    $mapChars = $(if ($null -ne $State.Config.repoMapChars) { [int]$State.Config.repoMapChars } else { 4000 })
+    if ($mapChars -gt 0 -and $paths.Count) {
+        $map = try { Get-RepoMap $root "$($State.TurnText)" @($State.ChatFiles) $mapChars } catch { Write-CCBLogError agent 'repo map' $_; '' }
+        if ($map) { $full += "`n`n$map" }
+    }
+    $guarded = @(Get-ProtectedPatterns $State.AppRoot)
+    if ($guarded.Count) { $full += "`n`nRead-only (the user protected these; never write, edit, move or delete them): $($guarded -join ', ')" }
     $traits = @(Get-ProjectTraits $paths)
     if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { $traits += 'nocommands' }
     @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths }
@@ -2129,8 +2275,8 @@ function Invoke-AgentAction {
                 }
                 $fixed = @(Restore-SourceData $root)
                 if ($fixed.Count) {
-                    Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) file(s) in Source/" 'Source data is read-only; StreamHub undid what the command did to it.' -Output ($fixed -join "`n")
-                    $out += "`nNote: Source/ is the user's read-only source data. This command changed it, so it was put back: " + ($fixed -join '; ') + '. Work on copies outside Source/.'
+                    Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) read-only file(s)" 'Source/ and protected files are read-only; StreamHub undid what the command did to them.' -Output ($fixed -join "`n")
+                    $out += "`nNote: Source/ and the files the user protected are read-only. This command changed them, so they were put back: " + ($fixed -join '; ') + '. Work on copies elsewhere in the project.'
                 }
                 if ($runChanged.Count) { $out += "`nFiles this command changed: " + ($runChanged -join ', ') }
                 return @{ ok = (-not $r.timedOut -and -not $r.cancelled -and $r.exitCode -eq 0); summary = "ran: $status"; output = $out; changed = [bool]$runChanged.Count }
@@ -2289,7 +2435,9 @@ function Invoke-AgentTurn {
     try { Sync-SourceVault $State.ProjectRoot } catch { Add-AgentEvent $State 'error' @{ text = "Could not back up source data: $($_.Exception.Message)" } }
     try {
         if (Test-OtherSender) { $State.NeedNewChat = $true }
+        Update-ChatScope $State $Text $ForceKind
         if ($State.NeedNewChat) { Start-NewChat $State }
+        Add-ChatScopeFiles $State $Text
         # As little as the request needs: plain chat goes as it is; other kinds add only the parts
         # (role, actions, rules, project context) this chat has not had yet.
         $ctx = Get-ProjectContext $State
@@ -2316,6 +2464,7 @@ function Invoke-AgentTurn {
         $syntaxNudges = 0   # times "done" was refused because a changed file has a syntax error
         $verifyNudges = 0   # times "done" was refused because the project's verify command failed
         $doneReminded = $false   # the one reminder at "done" (tests, README) was sent
+        $shotShown = $false; $attach = @()   # a screenshot of a changed page goes to Copilot once per task
         $ev = @{ syntaxLast = $null; page = $null; reviewed = $false; verify = $null }   # for the evidence file
         $msgStart = [int]$State.MessagesSent
         $lastReply = ''; $doneText = ''   # for the suggested next steps after the turn
@@ -2332,7 +2481,11 @@ function Invoke-AgentTurn {
             $message = Limit-Text $message $State.Config.promptCharBudget
 
             Write-CCBLog verbose agent "Round ${round}: sending" @{ chars = $message.Length }
-            $r = Send-ToCopilot $State $message
+            $r = Send-ToCopilot $State $message -Files @($attach) -OptionalFiles
+            if ($attach.Count) {
+                foreach ($why in @((Get-Bridge $State).AttachErrors)) { Add-AgentEvent $State 'status' @{ text = "The screenshot was not shown to Copilot: $why" } }
+            }
+            $attach = @()
             if ($r.Cancelled) {
                 if ($r.CopilotFinished -and "$($r.Text)".Trim()) {
                     Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @() }
@@ -2421,6 +2574,7 @@ function Invoke-AgentTurn {
             # strings, duplicate keys or code, missing local files...), so a broken file is fixed in
             # the next round, before more edits build on it. Only problems the task added count.
             $roundChanged = @($results | ForEach-Object { $_.changedPath } | Where-Object { $_ } | Select-Object -Unique)
+            if ($null -ne $State.ChatFiles) { foreach ($f in @($results | ForEach-Object { @($_.readPaths) + @($_.changedPath) } | Where-Object { $_ })) { [void]$State.ChatFiles.Add("$f".Replace('\', '/')) } }
             if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
                 $syntax = @(@(foreach ($p in $roundChanged) {
                     try {
@@ -2438,6 +2592,8 @@ function Invoke-AgentTurn {
                 try { $syntax = @($syntax) + @(Update-ImportsAfterRound $State.ProjectRoot $roundChanged) } catch { Write-CCBLogError agent 'import index' $_ }
                 # A new .env file that .gitignore does not cover would end up in git.
                 try { $syntax = @($syntax) + @(Find-UnignoredEnv $State.ProjectRoot $roundChanged) } catch { Write-CCBLogError agent 'env check' $_ }
+                # The project's afterEdit hooks (a formatter, a check): a failure goes back like a file check.
+                try { $syntax = @($syntax) + @(Invoke-ProjectHooks $State 'afterEdit' $roundChanged) } catch { Write-CCBLogError agent 'hooks' $_ }
                 $ev.syntaxLast = @($syntax)
                 if ($syntax.Count) {
                     Write-CCBLog info agent 'File check problems after this round' @{ count = $syntax.Count }
@@ -2460,26 +2616,43 @@ function Invoke-AgentTurn {
                         continue
                     }
                 }
-                # The project's own check (verify: in AGENTS.md) after a task that changed files.
+                # The project's own check (verify: in AGENTS.md) after a task that changed files;
+                # without one, the project's tests for what changed (TestRunner.psm1, setting autoTests).
                 $verifyCmd = Get-ProjectVerify $State.ProjectRoot
+                $verifyLabel = 'Verify'; $isTests = $false
+                if (-not $verifyCmd -and $checkpoint.Files.Count -and $State.Mode -ne 'plan' -and "$($State.Config.autoTests)" -notin 'False', 'off') {
+                    $tc = try { Find-TestCommand $State.ProjectRoot @($checkpoint.Files.Keys) } catch { Write-CCBLogError agent 'test detection' $_; $null }
+                    if ($tc) { $verifyCmd = $tc.command; $isTests = $true; $verifyLabel = "Tests ($($tc.kind), $(@($tc.tests).Count) file(s)$(if ($tc.scope -eq 'related') { ' for the changed files' }))" }
+                }
                 if ($verifyCmd -and $checkpoint.Files.Count -and $State.Mode -ne 'plan') {
                     $risk = Get-CommandRisk $verifyCmd
                     $why = Test-DeleteScope $State.ProjectRoot $verifyCmd
                     if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { $ev.verify = @{ command = $verifyCmd; skipped = 'commands are not allowed for this task' } }
                     elseif ($why -or $risk.m365 -or $risk.destructive) { $ev.verify = @{ command = $verifyCmd; skipped = 'the command deletes files or works with Microsoft 365, so it only runs by hand' } }
                     else {
-                        Add-AgentEvent $State 'status' @{ text = "Verify: running ``$verifyCmd``..." }
+                        Add-AgentEvent $State 'status' @{ text = "${verifyLabel}: running ``$verifyCmd``..." }
                         $vr = Invoke-RunAction $State.ProjectRoot $verifyCmd ([int]$State.Config.commandTimeoutSec) 6000 { $State.Cancel }
                         $passed = ($vr.exitCode -eq 0)
                         $tail = ("$($vr.output)".Split("`n") | Select-Object -Last 25) -join "`n"
                         $ev.verify = @{ command = $verifyCmd; passed = $passed; exit = $vr.exitCode; tail = $tail }
-                        Add-AgentEvent $State 'status' @{ text = "Verify: ``$verifyCmd`` $(if ($passed) { 'passed' } elseif ($vr.timedOut) { 'timed out' } else { "failed (exit $($vr.exitCode))" })." }
+                        Add-AgentEvent $State 'status' @{ text = "${verifyLabel}: ``$verifyCmd`` $(if ($passed) { 'passed' } elseif ($vr.timedOut) { 'timed out' } else { "failed (exit $($vr.exitCode))" })." }
                         if (-not $passed -and $verifyNudges -lt 2 -and -not $State.Cancel) {
                             $verifyNudges++
                             $fence = '```'
-                            $message = "The project's check failed, so the task is not finished. Command: $verifyCmd (exit $($vr.exitCode)). Output (end):`n$fence`n$tail`n$fence`nFix the cause, then send done again."
+                            $what = $(if ($isTests) { "The project's tests failed" } else { "The project's check failed" })
+                            $message = "$what, so the task is not finished. Command: $verifyCmd (exit $($vr.exitCode)). Output (end):`n$fence`n$tail`n$fence`nFix the cause (in the code, or in the test when the test is wrong about the new behaviour), then send done again."
                             continue
                         }
+                    }
+                }
+                # The project's beforeDone hooks: a failure goes back to Copilot (with the verify tries).
+                if ($checkpoint.Files.Count -and $verifyNudges -lt 2 -and -not $State.Cancel) {
+                    $hookFails = @(try { Invoke-ProjectHooks $State 'beforeDone' } catch { Write-CCBLogError agent 'hooks' $_ })
+                    if ($hookFails.Count) {
+                        $verifyNudges++
+                        $fence = '```'
+                        $message = "A check of the project failed, so the task is not finished:`n$fence`n$($hookFails -join "`n`n")`n$fence`nFix the cause, then send done again."
+                        continue
                     }
                 }
                 # After a big change: one consistency review by Copilot (dead code, broken references).
@@ -2494,7 +2667,8 @@ function Invoke-AgentTurn {
                         if (-not $pages.Count -and (Test-Path -LiteralPath (Join-Path $State.ProjectRoot 'index.html'))) { $pages = @('index.html') }
                         if ($pages.Count) {
                             Add-AgentEvent $State 'status' @{ text = "Checking $($pages -join ', ') in a browser tab for JavaScript errors and files that fail to load..." }
-                            $pageIssues = @(Test-WebPage $State $pages)
+                            $wantShot = (-not $shotShown) -and "$($State.Config.pageScreenshot)" -notin 'False', 'off' -and -not $State.ReviewByCaller
+                            $pageIssues = @(Test-WebPage $State $pages -Screenshot:$wantShot)
                             $ev.page = @($pageIssues)
                             if (-not $pageIssues.Count) { Add-AgentEvent $State 'status' @{ text = "Page check: $($pages -join ', ') loaded without errors." } }
                         }
@@ -2516,6 +2690,13 @@ function Invoke-AgentTurn {
                         }
                         break
                     }
+                    $shots = @($State.PageShots | Where-Object { $_ })
+                    $State.PageShots = @()
+                    if ($shots.Count -and -not $shotShown) {
+                        $shotShown = $true
+                        foreach ($sh in $shots) { Add-AgentEvent $State 'status' @{ text = "Screenshot of the page after the change: $sh (shown to Copilot)."; path = $sh } }
+                        $attach = @($shots | Select-Object -First 2 | ForEach-Object { Join-Path $State.ProjectRoot $_.Replace('/', '\') })
+                    }
                     if ($pageIssues.Count -or (Test-NeedsReview $State $changes)) {
                         $reviewed = $true
                         $ev.reviewed = $true
@@ -2523,8 +2704,13 @@ function Invoke-AgentTurn {
                         Write-CCBLog info agent 'Asking Copilot for a consistency review' @{ files = $changes.Count; issues = $issues.Count }
                         Add-AgentEvent $State 'status' @{ text = "Big change: asking Copilot to review $(@($changes).Count) changed file(s) for leftovers, dead code and broken references$(if ($issues.Count) { " ($($issues.Count) problem(s) found by the local checks)" })." }
                         $message = New-ReviewMessage $State $changes $issues
+                        if ($attach.Count) { $message += "`n`nAttached: a screenshot of the page as it looks now. Check it against the request too." }
                         continue
                     }
+                }
+                if ($attach.Count) {
+                    $message = "Attached: a screenshot of the page as it looks now, after your changes. Compare it with what was asked (layout, parts that are missing, overlap or are cut off, colours, text). If something is wrong, fix it, then send done again. If it looks right, send done."
+                    continue
                 }
                 break
             }
@@ -2544,7 +2730,7 @@ function Invoke-AgentTurn {
         Write-CCBLog info agent "Turn finished" @{ ms = $turnWatch.ElapsedMilliseconds; chat = "$($State.Throttle.used)/$($State.Throttle.max)"; cancelled = [bool]$State.Cancel }
         try {
             $fixed = @(Restore-SourceData $State.ProjectRoot)
-            if ($fixed.Count) { Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) file(s) in Source/" 'Source data is read-only; StreamHub undid changes to it.' -Output ($fixed -join "`n") }
+            if ($fixed.Count) { Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) read-only file(s)" 'Source/ and protected files are read-only; StreamHub undid changes to them.' -Output ($fixed -join "`n") }
         } catch { Add-AgentEvent $State 'error' @{ text = "Could not verify source data: $($_.Exception.Message)" } }
         try { Clear-RunSnapshot $checkpoint } catch { Write-CCBLogError agent 'run snapshot' $_ }
         if (-not $checkpoint.Files.Count) { Remove-Item $checkpoint.Dir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -2622,6 +2808,8 @@ function Start-AgentWorker {
             else { $State.ProjectRoot = $task.projectRoot }
         }
         $State.NoCommands = [bool]$task.noCommands
+        # Protected files as the user left them: the version put back after this task's activity.
+        if ($State.ProjectRoot -and $task.kind -notin 'connect', 'newchat') { try { Sync-ProtectedVault $State.ProjectRoot } catch { Write-CCBLogError agent 'protected files' $_ } }
         try {
             switch ($task.kind) {
                 'connect' { $null = Get-Bridge $State }
@@ -2674,19 +2862,16 @@ function Start-AgentWorker {
                     elseif (-not $r.Cancelled -and -not "$($r.Text)".Trim()) { $job.status = 'error'; $job.error = 'Copilot finished without a reply' }
                 }
                 'newchat' {
-                    Start-NewChat $State
-                    $State.Todos = @()
-                    $State.Summary = $null
-                    Add-AgentEvent $State 'newchat' @{ text = 'New Copilot chat started.' }
+                    # From New chat in the app the view already started over (background): only
+                    # Copilot's page changes here, unless a message started a new chat meanwhile.
+                    if (-not $task.background -or $State.NeedNewChat) { Start-NewChat $State }
+                    if (-not $task.background) {
+                        $State.Todos = @()
+                        $State.Summary = $null
+                        Add-AgentEvent $State 'newchat' @{ text = 'New Copilot chat started.' }
+                    }
                 }
-                'undo' {
-                    $details = @(Undo-LastCheckpoint $State.ProjectRoot -Detailed)
-                    $files = @($details | ForEach-Object { $_.path })
-                    $text = if ($files.Count) { 'Undid the last change set: ' + ($files -join ', ') } else { 'Nothing to undo.' }
-                    # Per file: the lines the undo brought back and took away, with a preview.
-                    $changes = @($details | ForEach-Object { @{ path = $_.path; deleted = [bool]$_.deleted; added = [int]$_.added; removed = [int]$_.removed; binary = [bool]$_.binary; preview = $_.preview } })
-                    Add-AgentEvent $State 'undo' @{ files = $files; text = $text; changes = $changes }
-                }
+                'undo' { Invoke-UndoTask $State "$($task.upTo)" }
             }
         } catch {
             Write-CCBLogError agent "task $($task.kind) failed" $_
@@ -2722,6 +2907,8 @@ function Start-AgentWorker {
             if ($State.ProjectRoot -and $task.kind -ne 'connect') { try { $null = Invoke-ProjectRetention $State.ProjectRoot $State.Config } catch { Write-CCBLogError agent 'retention' $_ } }
             # Data copies follow their JSON (a runbook, chain or change may have written the JSON).
             if ($State.ProjectRoot -and $task.kind -ne 'connect') { Sync-DataMirrors $State }
+            # The project's afterTask hooks, after work that can change files.
+            if ($State.ProjectRoot -and $task.kind -in 'chat', 'fetch', 'runbook', 'chain', 'script', 'agent') { try { $null = Invoke-ProjectHooks $State 'afterTask' } catch { Write-CCBLogError agent 'hooks' $_ } }
             $State.CurrentQueueId = $null
             $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller; $State.ResponseMode = $saved.ResponseMode
             if ($foreign -and $saved.ProjectRoot -and $State.ProjectRoot -ne $saved.ProjectRoot) {
@@ -2733,4 +2920,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

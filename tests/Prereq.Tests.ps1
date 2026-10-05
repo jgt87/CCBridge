@@ -106,3 +106,19 @@ Describe 'Get-DeviceJoinStatus' {
         @($j.Values | Where-Object { $_ -ne '?' }).Count | Should Be 0
     }
 }
+
+Describe 'Optional tools' {
+    It 'shows missing tools as information, never as a failure, and old versions as a warning' {
+        Mock -ModuleName Prereq Get-ToolVersion { $null }
+        Mock -ModuleName Prereq Get-Module { $null } -ParameterFilter { $Name -eq 'Pester' }
+        $c = @(Get-OptionalToolChecks)
+        ($c | ForEach-Object { $_.name }) -join ',' | Should Be 'Pester (PowerShell tests),Python,Node.js,.NET SDK,Git'
+        @($c | Where-Object { $_.status -ne 'INFO' }).Count | Should Be 0
+        ($c | Where-Object name -eq 'Python').hint | Should Match 'Optional'
+        ($c | Where-Object name -eq 'Python').link | Should Match '^https://www\.python\.org/'
+        Mock -ModuleName Prereq Get-ToolVersion { if ($Exe -eq 'node') { 'v16.20.0' } elseif ($Exe -eq 'npm') { '8.19.4' } else { $null } }
+        $node = @(Get-OptionalToolChecks) | Where-Object name -eq 'Node.js'
+        $node.status | Should Be 'WARN'
+        $node.detail | Should Be 'v16.20.0, npm 8.19.4'
+    }
+}

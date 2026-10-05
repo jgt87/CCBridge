@@ -38,7 +38,7 @@ Describe 'New-PromptMessage' {
         $m | Should Match 'OneDrive > CCBridge > budget tracker'
         $m | Should Match 'Request: Fix the build$'
         $m | Should Not Match 'app\.py|hello\.py|dotnet build|CCBridge sends'
-        $m.Length -lt 3200 | Should Be $true     # includes the folder rules (rules/folders.md)
+        $m.Length -lt 4000 | Should Be $true     # includes the folder rules, the work method and what the computer has installed
     }
 
     It 'gives assistant tasks only the role, the read-only rule, saving and the location' {
@@ -55,8 +55,8 @@ Describe 'New-PromptMessage' {
         New-PromptMessage -AppRoot $root -Kind 'chat' -Text 'hi' -Sent $sent -Context $ctx | Should BeExactly 'hi'
         $second = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Create hello.ps1' -Sent $sent -Context $ctx
         $second | Should Match 'expert software developer'
-        $third = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Now add a test' -Sent $sent -Context $ctx
-        $third | Should Match '^Now add a test\n\n\(How to answer: you cannot open or change the files, but the helper program applies the action blocks you write'
+        $third = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Now rename the variable' -Sent $sent -Context $ctx
+        $third | Should Match '^Now rename the variable\n\n\(How to answer: you cannot open or change the files, but the helper program applies the action blocks you write'
         $third | Should Match 'ACTION edit PATH'
         $third | Should Not Match 'expert software developer'
         New-PromptMessage -AppRoot $root -Kind 'chat' -Text 'thanks' -Sent $sent -Context $ctx | Should BeExactly 'thanks'
@@ -226,21 +226,32 @@ Describe 'Settings' {
 }
 Describe 'Case-specific prompt modules' {
     It 'picks modules from the project contents' {
-        (Get-ProjectTraits @('index.html', 'src/App.tsx', 'tools/build.ps1', 'source/data.csv')) -join ',' | Should Be 'code,web,powershell,source'
+        (Get-ProjectTraits @('index.html', 'src/App.tsx', 'tools/build.ps1', 'source/data.csv')) -join ',' | Should Be 'code,web,powershell,source,javascript'
         (Get-ProjectTraits @('main.py')) -join ',' | Should Be 'code,python'
         @(Get-ProjectTraits @('notes.md')).Count | Should Be 0
     }
     It 'picks modules from the request when the project does not show it yet' {
-        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:web,rules:moving,rules:quality'
-        (Get-PromptModules 'Split the parser into two modules' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:moving'
-        (Get-PromptModules 'Write a pytest for the parser' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:python,rules:quality'
-        (Get-PromptModules 'Fix the bug' @{ Traits = @('nocommands') }) -join ',' | Should Be 'rules:folders'
+        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:web,rules:moving,rules:quality,rules:security,rules:javascript'
+        (Get-PromptModules 'Split the parser into two modules' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:moving'
+        (Get-PromptModules 'Write a pytest for the parser' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:python,rules:quality,rules:testing'
+        (Get-PromptModules 'Fix the bug' @{ Traits = @('nocommands') }) -join ',' | Should Be 'rules:folders,rules:environment,rules:debugging'
+    }
+    It 'adds the debugging, testing, security, JavaScript and batch rules only when they apply' {
+        $none = @{ Traits = @() }
+        (Get-PromptModules 'Rename the title' $none) -join ',' | Should Not Match 'rules:(debugging|testing|security|javascript|batch)'
+        (Get-PromptModules 'The total is wrong after saving' $none) -join ',' | Should Match 'rules:debugging'
+        (Get-PromptModules 'Rename the title' @{ Traits = @('tests') }) -join ',' | Should Match 'rules:testing'
+        (Get-PromptModules 'Add a login form with a password' $none) -join ',' | Should Match 'rules:security'
+        (Get-PromptModules 'Rename the title' @{ Traits = @('javascript', 'batch') }) -join ',' | Should Match 'rules:javascript.*rules:batch'
+        (Get-PromptModules 'Update start.cmd' $none) -join ',' | Should Match 'rules:batch'
+        (Get-ProjectTraits @('start.cmd', 'tests/App.Tests.ps1', 'lib/App.psm1')) -join ',' | Should Be 'code,powershell,batch,tests'
+        Get-EnvironmentText | Should Match '^- This computer: Windows PowerShell 5\.1 and Edge'
     }
     It 'sends the web rules with a web project, after the core rules' {
         $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Fix the bug' -Sent (New-Sent) -Context @{ Location = 'L'; Full = 'F'; Traits = @('web') }
         $m | Should Match '(?s)RULES.*Web apps: one part per file.*Moving code'
         $m | Should Match '(?s)ACTION BLOCKS.*RUNNING COMMANDS.*RULES'
-        $m | Should Not Match 'Python|PowerShell:|source/'
+        $m | Should Not Match 'Python: |PowerShell:|source/'
     }
     It 'adds a newly needed module to a follow-up once, with the reminder' {
         $sent = New-Sent

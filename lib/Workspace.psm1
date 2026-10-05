@@ -243,9 +243,82 @@ function Set-ReadOnly([string]$Path, [bool]$On) {
     if ($fi.Exists) { $fi.IsReadOnly = $On }
 }
 
+# --- Protected files (setting protectedPaths) ---------------------------------------------------
+# Files the user marks as protected get the same treatment as Source/: Copilot's writes and edits are
+# refused, and a command that changes or deletes one sees it put back afterwards.
+
+function Get-ProtectedPatterns {
+    <# The protected paths from the settings (one per line: a file, a folder ending in /, or a
+       pattern with * and ?). Read from disk, so every runspace sees a change at once. #>
+    param([string]$AppRoot)
+    try {
+        Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
+        @(@((Get-CCBridgeConfig harness $AppRoot).protectedPaths) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().Replace('\', '/').TrimStart('/') })
+    } catch { @() }
+}
+
+function Test-ProtectedPath {
+    <# The protected pattern a project path falls under, or $null. $Patterns defaults to the settings. #>
+    param([string]$Path, $Patterns = $null)
+    $list = if ($null -ne $Patterns) { @($Patterns) } else { @(Get-ProtectedPatterns) }
+    $r = "$Path".Replace('\', '/').TrimStart('/')
+    foreach ($q in $list) {
+        if (-not $q) { continue }
+        if ($q.EndsWith('/')) { if ($r.StartsWith($q, [StringComparison]::OrdinalIgnoreCase)) { return $q }; continue }
+        if ($q -match '[*?]') {
+            if ($r -like $q -or ($q -notmatch '/' -and ($r -split '/')[-1] -like $q)) { return $q }
+            continue
+        }
+        if ($r -ieq $q -or $r.StartsWith("$q/", [StringComparison]::OrdinalIgnoreCase)) { return $q }
+    }
+    $null
+}
+
+function Get-ProtectedVaultDir([string]$ProjectRoot) { Join-Path (Get-ProjectStateDir $ProjectRoot) 'protected-vault' }
+
+function Sync-ProtectedVault {
+    <# Copies the protected files as they are now (the user's version) aside, to put them back after
+       StreamHub's agent activity. Without protected paths the copy is removed. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, $Patterns = $null)
+    $list = if ($null -ne $Patterns) { @($Patterns) } else { @(Get-ProtectedPatterns) }
+    $vault = Get-ProtectedVaultDir $ProjectRoot
+    if (-not $list.Count) { if (Test-Path -LiteralPath $vault) { [IO.Directory]::Delete($vault, $true) }; return }
+    $keep = @{}
+    foreach ($f in @(Get-ProjectFiles $ProjectRoot)) {
+        if ([int64]$f.size -gt 50MB -or -not (Test-ProtectedPath $f.path $list)) { continue }
+        $rel = $f.path.Replace('/', '\'); $keep[$rel.ToLowerInvariant()] = $true
+        $s = Join-Path $ProjectRoot $rel; $v = Join-Path $vault $rel
+        if (-not (Test-Path -LiteralPath $v) -or (Get-FileFingerprint $s) -ne (Get-FileFingerprint $v)) {
+            $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $v)
+            [IO.File]::Copy($s, $v, $true)
+        }
+    }
+    foreach ($rel in @(Get-RelativeFiles $vault)) { if (-not $keep.ContainsKey($rel.ToLowerInvariant())) { [IO.File]::Delete((Join-Path $vault $rel)) } }
+}
+
+function Restore-ProtectedFiles {
+    <# Puts back protected files that agent activity changed or deleted. Returns what was fixed. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot)
+    $vault = Get-ProtectedVaultDir $ProjectRoot
+    if (-not (Test-Path -LiteralPath $vault)) { return @() }
+    $fixed = New-Object System.Collections.Generic.List[string]
+    foreach ($rel in @(Get-RelativeFiles $vault)) {
+        $s = Join-Path $ProjectRoot $rel; $v = Join-Path $vault $rel
+        $state = if (-not (Test-Path -LiteralPath $s)) { 'deleted' } elseif ((Get-FileFingerprint $s) -ne (Get-FileFingerprint $v)) { 'changed' } else { $null }
+        if (-not $state) { continue }
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $s)
+        Set-ReadOnly $s $false
+        [IO.File]::Copy($v, $s, $true)
+        $fixed.Add("restored protected file $($rel.Replace('\', '/')) ($state)")
+    }
+    if ($fixed.Count) { Write-CCBLog info source 'Protected files restored after agent activity' @{ fixed = @($fixed) } }
+    @($fixed)
+}
+
 function Sync-SourceVault {
     <# Accepts the current Source/ as the truth (called when the USER acts: turn start, upload). #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
+    try { Sync-ProtectedVault $ProjectRoot } catch { Write-CCBLog info source "Protected files not copied aside: $($_.Exception.Message)" }
     $src = Get-SourceDir $ProjectRoot
     $vault = Get-SourceVaultDir $ProjectRoot
     if (-not (Test-Path -LiteralPath $src)) { return }
@@ -272,7 +345,8 @@ function Restore-SourceData {
     $src = Get-SourceDir $ProjectRoot
     $vault = Get-SourceVaultDir $ProjectRoot
     $fixed = New-Object System.Collections.Generic.List[string]
-    if (-not (Test-Path -LiteralPath $vault)) { return @() }
+    try { foreach ($x in @(Restore-ProtectedFiles $ProjectRoot)) { $fixed.Add($x) } } catch { Write-CCBLog info source "Protected files not checked: $($_.Exception.Message)" }
+    if (-not (Test-Path -LiteralPath $vault)) { return @($fixed) }
     $vaultFiles = Get-RelativeFiles $vault
     foreach ($rel in $vaultFiles) {
         $s = Join-Path $src $rel; $v = Join-Path $vault $rel
@@ -315,6 +389,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile

@@ -291,7 +291,7 @@ export default function App() {
     for (const e of projectEvents) {
       if (e.type === "checkpoint") {
         const counts = Array.isArray(e.counts) ? e.counts : e.counts ? [e.counts] : [];
-        list.push({ seq: e.seq, time: e.time, files: Array.isArray(e.files) ? e.files : e.files ? [e.files as unknown as string] : [], title: e.title || undefined, counts });
+        list.push({ seq: e.seq, time: e.time, files: Array.isArray(e.files) ? e.files : e.files ? [e.files as unknown as string] : [], title: e.title || undefined, counts, changeSet: e.changeSet || undefined });
       }
       else if (e.type === "undo" && (e.files ?? []).length) list.pop();
     }
@@ -505,6 +505,7 @@ export default function App() {
                   refreshFiles();
                 }}
                 onUndo={() => api.undo()}
+                onUndoTo={(id) => api.undo(id).catch((e) => setError((e as Error).message))}
                 onEditSchedule={(s) => {
                   setScheduling({ target: null, editing: s });
                   setDrawerOpen(false);

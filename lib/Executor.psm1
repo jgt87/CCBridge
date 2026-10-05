@@ -865,6 +865,8 @@ function Assert-Writable([string]$ProjectRoot, [string]$Path) {
         $hm = [regex]::Match($head, '^\s*//\s*Generated from (\S+) by the helper program')
         if ($hm.Success -and (Test-DataCopiesOn)) { throw "$Path is generated from $($hm.Groups[1].Value) by the helper program and is rewritten from it automatically. Do not edit it: change $($hm.Groups[1].Value) (or the runbook or script that writes it) instead." }
     }
+    $guard = Test-ProtectedPath $rel
+    if ($guard) { throw "$Path is protected (the user listed $guard as protected files) and is read-only. Leave it unchanged; put what you need in another file." }
     if (Test-InSource $ProjectRoot $full) {
         throw "$Path is in Source/, which holds the user's source data and is read-only. Leave it unchanged and write your own working file elsewhere in the project (for example Work/$([IO.Path]::GetFileName($full)))."
     }
