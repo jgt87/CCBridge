@@ -523,10 +523,10 @@ export default function FileUpload({
                     </div>
 
                     <div className="mb-4 space-y-1.5 text-center">
-                      <h3 className="font-semibold text-gray-900 text-lg tracking-tight dark:text-white">
+                      <h3 className="font-semibold text-foreground text-lg tracking-tight">
                         {title}
                       </h3>
-                      <p className="text-gray-500 text-xs dark:text-gray-400">
+                      <p className="text-muted-foreground text-xs">
                         {hint ??
                           (acceptedFileTypes?.length
                             ? `${acceptedFileTypes
@@ -539,7 +539,7 @@ export default function FileUpload({
                     </div>
 
                     <button
-                      className="group flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-gray-900 text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:text-white dark:hover:bg-white/20"
+                      className="group flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
                       onClick={triggerFileInput}
                       type="button"
                     >
@@ -547,7 +547,7 @@ export default function FileUpload({
                       <UploadCloud className="h-4 w-4 transition-transform duration-200 group-hover:scale-110" />
                     </button>
 
-                    <p className="mt-3 text-gray-500 text-xs dark:text-gray-400">
+                    <p className="mt-3 text-muted-foreground text-xs">
                       or drag and drop your file here
                     </p>
 
@@ -574,21 +574,21 @@ export default function FileUpload({
                     </div>
 
                     <div className="mb-4 space-y-1.5 text-center">
-                      <h3 className="truncate font-semibold text-gray-900 text-sm dark:text-white">
+                      <h3 className="truncate font-semibold text-foreground text-sm">
                         {file?.name}
                       </h3>
                       <div className="flex items-center justify-center gap-2 text-xs">
-                        <span className="text-gray-500 dark:text-gray-400">
+                        <span className="text-muted-foreground">
                           {formatBytes(file?.size || 0)}
                         </span>
-                        <span className="font-medium text-zinc-500">
+                        <span className="font-medium text-muted-foreground">
                           {Math.round(progress)}%
                         </span>
                       </div>
                     </div>
 
                     <button
-                      className="flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-gray-900 text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:text-white dark:hover:bg-white/20"
+                      className="flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
                       onClick={resetState}
                       type="button"
                     >

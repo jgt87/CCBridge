@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.81] - 2026-10-05
+
+### Added
+
+- Dark mode matches the Copilot window beside it: the page is Copilot's own base color (a warm dark grey, measured from its page) and all surfaces, menus, the selected tab and text follow from it (text uses Copilot's greys: about 11:1, secondary 7:1). Hard-coded cold greys in the command palette, mode menu, upload box, chain steps and action cards now use the theme's colors, the command preview in action cards is a tinted block instead of a black one, and red text and code comments are a little lighter in dark mode so they stay readable on the new base. Light mode is unchanged.
+- History: opening a file from a change set shows the lines that change set added and removed (the same view as the action cards), with a File tab for the whole text. A note says what is compared: a file created or deleted by the change set, or changed again later (then only this change set's part is shown), or compared with the file as it is now. Binary files open as before.
+
+Nothing yet.
+
 ## [v0.1.80] - 2026-10-05
 
 ### Added
@@ -939,7 +948,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.80...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.81...HEAD
+[v0.1.81]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.81
 [v0.1.80]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.80
 [v0.1.79]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.79
 [v0.1.78]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.78

@@ -110,7 +110,7 @@ function ModeMenu({ modes, selected, onModeChange }: { modes: PromptMode[]; sele
         className={cn(
           "min-w-[16rem]",
           "border-black/10 dark:border-white/10",
-          "bg-gradient-to-b from-white via-white to-neutral-100 dark:from-neutral-950 dark:via-neutral-900 dark:to-neutral-800"
+          "bg-popover"
         )}
       >
         {modes.map((m) => (

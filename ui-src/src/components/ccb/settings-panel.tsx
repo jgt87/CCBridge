@@ -160,7 +160,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
       {s.type !== "info" && ` Default: ${defaultText(s)}.`}
     </>
   );
-  const notes = error ? <div className="text-rose-500 text-xs">{error}</div> : null;
+  const notes = error ? <div className="text-rose-500 dark:text-rose-400 text-xs">{error}</div> : null;
   const kind = settingControlKind(s);
 
   // A list (commands, protected paths): the box goes the full width under the text.
@@ -305,7 +305,7 @@ function NotificationSetting() {
     <SettingLine
       control={<Segmented disabled={!notifySupported()} label="Desktop notifications" onChange={change} options={ON_OFF} value={on ? "on" : "off"} />}
       help="While this tab is in the background: approvals needed, Copilot's questions, a plan to approve, tasks done or failed, and the daily-limit pause."
-      notes={note ? <div className="text-rose-500 text-xs">{note}</div> : null}
+      notes={note ? <div className="text-rose-500 dark:text-rose-400 text-xs">{note}</div> : null}
       title="Desktop notifications"
     />
   );
@@ -453,7 +453,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 [scrollbar-gutter:stable_both-edges]">
-          {error && <div className="pt-2 text-rose-500 text-sm">{error}</div>}
+          {error && <div className="pt-2 text-rose-500 dark:text-rose-400 text-sm">{error}</div>}
           {/* The first time, before the background load: everything at once, not group by group. */}
           {!settings && !error && <div className="pt-4 text-muted-foreground text-sm">Loading settings...</div>}
           {settings && <SettingsBody onSaved={setSettings} onTheme={changeTheme} resetNote={resetNote} settings={settings} theme={theme} />}

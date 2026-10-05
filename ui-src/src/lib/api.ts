@@ -48,6 +48,21 @@ export interface Preview {
   new: string | null;
 }
 
+/** One file of a change set, before and right after it (History). */
+export interface ChangeFileDiff {
+  path: string;
+  changeSet: string;
+  old: string | null;
+  new: string;
+  /** The file existed before the change set (false: the change set created it). */
+  exists: boolean;
+  deleted: boolean;
+  binary: boolean;
+  /** "later": a newer change set changed the file again, so "after" is its state right after this one; "now": the file as it is now. */
+  after: "now" | "later";
+  laterId?: string | null;
+}
+
 export interface TodoItem {
   done: boolean;
   text: string;
@@ -602,6 +617,8 @@ export const api = {
   files: () => call<{ files: FileInfo[] }>("GET", "/api/files"),
   file: (path: string) =>
     call<{ path: string; text: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),
+  changeFile: (changeSet: string, path: string) =>
+    call<ChangeFileDiff>("GET", `/api/changeset/file?id=${encodeURIComponent(changeSet)}&path=${encodeURIComponent(path)}`),
   chat: (text: string, opts: ChatOptions = {}) => call<{ ok: boolean }>("POST", "/api/chat", { text, ...opts }),
   setResponseMode: (value: string) => call<{ ok: boolean }>("POST", "/api/response-mode", { value }),
   /** The app's theme, so the Copilot tab can show the same (setting copilotTheme). */

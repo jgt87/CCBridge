@@ -29,7 +29,7 @@ import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
 import type { ScheduleTarget } from "@/components/ccb/schedule-form";
 import { SchedulesModal } from "@/components/ccb/schedules-modal";
-import { FileViewer } from "@/components/ccb/file-viewer";
+import { FileViewer, type ViewerChange } from "@/components/ccb/file-viewer";
 import { SplitViewHint } from "@/components/ccb/split-view-hint";
 import { ModalBackdrop } from "@/components/ccb/modal-backdrop";
 import { notifyEvents, notifyQueue } from "@/lib/notify";
@@ -88,7 +88,7 @@ export default function App() {
   const queueSeen = useRef(new Map<string, string>());
   const pauseSeen = useRef<string | null | undefined>(undefined);
   const [palette, setPalette] = useState<null | "commands" | "attach">(null);
-  const [viewer, setViewer] = useState<{ path: string; text: string } | null>(null);
+  const [viewer, setViewer] = useState<{ path: string; text: string; change?: ViewerChange } | null>(null);
   const [queuedNote, setQueuedNote] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState("");
@@ -345,6 +345,21 @@ export default function App() {
     }
   };
 
+  // From History: the file with the lines that change set added and removed (and the whole file a tab away).
+  const openChangeFile = async (changeSet: string, path: string) => {
+    setDrawerOpen(false);
+    try {
+      const d = await api.changeFile(changeSet, path);
+      if (d.binary) return openFile(path); // no line view for binary files
+      const note = `${d.exists ? (d.deleted ? "Deleted later" : "Changes made by this change set") : "Created by this change set"}${
+        d.after === "later" ? "; the file was changed again later, which is not shown here." : d.deleted ? "." : "; compared with the file as it is now."
+      }`;
+      setViewer({ path, text: d.new, change: { note, preview: { path, exists: d.exists, old: d.old ?? "", new: d.new } } });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const attachPath = (path: string) => {
     setDraft((d) => `${d}${d && !d.endsWith(" ") ? " " : ""}@${path} `);
     setFocusKey((k) => k + 1);
@@ -502,6 +517,7 @@ export default function App() {
                 fetchItems={fetchItems}
                 files={files}
                 onAttach={attachPath}
+                onOpenChangeFile={openChangeFile}
                 onOpenFile={openFile}
                 onRunFetch={(name) => api.runFetch(name).catch((e) => setError((e as Error).message))}
                 onSaveFetch={async (name, prompt, web) => {
@@ -691,7 +707,7 @@ export default function App() {
                       )}
                       {state.credits && state.credits.remaining <= 10 && (
                         <span
-                          className={state.credits.remaining === 0 ? "text-rose-500" : "text-muted-foreground"}
+                          className={state.credits.remaining === 0 ? "text-rose-500 dark:text-rose-400" : "text-muted-foreground"}
                           title={`Copilot daily credits; they reset at ${new Date(state.credits.resetAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
                         >
                           {state.credits.remaining === 0

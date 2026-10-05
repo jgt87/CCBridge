@@ -11,13 +11,13 @@ const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
 /** How each kind of line looks: the row background, the sign and its colour. */
 const LINE_LOOK: Record<DiffLine["kind"], { row?: string; sign: string; signClass: string }> = {
   add: { row: "bg-black/[0.06] dark:bg-white/[0.08]", sign: "+", signClass: "text-foreground" },
-  del: { row: "bg-rose-500/10", sign: "-", signClass: "text-rose-500" },
+  del: { row: "bg-rose-500/10", sign: "-", signClass: "text-rose-500 dark:text-rose-400" },
   same: { sign: " ", signClass: "text-transparent" },
 };
 
 /** A proposed or applied change: a line diff with syntax colors; Markdown can also be shown rendered.
  *  The +/- counts are on the action card's title row (visible while folded), not repeated here. */
-export function DiffView({ preview }: { preview: Preview }) {
+export function DiffView({ preview, tall = false }: { preview: Preview; tall?: boolean }) {
   const { md, language, newText, lines, oldHtml, newHtml } = useDiff(preview);
   const [rendered, setRendered] = useState(false);
 
@@ -29,7 +29,7 @@ export function DiffView({ preview }: { preview: Preview }) {
   return (
     <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
       <DiffHeader isNew={!preview.exists} markdown={md} onRendered={setRendered} path={preview.path} rendered={rendered} />
-      <div className={cn("max-h-[28rem] overflow-auto", lines && !(md && rendered) && "font-mono text-xs leading-5")}>{body}</div>
+      <div className={cn(tall ? "overflow-auto" : "max-h-[28rem] overflow-auto", lines && !(md && rendered) && "font-mono text-xs leading-5")}>{body}</div>
     </div>
   );
 }

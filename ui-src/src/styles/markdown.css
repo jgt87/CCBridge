@@ -59,7 +59,7 @@
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 600; }
 
-.dark .hljs-comment, .dark .hljs-quote { color: #8b949e; }
+.dark .hljs-comment, .dark .hljs-quote { color: #9ba4ae; }   /* GitHub dark #8b949e, lifted for the warm base (4.5:1 on code) */
 .dark .hljs-keyword, .dark .hljs-selector-tag, .dark .hljs-type, .dark .hljs-meta .hljs-keyword, .dark .hljs-doctag, .dark .hljs-template-tag { color: #ff7b72; }
 .dark .hljs-string, .dark .hljs-regexp, .dark .hljs-meta .hljs-string, .dark .hljs-addition { color: #a5d6ff; }
 .dark .hljs-number, .dark .hljs-literal, .dark .hljs-symbol, .dark .hljs-bullet, .dark .hljs-attr, .dark .hljs-attribute, .dark .hljs-variable, .dark .hljs-template-variable, .dark .hljs-selector-attr, .dark .hljs-selector-class, .dark .hljs-selector-id { color: #79c0ff; }

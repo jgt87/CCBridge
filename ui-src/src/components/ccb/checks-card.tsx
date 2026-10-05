@@ -49,7 +49,7 @@ export function ChecksCard({ text, items }: { text: string; items: CheckFinding[
           </li>
         ))}
       </ul>
-      {error && <div className="mt-1 text-rose-500 text-xs">{error}</div>}
+      {error && <div className="mt-1 text-rose-500 dark:text-rose-400 text-xs">{error}</div>}
     </div>
   );
 }

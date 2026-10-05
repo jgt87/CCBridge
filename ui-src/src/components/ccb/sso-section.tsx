@@ -113,7 +113,7 @@ export function SsoSection() {
           )}
           <div className="mt-1 text-muted-foreground text-xs">{busy || ssoStateText(status)}</div>
           {note && <div className="text-muted-foreground text-xs">{note}</div>}
-          {error && <div className="text-rose-500 text-xs">{error}</div>}
+          {error && <div className="text-rose-500 dark:text-rose-400 text-xs">{error}</div>}
         </>
       }
       title="Sign in with your Windows account (single sign-on)"

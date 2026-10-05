@@ -180,7 +180,7 @@ function Sources({ refs }: { refs: Reference[] }) {
 
 const NOTE_STYLE = {
   info: { icon: <Info className="h-4 w-4" />, cls: "text-muted-foreground" },
-  error: { icon: <AlertCircle className="h-4 w-4" />, cls: "text-rose-500" },
+  error: { icon: <AlertCircle className="h-4 w-4" />, cls: "text-rose-500 dark:text-rose-400" },
   done: { icon: <CheckCircle2 className="h-4 w-4" />, cls: "text-foreground" },
   undo: { icon: <RotateCcw className="h-4 w-4" />, cls: "text-muted-foreground" },
   human: {

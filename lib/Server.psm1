@@ -193,6 +193,11 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ((Get-Item -LiteralPath $full).Length -gt 2MB) { throw 'File is larger than 2 MB' }
             return Send-Json $Ctx @{ path = $req.QueryString['path']; text = (Read-TextFile $full).Text }
         }
+        '^GET /api/changeset/file$' {
+            # History: one file of a change set, before and right after it (Get-ChangeSetFileDiff).
+            if (-not $State.ProjectRoot) { throw 'No project is open' }
+            return Send-Json $Ctx (Get-ChangeSetFileDiff $State.ProjectRoot ([string]$req.QueryString['id']) ([string]$req.QueryString['path']))
+        }
         '^GET /api/queue$' { return Send-Json $Ctx @{ queue = @(Get-QueueView $State 100); pausedUntil = $State.PausedUntil } }
         '^POST /api/copilot-theme$' {
             # The app's theme (per browser): the worker gives the Copilot tab the same (Update-CopilotTheme).

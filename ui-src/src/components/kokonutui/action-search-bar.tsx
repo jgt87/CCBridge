@@ -144,7 +144,7 @@ function ActionSearchBar({
       <div className="relative flex flex-col items-center justify-start">
         <div className="w-full pt-4 pb-1">
           <label
-            className="mb-1 block font-medium text-gray-500 text-xs dark:text-gray-400"
+            className="mb-1 block font-medium text-muted-foreground text-xs"
             htmlFor="search"
           >
             {label}
@@ -177,7 +177,7 @@ function ActionSearchBar({
                     key="send"
                     transition={{ duration: 0.2 }}
                   >
-                    <Send className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                    <Send className="h-4 w-4 text-muted-foreground" />
                   </motion.div>
                 ) : (
                   <motion.div
@@ -187,7 +187,7 @@ function ActionSearchBar({
                     key="search"
                     transition={{ duration: 0.2 }}
                   >
-                    <Search className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                    <Search className="h-4 w-4 text-muted-foreground" />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -200,7 +200,7 @@ function ActionSearchBar({
             <motion.div
               animate="show"
               aria-label="Search results"
-              className="mt-1 w-full overflow-hidden rounded-md border bg-white shadow-xs dark:border-gray-800 dark:bg-popover"
+              className="mt-1 w-full overflow-hidden rounded-md border bg-white shadow-xs dark:border-white/10 dark:bg-popover"
               exit="exit"
               initial="hidden"
               role="listbox"
@@ -208,13 +208,13 @@ function ActionSearchBar({
             >
               <motion.ul role="none">
                 {result.actions.length === 0 && (
-                  <li className="px-3 py-2 text-gray-400 text-sm">No matches</li>
+                  <li className="px-3 py-2 text-muted-foreground text-sm">No matches</li>
                 )}
                 {result.actions.map((action, index) => (
                   <motion.li
                     aria-selected={activeIndex === index}
-                    className={`flex cursor-pointer items-center justify-between rounded-md px-3 py-2 hover:bg-gray-200 dark:hover:bg-zinc-900 ${
-                      activeIndex === index ? "bg-gray-100 dark:bg-zinc-800" : ""
+                    className={`flex cursor-pointer items-center justify-between rounded-md px-3 py-2 hover:bg-gray-200 dark:hover:bg-white/5 ${
+                      activeIndex === index ? "bg-black/5 dark:bg-white/10" : ""
                     }`}
                     id={`action-${action.id}`}
                     key={action.id}
@@ -226,14 +226,14 @@ function ActionSearchBar({
                   >
                     <div className="flex min-w-0 items-center justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-2">
-                        <span aria-hidden="true" className="text-gray-500">
+                        <span aria-hidden="true" className="text-muted-foreground">
                           {action.icon}
                         </span>
-                        <span className="truncate font-medium text-gray-900 text-sm dark:text-gray-100">
+                        <span className="truncate font-medium text-foreground text-sm">
                           {action.label}
                         </span>
                         {action.description && (
-                          <span className="truncate text-gray-400 text-xs">
+                          <span className="truncate text-muted-foreground text-xs">
                             {action.description}
                           </span>
                         )}
@@ -243,20 +243,20 @@ function ActionSearchBar({
                       {action.short && (
                         <span
                           aria-label={`Keyboard shortcut: ${action.short}`}
-                          className="text-gray-400 text-xs"
+                          className="text-muted-foreground text-xs"
                         >
                           {action.short}
                         </span>
                       )}
                       {action.end && (
-                        <span className="text-right text-gray-400 text-xs">{action.end}</span>
+                        <span className="text-right text-muted-foreground text-xs">{action.end}</span>
                       )}
                     </div>
                   </motion.li>
                 ))}
               </motion.ul>
-              <div className="mt-2 border-gray-100 border-t px-3 py-2 dark:border-gray-800">
-                <div className="flex items-center justify-between text-gray-500 text-xs">
+              <div className="mt-2 border-black/10 border-t px-3 py-2 dark:border-white/10">
+                <div className="flex items-center justify-between text-muted-foreground text-xs">
                   <span>Enter to choose</span>
                   <span>ESC to cancel</span>
                 </div>

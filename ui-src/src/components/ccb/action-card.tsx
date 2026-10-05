@@ -76,10 +76,10 @@ function StatusBadge({ status }: { status: string }) {
     awaiting: "font-medium text-foreground",
     ok: "text-muted-foreground",
     "already applied": "text-muted-foreground",
-    failed: "text-rose-500",
-    rejected: "text-zinc-500",
-    skipped: "text-zinc-500",
-    interrupted: "text-zinc-500",
+    failed: "text-rose-500 dark:text-rose-400",
+    rejected: "text-muted-foreground",
+    skipped: "text-muted-foreground",
+    interrupted: "text-muted-foreground",
   };
   const label: Record<string, string> = {
     interrupted: "interrupted (StreamHub restarted)",
@@ -158,7 +158,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
               {item.warning}
             </div>
           )}
-          {item.error && <div className="text-rose-500 text-xs">{item.error}</div>}
+          {item.error && <div className="text-rose-500 dark:text-rose-400 text-xs">{item.error}</div>}
           {item.reasons && item.reasons.length > 0 && (
             <div className="space-y-1 rounded-md bg-black/[0.03] p-2 text-xs dark:bg-white/[0.04]">
               <div className="flex items-center gap-2">
@@ -190,8 +190,8 @@ export function ActionCard({ item }: { item: ActionItem }) {
             item.preview && <DiffView preview={item.preview} />
           )}
           {item.action === "run" && (
-            <pre className="overflow-auto rounded-lg bg-black/80 px-3 py-2 font-mono text-xs text-zinc-100">
-              <span className="select-none text-zinc-400">&gt; </span>
+            <pre className="overflow-auto rounded-lg bg-black/5 px-3 py-2 font-mono text-foreground text-xs dark:bg-white/5">
+              <span className="select-none text-muted-foreground">&gt; </span>
               {item.target}
             </pre>
           )}

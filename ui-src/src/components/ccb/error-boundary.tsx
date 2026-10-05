@@ -24,7 +24,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode; area: string
     if (!this.state.error) return this.props.children;
     return (
       <div className="mx-auto my-6 max-w-2xl rounded-xl border border-rose-500/40 bg-rose-500/5 p-4 text-sm">
-        <p className="font-medium text-rose-500">Something in the {this.props.area} could not be shown.</p>
+        <p className="font-medium text-rose-500 dark:text-rose-400">Something in the {this.props.area} could not be shown.</p>
         <p className="mt-1 break-words font-mono text-muted-foreground text-xs">{this.state.error.message}</p>
         <p className="mt-2 text-muted-foreground text-xs">
           The details were written to the StreamHub log; Menu, Export diagnostics includes them.

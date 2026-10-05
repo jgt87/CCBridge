@@ -8,12 +8,12 @@ colors:
   pencil: "oklch(0.556 0 0)"
   shelf: "oklch(0.97 0 0)"
   hairline: "oklch(0.922 0 0)"
-  graphite: "oklch(0.18 0 0)"
-  graphite-raised: "oklch(0.215 0 0)"
-  graphite-float: "oklch(0.225 0 0)"
-  graphite-shelf: "oklch(0.285 0 0)"
-  chalk: "oklch(0.93 0 0)"
-  dust: "oklch(0.745 0 0)"
+  graphite: "oklch(0.261 0.004 84.6)"
+  graphite-raised: "oklch(0.29 0.004 84.6)"
+  graphite-float: "oklch(0.305 0.004 84.6)"
+  graphite-shelf: "oklch(0.348 0.004 84.6)"
+  chalk: "oklch(0.901 0.002 84.6)"
+  dust: "oklch(0.751 0.003 84.6)"
   signal-red: "oklch(0.577 0.245 27.325)"
   signal-red-night: "oklch(0.704 0.191 22.216)"
   added-green: "oklch(0.596 0.145 163.225)"
@@ -117,12 +117,12 @@ components:
 
 StreamHub is the bench Copilot's work is laid out on. Replies, diffs, file trees, runs and checks are the material; the interface is the grey wood underneath them. Everything the app draws itself is neutral, so the only things that ever carry colour are content: syntax in code, lines added and removed, and errors. A user should be able to read a long reply, scan a diff and approve a command without anything in the chrome asking for attention.
 
-The system is dense and calm. Panels stack in narrow columns with small uppercase section labels, controls sit flat on the surface until hovered, and depth comes from faint tints and hairlines rather than shadows. Both themes are first-class: light is paper and ink for daytime office use; dark is a lifted graphite for long sessions, softened on purpose so long replies do not glare.
+The system is dense and calm. Panels stack in narrow columns with small uppercase section labels, controls sit flat on the surface until hovered, and depth comes from faint tints and hairlines rather than shadows. Both themes are first-class: light is paper and ink for daytime office use; dark is Copilot's own warm graphite, so the StreamHub pane and the Copilot pane beside it read as one window.
 
 It rejects **colourful SaaS dashboards**: blue or purple brand accents, gradient buttons, hero metrics, and coloured status pills. StreamHub sits next to Copilot in the same window and earns trust by staying out of the way.
 
 **Key Characteristics:**
-- Monochrome chrome: zero-chroma greys in both themes; colour only as content.
+- Monochrome chrome: greys only (light is pure grey; dark carries Copilot's faint warm tint); colour only as content.
 - Flat by default: tints (3 to 15% black or white) and 1px hairlines, never shadows.
 - One family: Geist for every UI role, a system monospace for code.
 - Dense columns: a left side panel with collapsible sections; one fixed control width in Settings.
@@ -130,7 +130,7 @@ It rejects **colourful SaaS dashboards**: blue or purple brand accents, gradient
 
 ## 2. Colors
 
-A grey scale with no hue, plus three content signals that appear only where they mean something.
+A grey scale (pure in light; in dark, Copilot's warm graphite with a barely visible tint), plus three content signals that appear only where they mean something.
 
 ### Primary
 - **Ink** (oklch(0.145 0 0), light theme) and **Chalk** (oklch(0.93 0 0), dark theme): all primary text and icons, and the one solid button style (Ink fill with Paper text in light; Chalk fill with Graphite text in dark). The solid fill marks a single active choice at a time, for example an enabled "Clarify first".
@@ -140,10 +140,10 @@ A grey scale with no hue, plus three content signals that appear only where they
 - **Shelf** (oklch(0.97 0 0)): light muted surfaces and secondary fills.
 - **Hairline** (oklch(0.922 0 0)): light borders and inputs; in practice drawn as black at 10%.
 - **Pencil** (oklch(0.556 0 0)): light secondary text, labels, counts, placeholders' darker cousin.
-- **Graphite** (oklch(0.18 0 0)): the dark page. Lifted from near-black on purpose: dark mode reads best without the extremes.
-- **Graphite Raised** (oklch(0.215 0 0)) and **Graphite Float** (oklch(0.225 0 0)): dark cards, the side panel, popovers and menus, one step above the page.
-- **Graphite Shelf** (oklch(0.285 0 0)): dark muted surfaces.
-- **Dust** (oklch(0.745 0 0)): dark secondary text (about 8:1 on Graphite).
+- **Graphite** (oklch(0.261 0.004 84.6), rgb 37 36 34): the dark page. It is exactly the base color of the Copilot window, measured from its page, so the two panes meet without a seam.
+- **Graphite Raised** (oklch(0.29 0.004 84.6)) and **Graphite Float** (oklch(0.305 0.004 84.6)): dark cards, the side panel, popovers and menus, one and two steps above the page in the same hue.
+- **Graphite Shelf** (oklch(0.348 0.004 84.6)): dark muted surfaces and the selected side panel tab; Copilot's own raised-control level (rgb 58).
+- **Dust** (oklch(0.751 0.003 84.6)): dark secondary text, Copilot's secondary grey (rgb 174; about 7:1 on Graphite).
 
 ### Tertiary (content signals only)
 - **Signal Red** (oklch(0.577 0.245 27.325); **Signal Red Night** oklch(0.704 0.191 22.216) in dark): errors, failed steps, destructive confirmation.
@@ -153,7 +153,7 @@ A grey scale with no hue, plus three content signals that appear only where they
 ### Named Rules
 **The Colour Is Content Rule.** The app's own chrome never carries hue. Colour appears only when it describes the material: code syntax, added and removed lines, errors. A blue or green button, badge, link or status dot is prohibited.
 
-**The No Extremes Rule.** Dark mode never uses near-black with near-white. Page Graphite (about #121212) and text Chalk keep body text near 15:1, not 19:1; secondary text stays clearly secondary at about 8:1.
+**The One Window Rule.** In dark mode StreamHub takes the Copilot window's palette: page Graphite is Copilot's base (rgb 37 36 34) and text uses Copilot's greys (Chalk 222, Dust 174), about 11:1 and 7:1. Never near-black with near-white, and never a cold neutral grey (zinc, gray, neutral) beside the warm base: use the tokens.
 
 **The Tint, Don't Paint Rule.** Hover, selection and grouping are black (light) or white (dark) at 3, 5, 10 or 15 percent over the surface. Never a new grey value, never a colour.
 
@@ -232,10 +232,10 @@ Flat and unassuming: controls look like part of the page until you need them.
 ## 6. Do's and Don'ts
 
 ### Do:
-- **Do** keep all chrome on the zero-chroma grey scale (Paper, Shelf, Hairline, Pencil; Graphite, Graphite Raised, Graphite Shelf, Dust, Chalk).
+- **Do** keep all chrome on the grey scale tokens (Paper, Shelf, Hairline, Pencil; Graphite, Graphite Raised, Graphite Shelf, Dust, Chalk), never hard-coded gray/zinc/neutral classes.
 - **Do** express hover, selection and grouping as black or white at 3, 5, 10 or 15 percent.
 - **Do** separate surfaces with 1px hairlines at 10% and one tonal step, never with shadows.
-- **Do** keep dark-mode body text near 15:1 and secondary text near 8:1 (Chalk and Dust on Graphite).
+- **Do** keep dark mode on Copilot's palette: Graphite page, Chalk text (about 11:1), Dust secondary (about 7:1); red text in dark uses the lighter rose (rose-400) to stay above 4.5:1.
 - **Do** use the 192px control width and 32px height for every Settings control so the columns align.
 - **Do** keep colour for content only: syntax, Added Green / Removed Rose change counts and diff rows, Signal Red errors.
 - **Do** show state as plain words with a small grey icon ("Copilot connected").

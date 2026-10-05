@@ -57,42 +57,42 @@
       "graphite": {
         "role": "neutral",
         "displayName": "Graphite",
-        "canonical": "oklch(0.18 0 0)",
+        "canonical": "oklch(0.261 0.004 84.6)",
         "tonalRamp": [
-          "oklch(0.18 0 0)",
-          "oklch(0.215 0 0)",
-          "oklch(0.225 0 0)",
-          "oklch(0.285 0 0)",
-          "oklch(0.4 0 0)",
-          "oklch(0.55 0 0)",
-          "oklch(0.745 0 0)",
-          "oklch(0.93 0 0)"
+          "oklch(0.261 0.004 84.6)",
+          "oklch(0.29 0.004 84.6)",
+          "oklch(0.305 0.004 84.6)",
+          "oklch(0.348 0.004 84.6)",
+          "oklch(0.45 0.004 84.6)",
+          "oklch(0.6 0.003 84.6)",
+          "oklch(0.751 0.003 84.6)",
+          "oklch(0.901 0.002 84.6)"
         ]
       },
       "graphite-raised": {
         "role": "neutral",
         "displayName": "Graphite Raised",
-        "canonical": "oklch(0.215 0 0)"
+        "canonical": "oklch(0.29 0.004 84.6)"
       },
       "graphite-float": {
         "role": "neutral",
         "displayName": "Graphite Float",
-        "canonical": "oklch(0.225 0 0)"
+        "canonical": "oklch(0.305 0.004 84.6)"
       },
       "graphite-shelf": {
         "role": "neutral",
         "displayName": "Graphite Shelf",
-        "canonical": "oklch(0.285 0 0)"
+        "canonical": "oklch(0.348 0.004 84.6)"
       },
       "chalk": {
         "role": "primary",
         "displayName": "Chalk",
-        "canonical": "oklch(0.93 0 0)"
+        "canonical": "oklch(0.901 0.002 84.6)"
       },
       "dust": {
         "role": "neutral",
         "displayName": "Dust",
-        "canonical": "oklch(0.745 0 0)"
+        "canonical": "oklch(0.751 0.003 84.6)"
       },
       "signal-red": {
         "role": "tertiary",
@@ -234,9 +234,9 @@
   ],
   "narrative": {
     "northStar": "The Quiet Workbench",
-    "overview": "StreamHub is the bench Copilot's work is laid out on. Replies, diffs, file trees, runs and checks are the material; the interface is the grey wood underneath them. Everything the app draws itself is neutral, so the only things that ever carry colour are content: syntax in code, lines added and removed, and errors. A user should be able to read a long reply, scan a diff and approve a command without anything in the chrome asking for attention.\n\nThe system is dense and calm. Panels stack in narrow columns with small uppercase section labels, controls sit flat on the surface until hovered, and depth comes from faint tints and hairlines rather than shadows. Both themes are first-class: light is paper and ink for daytime office use; dark is a lifted graphite for long sessions, softened on purpose so long replies do not glare.\n\nIt rejects colourful SaaS dashboards: blue or purple brand accents, gradient buttons, hero metrics, and coloured status pills. StreamHub sits next to Copilot in the same window and earns trust by staying out of the way.",
+    "overview": "StreamHub is the bench Copilot's work is laid out on. Replies, diffs, file trees, runs and checks are the material; the interface is the grey wood underneath them. Everything the app draws itself is neutral, so the only things that ever carry colour are content: syntax in code, lines added and removed, and errors. A user should be able to read a long reply, scan a diff and approve a command without anything in the chrome asking for attention.\n\nThe system is dense and calm. Panels stack in narrow columns with small uppercase section labels, controls sit flat on the surface until hovered, and depth comes from faint tints and hairlines rather than shadows. Both themes are first-class: light is paper and ink for daytime office use; dark is Copilot's own warm graphite, so the StreamHub pane and the Copilot pane beside it read as one window.\n\nIt rejects colourful SaaS dashboards: blue or purple brand accents, gradient buttons, hero metrics, and coloured status pills. StreamHub sits next to Copilot in the same window and earns trust by staying out of the way.",
     "keyCharacteristics": [
-      "Monochrome chrome: zero-chroma greys in both themes; colour only as content.",
+      "Monochrome chrome: greys only (light is pure grey; dark carries Copilot's faint warm tint); colour only as content.",
       "Flat by default: tints (3 to 15% black or white) and 1px hairlines, never shadows.",
       "One family: Geist for every UI role, a system monospace for code.",
       "Dense columns: a left side panel with collapsible sections; one fixed control width in Settings.",
@@ -249,8 +249,8 @@
         "section": "colors"
       },
       {
-        "name": "The No Extremes Rule",
-        "body": "Dark mode never uses near-black with near-white. Page Graphite (about #121212) and text Chalk keep body text near 15:1, not 19:1; secondary text stays clearly secondary at about 8:1.",
+        "name": "The One Window Rule",
+        "body": "In dark mode StreamHub takes the Copilot window's palette: page Graphite is Copilot's base (rgb 37 36 34) and text uses Copilot's greys (Chalk 222, Dust 174), about 11:1 and 7:1. Never near-black with near-white, and never a cold neutral grey (zinc, gray, neutral) beside the warm base: use the tokens.",
         "section": "colors"
       },
       {
@@ -280,10 +280,10 @@
       }
     ],
     "dos": [
-      "Do keep all chrome on the zero-chroma grey scale (Paper, Shelf, Hairline, Pencil; Graphite, Graphite Raised, Graphite Shelf, Dust, Chalk).",
+      "Do keep all chrome on the grey scale tokens (Paper, Shelf, Hairline, Pencil; Graphite, Graphite Raised, Graphite Shelf, Dust, Chalk).",
       "Do express hover, selection and grouping as black or white at 3, 5, 10 or 15 percent.",
       "Do separate surfaces with 1px hairlines at 10% and one tonal step, never with shadows.",
-      "Do keep dark-mode body text near 15:1 and secondary text near 8:1 (Chalk and Dust on Graphite).",
+      "Do keep dark mode on Copilot's palette: Graphite page, Chalk text (about 11:1), Dust secondary (about 7:1); red text in dark uses the lighter rose (rose-400) to stay above 4.5:1.",
       "Do use the 192px control width and 32px height for every Settings control so the columns align.",
       "Do keep colour for content only: syntax, Added Green / Removed Rose change counts and diff rows, Signal Red errors.",
       "Do show state as plain words with a small grey icon (\"Copilot connected\").",

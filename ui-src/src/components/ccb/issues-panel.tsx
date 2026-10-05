@@ -135,7 +135,7 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
           <RefreshCw className={cn("h-3.5 w-3.5", indexing && "animate-spin")} /> Re-index
         </button>
       </div>
-      {error && <div className="text-rose-500 text-xs">{error}</div>}
+      {error && <div className="text-rose-500 dark:text-rose-400 text-xs">{error}</div>}
 
       <div className="grid grid-cols-2 gap-1 [&>button]:justify-center">
         {CATEGORIES.map((c) => (

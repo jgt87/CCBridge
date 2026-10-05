@@ -57,7 +57,7 @@ export function ToolsSection() {
           />
         );
       })}
-      {error && <p className="text-rose-500 text-xs">{error}</p>}
+      {error && <p className="text-rose-500 dark:text-rose-400 text-xs">{error}</p>}
     </>
   );
 }

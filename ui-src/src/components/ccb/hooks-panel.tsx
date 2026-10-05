@@ -38,7 +38,7 @@ export function HooksPanel({ onOpen, refreshKey }: { onOpen: (path: string) => v
         <span className="font-mono">.streamhub/hooks.json</span>, which Copilot cannot change; you approve the file once, and again after it changes. Deleting or Microsoft 365 commands never
         run. Settings &gt; Changes and commands can pause them.
       </p>
-      {state?.error && <p className="text-rose-500 text-xs">{state.error}</p>}
+      {state?.error && <p className="text-rose-500 dark:text-rose-400 text-xs">{state.error}</p>}
       {state?.exists ? (
         <>
           {MOMENTS.map((m) => {

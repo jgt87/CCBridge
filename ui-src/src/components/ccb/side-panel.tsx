@@ -354,6 +354,8 @@ type SidePanelProps = {
   todos: TodoItem[];
   changes: ChangeSetView[];
   onOpenFile: (path: string) => void;
+  /** Opens a file of a change set with the lines it added and removed (History). */
+  onOpenChangeFile?: (changeSet: string, path: string) => void;
   onUndo: () => void;
   /** Undoes this change set and every newer one (History > Restore). */
   onUndoTo?: (changeSet: string) => void;
@@ -462,6 +464,7 @@ function ChangeSetCard({
   onConfirm,
   onUndoTo,
   onOpenFile,
+  onOpenChangeFile,
 }: {
   change: ChangeSetView;
   /** How many change sets are newer (0 = the latest). */
@@ -472,6 +475,7 @@ function ChangeSetCard({
   onConfirm: (seq: number | null) => void;
   onUndoTo?: (changeSet: string) => void;
   onOpenFile: (path: string) => void;
+  onOpenChangeFile?: (changeSet: string, path: string) => void;
 }) {
   const counts = new Map((c.counts ?? []).map((x) => [x.path, x]));
   // Restore on an older change set; a confirmation that is open stays until it is answered.
@@ -506,7 +510,7 @@ function ChangeSetCard({
       {c.files.map((f) => {
         const n = counts.get(f);
         return (
-          <button className="flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs hover:underline" key={f} onClick={() => onOpenFile(f)} type="button">
+          <button className="flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs hover:underline" key={f} onClick={() => (c.changeSet && onOpenChangeFile ? onOpenChangeFile(c.changeSet, f) : onOpenFile(f))} title={c.changeSet && onOpenChangeFile ? `${f}: the lines this change set added and removed` : f} type="button">
             <span className="min-w-0 flex-1 truncate">{f}</span>
             {n && (n.deleted ? <span className="shrink-0 font-sans text-muted-foreground">deleted</span> : <ChangePill added={n.added} removed={n.removed} />)}
           </button>
@@ -526,7 +530,8 @@ function ChangesPanel({
   onUndo,
   onUndoTo,
   onOpenFile,
-}: Pick<SidePanelProps, "changes" | "busy" | "onUndo" | "onUndoTo" | "onOpenFile"> & {
+  onOpenChangeFile,
+}: Pick<SidePanelProps, "changes" | "busy" | "onUndo" | "onUndoTo" | "onOpenFile" | "onOpenChangeFile"> & {
   litChange: number | null;
   confirmUndo: number | null;
   onConfirmUndo: (seq: number | null) => void;
@@ -551,6 +556,7 @@ function ChangesPanel({
             lit={litChange === c.seq}
             newer={i}
             onConfirm={onConfirmUndo}
+            onOpenChangeFile={onOpenChangeFile}
             onOpenFile={onOpenFile}
             onUndoTo={onUndoTo}
           />
@@ -729,17 +735,17 @@ export function SidePanel(props: SidePanelProps) {
           id: "files",
           title: "Files",
           icon: FolderTree,
-          color: "bg-zinc-700",
+          color: "bg-zinc-700 dark:bg-muted",
           content: (
             <FilesPanel activity={activity} files={files} issueStamp={issueStamp} onShowIssues={showIssues} refreshing={filesRefreshing} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
           ),
         },
-        { id: "automation", title: "Automation", icon: Workflow, color: "bg-zinc-700", content: <AutomationPanel {...props} chains={chains} scripts={scripts} /> },
+        { id: "automation", title: "Automation", icon: Workflow, color: "bg-zinc-700 dark:bg-muted", content: <AutomationPanel {...props} chains={chains} scripts={scripts} /> },
         {
           id: "changes",
           title: "History",
           icon: FileClock,
-          color: "bg-zinc-700",
+          color: "bg-zinc-700 dark:bg-muted",
           content: (
             <ChangesPanel
               busy={busy}
@@ -747,18 +753,19 @@ export function SidePanel(props: SidePanelProps) {
               confirmUndo={confirmUndo}
               litChange={litChange}
               onConfirmUndo={setConfirmUndo}
+              onOpenChangeFile={props.onOpenChangeFile}
               onOpenFile={onOpenFile}
               onUndo={onUndo}
               onUndoTo={onUndoTo}
             />
           ),
         },
-        { id: "tasks", title: "Actions", icon: ListTodo, color: "bg-zinc-700", content: <TasksPanel onOpenFile={onOpenFile} onShowChange={showChange} pausedUntil={pausedUntil} queue={queue} todos={todos} /> },
+        { id: "tasks", title: "Actions", icon: ListTodo, color: "bg-zinc-700 dark:bg-muted", content: <TasksPanel onOpenFile={onOpenFile} onShowChange={showChange} pausedUntil={pausedUntil} queue={queue} todos={todos} /> },
         {
           id: "health",
           title: "Code health",
           icon: HeartPulse,
-          color: "bg-zinc-700",
+          color: "bg-zinc-700 dark:bg-muted",
           badge: <BetaTag title="Beta: Issues and Code review are still being refined; their checks run without a language model and can miss problems or report ones that are not real." />,
           content: <HealthPanel activity={activity} issueStamp={issueStamp} onOpenFile={onOpenFile} openIssues={openIssues} reviewTick={reviewTick} />,
         },

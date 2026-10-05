@@ -120,7 +120,7 @@ export function ChainsPanel({
           {/* A new chain has no steps yet: that is not a problem to warn about, just the next step. */}
           {c.steps.length === 0 && <p className="mt-1 text-muted-foreground text-xs">No steps yet: pick a runbook or script above and click Add.</p>}
           {c.steps.length > 0 && c.problems.length > 0 && (
-            <div className="mt-1 flex gap-1 text-xs text-zinc-700 dark:text-zinc-300">
+            <div className="mt-1 flex gap-1 text-xs text-foreground/80">
               <AlertTriangle aria-hidden className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{c.problems.join("; ")}</span>
             </div>

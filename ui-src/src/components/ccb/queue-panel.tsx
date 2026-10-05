@@ -9,7 +9,7 @@ const STATUS: Record<QueueEntry["status"], { label: string; icon: React.ReactNod
   running: { label: "running", icon: <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> },
   awaiting: { label: "needs approval", icon: <Hand className="h-3.5 w-3.5" /> },
   done: { label: "done", icon: <CircleCheck className="h-3.5 w-3.5" /> },
-  failed: { label: "failed", icon: <CircleX className="h-3.5 w-3.5 text-rose-500" /> },
+  failed: { label: "failed", icon: <CircleX className="h-3.5 w-3.5 text-rose-500 dark:text-rose-400" /> },
   cancelled: { label: "cancelled", icon: <CircleDashed className="h-3.5 w-3.5" /> },
 };
 

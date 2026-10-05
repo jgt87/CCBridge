@@ -63,7 +63,7 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
         <GradientButton className="h-12" disabled={!name.trim()} label="Create project" type="submit" variant="neutral" />
       </form>
 
-      {error && <p className="text-rose-500 text-sm">{error}</p>}
+      {error && <p className="text-rose-500 dark:text-rose-400 text-sm">{error}</p>}
 
       <div className="space-y-2">
         {projects.map((p) => (

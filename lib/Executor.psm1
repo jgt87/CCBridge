@@ -368,6 +368,52 @@ function Get-CheckpointChanges {
     }
 }
 
+function Get-ChangeSetFileDiff {
+    <# One file of a change set as it was before and right after that change set, for the History
+       tab: before = the change set's backup (empty when the change set created it); after = the
+       backup the next change set that touched the file took (its state right after this one), else
+       the file as it is now (absent: deleted). @{ path; old; new; exists; deleted; binary; after =
+       'now' | 'later'; laterId }. Throws when the change set or the file is not known. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$ChangeSet, [Parameter(Mandatory)][string]$Path, [int]$MaxChars = 400000)
+    if ($ChangeSet -notmatch '^\d{8}-\d{6}-\d{3}$') { throw "not a change set: $ChangeSet" }
+    $base = Join-Path (Get-ProjectStateDir $ProjectRoot) 'backups'
+    $readManifest = { param($dir) $m = Join-Path $dir 'manifest.json'; if (Test-Path -LiteralPath $m) { Get-Content -LiteralPath $m -Raw | ConvertFrom-Json } else { $null } }
+    $own = & $readManifest (Join-Path $base $ChangeSet)
+    if (-not $own) { throw "change set $ChangeSet is no longer kept (undone, or removed by Settings > Retention)" }
+    $rel = $Path.Trim().Replace('\', '/')
+    $entry = @($own.PSObject.Properties | Where-Object { $_.Name -eq $rel }) | Select-Object -First 1
+    if (-not $entry) { throw "$rel is not part of change set $ChangeSet" }
+    $full = Resolve-ProjectPath $ProjectRoot $rel   # inside the project, no outside links
+    $text = {
+        param($file)
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return @{ text = $null; binary = $false } }
+        if (-not (Test-TextReadable $file)) { return @{ text = $null; binary = $true } }
+        $t = (Read-TextFile $file).Text
+        if ($t.Length -gt $MaxChars) { $t = $t.Substring(0, $MaxChars) }
+        @{ text = $t; binary = $false }
+    }
+    $before = if ($entry.Value -eq 'new') { @{ text = ''; binary = $false } } else { & $text (Join-Path (Join-Path $base $ChangeSet) $rel.Replace('/', '\')) }
+    # The state right after this change set: the next one that touched the file kept it.
+    $after = $null; $laterId = $null
+    foreach ($cp in @(Get-ChildItem -LiteralPath $base -Directory | Where-Object { $_.Name -gt $ChangeSet } | Sort-Object Name)) {
+        $m = & $readManifest $cp.FullName
+        if (-not $m) { continue }
+        $later = @($m.PSObject.Properties | Where-Object { $_.Name -eq $rel }) | Select-Object -First 1
+        if (-not $later) { continue }
+        $laterId = $cp.Name
+        $after = if ($later.Value -eq 'new') { @{ text = $null; binary = $false } } else { & $text (Join-Path $cp.FullName $rel.Replace('/', '\')) }
+        break
+    }
+    if (-not $laterId) { $after = & $text $full }
+    [pscustomobject]@{
+        path = $rel; changeSet = $ChangeSet
+        old = $before.text; new = $(if ($null -eq $after.text) { '' } else { $after.text })
+        exists = ($entry.Value -ne 'new'); deleted = ($null -eq $after.text -and -not $after.binary)
+        binary = ([bool]$before.binary -or [bool]$after.binary)
+        after = $(if ($laterId) { 'later' } else { 'now' }); laterId = $laterId
+    }
+}
+
 function Get-ChangeSetContents {
     <# Per changed file: the contents before and after the change set, so the calling program can
        check them (MCP tasks). Each text is cut at 200,000 characters. #>
@@ -1709,5 +1755,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction
