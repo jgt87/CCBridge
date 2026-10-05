@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.79] - 2026-10-05
+
+### Fixed
+
+- Drop-down lists (Response and Agent above the message box, and the selects in Settings and schedules) were unreadable in dark mode: the browser drew the list in light colors under light text. The page now tells the browser which theme is on, so native lists, scrollbars and pickers follow it, and options use the theme's menu colors.
+
 ## [v0.1.78] - 2026-10-05
 
 ### Added
@@ -925,7 +931,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.78...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.79...HEAD
+[v0.1.79]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.79
 [v0.1.78]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.78
 [v0.1.77]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.77
 [v0.1.76]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.76

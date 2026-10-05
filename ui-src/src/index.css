@@ -130,6 +130,14 @@
   html {
     @apply font-sans;
     }
+  /* Native controls (select lists, scrollbars, date pickers) follow the theme: without this the
+     browser draws a select's list in light colors under the dark theme's light text. */
+  :root { color-scheme: light; }
+  .dark { color-scheme: dark; }
+  option, optgroup {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+    }
 }
 /* Markdown in Copilot replies (CCBridge) */
 .ccb-markdown p { margin: 0.4rem 0; }

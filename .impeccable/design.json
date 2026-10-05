@@ -1,0 +1,302 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-05T12:00:00Z",
+  "title": "Design System: StreamHub",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "oklch(1 0 0)",
+        "tonalRamp": [
+          "oklch(0.15 0 0)",
+          "oklch(0.27 0 0)",
+          "oklch(0.39 0 0)",
+          "oklch(0.51 0 0)",
+          "oklch(0.63 0 0)",
+          "oklch(0.75 0 0)",
+          "oklch(0.87 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "ink": {
+        "role": "primary",
+        "displayName": "Ink",
+        "canonical": "oklch(0.145 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.439 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.87 0 0)"
+        ]
+      },
+      "ink-press": {
+        "role": "primary",
+        "displayName": "Ink Press",
+        "canonical": "oklch(0.205 0 0)"
+      },
+      "pencil": {
+        "role": "neutral",
+        "displayName": "Pencil",
+        "canonical": "oklch(0.556 0 0)"
+      },
+      "shelf": {
+        "role": "neutral",
+        "displayName": "Shelf",
+        "canonical": "oklch(0.97 0 0)"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(0.922 0 0)"
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Graphite",
+        "canonical": "oklch(0.18 0 0)",
+        "tonalRamp": [
+          "oklch(0.18 0 0)",
+          "oklch(0.215 0 0)",
+          "oklch(0.225 0 0)",
+          "oklch(0.285 0 0)",
+          "oklch(0.4 0 0)",
+          "oklch(0.55 0 0)",
+          "oklch(0.745 0 0)",
+          "oklch(0.93 0 0)"
+        ]
+      },
+      "graphite-raised": {
+        "role": "neutral",
+        "displayName": "Graphite Raised",
+        "canonical": "oklch(0.215 0 0)"
+      },
+      "graphite-float": {
+        "role": "neutral",
+        "displayName": "Graphite Float",
+        "canonical": "oklch(0.225 0 0)"
+      },
+      "graphite-shelf": {
+        "role": "neutral",
+        "displayName": "Graphite Shelf",
+        "canonical": "oklch(0.285 0 0)"
+      },
+      "chalk": {
+        "role": "primary",
+        "displayName": "Chalk",
+        "canonical": "oklch(0.93 0 0)"
+      },
+      "dust": {
+        "role": "neutral",
+        "displayName": "Dust",
+        "canonical": "oklch(0.745 0 0)"
+      },
+      "signal-red": {
+        "role": "tertiary",
+        "displayName": "Signal Red",
+        "canonical": "oklch(0.577 0.245 27.325)",
+        "tonalRamp": [
+          "oklch(0.25 0.1 27)",
+          "oklch(0.35 0.14 27)",
+          "oklch(0.45 0.19 27)",
+          "oklch(0.577 0.245 27.325)",
+          "oklch(0.65 0.2 25)",
+          "oklch(0.704 0.191 22.216)",
+          "oklch(0.82 0.1 22)",
+          "oklch(0.94 0.04 22)"
+        ]
+      },
+      "signal-red-night": {
+        "role": "tertiary",
+        "displayName": "Signal Red Night",
+        "canonical": "oklch(0.704 0.191 22.216)"
+      },
+      "added-green": {
+        "role": "tertiary",
+        "displayName": "Added Green",
+        "canonical": "oklch(0.596 0.145 163.225)"
+      },
+      "removed-rose": {
+        "role": "tertiary",
+        "displayName": "Removed Rose",
+        "canonical": "oklch(0.586 0.253 17.585)"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The empty-chat question and window titles. Rare."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Tab names, card titles, bold lead-ins."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Chat replies and messages."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Help text, timestamps, summaries, dense-row buttons."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase section headings in the side panel and Settings."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "Code, paths, commands, diffs, change counts."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "state-change",
+        "value": "150ms ease-out",
+        "purpose": "Hover tints, chevron rotation, card highlight fade."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "none",
+        "purpose": "Every animation (status pulse, hint nudge, refresh sweep) stops under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Flat Button",
+      "kind": "button",
+      "refersTo": "button-flat",
+      "description": "The default action in dense rows: no fill until hovered.",
+      "html": "<button class=\"ds-btn-flat\">Run</button>",
+      "css": ".ds-btn-flat { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--foreground, oklch(0.145 0 0)); font: 400 12px/1.33 'Geist Variable', sans-serif; cursor: pointer; transition: background-color 150ms ease-out; } .ds-btn-flat:hover { background: oklch(0 0 0 / 5%); } .ds-btn-flat:focus-visible { outline: 2px solid oklch(0.708 0 0 / 50%); outline-offset: 1px; } .ds-btn-flat:disabled { opacity: 0.4; background: transparent; cursor: default; }"
+    },
+    {
+      "name": "Tinted Button",
+      "kind": "button",
+      "refersTo": "button-tinted",
+      "description": "The main action of a small form (Create, Send answer).",
+      "html": "<button class=\"ds-btn-tinted\">Create</button>",
+      "css": ".ds-btn-tinted { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 0; border-radius: 8px; background: oklch(0 0 0 / 5%); color: var(--foreground, oklch(0.145 0 0)); font: 400 12px/1.33 'Geist Variable', sans-serif; cursor: pointer; transition: background-color 150ms ease-out; } .ds-btn-tinted:hover { background: oklch(0 0 0 / 10%); } .ds-btn-tinted:focus-visible { outline: 2px solid oklch(0.708 0 0 / 50%); outline-offset: 1px; }"
+    },
+    {
+      "name": "Solid Button",
+      "kind": "button",
+      "refersTo": "button-solid",
+      "description": "The one active choice (for example Clarify first when it is on).",
+      "html": "<button class=\"ds-btn-solid\">Clarify first</button>",
+      "css": ".ds-btn-solid { padding: 2px 8px; border: 0; border-radius: 8px; background: oklch(0.145 0 0); color: oklch(1 0 0); font: 500 12px/1.5 'Geist Variable', sans-serif; box-shadow: 0 1px 2px oklch(0 0 0 / 5%); cursor: pointer; transition: opacity 150ms ease-out; } .ds-btn-solid:hover { opacity: 0.85; } .ds-btn-solid:focus-visible { outline: 2px solid oklch(0.708 0 0 / 50%); outline-offset: 1px; }"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "A Settings field: hairline border, darker border on focus, no glow.",
+      "html": "<input class=\"ds-field\" type=\"number\" value=\"300\" aria-label=\"Timeout\" />",
+      "css": ".ds-field { width: 192px; height: 32px; padding: 0 8px; border: 1px solid oklch(0 0 0 / 10%); border-radius: 8px; background: transparent; color: var(--foreground, oklch(0.145 0 0)); font: 400 14px/1.43 'Geist Variable', sans-serif; outline: none; transition: border-color 150ms ease-out; } .ds-field:focus { border-color: oklch(0 0 0 / 30%); }"
+    },
+    {
+      "name": "Segmented Choice",
+      "kind": "custom",
+      "refersTo": "segmented",
+      "description": "Every on/off and small choice in Settings; the selected option sits on a 10% tint.",
+      "html": "<div class=\"ds-seg\" role=\"radiogroup\" aria-label=\"Theme\"><button class=\"ds-seg-opt is-on\" role=\"radio\" aria-checked=\"true\">System</button><button class=\"ds-seg-opt\" role=\"radio\" aria-checked=\"false\">Light</button><button class=\"ds-seg-opt\" role=\"radio\" aria-checked=\"false\">Dark</button></div>",
+      "css": ".ds-seg { display: flex; width: 192px; height: 32px; padding: 2px; border: 1px solid oklch(0 0 0 / 10%); border-radius: 8px; box-sizing: border-box; } .ds-seg-opt { flex: 1; border: 0; border-radius: 4px; background: transparent; color: oklch(0.556 0 0); font: 400 12px/1 'Geist Variable', sans-serif; cursor: pointer; } .ds-seg-opt:hover { color: oklch(0.145 0 0); } .ds-seg-opt.is-on { background: oklch(0 0 0 / 10%); color: oklch(0.145 0 0); } .ds-seg-opt:focus-visible { outline: 2px solid oklch(0.708 0 0 / 50%); }"
+    },
+    {
+      "name": "Section Label with Count",
+      "kind": "nav",
+      "refersTo": "count-chip",
+      "description": "A side panel section header: chevron, uppercase label, ringed count.",
+      "html": "<div class=\"ds-section\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" style=\"transform: rotate(90deg)\"><path d=\"m9 18 6-6-6-6\"/></svg><span class=\"ds-section-label\">Runs</span><span class=\"ds-count\">3</span></div>",
+      "css": ".ds-section { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px; color: oklch(0.556 0 0); } .ds-section:hover { color: oklch(0.145 0 0); } .ds-section-label { font: 500 11px/1 'Geist Variable', sans-serif; letter-spacing: 0.025em; text-transform: uppercase; } .ds-count { padding: 0 4px; border-radius: 4px; box-shadow: inset 0 0 0 1px oklch(0 0 0 / 10%); font: 400 10px/1.5 'Geist Variable', sans-serif; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Change Pill",
+      "kind": "chip",
+      "refersTo": "change-pill",
+      "description": "Lines added and removed: the only coloured chip, because the colour is content.",
+      "html": "<span class=\"ds-pill\"><span class=\"ds-pill-add\">+12</span><span class=\"ds-pill-del\">-3</span></span>",
+      "css": ".ds-pill { display: inline-flex; overflow: hidden; border-radius: 8px; font: 500 11px/20px ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; } .ds-pill-add { padding: 0 6px; background: oklch(0.596 0.145 163.225 / 15%); color: oklch(0.508 0.118 165.612); } .ds-pill-del { padding: 0 6px; background: oklch(0.586 0.253 17.585 / 15%); color: oklch(0.586 0.253 17.585); }"
+    },
+    {
+      "name": "User Message",
+      "kind": "card",
+      "refersTo": "message-user",
+      "description": "The user's message in the transcript; Copilot's reply has no container.",
+      "html": "<div class=\"ds-msg\">Add a dark mode toggle to the settings page</div>",
+      "css": ".ds-msg { display: inline-block; max-width: 85%; padding: 10px 16px; border-radius: 18px 2px 18px 18px; background: oklch(0 0 0 / 5%); color: var(--foreground, oklch(0.145 0 0)); font: 400 14px/1.625 'Geist Variable', sans-serif; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Workbench",
+    "overview": "StreamHub is the bench Copilot's work is laid out on. Replies, diffs, file trees, runs and checks are the material; the interface is the grey wood underneath them. Everything the app draws itself is neutral, so the only things that ever carry colour are content: syntax in code, lines added and removed, and errors. A user should be able to read a long reply, scan a diff and approve a command without anything in the chrome asking for attention.\n\nThe system is dense and calm. Panels stack in narrow columns with small uppercase section labels, controls sit flat on the surface until hovered, and depth comes from faint tints and hairlines rather than shadows. Both themes are first-class: light is paper and ink for daytime office use; dark is a lifted graphite for long sessions, softened on purpose so long replies do not glare.\n\nIt rejects colourful SaaS dashboards: blue or purple brand accents, gradient buttons, hero metrics, and coloured status pills. StreamHub sits next to Copilot in the same window and earns trust by staying out of the way.",
+    "keyCharacteristics": [
+      "Monochrome chrome: zero-chroma greys in both themes; colour only as content.",
+      "Flat by default: tints (3 to 15% black or white) and 1px hairlines, never shadows.",
+      "One family: Geist for every UI role, a system monospace for code.",
+      "Dense columns: a left side panel with collapsible sections; one fixed control width in Settings.",
+      "Small, consistent radii: 8px for controls, 10px for cards, 18px for the composer and user messages."
+    ],
+    "rules": [
+      {
+        "name": "The Colour Is Content Rule",
+        "body": "The app's own chrome never carries hue. Colour appears only when it describes the material: code syntax, added and removed lines, errors. A blue or green button, badge, link or status dot is prohibited.",
+        "section": "colors"
+      },
+      {
+        "name": "The No Extremes Rule",
+        "body": "Dark mode never uses near-black with near-white. Page Graphite (about #121212) and text Chalk keep body text near 15:1, not 19:1; secondary text stays clearly secondary at about 8:1.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tint, Don't Paint Rule",
+        "body": "Hover, selection and grouping are black (light) or white (dark) at 3, 5, 10 or 15 percent over the surface. Never a new grey value, never a colour.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Family Rule",
+        "body": "Geist for every UI role, monospace for machine text. A display or serif font is prohibited.",
+        "section": "typography"
+      },
+      {
+        "name": "The Small Caps Are Signposts Rule",
+        "body": "Uppercase is reserved for section labels and tags. Never uppercase a button, a title or a sentence.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "Surfaces are flat at rest and in every state. Depth is a tint or a hairline. If a panel needs a shadow to be told apart from the page, its tint is wrong.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No Glass Rule",
+        "body": "The modal backdrop is the only blur. Blurred or translucent panels are prohibited.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep all chrome on the zero-chroma grey scale (Paper, Shelf, Hairline, Pencil; Graphite, Graphite Raised, Graphite Shelf, Dust, Chalk).",
+      "Do express hover, selection and grouping as black or white at 3, 5, 10 or 15 percent.",
+      "Do separate surfaces with 1px hairlines at 10% and one tonal step, never with shadows.",
+      "Do keep dark-mode body text near 15:1 and secondary text near 8:1 (Chalk and Dust on Graphite).",
+      "Do use the 192px control width and 32px height for every Settings control so the columns align.",
+      "Do keep colour for content only: syntax, Added Green / Removed Rose change counts and diff rows, Signal Red errors.",
+      "Do show state as plain words with a small grey icon (\"Copilot connected\").",
+      "Do let native controls follow the theme (color-scheme: dark under .dark, options on the popover colors); a native select list is drawn by the browser, not by the page's classes."
+    ],
+    "donts": [
+      "Don't make it look like a colourful SaaS dashboard: no blue or purple accents, no gradient buttons, no hero metrics, no coloured status pills.",
+      "Don't use blue or green as an accent anywhere in the chrome; green exists only as \"+N\" added lines.",
+      "Don't use near-black with near-white in dark mode, and don't add surfaces darker than the page (no bg-black panels in dark).",
+      "Don't add shadows, glass or blur to panels; the modal backdrop is the only blur.",
+      "Don't use border-left or border-right wider than 1px as a coloured or grey stripe on cards, notes or alerts. (Markdown callouts in replies still use a 3px left rule; that is existing drift to replace with a full tint, not a pattern to copy.)",
+      "Don't introduce a second typeface or uppercase anything but section labels and tags.",
+      "Don't wrap a Copilot reply in a card; replies sit directly on the page."
+    ]
+  }
+}
