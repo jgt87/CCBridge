@@ -1256,6 +1256,23 @@ function Merge-LateReplyText {
     [pscustomobject]@{ text = $PageText; how = 'page' }
 }
 
+function Test-DamagedTagText([AllowEmptyString()][string]$Text) {
+    <# Whether reply text holds an HTML tag damaged on the way (seen on some tenants: the received text
+       turns <script src="PATH.js"></script> into PATH.jsscript> while the page shows it intact): the
+       end of a tag without its start, or a tag whose attribute quote never closes. #>
+    if ($Text -match '(?i)\.(js|mjs|cjs|css|json)(script|link|style)>') { return $true }
+    foreach ($m in [regex]::Matches($Text, '<[A-Za-z][\w-]*(\s[^<>\n]*)?>')) {
+        $attrs = $m.Groups[1].Value -replace '\{[^{}]*\}', ''
+        if (([regex]::Matches($attrs, '"')).Count % 2 -eq 1) { return $true }
+    }
+    $false
+}
+
+function Get-AlnumHead([string]$Text, [int]$Length = 120) {
+    $a = ($Text.ToLowerInvariant() -replace '[^a-z0-9]+', '')
+    $a.Substring(0, [Math]::Min($Length, $a.Length))
+}
+
 function Update-LateReply {
     <# After Copilot signalled the end of a reply: wait a moment (pacing lateReplySec), then read the
        reply from the page. If Copilot is still answering (Stop visible) wait for it, and if the page
@@ -1277,6 +1294,15 @@ function Update-LateReply {
             while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $Bridge.Session 200 }
         }
         $pt = Get-PageReplyText $Bridge -Fresh
+        # A tag damaged in the received text while the page's raw copy of the same reply is intact:
+        # use the page's copy (it is what Copilot wrote).
+        if ($pt.how -eq 'state' -and "$($pt.text)" -and (Test-DamagedTagText "$($Reply.Text)") -and -not (Test-DamagedTagText "$($pt.text)") -and (Get-AlnumHead "$($Reply.Text)" 8) -eq (Get-AlnumHead "$($pt.text)" 8) -and "$($pt.text)".Length -ge "$($Reply.Text)".Length -and "$($pt.text)".Length -le "$($Reply.Text)".Length * 1.5 + 200) {
+            $before = "$($Reply.Text)".Length
+            $Reply.Text = "$($pt.text)"
+            try { Write-CCBLog info bridge 'The received reply has a damaged HTML tag; using the page copy of the reply' @{ before = $before; after = $Reply.Text.Length } } catch { }
+            if ($Reply.PSObject.Properties['TagRepaired']) { $Reply.TagRepaired = $true } else { $Reply | Add-Member -NotePropertyName TagRepaired -NotePropertyValue $true }
+            return $Reply
+        }
         if ($pt.how -ne 'state' -and -not $waited) { return $Reply }       # visible text only: not exact enough to compare
         $late = Merge-LateReplyText "$($Reply.Text)" "$($pt.text)"
         if (-not $late) { return $Reply }
@@ -1823,4 +1849,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Test-DamagedTagText, Get-AlnumHead, Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

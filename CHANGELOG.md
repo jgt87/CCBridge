@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.86] - 2026-10-05
+
+### Fixed
+- HTML tags damaged on the way back from Copilot (`<script src="PATH.js"></script>` arriving as `PATH.jsscript>` while Copilot's page shows the line intact): when a received reply holds such a damaged tag and the page's own copy of the same reply does not, StreamHub uses the page's copy. A script tag that still arrives as `PATH.jsscript>` in a page file is put back as `<script src="PATH.js"></script>` (in write and REPLACE text, not in SEARCH, so the damaged line already in a file is still found).
+- The HTML file check reports what is left of a damaged tag (`PATH.jsscript>`, `PATH.csslink>`), so a page already damaged by an earlier write shows under Issues and is sent back to Copilot after a change; before, it was plain text to the check.
+
 ## [v0.1.85] - 2026-10-05
 
 ### Added
@@ -990,7 +996,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.85...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.86...HEAD
+[v0.1.86]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.86
 [v0.1.85]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.85
 [v0.1.84]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.84
 [v0.1.83]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.83

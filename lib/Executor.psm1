@@ -147,6 +147,13 @@ function Test-LongPowerShellCommand([AllowEmptyString()][string]$Command, [int]$
     "a PowerShell command line of $($body.Length) characters (more than $MaxChars)"
 }
 
+function Repair-StrippedScriptTag([AllowEmptyString()][string]$Text) {
+    <# Some Copilot routes strip a script tag down to its address and the end of the closing tag:
+       <script src="PATH.js"></script> arrives as PATH.jsscript>. That text never occurs in real
+       HTML, so the tag is put back (attributes like defer or type are lost on the way). #>
+    [regex]::Replace($Text, '(?m)(?<=^|[\s>])([\w.~/-]+\.(?:m?js))script>', '<script src="$1"></script>')
+}
+
 function Repair-CodeText([string]$Path, [string]$Text) {
     <# Text from Copilot made fit for the file: &lt; / &gt; back to < and > (not in markup), and in
        code files the invisible characters a web chat brings along removed (zero-width spaces,
@@ -156,6 +163,7 @@ function Repair-CodeText([string]$Path, [string]$Text) {
         $Text = [regex]::Replace($Text, $script:OddSpace, ' ')
     }
     if ($Path -match '(?i)\.ps[md]?1$') { $Text = Repair-EscapedTypeName $Text }
+    if ($Path -match '(?i)\.(html?|xhtml|vue|svelte|jsx|tsx|php|aspx|cshtml)$') { $Text = Repair-StrippedScriptTag $Text }
     if (Test-MarkupFile $Path) { return $Text }
     ConvertFrom-AngleEntities $Text
 }
@@ -1828,5 +1836,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

@@ -6,6 +6,8 @@ $env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid()
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
+Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
+Import-Module (Join-Path $root 'lib\Lint.psm1') -Force
 
 Describe 'Find-DamagedHtmlLine' {
     $old = "<head>`n  <link rel=`"stylesheet`" href=`"styles.css`">`n</head>"
@@ -38,6 +40,57 @@ Describe 'A damaged HTML edit is refused before it is written' {
         $r.output | Should Match 'tell the user the exact line'
         [IO.File]::ReadAllText($file) | Should Be $orig
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+Describe 'A script tag stripped to PATH.jsscript> is put back' {
+    It 'repairs the address form in page files only, and leaves real text alone' {
+        Repair-StrippedScriptTag '  ./data/example-manifest.jsscript>' | Should Be '  <script src="./data/example-manifest.js"></script>'
+        Repair-StrippedScriptTag '<head>data/a.jsscript></head>' | Should Be '<head><script src="data/a.js"></script></head>'
+        Repair-StrippedScriptTag '<script src="app.js"></script>' | Should Be '<script src="app.js"></script>'
+        Repair-StrippedScriptTag 'see the javascript> docs' | Should Be 'see the javascript> docs'
+        Repair-CodeText 'web/index.html' 'x/a.jsscript>' | Should Be '<script src="x/a.js"></script>'
+        Repair-CodeText 'docs/notes.md' 'x/a.jsscript>' | Should Be 'x/a.jsscript>'
+    }
+    It 'fixes the damaged line in the file through an edit whose REPLACE arrived stripped' {
+        $p = Join-Path $env:TEMP ('ccb-strip-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        $file = Join-Path $p 'index.html'
+        [IO.File]::WriteAllText($file, "<html>`n<head>`n  data/example-manifest.jsscript>`n</head>`n<body></body>`n</html>`n")
+        $config = Get-CCBridgeConfig harness $root
+        $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
+        $edits = @(@{ search = "  data/example-manifest.jsscript>`n</head>"; replace = "  ./data/example-manifest.jsscript>`n</head>" })
+        $r = & (Get-Module Agent) { param($st, $e) Invoke-AgentAction $st ([pscustomobject]@{ type = 'edit'; arg = 'index.html'; edits = $e; body = ''; closed = $true }) 'a1' $null 0 } $s $edits
+        $r.ok | Should Be $true
+        [IO.File]::ReadAllText($file) | Should Match '  <script src="\./data/example-manifest\.js"></script>
+</head>'
+        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+Describe 'A reply with a damaged tag is replaced by the page copy of the same reply' {
+    It 'recognises damaged tag text and leaves correct HTML and code alone' {
+        Test-DamagedTagText "ACTION edit index.html`n  ./data/example.jsscript>`n</head>" | Should Be $true
+        Test-DamagedTagText '<script src="./data/example.jsd>' | Should Be $true
+        Test-DamagedTagText "<script src=`"./data/example.js`"></script>`n<button onClick={() => go(`"a`")}>Go</button>" | Should Be $false
+        Test-DamagedTagText 'if (a < b && c > d) { x = 1; }' | Should Be $false
+    }
+    It 'takes the page copy when it starts the same and is intact' {
+        # The page is replaced inside the module (no Edge): the page copy of the reply is intact.
+        $m = @(Get-Module CopilotBridge)[-1]
+        $r = & $m {
+            function Receive-CdpEvent { $null }
+            function Get-PageReplyState { [pscustomobject]@{ stop = $false } }
+            function Get-PageReplyText { [pscustomobject]@{ how = 'state'; text = "Fixing it.`n<script src=`"./data/example.js`"></script>" } }
+            $bridge = [pscustomobject]@{ Session = $null; Pacing = @{ lateReplySec = 0.1 } }
+            Update-LateReply $bridge ([pscustomobject]@{ Text = "Fixing it.`n./data/example.jsscript>"; Uncertain = 0 })
+        }
+        $r.Text | Should Match '<script src="\./data/example\.js"></script>'
+        $r.TagRepaired | Should Be $true
+    }
+}
+Describe 'The HTML file check finds what is left of a damaged tag' {
+    It 'reports PATH.jsscript> in a page, not a correct script tag' {
+        $bad = @(Test-FileContent 'index.html' "<html>`n<head>`n  data/example-manifest.jsscript>`n</head>`n<body></body>`n</html>`n")
+        ($bad -join ' ') | Should Match "line 3: 'data/example-manifest.jsscript>' is what is left of a damaged <script> tag"
+        @(Test-FileContent 'index.html' "<html>`n<head>`n  <script src=`"data/example-manifest.js`"></script>`n</head>`n<body></body>`n</html>`n").Count | Should Be 0
     }
 }
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

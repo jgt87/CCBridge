@@ -230,6 +230,8 @@ function Test-Html([string]$Text) {
         if ($at -lt $stack.Count - 1 -and -not $first) { $first = "line $($stack[$stack.Count - 1][1]): <$($stack[$stack.Count - 1][0])> is not closed before </$name> at line $line" }
         $stack.RemoveRange($at, $stack.Count - $at)
     }
+    # A tag whose start was lost on the way from the chat (<script src="PATH.js"></script> left as PATH.jsscript>).
+    foreach ($lost in [regex]::Matches($m, '(?i)[\w.~/-]+\.(js|mjs|cjs|css|json)(script|link|style)>')) { "line $(LineAt $m $lost.Index): '$($lost.Value)' is what is left of a damaged <$($lost.Groups[2].Value.ToLowerInvariant())> tag; write the whole tag again" }
     if ($first) { $first } elseif ($stack.Count) { "line $($stack[$stack.Count - 1][1]): <$($stack[$stack.Count - 1][0])> is never closed" }
     $ids = @{}
     foreach ($idm in [regex]::Matches($m, '(?i)\sid\s*=\s*["'']([^"''{}$]+)["'']')) {

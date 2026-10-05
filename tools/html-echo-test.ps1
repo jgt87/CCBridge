@@ -59,6 +59,7 @@ try {
             $r = Send-CopilotPrompt $bridge $prompt -TimeoutSec 180
             $src = if ($r.Source) { $r.Source } else { 'stream' }
             Say "   reply: $($r.Result), read from: $src, repaired merges: $([int]$r.Uncertain)"
+            if ($r.PSObject.Properties['TagRepaired'] -and $r.TagRepaired) { Say '   the received text had damaged HTML tags; the page copy of the reply was used instead' 'Yellow' }
             $got = @(Get-EchoedLines "$($r.Text)")
             $bad = 0; $esc = 0
             for ($i = 0; $i -lt $expected.Count; $i++) {
