@@ -74,7 +74,7 @@ try {
         try {
             New-CopilotChat $bridge
             $entry.workIq = Set-CopilotWorkIq $bridge $true
-            if ($entry.workIq -eq 'unavailable') { Write-Host ' (Work IQ toggle not found: run capture.cmd on a Microsoft 365 Copilot licence first)' -NoNewline -ForegroundColor Yellow }
+            if ($entry.workIq -eq 'unavailable') { Write-Host ' (Work IQ toggle not found; Copilot may still use Microsoft 365 data)' -NoNewline -ForegroundColor DarkGray }
             $r = Send-CopilotPrompt $bridge (New-FieldsQuestion $t $what[$t]) -TimeoutSec 240
             $entry.result = "$($r.Result)"
             $entry.proposedActions = @($r.ProposedActions).Count
@@ -112,7 +112,8 @@ foreach ($e in $results) {
     $md.Add('')
     $md.Add("## $($e.topic)")
     $md.Add('')
-    $md.Add("Work IQ: $($e.workIq); reply: $($e.result); item found: $($e.found); cited source kinds: $(if (@($e.sourceKinds).Count) { $e.sourceKinds -join ', ' } else { 'none' })")
+    $toggle = if ($e.workIq -eq 'unavailable') { 'not found on the page (Copilot may still use Microsoft 365 data; capture.cmd records the toggle)' } else { $e.workIq }
+    $md.Add("Work IQ toggle: $toggle; reply: $($e.result); item found: $($e.found); cited source kinds: $(if (@($e.sourceKinds).Count) { $e.sourceKinds -join ', ' } else { 'none' })")
     if ($e.note) { $md.Add(''); $md.Add("Note: $($e.note)") }
     if (@($e.fields).Count) {
         $md.Add(''); $md.Add('| Field | Type | Description | Example |'); $md.Add('|---|---|---|---|')

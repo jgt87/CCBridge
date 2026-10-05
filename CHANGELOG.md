@@ -6,6 +6,13 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.83] - 2026-10-05
+
+### Fixed
+
+- Long Microsoft 365 requests were cancelled: when Copilot took longer than the reply limit (5 minutes), StreamHub pressed Stop, which cancels Copilot's work (a month-wide summary that Copilot ran as a background task was lost this way). At the limit StreamHub now looks at the page: while Copilot still shows that it is working, it keeps waiting, a minute at a time, up to the agent limit (Settings: agentTimeoutSec, 30 minutes) and shows "Copilot is still working (N min)". A Copilot that has gone silent is still caught by the stall check.
+- Complexity test (complexity-test.cmd): the near-limit step was over the message box's 128,000 characters and is now 123,000; failed steps show their error message instead of empty fields; steps wait up to 30 minutes while Copilot is working.
+
 ## [v0.1.82] - 2026-10-05
 
 ### Added
@@ -960,7 +967,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.82...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.83...HEAD
+[v0.1.83]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.83
 [v0.1.82]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.82
 [v0.1.81]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.81
 [v0.1.80]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.80

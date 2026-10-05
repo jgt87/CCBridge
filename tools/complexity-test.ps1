@@ -97,7 +97,7 @@ $steps = @(
     @{ n = 12; name = 'Microsoft 365 + files: mixed task';   m365 = $true;  prompt = { New-AgentPrompt 'mixed' 'Summarise the decisions and follow-ups from my Teams meetings of this week and write them to notes/weekly-summary.md as a markdown table (date, meeting, decision or follow-up, owner). Then done.' } }
     # Harder: bigger input, longer output, coordinated edits, reasoning, a multi-turn agent loop.
     @{ n = 13; name = 'Instructions + ~100k chars of code';  m365 = $false; prompt = { New-AgentPrompt 'coding' 'In the attached src/Inventory.psm1, make Get-Item42 reject an empty Name and a Quantity above 1000 with clear error messages. Use an edit block with SEARCH/REPLACE, then done.' (New-CodeContext 100000) } }
-    @{ n = 14; name = 'Instructions + ~125k chars (near max)'; m365 = $false; prompt = { New-AgentPrompt 'coding' 'In the attached src/Inventory.psm1, find the function whose price factor is 1.95 for the highest item number and add a comment above it saying "highest 1.95 item". Use an edit block, then done.' (New-CodeContext 124000) } }
+    @{ n = 14; name = 'Instructions + ~120k chars (near max)'; m365 = $false; prompt = { New-AgentPrompt 'coding' 'In the attached src/Inventory.psm1, find the function whose price factor is 1.95 for the highest item number and add a comment above it saying "highest 1.95 item". Use an edit block, then done.' (New-CodeContext 118000) } }   # the message box takes at most 128,000 characters; instructions add about 5,000
     @{ n = 15; name = 'Long output: one large file';         m365 = $false; prompt = { New-AgentPrompt 'coding' 'Write src/Geometry.psm1 for PowerShell 5.1 with 24 functions: area and perimeter (or surface area and volume for solids) for circle, square, rectangle, triangle, ellipse, trapezoid, parallelogram, regular hexagon, cube, sphere, cylinder and cone. Each function gets comment-based help (synopsis, parameters, an example) and parameter validation that rejects negative or zero sizes. One write block with the complete file, then done.' } }
     @{ n = 16; name = 'Coordinated edits across 5 files';    m365 = $false; prompt = { New-AgentPrompt 'coding' 'Rename Get-Item7 to Get-InventoryItem7 everywhere in the attached files: its definition in src/Part1.psm1 and every call in the other files. Use edit blocks (one block per file, several SEARCH/REPLACE pairs where needed), then done.' (New-MultiFileContext 5 7000) } }
     @{ n = 17; name = 'Reasoning: algorithm + tests';        m365 = $false; prompt = { New-AgentPrompt 'coding' 'Build an arithmetic expression evaluator in PowerShell 5.1 without Invoke-Expression: src/Calc.psm1 with Invoke-Calc that supports + - * / ^, parentheses, unary minus, decimals, right-associative ^, and clear errors for division by zero, unbalanced parentheses and unknown characters (with the position). Use a tokenizer and a recursive-descent parser. Add tests/Calc.Tests.ps1 with at least 15 Pester 3.4 tests (Should Be syntax) covering precedence, associativity and every error. Start with a todo checklist, write both files, then done.' } }
@@ -131,7 +131,7 @@ try {
             # The callback runs inside the bridge module, so it keeps its state in a captured hashtable.
             $first = @{ ms = $null }
             $onProgress = { param($t) if (-not $first.ms -and $t) { $first.ms = $watch.ElapsedMilliseconds } }.GetNewClosure()
-            $r = Send-CopilotPrompt $bridge $prompt -TimeoutSec $StepTimeoutSec -OnProgress $onProgress -StallSec ([int]$config.stallSec)
+            $r = Send-CopilotPrompt $bridge $prompt -TimeoutSec $StepTimeoutSec -MaxTimeoutSec 1800 -OnProgress $onProgress -StallSec ([int]$config.stallSec)
             $res.result = if ($r.Result) { $r.Result } else { 'Success' }
             $res.resultMessage = $r.ResultMessage
             $res.seconds = [Math]::Round($watch.Elapsed.TotalSeconds, 1)
@@ -156,7 +156,7 @@ try {
                 foreach ($fu in $step.followUps) {
                     $t++
                     $tw = [Diagnostics.Stopwatch]::StartNew()
-                    $r2 = Send-CopilotPrompt $bridge $fu -TimeoutSec $StepTimeoutSec -StallSec ([int]$config.stallSec)
+                    $r2 = Send-CopilotPrompt $bridge $fu -TimeoutSec $StepTimeoutSec -MaxTimeoutSec 1800 -StallSec ([int]$config.stallSec)
                     $turns += [ordered]@{ turn = $t; result = $(if ($r2.Result) { $r2.Result } else { 'Success' }); seconds = [Math]::Round($tw.Elapsed.TotalSeconds, 1); replyChars = "$($r2.Text)".Length; actions = ((@(Get-ActionBlocks "$($r2.Text)" | ForEach-Object { $_.type })) -join ',') }
                     if ($turns[-1].result -ne 'Success' -or -not $turns[-1].replyChars) { $res.result = $turns[-1].result; if ($res.result -eq 'Success') { $res.result = 'EmptyReply' }; $res.resultMessage = "turn ${t}: $($r2.ResultMessage)"; break }
                 }
@@ -200,7 +200,8 @@ try {
         }
         $results.Add([pscustomobject]$res)
         $color = if ($res.result -eq 'Success' -and $res.replyChars -gt 0) { 'Green' } else { 'Yellow' }
-        Write-Host ("{0} in {1}s, reply {2} chars, via {3}, waited {4} ms after Copilot finished" -f $res.result, $res.seconds, $res.replyChars, $res.route, $res.waitAfterStopGoneMs) -ForegroundColor $color
+        if ($res.result -eq 'Error') { Write-Host ("Error in {0}s: {1}" -f $res.seconds, $res.resultMessage) -ForegroundColor $color }
+        else { Write-Host ("{0} in {1}s, reply {2} chars, via {3}, waited {4} ms after Copilot finished" -f $res.result, $res.seconds, $res.replyChars, $res.route, $res.waitAfterStopGoneMs) -ForegroundColor $color }
         Write-CCBLog info complexity "step $($step.n) $($step.name): $($res.result)" $res
         if ($res.result -eq 'OutOfCredits') { Write-Host 'Out of Copilot credits: stopping.' -ForegroundColor Yellow; break }
         Start-Sleep -Seconds $PauseSec

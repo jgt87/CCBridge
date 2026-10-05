@@ -1192,20 +1192,21 @@ function Send-CopilotPrompt {
         [scriptblock]$OnProgress,
         [scriptblock]$CancelCheck,   # returns $true to stop now: Copilot's Stop is pressed and Cancelled = $true is returned
         [int]$StallSec = 90,         # no data from Copilot this long: it hangs; press Stop and report NoAnswer
+        [int]$MaxTimeoutSec = 0,     # while Copilot still shows it is working at TimeoutSec, keep waiting up to this (0 = no longer)
         [scriptblock]$OnStatus,      # an agent's progress line ("Searching for release details")
         [string]$Agent = '',         # Researcher or Analyst: mentioned at the start of the message
         [string[]]$Files = @(),      # local files to attach
         [switch]$OptionalFiles       # a file that cannot be attached is left out (said in $Bridge.AttachErrors)
     )
     Use-CopilotLock {
-        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $OnStatus
+        $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $OnStatus -MaxTimeoutSec $MaxTimeoutSec
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
         if ($r.Result -eq 'Lost') {
             # The request never reached Copilot's answer stream (seen when the page opens that
             # connection only at the first send). The connection exists now: send it once more.
             Write-CCBLog info bridge 'No part of the reply arrived; sending the prompt again'
             Add-TimelineEvent $Bridge 'resent' $null
-            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $OnStatus -LostSec 0
+            $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $OnStatus -LostSec 0 -MaxTimeoutSec $MaxTimeoutSec
             if ($r.Result -eq 'Lost') { $r.Result = 'NoAnswer' }
         }
         if ($r.Result -eq 'Success' -and -not $r.Cancelled) { $r = Update-LateReply $Bridge $r }
@@ -1299,7 +1300,8 @@ function Send-CopilotPromptUnlocked {
         [scriptblock]$OnStatus,  # an agent's progress line, when it changes
         [string]$Agent = '',   # Researcher or Analyst: the message starts with a mention of that agent
         [string[]]$Files = @(), # local files attached to the message (as with Copilot's + button)
-        [switch]$OptionalFiles  # a file that cannot be attached is left out instead of stopping the send
+        [switch]$OptionalFiles, # a file that cannot be attached is left out instead of stopping the send
+        [int]$MaxTimeoutSec = 0 # at TimeoutSec, keep waiting while Copilot still shows it is working, up to this
     )
     $s = $Bridge.Session
     $replyRecords = 0      # records that belong to a reply (not handshakes or keep-alive pings)
@@ -1353,7 +1355,25 @@ function Send-CopilotPromptUnlocked {
     $lastActivity = Get-Date
     $nextStallCheck = (Get-Date).AddSeconds(30)
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
-    while ((Get-Date) -lt $deadline) {
+    # Pressing Stop while Copilot is still working cancels its work (long Microsoft 365 tasks run
+    # for many minutes). At the deadline: if the page still shows Stop or a busy agent, wait on, a
+    # minute at a time, up to MaxTimeoutSec; the stall check still catches a Copilot that went silent.
+    $started = Get-Date
+    $inTime = {
+        if ((Get-Date) -lt $deadline) { return $true }
+        if ($MaxTimeoutSec -le $TimeoutSec -or ((Get-Date) - $started).TotalSeconds -ge $MaxTimeoutSec) { return $false }
+        $busy = $false
+        try { $st = Get-PageReplyState $Bridge; $busy = [bool]($st -and ($st.stop -or $st.agentBusy)) } catch { }
+        if (-not $busy) { return $false }
+        $mins = [int][Math]::Floor(((Get-Date) - $started).TotalMinutes)
+        Write-CCBLog info bridge "Copilot is still working after $mins min; waiting on (up to $([int]($MaxTimeoutSec / 60)) min)"
+        if ($OnStatus) { try { & $OnStatus "Copilot is still working ($mins min); waiting up to $([int]($MaxTimeoutSec / 60)) min" } catch { } }
+        # Dot-sourced below: this sets the loop's own deadline (a minute on, never past the cap).
+        $deadline = (Get-Date).AddSeconds([Math]::Max(1, [Math]::Min(60, $MaxTimeoutSec - ((Get-Date) - $started).TotalSeconds)))
+        $true
+    }
+    while ($true) {
+        if (-not (. $inTime)) { break }
         if ($CancelCheck -and (& $CancelCheck)) {
             $was = Stop-CopilotReply $Bridge
             $keep = $merger.Text; $finished = $false
@@ -1549,6 +1569,7 @@ function Send-CopilotPromptUnlocked {
             & $OnProgress $merger.Text
         }
     }
+    $TimeoutSec = [int]((Get-Date) - $started).TotalSeconds   # the time actually waited, also when extended
     Write-CCBLog info bridge "No complete reply within $TimeoutSec s" @{ partialChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; sent = @($sentTargets | Select-Object -Unique) }
     Write-NetTrace $net 'timeout'
     if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }

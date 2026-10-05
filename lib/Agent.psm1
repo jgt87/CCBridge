@@ -334,7 +334,7 @@ function Send-ToCopilot {
         }
         $r = $null
         try {
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $status
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -MaxTimeoutSec $(if ([int]$State.Config.agentTimeoutSec -gt 0) { [int]$State.Config.agentTimeoutSec } else { 1800 }) -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $status
         } catch {
             if (-not (Test-ConnectionLost $_) -or $State.ChatStarted) { throw }
             # First message of a chat: reconnect, start a fresh chat and send it once more.
@@ -343,7 +343,7 @@ function Send-ToCopilot {
             Reset-Bridge $State
             Start-NewChat $State
             $bridge = Get-Bridge $State
-            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $status
+            $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -MaxTimeoutSec $(if ([int]$State.Config.agentTimeoutSec -gt 0) { [int]$State.Config.agentTimeoutSec } else { 1800 }) -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $status
         }
     } catch {
         if (Test-ConnectionLost $_) {
