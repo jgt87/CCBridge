@@ -1,3 +1,4 @@
+import { openExternal } from "@/lib/links";
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
 import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
@@ -164,7 +165,7 @@ function Sources({ refs }: { refs: Reference[] }) {
         const label = `${r.kind ? `${r.kind}: ` : ""}${r.title ?? r.url ?? "source"}`;
         const cls = "inline-flex max-w-72 items-center gap-1 truncate rounded-md bg-black/5 px-2 py-0.5 text-foreground/80 dark:bg-white/10";
         return r.url ? (
-          <a className={`${cls} hover:bg-black/10 dark:hover:bg-white/15`} href={r.url} key={i} rel="noreferrer" target="_blank" title={label}>
+          <a className={`${cls} hover:bg-black/10 dark:hover:bg-white/15`} href={r.url} key={i} onClick={openExternal} rel="noreferrer" target="_blank" title={label}>
             <Link2 className="h-3 w-3 shrink-0" />
             <span className="truncate">{label}</span>
           </a>

@@ -21,6 +21,8 @@ import { ReviewPanel } from "./review-panel";
 import type { Activity, QueueEntry, ScheduleItem } from "@/lib/api";
 import type { ScheduleTarget } from "./schedule-form";
 import { cn } from "@/lib/utils";
+import { appEntryUrl, findAppEntry } from "@/lib/app-entry";
+import { openExternal } from "@/lib/links";
 import { readStored, readStoredJson, writeStored } from "@/lib/stored";
 import { useIssueReport } from "@/lib/use-issue-report";
 import { IndexBar } from "./index-bar";
@@ -262,6 +264,7 @@ function FilesPanel({
   issueStamp,
   refreshing = false,
   onShowIssues,
+  previewBase,
 }: {
   files: FileInfo[];
   onOpenFile: (path: string) => void;
@@ -271,7 +274,10 @@ function FilesPanel({
   issueStamp: string;
   refreshing?: boolean;
   onShowIssues?: () => void;
+  /** Where the project is served read-only (/preview/TOKEN/): Open app opens its entry page there. */
+  previewBase?: string;
 }) {
+  const entry = useMemo(() => findAppEntry(files.map((f) => f.path)), [files]);
   const tree = useMemo(() => buildTree(files), [files]);
   const folders = useClosedFolders(project?.path);
   // The issue index: open issues per file, reloaded when the project's details change.
@@ -318,6 +324,20 @@ function FilesPanel({
         </PanelSection>
       )}
       <PanelSection
+        actions={
+          entry && previewBase ? (
+            <a
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground text-xs hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+              href={appEntryUrl(previewBase, entry)}
+              onClick={openExternal}
+              rel="noopener noreferrer"
+              target="_blank"
+              title={`Open ${entry} in a new tab, served read-only by StreamHub (also works for built apps with module scripts)`}
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> Open app
+            </a>
+          ) : null
+        }
         id="files.tree"
         title="Files"
       >
@@ -344,6 +364,8 @@ type SidePanelProps = {
   issueStamp?: string;
   /** The file tree is being refreshed (a bar shows in the Files section). */
   filesRefreshing?: boolean;
+  /** Where the project is served read-only, for Open app (/preview/TOKEN/). */
+  previewBase?: string;
   /** What StreamHub is busy with besides Copilot (indexing, scanning). */
   activity?: Activity | null;
   schedules: ScheduleItem[];
@@ -737,7 +759,7 @@ export function SidePanel(props: SidePanelProps) {
           icon: FolderTree,
           color: "bg-zinc-700 dark:bg-muted",
           content: (
-            <FilesPanel activity={activity} files={files} issueStamp={issueStamp} onShowIssues={showIssues} refreshing={filesRefreshing} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
+            <FilesPanel activity={activity} files={files} issueStamp={issueStamp} onShowIssues={showIssues} previewBase={props.previewBase} refreshing={filesRefreshing} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
           ),
         },
         { id: "automation", title: "Automation", icon: Workflow, color: "bg-zinc-700 dark:bg-muted", content: <AutomationPanel {...props} chains={chains} scripts={scripts} /> },

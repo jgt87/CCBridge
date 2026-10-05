@@ -113,6 +113,21 @@ function Get-ToolVersion([string]$Exe, [string[]]$Arguments = @('--version')) {
     $line
 }
 
+function Test-NpmRegistry {
+    <# Whether npm can download packages: its registry answers through Windows' proxy settings
+       (5 seconds at most). 'reachable', 'blocked', or $null when npm is not installed. #>
+    $reg = Get-ToolVersion 'npm' @('config', 'get', 'registry')
+    if (-not $reg) { return $null }
+    if ($reg -notmatch '^https?://') { $reg = 'https://registry.npmjs.org/' }
+    try {
+        $null = Invoke-WebRequest -Uri $reg -UseBasicParsing -Method Head -TimeoutSec 5
+        'reachable'
+    } catch {
+        # A registry that answers with an error status is reachable; only no answer means blocked.
+        if ($_.Exception.Response) { 'reachable' } else { 'blocked' }
+    }
+}
+
 function Get-OptionalToolChecks {
     <# Optional tools StreamHub uses when they are there: Pester (ships with Windows) and Python,
        Node.js, the .NET SDK and Git for projects that need them. Never a failure: INFO when a tool
@@ -137,7 +152,10 @@ function Get-OptionalToolChecks {
         if (-not $v) { return New-Check 'Node.js' 'INFO' 'not installed' 'Optional: only for projects with a package.json (npm scripts and tests). StreamHub runs without it.' 'https://nodejs.org/' }
         $npm = Get-ToolVersion 'npm'
         $old = ($v -match 'v?(\d+)\.') -and [int]$Matches[1] -lt 18
-        New-Check 'Node.js' $(if ($old) { 'WARN' } else { 'OK' }) "$v$(if ($npm) { ", npm $npm" } else { ', no npm' })" $(if ($old) { 'Node.js 18 or newer is recommended.' } else { '' }) $(if ($old) { 'https://nodejs.org/' } else { '' })
+        $reg = if ($npm) { Test-NpmRegistry } else { $null }
+        $blocked = $reg -eq 'blocked'
+        $hint = @($(if ($old) { 'Node.js 18 or newer is recommended.' }), $(if ($blocked) { 'npm cannot reach its package registry (network or proxy): npm install will not work, so React and other npm projects cannot be built; plain HTML and JavaScript still work.' })) | Where-Object { $_ }
+        New-Check 'Node.js' $(if ($old -or $blocked) { 'WARN' } else { 'OK' }) "$v$(if ($npm) { ", npm $npm$(if ($reg) { ", registry $reg" })" } else { ', no npm' })" ($hint -join ' ') $(if ($old) { 'https://nodejs.org/' } else { '' })
     }))
     foreach ($t in @(@('.NET SDK', 'dotnet', 'Optional: only for C# and .NET projects. StreamHub itself uses the .NET Framework that ships with Windows.', 'https://dotnet.microsoft.com/download'),
                      @('Git', 'git', 'Optional: StreamHub has no Git features, but your own Git tools work next to it.', 'https://git-scm.com/download/win'))) {

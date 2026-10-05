@@ -30,6 +30,7 @@ import { SidePanel } from "@/components/ccb/side-panel";
 import type { ScheduleTarget } from "@/components/ccb/schedule-form";
 import { SchedulesModal } from "@/components/ccb/schedules-modal";
 import { FileViewer, type ViewerChange } from "@/components/ccb/file-viewer";
+import { openExternal, setLinksThroughEdge } from "@/lib/links";
 import { SplitViewHint } from "@/components/ccb/split-view-hint";
 import { ModalBackdrop } from "@/components/ccb/modal-backdrop";
 import { notifyEvents, notifyQueue } from "@/lib/notify";
@@ -103,6 +104,8 @@ export default function App() {
   // hidden and a button (shown only then) opens it over the chat; a click beside it or Esc closes it.
   const [wide, setWide] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // External links open through StreamHub's Edge when the app is a tab there (lib/links.ts).
+  useEffect(() => setLinksThroughEdge(Boolean(state.appInEdge)), [state.appInEdge]);
   useEffect(() => {
     if (!drawerOpen) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDrawerOpen(false);
@@ -553,6 +556,7 @@ export default function App() {
                 schedules={schedulesHere}
                 reviewTick={reviewTick}
                 filesRefreshing={filesRefreshing}
+                previewBase={state.previewBase}
                 issueStamp={state.issueStamp ?? ""}
                 activity={state.activity ?? null}
                 pausedUntil={state.pausedUntil}
@@ -577,6 +581,7 @@ export default function App() {
                     <a
                       className="font-mono underline-offset-2 hover:text-foreground hover:underline"
                       href={changelogUrl(state.commit)}
+                      onClick={openExternal}
                       rel="noopener noreferrer"
                       target="_blank"
                       title="What changed: the changelog on GitHub, as of this commit"

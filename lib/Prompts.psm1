@@ -86,6 +86,14 @@ function Get-ProjectTraits {
     $t.ToArray()
 }
 
+$script:ReactWithNpm = '- Building React here: use Vite with base: ''./'' in vite.config, so the built app (dist/index.html) also opens from a subfolder address; build with npm run build. Do not start a development server (npm run dev, vite, npm start): the user cannot run one. The user opens the built app from the helper program.'
+$script:ReactWithoutNpm = '- This computer has no Node.js or npm, so a React app (or any npm package, bundler or build step) cannot be built here. Build the page with plain HTML, CSS and JavaScript instead, unless the user asks to install Node.js first.'
+
+function Test-ToolInstalled([string]$Name) {
+    <# A program on PATH (not the Store's WindowsApps stubs). #>
+    [bool](Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1)
+}
+
 function Get-EnvironmentText {
     <# What this computer can run, so Copilot does not suggest tools that are not there. Looked up
        once per run of the helper program (the Store's python.exe stub does not count). #>
@@ -182,6 +190,8 @@ function Read-PromptPart([string]$AppRoot, [string]$Name) {
     $t = ([IO.File]::ReadAllText((Join-Path $AppRoot "prompts\$Name"))).Trim()
     # Data copies turned off (setting dataCopies): no word about the helper program keeping them.
     if ($Name -eq 'rules\web.md' -and -not (Test-DataCopiesOn $AppRoot)) { $t = $t -replace '; when the data is also a \.json file[^)]*', ';' }
+    # React needs Node.js and npm to build; without them a React setup cannot work here.
+    if ($Name -eq 'rules\react.md') { $t += "`n" + $(if (Test-ToolInstalled 'npm') { $script:ReactWithNpm } else { $script:ReactWithoutNpm }) }
     $t
 }
 
@@ -295,4 +305,4 @@ function Get-AutoAgent {
     @{ agent = ''; why = '' }
 }
 
-Export-ModuleMember -Function Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage
+Export-ModuleMember -Function Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage

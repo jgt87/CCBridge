@@ -6,6 +6,7 @@
 # The opening runs in the background: Copilot's Edge starts only when StreamHub connects to it.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'Cdp.psm1')
 
 function Test-LocalPageUrl([string]$Url, [int]$Port = 0) {
     <# Whether a tab shows a local page (StreamHub itself, a page check) rather than Copilot. #>
@@ -119,6 +120,37 @@ function Open-AppInCopilotWindow {
     'new-tab'
 }
 
+function Test-AppTabInEdge {
+    <# Whether the app runs as a tab in StreamHub's Edge (next to Copilot, for Split screen). #>
+    param([int]$AppPort, [int]$CdpPort)
+    try {
+        $pages = @((Invoke-RestMethod "http://127.0.0.1:$CdpPort/json/list" -TimeoutSec 2) | Where-Object { $_.type -eq 'page' })
+        [bool]@($pages | Where-Object { (Test-LocalPageUrl $_.url $AppPort) -and $_.url -notmatch '/preview/' }).Count
+    } catch { $false }
+}
+
+function Test-ExternalLink([string]$Url) {
+    <# A web address the app may open in a new tab: http or https, not a local page. #>
+    ($Url -match '^(?i)https?://[^\s]+$') -and -not (Test-LocalPageUrl $Url)
+}
+
+function Open-LinkInEdgeTab {
+    <# Opens a link as a new tab in StreamHub's Edge. Needed because in Edge's Split screen a link
+       clicked in one pane opens in the other pane (replacing Copilot), even with target=_blank;
+       a tab created through Edge's own command (Target.createTarget) is a real new tab.
+       Returns 'new-tab', or 'not-here' when the app is not a tab in that Edge (the browser
+       opens the link itself then). #>
+    param([Parameter(Mandatory)][string]$Url, [int]$AppPort, [int]$CdpPort, [string]$PreviewPrefix = '')
+    # Besides web links: the project's own pages on the read-only preview address (Open app).
+    $preview = $PreviewPrefix -and $Url.StartsWith($PreviewPrefix, [StringComparison]::OrdinalIgnoreCase) -and $Url -notmatch '\s'
+    if (-not $preview -and -not (Test-ExternalLink $Url)) { throw 'only http and https links to other sites are opened' }
+    if (-not (Test-AppTabInEdge $AppPort $CdpPort)) { return 'not-here' }
+    $browser = (Invoke-RestMethod "http://127.0.0.1:$CdpPort/json/version" -TimeoutSec 2).webSocketDebuggerUrl
+    $s = Connect-Cdp $browser
+    try { $null = Invoke-Cdp $s 'Target.createTarget' @{ url = $Url } } finally { Disconnect-Cdp $s }
+    'new-tab'
+}
+
 function Start-AppWindow {
     <# Opens the StreamHub app the way the appWindow setting says, in the background. #>
     param([Parameter(Mandatory)][string]$Url, [string]$Mode = 'copilot-tab', [int]$AppPort, [int]$CdpPort, [string]$EdgePath)
@@ -146,4 +178,4 @@ function Start-AppWindow {
     $script:Opener = @{ ps = $ps; handle = $ps.BeginInvoke() }
 }
 
-Export-ModuleMember -Function Test-LocalPageUrl, Select-AppWindows, Get-HalfRects, Get-TopWindows, Get-CopilotEdgePids, Set-WindowsSideBySide, Open-AppInCopilotWindow, Start-AppWindow
+Export-ModuleMember -Function Test-AppTabInEdge, Test-ExternalLink, Open-LinkInEdgeTab, Test-LocalPageUrl, Select-AppWindows, Get-HalfRects, Get-TopWindows, Get-CopilotEdgePids, Set-WindowsSideBySide, Open-AppInCopilotWindow, Start-AppWindow

@@ -368,3 +368,20 @@ Describe 'Agent: Auto picks an agent by fixed words (Get-AutoAgent)' {
         }
     }
 }
+
+Describe 'React instructions follow what this computer can build' {
+    It 'tells Copilot to use plain HTML and JavaScript when npm is missing' {
+        Mock -ModuleName Prompts Test-ToolInstalled { $false }
+        $t = Get-PromptPart $root 'rules:react'
+        $t | Should Match 'no Node\.js or npm'
+        $t | Should Match 'plain HTML, CSS and JavaScript'
+    }
+    It 'tells Copilot how to build with Vite when npm is there, and never to start a dev server' {
+        Mock -ModuleName Prompts Test-ToolInstalled { $true }
+        $t = Get-PromptPart $root 'rules:react'
+        $t | Should Match "base: './'"
+        $t | Should Match 'npm run build'
+        $t | Should Match 'Do not start a development server'
+        $t | Should Not Match 'CCBridge|StreamHub'
+    }
+}

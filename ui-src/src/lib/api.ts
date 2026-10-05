@@ -194,6 +194,8 @@ export interface AppState {
   previewBase?: string;
   /** Where the app opened: copilot-tab (a tab in the Copilot window), side-by-side or browser. */
   appWindow?: string;
+  /** The app is a tab in StreamHub's Edge: external links open through it (see lib/links.ts). */
+  appInEdge?: boolean;
   /** One-time hints already shown, by name (e.g. splitView), with when. */
   hints?: Record<string, string>;
   /** Changes when the project's issue details change (reload the Issues panel). */
@@ -620,6 +622,7 @@ export const api = {
   changeFile: (changeSet: string, path: string) =>
     call<ChangeFileDiff>("GET", `/api/changeset/file?id=${encodeURIComponent(changeSet)}&path=${encodeURIComponent(path)}`),
   chat: (text: string, opts: ChatOptions = {}) => call<{ ok: boolean }>("POST", "/api/chat", { text, ...opts }),
+  openLink: (url: string) => call<{ ok: boolean; opened: boolean }>("POST", "/api/open-link", { url }),
   setResponseMode: (value: string) => call<{ ok: boolean }>("POST", "/api/response-mode", { value }),
   /** The app's theme, so the Copilot tab can show the same (setting copilotTheme). */
   setCopilotTheme: (theme: "light" | "dark" | "system") => call<{ ok: boolean }>("POST", "/api/copilot-theme", { theme }),

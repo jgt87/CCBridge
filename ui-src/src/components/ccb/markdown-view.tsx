@@ -9,6 +9,7 @@ import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { rehypeAlerts, resolveProjectPath, sanitizeSchema, splitFrontMatter } from "@/lib/markdown-plugins";
+import { openExternal } from "@/lib/links";
 import { cn } from "@/lib/utils";
 import { CodeBlock } from "./code-block";
 import { MermaidBlock } from "./mermaid-block";
@@ -93,7 +94,7 @@ export function MarkdownView({
         );
       }
       return (
-        <a {...rest} href={href} rel="noreferrer" target="_blank">
+        <a {...rest} href={href} onClick={openExternal} rel="noreferrer" target="_blank">
           {children}
         </a>
       );

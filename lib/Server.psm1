@@ -75,6 +75,14 @@ function Read-JsonBody($Ctx) {
     if ($body) { $body | ConvertFrom-Json } else { [pscustomobject]@{} }
 }
 
+function Get-AppInEdge($State) {
+    <# Whether the app is a tab in StreamHub's Edge; asked at most every 30 seconds. #>
+    if ($script:AppInEdgeAt -and ((Get-Date) - $script:AppInEdgeAt).TotalSeconds -lt 30) { return $script:AppInEdge }
+    $script:AppInEdge = Test-AppTabInEdge ([int]$State.Config.port) ([int]$State.Config.cdpPort)
+    $script:AppInEdgeAt = Get-Date
+    $script:AppInEdge
+}
+
 function Get-StateSnapshot($State) {
     @{
         project = $(if ($State.ProjectRoot) { @{ name = (Split-Path $State.ProjectRoot -Leaf); path = $State.ProjectRoot; location = @(Get-ProjectLocation $State.ProjectRoot) } } else { $null })
@@ -96,6 +104,7 @@ function Get-StateSnapshot($State) {
         workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
         activity = (Get-ActivityView $State)
         appWindow = [string]$State.Config.appWindow   # where the app opened (the Split screen hint is for copilot-tab)
+        appInEdge = (Get-AppInEdge $State)   # links then open through Edge (Split screen sends them to the other pane)
         hints = (Get-UiHints $State)
         previewBase = "/preview/$($State.PreviewToken)/"   # images in Markdown files (read-only project files)
         issueStamp = $(if ($State.ProjectRoot) { $p = Get-IssueIndexPath $State.ProjectRoot; if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTimeUtc.Ticks.ToString() } else { '' } } else { '' })
@@ -197,6 +206,12 @@ function Invoke-ApiRequest($Ctx, $State) {
             # History: one file of a change set, before and right after it (Get-ChangeSetFileDiff).
             if (-not $State.ProjectRoot) { throw 'No project is open' }
             return Send-Json $Ctx (Get-ChangeSetFileDiff $State.ProjectRoot ([string]$req.QueryString['id']) ([string]$req.QueryString['path']))
+        }
+        '^POST /api/open-link$' {
+            # An external link as a real new tab in StreamHub's Edge (see Open-LinkInEdgeTab).
+            $b = Read-JsonBody $Ctx
+            $r = Open-LinkInEdgeTab ([string]$b.url) ([int]$State.Config.port) ([int]$State.Config.cdpPort) -PreviewPrefix "http://localhost:$([int]$State.Config.port)/preview/$($State.PreviewToken)/"
+            return Send-Json $Ctx @{ ok = $true; opened = ($r -eq 'new-tab') }
         }
         '^GET /api/queue$' { return Send-Json $Ctx @{ queue = @(Get-QueueView $State 100); pausedUntil = $State.PausedUntil } }
         '^POST /api/copilot-theme$' {
@@ -734,7 +749,9 @@ function Set-Project($State, [string]$Path) {
 
 $script:PreviewTypes = @{ '.html' = 'text/html; charset=utf-8'; '.htm' = 'text/html; charset=utf-8'; '.css' = 'text/css; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.mjs' = 'text/javascript; charset=utf-8'
     '.json' = 'application/json; charset=utf-8'; '.svg' = 'image/svg+xml'; '.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.jpeg' = 'image/jpeg'; '.gif' = 'image/gif'; '.webp' = 'image/webp'
-    '.ico' = 'image/x-icon'; '.woff' = 'font/woff'; '.woff2' = 'font/woff2'; '.txt' = 'text/plain; charset=utf-8'; '.csv' = 'text/csv; charset=utf-8'; '.xml' = 'application/xml' }
+    '.ico' = 'image/x-icon'; '.woff' = 'font/woff'; '.woff2' = 'font/woff2'; '.txt' = 'text/plain; charset=utf-8'; '.csv' = 'text/csv; charset=utf-8'; '.xml' = 'application/xml'
+    # Built apps (Vite, webpack): WebAssembly, source maps, other fonts, the web app manifest.
+    '.wasm' = 'application/wasm'; '.map' = 'application/json; charset=utf-8'; '.ttf' = 'font/ttf'; '.otf' = 'font/otf'; '.webmanifest' = 'application/manifest+json' }
 
 function Send-PreviewFile($Ctx, $State, [string]$RelPath) {
     <# The project's files, read-only, for the page check (GET only, confined to the project). #>
