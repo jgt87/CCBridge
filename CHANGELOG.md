@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.77] - 2026-10-05
+
+### Added
+
+- Images (.png, .jpg, .gif, .webp, .bmp): when Copilot reads an image in the project (a mockup, a design, a screenshot you saved), the image is attached to its next message so Copilot can look at it. Images are never written; Copilot can write an SVG when a drawing is needed. Copilot asks once for consent to images; you give it yourself.
+- Secret files (`lib/SecretFiles.psm1`): .env files, .npmrc, .pypirc, .netrc, .git-credentials, secrets.json and similar, private keys and certificate stores. Copilot sees which keys are set, never their values: reads and searches show `<hidden>`, a key file is not shown at all, and the values are also taken out of command output (so `type .env` shows nothing secret). Copilot does not write or edit these files (it tells you what to add), they are never attached to a message and never sent for code review. Example files (`.env.example`, `.sample`, `.template`) stay as they are.
+- Outlines for C#, Java and Kotlin (types and methods), Go (types and functions), SQL (CREATE and ALTER statements), JSON (keys of the first two levels) and INI/TOML (sections), so Copilot can read just the part it needs of a large file.
+- PDF files: when Copilot reads a PDF in the project, the file is attached to its next message so Copilot reads it itself (as with old .doc, .ppt and .xls files; at most 50 MB). PDFs are never written: Copilot is told to write a .docx instead, which can be saved as PDF from Word. The Office rules for Copilot now also go with requests that mention a PDF and with projects that hold PDFs.
+
 ## [v0.1.76] - 2026-10-05
 
 ### Added
@@ -903,7 +912,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.76...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.77...HEAD
+[v0.1.77]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.77
 [v0.1.76]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.76
 [v0.1.75]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.75
 [v0.1.74]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.74

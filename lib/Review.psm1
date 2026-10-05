@@ -13,6 +13,7 @@ Import-Module (Join-Path $PSScriptRoot 'Executor.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Layout.psm1')
 Import-Module (Join-Path $PSScriptRoot 'DataMirror.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
+Import-Module (Join-Path $PSScriptRoot 'SecretFiles.psm1')
 
 $script:ReviewExt = '(?i)\.(ps1|psm1|psd1|py|pyw|js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|html?|css|scss|less|json|cs|java|kt|go|rs|rb|php|sh|bash|cmd|bat|sql|ya?ml|toml|ini|xml|c|cpp|h|hpp|swift|dart|lua|r)$'
 $script:ReviewSkipPath = '(?i)(^|/)(source|\.streamhub|reviews|evidence|exports|fetch|runbooks|History|Logs|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.next|\.venv|venv|__pycache__)/|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|poetry\.lock)$|\.min\.(js|css)$|\.map$'
@@ -33,6 +34,7 @@ function Get-ReviewFiles {
         $p = $f.path
         if ($want.Count -and -not @($want | Where-Object { $p -eq $_ -or $p.StartsWith("$_/", [StringComparison]::OrdinalIgnoreCase) }).Count) { continue }
         if ($p -notmatch $script:ReviewExt -or $p -match $script:ReviewSkipPath) { continue }
+        if (Get-SecretFileKind $p) { continue }   # never sent to Copilot (SecretFiles.psm1)
         if ([int64]$f.size -gt $MaxBytes) { $skipped.Add("$p (too large, probably generated)"); continue }
         # A data copy (a JS file that only wraps JSON data): its content is the JSON's, reviewed there.
         if ($p -match '(?i)\.js$' -and $dataCopies) {

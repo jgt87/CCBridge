@@ -27,7 +27,7 @@ $script:FixPattern = '(?i)\b(fix|fixes|fixing|repair|solve|debug|repareer|herste
 $script:TestPattern = '(?i)\b(tests?|testing|unit ?tests?|pester|pytest|jest|vitest|spec|specs)\b'
 $script:SecurityPattern = '(?i)\b(login|log ?in|sign ?in|auth|authentication|passwords?|tokens?|api ?keys?|secrets?|sql|query|queries|database|user input|forms?|uploads?|cookies?|sessions?|permissions?|encrypt|xss|injection|sanitize|wachtwoord)\b'
 $script:JsPattern = '(?i)\b(javascript|typescript|node(\.?js)?|npm|react|vue|svelte|angular)\b|\.(m?js|cjs|jsx?|tsx?)\b'
-$script:OfficePattern = '(?i)\b(word|powerpoint|excel)[ -]?(document|doc|file|bestand|presentation|presentatie|deck|workbook|sheet)s?\b|\b(docx?|pptx?|xlsx?|slide ?decks?|slides)\b|\.(docx?|pptx?|xlsx?)\b'
+$script:OfficePattern = '(?i)\b(word|powerpoint|excel)[ -]?(document|doc|file|bestand|presentation|presentatie|deck|workbook|sheet)s?\b|\b(docx?|pptx?|xlsx?|slide ?decks?|slides)\b|\.(docx?|pptx?|xlsx?|pdf)\b|\b(pdfs?|pdf[ -]?(file|document|bestand)s?)\b'
 $script:DataPattern = '(?i)\b(csv|tsv|excel|xlsx|xls|spreadsheets?|data ?files?|import (the )?data|export (the )?data|parse|parsing|columns?|rows?)\b|\.(csv|tsv|xlsx?)\b'
 $script:BigTaskPattern = '(?i)\b(build|create|make|develop)\s+(an?|the|my|me an?|me the)?\s*(new\s+)?(app|application|website|web ?site|tool|dashboard|portal|system|game)\b|\b(multiple|several|all the) (pages|screens|features|parts)\b|\bfrom scratch\b'
 $script:ScriptPattern = '(?i)\b(scripts?|automat\w*|schedul\w*|chains?|cron|task scheduler|batch job)\b|scripts/'
@@ -80,7 +80,7 @@ function Get-ProjectTraits {
     if (@($Paths | Where-Object { $_ -match '(?i)\.(cmd|bat)$' }).Count) { $t.Add('batch') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.(csv|tsv|xlsx?)$' }).Count) { $t.Add('data') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.(cs|csproj|sln)$' }).Count) { $t.Add('csharp') }
-    if (@($Paths | Where-Object { $_ -match '(?i)\.(docx?|pptx?|xlsx?|docm|pptm|xlsm)$' }).Count) { $t.Add('office') }
+    if (@($Paths | Where-Object { $_ -match '(?i)\.(docx?|pptx?|xlsx?|docm|pptm|xlsm|pdf)$' }).Count) { $t.Add('office') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.(jsx|tsx)$' -and $_ -notmatch '(?i)(^|/)node_modules/' }).Count) { $t.Add('react') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.Tests\.ps1$|(^|/)test_[^/]+\.py$|_test\.py$|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)(tests?|__tests__)/' }).Count) { $t.Add('tests') }
     $t.ToArray()

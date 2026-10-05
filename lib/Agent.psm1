@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -1274,6 +1274,7 @@ function Resolve-AgentFiles {
         if ($p -match '(?i)^\.streamhub(/|$)') { throw "$p is one of StreamHub's own records; attach a project file instead." }
         $full = Resolve-ProjectPath $ProjectRoot $p
         if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "There is no file $p in the project." }
+        if (Get-SecretFileKind $full) { throw "$p holds secrets (keys, passwords, tokens) and is never attached." }
         if ((Get-Item -LiteralPath $full).Length -gt $script:AgentFileMaxBytes) { throw "$p is larger than 50 MB; Copilot does not take files that large." }
         $out.Add($full)
     }
@@ -2021,11 +2022,17 @@ function Invoke-AgentAction {
             $out = (Invoke-ReadAction $root $paths -MaxCharsPerFile 200000) -join "`n`n"
             $usedBy = try { Format-ImportUsers $root $paths } catch { '' }   # who imports it or uses its ids, functions, hooks
             if ($usedBy) { $out += "`n`n$usedBy" }
-            # Old binary Office files (.doc, .ppt, .xls) cannot be read here: Copilot reads them from an attachment.
+            # Images, PDFs and old binary Office files (.doc, .ppt, .xls) cannot be read here: Copilot reads them
+            # from an attachment (at most 50 MB, as with @-attached files).
             $files = @(foreach ($rp in $paths) {
                 $fp = $rp -replace ':(outline|\d+(-\d+)?)$', ''
-                if ((Get-OfficeKind $fp) -ne 'old') { continue }
-                try { $f = Resolve-ProjectPath $root $fp; if (Test-Path -LiteralPath $f -PathType Leaf) { $f } } catch { }
+                if ((Get-OfficeKind $fp) -notin 'old', 'pdf', 'image') { continue }
+                try {
+                    $f = Resolve-ProjectPath $root $fp
+                    if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { continue }
+                    if ((Get-Item -LiteralPath $f).Length -gt 50MB) { $out += "`n`n($fp is over 50 MB and cannot be attached; ask the user for the part you need.)"; continue }
+                    $f
+                } catch { }
             })
             return @{ ok = $true; summary = "read $($paths.Count) file(s)"; output = $out; readPaths = @($paths); attach = @($files) }
         }

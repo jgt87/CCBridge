@@ -7,6 +7,7 @@ Import-Module (Join-Path $PSScriptRoot 'Log.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Guardrails.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Office.psm1')
+Import-Module (Join-Path $PSScriptRoot 'SecretFiles.psm1')
 
 $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
@@ -701,7 +702,8 @@ function Get-FileOutline {
        TypeScript (functions, classes, arrow functions), CSS (@media blocks, section comments,
        selectors), PowerShell (functions), Markdown (headings), Python (classes, functions and
        methods, the main block), XML (elements of the first three levels, with their name/id/key
-       attribute), YAML (keys of the first two levels). At most $Max entries. #>
+       attribute), YAML and JSON (keys of the first two levels), C#/Java/Kotlin/Go (types and
+       methods), SQL (CREATE/ALTER statements), INI/TOML (sections). At most $Max entries. #>
     param([string]$Text, [string]$Path, [int]$Max = 80)
     $ext = [IO.Path]::GetExtension($Path).ToLowerInvariant()
     if ($ext -match '^\.(xml|csproj|vbproj|fsproj|props|targets|config|xaml|resx|nuspec|plist|xsd|xsl|xslt|wsdl|svg)$') {
@@ -720,6 +722,65 @@ function Get-FileOutline {
             } finally { $xr.Dispose() }
         } catch { }   # not well-formed: the outline up to that point (the file check reports it)
         return $xo.ToArray()
+    }
+    if ($ext -match '^\.(cs|java|kt|kts|go)$') {
+        # Types and their members, by fixed patterns on the line (no parser): C#, Java, Kotlin, Go.
+        $cl = $Text.Replace("`r`n", "`n").Split("`n"); $co = New-Object System.Collections.Generic.List[string]
+        $mods = '(?:(?:public|private|protected|internal|static|abstract|sealed|partial|final|override|virtual|async|extern|unsafe|new|readonly|synchronized|default|open|data|inline|suspend|operator|infix|private\s+protected|protected\s+internal)\s+)*'
+        $control = '^(if|for|foreach|while|switch|catch|using|lock|return|new|else|do|try|throw|when|fixed)$'
+        for ($k = 0; $k -lt $cl.Length -and $co.Count -lt $Max; $k++) {
+            $l = $cl[$k]; $t = $l.Trim()
+            if (-not $t -or $t -match '^(//|/\*|\*|#|@)') { continue }
+            $ind = '  ' * [Math]::Min(3, [int][Math]::Floor(($l.Length - $l.TrimStart().Length) / 4))
+            if ($ext -eq '.go') {
+                if ($l -match '^func\s+(\([^)]*\)\s*)?(\w+)') { $co.Add("$($k + 1)  func $(if ($Matches[1]) { $Matches[1].Trim() + ' ' })$($Matches[2])") }
+                elseif ($l -match '^type\s+(\w+)\s+(struct|interface)\b') { $co.Add("$($k + 1)  type $($Matches[1]) $($Matches[2])") }
+                continue
+            }
+            if ($t -match "^$mods(class|interface|enum|record|struct|object)\s+(\w+)") { $co.Add("$($k + 1)  $ind$($Matches[1]) $($Matches[2])"); continue }
+            if ($ext -match '^\.kts?$' -and $t -match "^${mods}fun\s+(?:<[^>]+>\s*)?(?:[\w.]+\.)?(\w+)\s*\(") { $co.Add("$($k + 1)  $ind$($Matches[1])()"); continue }
+            # A method: modifiers, a return type, a name and ( on a line that is not a call or a statement.
+            if ($t -match "^$mods[\w<>\[\],.?\s]+?\s+(\w+)\s*(<[^>]*>)?\s*\([^;]*$" -and $t -notmatch '=' -and $Matches[1] -notmatch $control -and $t -notmatch '^(return|new|else|throw)\b') { $co.Add("$($k + 1)  $ind$($Matches[1])()") }
+        }
+        return $co.ToArray()
+    }
+    if ($ext -eq '.sql') {
+        $so = New-Object System.Collections.Generic.List[string]; $sl = $Text.Replace("`r`n", "`n").Split("`n")
+        for ($k = 0; $k -lt $sl.Length -and $so.Count -lt $Max; $k++) {
+            if ($sl[$k] -match '(?i)^\s*(create|alter)\s+(or\s+replace\s+|or\s+alter\s+)?(temporary\s+|temp\s+|unique\s+|materialized\s+)?(table|view|procedure|proc|function|trigger|index|schema|type|sequence)\s+(if\s+not\s+exists\s+)?([\w.\[\]"`]+)') {
+                $so.Add("$($k + 1)  $($Matches[1].ToUpperInvariant()) $($Matches[4].ToUpperInvariant()) $($Matches[6])")
+            }
+        }
+        return $so.ToArray()
+    }
+    if ($ext -match '^\.(ini|toml|cfg|conf|properties|editorconfig|gitconfig)$' -or [IO.Path]::GetFileName($Path) -match '(?i)^\.(editorconfig|gitconfig)$') {
+        $io = New-Object System.Collections.Generic.List[string]; $il = $Text.Replace("`r`n", "`n").Split("`n")
+        for ($k = 0; $k -lt $il.Length -and $io.Count -lt $Max; $k++) { if ($il[$k] -match '^\s*(\[\[?[^\]]+\]\]?)') { $io.Add("$($k + 1)  $($Matches[1])") } }
+        return $io.ToArray()
+    }
+    if ($ext -match '^\.jsonc?$') {
+        # Keys of the first two levels of objects, with their line, by a scan that skips strings.
+        $jo = New-Object System.Collections.Generic.List[string]
+        $stack = New-Object System.Collections.Generic.List[char]
+        $line = 1; $i = 0; $len = [Math]::Min($Text.Length, 400000)   # a character scan: the first 400 KB
+        while ($i -lt $len -and $jo.Count -lt $Max) {
+            $c = $Text[$i]
+            if ($c -eq "`n") { $line++; $i++; continue }
+            if ($c -eq '"') {
+                $start = $i; $i++
+                while ($i -lt $len -and $Text[$i] -ne '"') { if ($Text[$i] -eq '\') { $i++ } elseif ($Text[$i] -eq "`n") { $line++ }; $i++ }
+                $str = $Text.Substring($start + 1, [Math]::Max(0, $i - $start - 1)); $i++
+                if ($stack.Count -ge 1 -and $stack.Count -le 2 -and $stack[$stack.Count - 1] -eq '{') {
+                    $j = $i; while ($j -lt $len -and [char]::IsWhiteSpace($Text[$j])) { $j++ }
+                    if ($j -lt $len -and $Text[$j] -eq ':') { $jo.Add("$line  $('  ' * ($stack.Count - 1))$str") }
+                }
+                continue
+            }
+            if ($c -eq '/' -and $i + 1 -lt $len -and $Text[$i + 1] -eq '/') { while ($i -lt $len -and $Text[$i] -ne "`n") { $i++ }; continue }
+            if ($c -eq '{' -or $c -eq '[') { $stack.Add($c) } elseif (($c -eq '}' -or $c -eq ']') -and $stack.Count) { $stack.RemoveAt($stack.Count - 1) }
+            $i++
+        }
+        return $jo.ToArray()
     }
     if ($ext -match '^\.ya?ml$') {
         $yl = $Text.Replace("`r`n", "`n").Split("`n"); $yo = New-Object System.Collections.Generic.List[string]
@@ -811,10 +872,14 @@ function Invoke-ReadAction {
             $full = Resolve-ProjectPath $ProjectRoot $p
             if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $p`n(file not found)"; continue }
             $office = Get-OfficeKind $full
-            if ($office -eq 'old') { "### $p`n($(Get-OfficeLabel $full), which cannot be read as text here. The helper program attaches the file to this message when it can: read it from the attachment. To change it, write a new .docx or .csv.)"; continue }
+            if ($office -in 'old', 'pdf', 'image') { "### $p`n($(Get-OfficeLabel $full), which cannot be read as text here. The helper program attaches the file to this message when it can: read it from the attachment. To change it, write a new .docx or .csv.)"; continue }
+            # Secret files: which keys are set, never the values (SecretFiles.psm1).
+            $secret = Get-SecretFileKind $full
+            if ($secret -eq 'key') { "### $p`n(holds a private key or certificate: not shown. Never ask for its content.)"; continue }
             if (-not $office -and (Test-BinaryFile $full)) { "### $p`n(binary file, $((Get-Item -LiteralPath $full).Length) bytes - not shown)"; continue }
             $info = Read-TextFile $full
             $raw = $info.Text.Replace("`r`n", "`n")
+            if ($secret) { $raw = Hide-SecretValues $full $raw }
             $lines = $raw.Split("`n")
             $total = $lines.Length
             $from = [Math]::Min($r.From, [Math]::Max(1, $total)); $to = [Math]::Min($r.To, $total)
@@ -836,6 +901,7 @@ function Invoke-ReadAction {
             }
             $whole = ($from -eq 1 -and $last -eq $total)
             $head = if ($whole) { "### $p" } else { "### $p (lines $from-$last of $total$widened)" }
+            if ($secret) { $head += "`n(holds secrets: the values are shown as <hidden>; this file is changed by the user, not by you)" }
             if ($office) {
                 # Shown as Markdown; a .docx made here can be changed with write/edit on this text.
                 $how = if ($office -eq 'word' -and (Test-OwnDocx $full)) { 'write or edit this text to change it' } elseif ($office -eq 'word') { 'made in Word: not rewritten here' } else { 'read only here' }
@@ -885,7 +951,10 @@ function Invoke-GrepAction {
         $full = Resolve-ProjectPath $ProjectRoot $f.path
         if (Test-BinaryFile $full) { continue }
         $n = 0
-        foreach ($line in (Read-TextFile $full).Text.Split("`n")) {
+        if ((Get-SecretFileKind $full) -eq 'key') { continue }
+        $gt = (Read-TextFile $full).Text
+        if (Get-SecretFileKind $full) { $gt = Hide-SecretValues $full $gt }   # keys can be found, values stay hidden
+        foreach ($line in $gt.Split("`n")) {
             $n++
             if ($line -match $Pattern) {
                 $hits.Add("$($f.path):$n`: $($line.Trim())")
@@ -915,6 +984,8 @@ function Assert-Writable([string]$ProjectRoot, [string]$Path) {
     }
     $office = Get-OfficeWriteRefusal $full (Test-Path -LiteralPath $full -PathType Leaf)
     if ($office) { throw $office }
+    $secretFile = Get-SecretWriteRefusal $full
+    if ($secretFile) { throw $secretFile }
     $guard = Test-ProtectedPath $rel
     if ($guard) { throw "$Path is protected (the user listed $guard as protected files) and is read-only. Leave it unchanged; put what you need in another file." }
     if (Test-InSource $ProjectRoot $full) {
@@ -1575,6 +1646,19 @@ function Get-CommandRisk {
     @{ m365 = $m365; destructive = $destructive; reasons = @($reasons) }
 }
 
+function Hide-ProjectSecrets([string]$ProjectRoot, [AllowEmptyString()][string]$Text) {
+    <# Command output with the values of the project's secret files (SecretFiles.psm1) hidden. #>
+    if (-not $Text -or -not $ProjectRoot) { return $Text }
+    try {
+        $vals = @(foreach ($f in @(Get-ProjectFiles $ProjectRoot)) {
+            if ([int64]$f.size -gt 1MB -or -not (Get-SecretFileKind $f.path)) { continue }
+            $full = Resolve-ProjectPath $ProjectRoot $f.path
+            Get-SecretValues $full ([IO.File]::ReadAllText($full))
+        })
+        Hide-KnownSecrets $Text $vals
+    } catch { $Text }
+}
+
 function Invoke-RunAction {
     <# Runs a command with cmd.exe in the project folder. Output is trimmed to head + tail. #>
     param([string]$ProjectRoot, [string]$Command, [int]$TimeoutSec = 120, [int]$MaxChars = 8000, [scriptblock]$CancelCheck)
@@ -1621,6 +1705,7 @@ function Invoke-RunAction {
         $text = $text.Substring(0, $head) + "`n... ($($text.Length - $MaxChars) characters omitted) ...`n" + $text.Substring($text.Length - ($MaxChars - $head))
     }
     if ($batch) { try { [IO.File]::Delete($batch) } catch { } }
+    $text = Hide-ProjectSecrets $ProjectRoot $text   # "type .env" must not show the values either
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 

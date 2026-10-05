@@ -19,19 +19,22 @@ $script:PR = 'http://schemas.openxmlformats.org/package/2006/relationships'
 $script:Maker = 'StreamHub'   # docProps/app.xml Application of documents written here
 
 function Get-OfficeKind([string]$Path) {
-    <# 'word', 'slides', 'sheet' (read as text here), 'old' (binary format: only Copilot can read it)
+    <# 'word', 'slides', 'sheet' (read as text here), 'old' (binary format) or 'pdf' (only Copilot
+       can read those: they go to it as an attachment)
        or $null (not an Office document). #>
     switch -regex ([IO.Path]::GetExtension($Path).ToLowerInvariant()) {
         '^\.doc[xm]$' { return 'word' }
         '^\.pp[st][xm]$' { return 'slides' }
         '^\.xls[xm]$' { return 'sheet' }
         '^\.(doc|dot|ppt|pps|xls|xlt)$' { return 'old' }
+        '^\.pdf$' { return 'pdf' }
+        '^\.(png|jpe?g|gif|webp|bmp)$' { return 'image' }
     }
     $null
 }
 
 function Get-OfficeLabel([string]$Path) {
-    switch (Get-OfficeKind $Path) { 'word' { 'Word document' } 'slides' { 'PowerPoint presentation' } 'sheet' { 'Excel workbook' } 'old' { 'Office document in the old binary format' } default { '' } }
+    switch (Get-OfficeKind $Path) { 'word' { 'Word document' } 'slides' { 'PowerPoint presentation' } 'sheet' { 'Excel workbook' } 'old' { 'Office document in the old binary format' } 'pdf' { 'PDF document' } 'image' { 'Image' } default { '' } }
 }
 
 function Open-OfficeZip([string]$Path) {
@@ -563,6 +566,8 @@ function Get-OfficeWriteRefusal([string]$Path, [bool]$Exists) {
         'slides' { return "$name is a PowerPoint file, which cannot be written here. Write the slides as Markdown (one ## heading per slide) in a .md file, or as a .docx." }
         'sheet' { return "$name is an Excel workbook, which cannot be written here. Write the data as a .csv file (Excel opens it), or as a table in a .docx." }
         'old' { return "$name is in an old binary Office format, which cannot be written here. Write a .docx (from Markdown) or a .csv instead." }
+        'image' { return "$name is an image, which cannot be written here. Describe the image to the user, or write an SVG (text) when a drawing is needed." }
+        'pdf' { return "$name is a PDF, which cannot be written here. Write a .docx (from Markdown) or a .md file instead; the user can save it as PDF from Word." }
     }
     $null
 }

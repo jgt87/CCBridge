@@ -5,6 +5,7 @@ $env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid()
 Import-Module (Join-Path $root 'lib\Office.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
+Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Add-Type -AssemblyName System.IO.Compression
 
 function New-TestZip([string]$Path, [hashtable]$Parts) {
@@ -117,4 +118,22 @@ Describe 'Outlines of XML and YAML files' {
         $yaml = "name: build`non:`n  push:`n    branches: [main]`njobs:`n  test:`n    runs-on: windows-latest"
         (@(Get-FileOutline $yaml 'ci.yml') -join '|') | Should Be '1  name|2  on|3    push|5  jobs|6    test'
     }
+}
+
+Describe 'PDF files go to Copilot as an attachment' {
+    $p2 = Join-Path $env:TEMP ('ccb-pdf-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p2 | Out-Null
+    [IO.File]::WriteAllText((Join-Path $p2 'report.pdf'), "%PDF-1.4`n%test`n")
+    It 'is not read as text, not written, and is attached by the read action' {
+        Get-OfficeKind 'a.PDF' | Should Be 'pdf'
+        (Invoke-ReadAction $p2 @('report.pdf')) -join "`n" | Should Match 'PDF document, which cannot be read as text here.*attaches the file'
+        { Assert-Writable $p2 'out.pdf' } | Should Throw 'Write a .docx'
+        @(Get-PromptModules 'Summarise the PDF in Docs' @{ Traits = @(); Paths = @() }) -contains 'rules:office' | Should Be $true
+        Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
+        $config = Get-CCBridgeConfig harness $root
+        $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p2
+        $res = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'read'; arg = 'report.pdf'; body = '' }) 'a1' $null 0 } $s
+        @($res.attach).Count | Should Be 1
+        $res.attach[0] | Should Match 'report\.pdf$'
+    }
+    Remove-Item $p2 -Recurse -Force -ErrorAction SilentlyContinue
 }
