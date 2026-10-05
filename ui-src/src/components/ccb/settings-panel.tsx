@@ -1,5 +1,7 @@
 import { Monitor, Moon, RotateCcw, Sun, X } from "lucide-react";
 import { getThemeChoice, setThemeChoice, type ThemeChoice } from "@/lib/theme";
+import { type CardView, getCardView, setCardView } from "@/lib/card-view";
+import { readStored, writeStored } from "@/lib/stored";
 import { ModalBackdrop } from "./modal-backdrop";
 import { SsoSection } from "./sso-section";
 import { ToolsSection } from "./tools-section";
@@ -356,7 +358,8 @@ function ResetAllControl({ anyCustom, onReset }: { anyCustom: boolean; onReset: 
   );
 }
 
-/** The settings themselves: this browser, this computer, sign-in, then the app's groups. */
+/** The settings themselves: a list of sections on the left (this browser, this computer,
+    sign-in, then the app's groups) and the chosen section on the right. */
 function SettingsBody({
   settings,
   resetNote,
@@ -369,33 +372,92 @@ function SettingsBody({
     for (const s of settings) if (s.group !== "Sign-in") m.set(s.group, [...(m.get(s.group) ?? []), s]);
     return [...m.entries()];
   }, [settings]);
+  const sections = useMemo(() => [...FIXED_SECTIONS, ...groups.map(([g]) => g)], [groups]);
+  const [chosen, setChosen] = useState<string>(() => readStored(SECTION_KEY) ?? FIXED_SECTIONS[0]);
+  const current = sections.includes(chosen) ? chosen : sections[0];
+  const choose = (name: string) => {
+    setChosen(name);
+    writeStored(SECTION_KEY, name);
+  };
+  const list = groups.find(([g]) => g === current)?.[1] ?? [];
   return (
-    <>
-      {resetNote && <div className="pt-2 text-muted-foreground text-sm">{resetNote}</div>}
-      <SettingsGroup first title="This browser">
-        <SettingLine
-          control={<Segmented label="Theme" onChange={onTheme} options={THEMES} value={theme} />}
-          help="System follows Windows (also when it switches). Default: System."
-          title="Theme"
-        />
-        <NotificationSetting />
-      </SettingsGroup>
-      <SettingsGroup title="This computer">
-        <ToolsSection />
-      </SettingsGroup>
-      <SettingsGroup title="Sign-in">
-        <SsoSection />
-      </SettingsGroup>
-      {groups.map(([group, list]) => (
-        <SettingsGroup key={group} title={group}>
-          {list.map((s) => (
-            <SettingRow key={s.key} onSaved={onSaved} s={s} />
-          ))}
-          {group === "Privacy and retention" && <ClearHistoryRow />}
-          {group === "Privacy and retention" && <ClearEdgeCacheRow />}
-        </SettingsGroup>
-      ))}
-    </>
+    <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+      <nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-black/10 border-b p-2 sm:w-52 sm:flex-col sm:overflow-x-visible sm:overflow-y-auto sm:border-r sm:border-b-0 sm:p-3 dark:border-white/10">
+        {sections.map((name) => (
+          <button
+            aria-current={name === current ? "page" : undefined}
+            className={cn(
+              "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5",
+              name === current ? "bg-black/5 font-medium text-foreground dark:bg-white/10" : "text-muted-foreground",
+            )}
+            key={name}
+            onClick={() => choose(name)}
+            type="button"
+          >
+            {name}
+          </button>
+        ))}
+      </nav>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 [scrollbar-gutter:stable]">
+        {resetNote && <div className="pt-2 text-muted-foreground text-sm">{resetNote}</div>}
+        {current === "This browser" && (
+          <SettingsGroup first title="This browser">
+            <SettingLine
+              control={<Segmented label="Theme" onChange={onTheme} options={THEMES} value={theme} />}
+              help="System follows Windows (also when it switches). Default: System."
+              title="Theme"
+            />
+            <CardViewSetting />
+            <NotificationSetting />
+          </SettingsGroup>
+        )}
+        {current === "This computer" && (
+          <SettingsGroup first title="This computer">
+            <ToolsSection />
+          </SettingsGroup>
+        )}
+        {current === "Sign-in" && (
+          <SettingsGroup first title="Sign-in">
+            <SsoSection />
+          </SettingsGroup>
+        )}
+        {list.length > 0 && (
+          <SettingsGroup first title={current}>
+            {list.map((s) => (
+              <SettingRow key={s.key} onSaved={onSaved} s={s} />
+            ))}
+            {current === "Privacy and retention" && <ClearHistoryRow />}
+            {current === "Privacy and retention" && <ClearEdgeCacheRow />}
+          </SettingsGroup>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Sections that are not app settings groups, always first in the list. */
+const FIXED_SECTIONS = ["This browser", "This computer", "Sign-in"];
+/** The section shown last time (this browser). */
+const SECTION_KEY = "ccb.settingsSection";
+
+const CARD_VIEWS: { id: CardView; label: string }[] = [
+  { id: "expanded", label: "Expanded" },
+  { id: "collapsed", label: "Collapsed" },
+];
+
+/** How change cards start in the chat (this browser only). */
+function CardViewSetting() {
+  const [view, setView] = useState<CardView>(getCardView());
+  const onChange = (v: CardView) => {
+    setCardView(v);
+    setView(v);
+  };
+  return (
+    <SettingLine
+      control={<Segmented label="Change cards" onChange={onChange} options={CARD_VIEWS} value={view} />}
+      help="How Write and Edit cards start in the chat: expanded shows the changed lines at once, collapsed shows one line you can open. Default: Expanded."
+      title="Change cards"
+    />
   );
 }
 
@@ -436,7 +498,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   return (
     <ModalBackdrop onClose={onClose}>
       <div
-        className="flex max-h-[80vh] w-full max-w-[880px] flex-col overflow-hidden rounded-xl border border-black/10 bg-background shadow-xl dark:border-white/10"
+        className="flex h-[min(80vh,760px)] w-full max-w-[960px] flex-col overflow-hidden rounded-xl border border-black/10 bg-background shadow-xl dark:border-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header stays in place; only the settings below it scroll. */}
@@ -452,12 +514,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 [scrollbar-gutter:stable_both-edges]">
-          {error && <div className="pt-2 text-rose-500 dark:text-rose-400 text-sm">{error}</div>}
-          {/* The first time, before the background load: everything at once, not group by group. */}
-          {!settings && !error && <div className="pt-4 text-muted-foreground text-sm">Loading settings...</div>}
-          {settings && <SettingsBody onSaved={setSettings} onTheme={changeTheme} resetNote={resetNote} settings={settings} theme={theme} />}
-        </div>
+        {error && <div className="shrink-0 px-5 pt-2 text-rose-500 dark:text-rose-400 text-sm">{error}</div>}
+        {/* The first time, before the background load: everything at once, not group by group. */}
+        {!settings && !error && <div className="px-5 pt-4 text-muted-foreground text-sm">Loading settings...</div>}
+        {settings && <SettingsBody onSaved={setSettings} onTheme={changeTheme} resetNote={resetNote} settings={settings} theme={theme} />}
       </div>
     </ModalBackdrop>
   );

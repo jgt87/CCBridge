@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { startsOpen, useCardView } from "@/lib/card-view";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import HoldButton from "@/components/kokonutui/hold-button";
 import { Input } from "@/components/ui/input";
@@ -101,11 +102,13 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function ActionCard({ item }: { item: ActionItem }) {
-  const [open, setOpen] = useState(item.status === "awaiting");
+  // null: follow the setting (Settings > This browser > Change cards) until the person opens or closes it.
+  const [open, setOpen] = useState<boolean | null>(null);
+  const view = useCardView();
   const [note, setNote] = useState("");
   const [sent, setSent] = useState(false);
   const awaiting = item.status === "awaiting" && !sent;
-  const expanded = open || awaiting;
+  const expanded = awaiting || (open ?? (item.status === "awaiting" || startsOpen(item.action, view)));
 
   const decide = async (decision: "approve" | "reject") => {
     setSent(true);
@@ -133,7 +136,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
       <button
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
         disabled={!hasDetails}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!expanded)}
         type="button"
       >
         {ICONS[item.action] ?? <Play className="h-4 w-4" />}

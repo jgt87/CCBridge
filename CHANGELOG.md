@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.92] - 2026-10-06
+
+### Changed
+- Write and Edit cards in the chat now start expanded, showing the changed lines at once. Settings > This browser > Change cards switches back to collapsed (kept per browser). A card you open or close yourself stays that way; cards waiting for approval are always open.
+- Settings is no longer one long page: a list of sections on the left (This browser, This computer, Sign-in, then the app's groups) shows one section at a time, which scrolls on its own when it is long. The window keeps one height, the last section is remembered per browser, and on a narrow window the list becomes a row of buttons at the top.
+
 ## [v0.1.91] - 2026-10-06
 
 ### Added
@@ -1033,7 +1039,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.91...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.92...HEAD
+[v0.1.92]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.92
 [v0.1.91]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.91
 [v0.1.90]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.90
 [v0.1.89]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.89
