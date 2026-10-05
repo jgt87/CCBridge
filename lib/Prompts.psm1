@@ -173,6 +173,7 @@ function Get-PromptParts {
         'fetch'     { @('fetch') }                                  # saved fetch prompt: the answer becomes a file
         'fetch-m365' { @('role:assistant', 'm365', 'fetch') }
         'runbook'   { @('role:assistant', 'm365', 'runbook') }   # data runbook: JSON export, read-only
+        'runbook-web' { @('role:research', 'runbook-web') }      # a runbook with sources: web (no Microsoft 365)
         default     { @() }
     }
 }
@@ -210,6 +211,7 @@ function Get-PromptPart {
         '^review$'    { return Read-PromptPart $AppRoot 'review.md' }
         '^review-(code|cross)$' { return Read-PromptPart $AppRoot "review-$($Matches[1]).md" }
         '^runbook$'   { return Read-PromptPart $AppRoot 'runbook.md' }
+        '^runbook-web$' { return Read-PromptPart $AppRoot 'runbook-web.md' }
         '^clarify$'   { return Read-PromptPart $AppRoot 'clarify.md' }
         '^plan-first$' { return Read-PromptPart $AppRoot 'plan-first.md' }
         '^location$'  { return [string]$Context.Location }

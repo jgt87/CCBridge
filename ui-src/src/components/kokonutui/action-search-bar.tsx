@@ -200,7 +200,7 @@ function ActionSearchBar({
             <motion.div
               animate="show"
               aria-label="Search results"
-              className="mt-1 w-full overflow-hidden rounded-md border bg-white shadow-xs dark:border-gray-800 dark:bg-black"
+              className="mt-1 w-full overflow-hidden rounded-md border bg-white shadow-xs dark:border-gray-800 dark:bg-popover"
               exit="exit"
               initial="hidden"
               role="listbox"

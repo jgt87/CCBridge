@@ -60,7 +60,7 @@ interface AIPromptProps {
 
 /** Hover and focus look shared by the buttons in the bar under the message box. */
 const BAR_BUTTON = "hover:bg-black/10 focus-visible:ring-1 focus-visible:ring-zinc-400 focus-visible:ring-offset-0 dark:hover:bg-white/10";
-const TOOL_IDLE = "bg-black/5 text-black/40 hover:text-black dark:bg-white/5 dark:text-white/40 dark:hover:text-white";
+const TOOL_IDLE = "bg-black/5 text-black/40 hover:text-black dark:bg-white/5 dark:text-white/65 dark:hover:text-white";
 
 // --- Message history (CCBridge): Arrow Up / Down like a terminal ---------------------------
 
@@ -290,7 +290,7 @@ export default function AI_Prompt({
             <div className="overflow-y-auto" style={{ maxHeight: "400px" }}>
               <Textarea aria-label="Message"
                 className={cn(
-                  "w-full resize-none rounded-xl rounded-b-none border-none bg-black/5 px-4 py-3 placeholder:text-black/70 focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-white/5 dark:text-white dark:placeholder:text-white/50",
+                  "w-full resize-none rounded-xl rounded-b-none border-none bg-black/5 px-4 py-3 placeholder:text-black/70 focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-white/5 dark:text-foreground dark:placeholder:text-white/50",
                   "min-h-[72px]"
                 )}
                 disabled={disabled}

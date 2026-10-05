@@ -1021,7 +1021,9 @@ function Invoke-RunbookJob {
         $web = Get-WebSourcePrompt $State $spec
         $inp = New-ChainInputBlock $State.ProjectRoot $Inputs ([int]$State.Config.resultCharBudget)
         foreach ($n in @($inp.notes)) { Add-AgentEvent $State 'status' @{ text = "Runbook '$($item.title)': $n." } }
-        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind 'runbook' -Text "$body$(if ($web.text) { "`n`n$($web.text)" })$(if ($inp.text) { "`n`n$($inp.text)" })" -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
+        # A runbook that reads only the web gets the research role, not the Microsoft 365 assistant.
+        $rbKind = if ($spec.sources -eq 'web') { 'runbook-web' } else { 'runbook' }
+        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $rbKind -Text "$body$(if ($web.text) { "`n`n$($web.text)" })$(if ($inp.text) { "`n`n$($inp.text)" })" -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
         $check = $null
         for ($attempt = 1; $attempt -le 2; $attempt++) {
             $r = if ($attempt -eq 1) { Send-AgentJobMessage $State $spec $message $agentSpec } else { Send-WithSources $State $spec $message -Long:([bool]$agentSpec.agent) }
@@ -1352,15 +1354,27 @@ function Send-AgentJobMessage {
     $r
 }
 
+function Get-AgentPromptLine([string]$AppRoot, [string]$Name) {
+    $file = Join-Path $AppRoot "prompts\$Name"
+    if (Test-Path -LiteralPath $file) { [IO.File]::ReadAllText($file).Trim() } else { '' }
+}
+
 function Add-AgentOutputFormat {
-    <# A message to Researcher or Analyst with the expected output added (prompts/agent-output.md),
-       so the answer can be reused: unless the message already says how the answer should look. #>
-    param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Text)
-    if ($Text -match '(?i)\b(format|formatted|json|csv|markdown|tables?|bullets?|bullet points|columns?|yaml|xml|spreadsheet)\b') { return $Text }
-    $file = Join-Path $AppRoot 'prompts\agent-output.md'
-    $line = if (Test-Path -LiteralPath $file) { [IO.File]::ReadAllText($file).Trim() } else { '' }
-    if (-not $line) { return $Text }
-    "$($Text.TrimEnd())`n`n$line"
+    <# A message to Researcher or Analyst with what the answer should cover and look like, so it can
+       be checked and reused. Analyst always gets its scope (prompts/agent-scope-analyst.md: data
+       used, rows left out, assumptions, method, no invented values). The layout (agent-output.md for
+       Researcher, agent-output-analyst.md for Analyst) is left out when the message already says
+       how the answer should look. #>
+    param([Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Text, [string]$Agent = '')
+    $analyst = $Agent -match '(?i)^analyst$'
+    $lines = New-Object System.Collections.Generic.List[string]
+    if ($analyst) { $lines.Add((Get-AgentPromptLine $AppRoot 'agent-scope-analyst.md')) }
+    if ($Text -notmatch '(?i)\b(format|formatted|json|csv|markdown|tables?|bullets?|bullet points|columns?|yaml|xml|spreadsheet)\b') {
+        $lines.Add((Get-AgentPromptLine $AppRoot $(if ($analyst) { 'agent-output-analyst.md' } else { 'agent-output.md' })))
+    }
+    $add = @($lines | Where-Object { $_ })
+    if (-not $add.Count) { return $Text }
+    "$($Text.TrimEnd())`n`n$($add -join "`n")"
 }
 
 function Invoke-AgentRun {
@@ -1386,7 +1400,7 @@ function Invoke-AgentRun {
         $files = @(Resolve-AgentFiles $State.ProjectRoot $att.names)
         if ($files.Count) { Add-AgentEvent $State 'status' @{ text = "Attaching $($att.names -join ', ') (Copilot keeps a copy in your OneDrive, as with its own + button)." } }
         # A new question gets the expected output format (unless it states one); an answer to the plan goes as typed.
-        $message = if ($FollowUp) { $att.text } else { Add-AgentOutputFormat $State.AppRoot $att.text }
+        $message = if ($FollowUp) { $att.text } else { Add-AgentOutputFormat $State.AppRoot $att.text $Agent }
         $r = Send-ToCopilot $State $message -Agent $(if ($FollowUp) { '' } else { $name }) -Long -Files $files
         if ($r.Cancelled) { Add-AgentEvent $State 'status' @{ text = "$name stopped." }; $State.AgentChat = $null; $State.NeedNewChat = $true; return }
         if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) {

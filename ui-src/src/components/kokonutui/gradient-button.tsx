@@ -165,7 +165,7 @@ export default function GradientButton({
           className={cn(
             "absolute inset-0 rounded-lg opacity-90",
             "bg-white/80",
-            "dark:bg-[#141414]"
+            "dark:bg-card"
           )}
         />
       </div>
@@ -174,7 +174,7 @@ export default function GradientButton({
         className={cn(
           "absolute inset-[2px] rounded-lg opacity-95",
           "bg-white/80",
-          "dark:bg-[#141414]"
+          "dark:bg-card"
         )}
       />
 

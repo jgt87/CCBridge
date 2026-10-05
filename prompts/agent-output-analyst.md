@@ -1,0 +1,1 @@
+Format: answer in Markdown with the key findings first, then the method and assumptions, then the results in Markdown tables. Give every chart a title, labelled axes and units. End with the result data in one ```json code block (a list of objects with clear field names), so it can be reused.

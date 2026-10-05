@@ -6,6 +6,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.78] - 2026-10-05
+
+### Added
+
+- A research role for runbooks that read only the web (`sources: web`, as in the web-pages template): Copilot is told to take each value from a named public source, prefer the official one, give dates and never guess a value, and gets none of the Microsoft 365 instructions (`prompts/roles/research.md`, `prompts/runbook-web.md`). Before, every runbook was sent as a Microsoft 365 assistant task. Runbooks without a sources line, or with work or both, are sent as before.
+
+### Changed
+
+- Dark mode is easier to read: the background is a lifted near-black (about #121212 instead of #0a0a0a) and text is softened from near-white, so long replies no longer glare (body text about 15:1 instead of 19:1; secondary text about 8:1). Code in replies is a little larger, line numbers in code and diffs are clearer (5:1 instead of 3.4:1), the message box's tool buttons and tab descriptions are no longer faint, and a few panels that were darker than the page (the upload box, the Undo button, the command list) now use the theme's colors. Light mode is unchanged apart from the larger code and clearer line numbers.
+- Messages to Analyst get their own instructions instead of the line written for Researcher: work only from the data provided, say which files, sheets and columns were used and which rows were left out, state assumptions (units, currency, periods, date formats), show how each figure was calculated, and say so when the data cannot answer the question (`prompts/agent-scope-analyst.md`, always sent); and a layout with key findings, method, result tables, charts with labelled axes and the data as JSON (`prompts/agent-output-analyst.md`, left out when your message names a format). Researcher keeps its line; runbooks and text runbooks with an agent are unchanged (their answer is the runbook's JSON).
+- Project work that is not coding (documents, data, notes, reports, Office files) gets a work method for Copilot: keep the user's structure and wording, take facts from the files and name where they come from, check figures against their source, write results to a new file instead of changing source data, and say what was left out (`prompts/roles/project.md`).
+- The side panel and the Settings window are split into smaller parts (no change in what they show or do): the index line, the tab bodies, the setting controls and the reset-all confirmation are their own components; remembered browser choices go through one helper (`ui-src/src/lib/stored.ts`) and the issue list is loaded by one shared hook.
+
 ## [v0.1.77] - 2026-10-05
 
 ### Added
@@ -912,7 +925,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.77...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.78...HEAD
+[v0.1.78]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.78
 [v0.1.77]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.77
 [v0.1.76]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.76
 [v0.1.75]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.75

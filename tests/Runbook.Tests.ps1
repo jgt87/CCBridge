@@ -83,6 +83,14 @@ Describe 'Runbooks in a project' {
         $m | Should Match 'one ```json code block'
         $m | Should Match 'Request: RUNBOOK BODY$'
     }
+    It 'sends a runbook that reads only the web with the research role and no Microsoft 365 rules' {
+        $m = New-PromptMessage -AppRoot $root -Kind 'runbook-web' -Text 'RUNBOOK BODY' -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
+        $m | Should Match 'careful researcher'
+        $m | Should Match 'facts from the web'
+        $m | Should Match 'one ```json code block'
+        $m | Should Not Match 'personal assistant|Microsoft 365 data|only to read it'
+        $m | Should Match 'Request: RUNBOOK BODY$'
+    }
     Remove-Item $p -Recurse -Force
 }
 

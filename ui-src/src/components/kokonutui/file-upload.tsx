@@ -475,13 +475,13 @@ export default function FileUpload({
       className={cn("relative mx-auto w-full max-w-sm", className || "")}
       role="complementary"
     >
-      <div className="group relative w-full rounded-xl bg-white p-0.5 ring-1 ring-gray-200 dark:bg-black dark:ring-white/10">
+      <div className="group relative w-full rounded-xl bg-white p-0.5 ring-1 ring-gray-200 dark:bg-background dark:ring-white/10">
         <div className="absolute inset-x-0 -top-px h-px w-full bg-gradient-to-r from-transparent via-zinc-500/20 to-transparent" />
 
         <div className="relative w-full rounded-[10px] bg-gray-50/50 p-1.5 dark:bg-white/[0.02]">
           <div
             className={cn(
-              "relative mx-auto w-full overflow-hidden rounded-lg border border-gray-100 bg-white dark:border-white/[0.08] dark:bg-black/50",
+              "relative mx-auto w-full overflow-hidden rounded-lg border border-gray-100 bg-white dark:border-white/[0.08] dark:bg-white/[0.02]",
               error ? "border-red-500/50" : ""
             )}
           >

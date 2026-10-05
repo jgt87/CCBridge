@@ -85,6 +85,18 @@ Describe 'Invoke-AgentRun (Copilot mocked)' {
         Add-AgentOutputFormat $root 'Give it as JSON' | Should Be 'Give it as JSON'
         Add-AgentOutputFormat $root 'Monthly revenue per product' | Should Match '^Monthly revenue per product\r?\n\r?\nFormat: '
     }
+    It 'gives Analyst its own scope and layout; the scope stays when the message names a format' {
+        $a = Add-AgentOutputFormat $root 'Monthly revenue per product' 'analyst'
+        $a | Should Match '^Monthly revenue per product\r?\n\r?\nScope: work only from the data provided'
+        $a | Should Match 'labelled axes'
+        $a | Should Not Match 'a link for each source'
+        $t = Add-AgentOutputFormat $root 'Monthly revenue per product as a table' 'analyst'
+        $t | Should Match 'Scope: '
+        $t | Should Not Match 'Format: '
+        $r = Add-AgentOutputFormat $root 'Compare e-bike makers' 'researcher'
+        $r | Should Match 'a link for each source'
+        $r | Should Not Match 'Scope: '
+    }
     It 'warns when Copilot itself answered instead of the agent' {
         $global:ccbSent = @(); $global:ccbNewChats = 0
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p

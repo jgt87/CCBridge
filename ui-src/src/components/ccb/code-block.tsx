@@ -47,7 +47,7 @@ export function CodeView({ text, language, startLine = 1 }: { text: string; lang
   const numbers = useMemo(() => Array.from({ length: lines }, (_, i) => i + startLine).join("\n"), [lines, startLine]);
   return (
     <div className="flex min-w-max font-mono text-xs leading-5">
-      <pre aria-hidden className="select-none border-black/10 border-r py-4 pr-3 pl-4 text-right text-muted-foreground/60 dark:border-white/10">
+      <pre aria-hidden className="select-none border-black/10 border-r py-4 pr-3 pl-4 text-right text-muted-foreground/75 dark:border-white/10">
         {numbers}
       </pre>
       <pre className="py-4 pr-4 pl-3">{html ? <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} /> : <code>{text}</code>}</pre>

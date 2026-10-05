@@ -6,7 +6,7 @@ import GradientButton from "@/components/kokonutui/gradient-button";
 import { api } from "@/lib/api";
 import { ChangePill } from "./change-pill";
 import SmoothTab from "@/components/kokonutui/smooth-tab";
-import type { ChainItem, ChangeSetView, FetchItem, FetchWeb, FileInfo, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
+import type { ChainItem, ChangeSetView, FetchItem, FetchWeb, FileInfo, IssueReport, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
 
 import { RunbooksPanel, runbookRows } from "./runbooks-panel";
 import { ScriptsPanel } from "./scripts-panel";
@@ -21,6 +21,9 @@ import { ReviewPanel } from "./review-panel";
 import type { Activity, QueueEntry, ScheduleItem } from "@/lib/api";
 import type { ScheduleTarget } from "./schedule-form";
 import { cn } from "@/lib/utils";
+import { readStored, readStoredJson, writeStored } from "@/lib/stored";
+import { useIssueReport } from "@/lib/use-issue-report";
+import { IndexBar } from "./index-bar";
 
 interface TreeNode {
   name: string;
@@ -106,55 +109,6 @@ function IssueBadge({ path }: { path: string }) {
   );
 }
 
-/** The issue index of the project: a bar that runs left to right while it indexes, and a short status line. */
-function IndexBar({
-  activity,
-  files,
-  withIssues,
-  updated,
-  onShowIssues,
-}: { activity: Activity | null; files: number; withIssues: number; updated: string | null; onShowIssues?: () => void }) {
-  const running = Boolean(activity?.label);
-  const pct = running && activity?.total ? Math.min(100, Math.round((activity.done / activity.total) * 100)) : null;
-  const when = updated ? new Date(updated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-  return (
-    <div>
-      <div className="flex min-w-0 items-center gap-1 text-muted-foreground text-xs">
-        {running ? (
-          <span className="truncate">{`${activity?.label.replace(/ for issues.*$/, "")}...`}</span>
-        ) : files && !withIssues ? (
-          // Nothing found: only when it was indexed, no issue text.
-          <span className="truncate">{`Indexed${when ? ` at ${when}` : ""}`}</span>
-        ) : files ? (
-          <>
-            <span className="shrink-0">{`Indexed${when ? ` at ${when}` : ""},`}</span>
-            {onShowIssues ? (
-              // The issue count leads to the issues overview (Code health > Issues).
-              <button className="min-w-0 truncate underline-offset-2 hover:text-foreground hover:underline" onClick={onShowIssues} title="Show the issues (Code health tab)" type="button">
-                {`${withIssues} file(s) with issues`}
-              </button>
-            ) : (
-              <span className="truncate">{`${withIssues} file(s) with issues`}</span>
-            )}
-            <BetaTag title="Beta: still being refined. The checks run without a language model and can miss problems or report ones that are not real." />
-          </>
-        ) : (
-          <span className="truncate">Not indexed yet</span>
-        )}
-      </div>
-      {/* The bar only while an index run is busy. */}
-      {running && (
-        <div className="mt-1.5 h-0.5 w-full overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
-          <div
-            className={cn("h-full rounded-full bg-foreground/60 transition-[width] duration-500", pct === null && "w-1/3 animate-pulse")}
-            style={pct === null ? undefined : { width: `${pct}%` }}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ChangeBadge({ node }: { node: TreeNode }) {
   const { added, removed } = changeTotals(node);
   if (!added && !removed) return null;
@@ -183,14 +137,7 @@ const ClosedFolders = createContext<{ closed: Record<string, boolean>; toggle: (
  */
 function useClosedFolders(projectPath: string | undefined) {
   const key = `ccb.closedFolders.${(projectPath ?? "").toLowerCase()}`;
-  const read = () => {
-    try {
-      const v = JSON.parse(localStorage.getItem(key) ?? "{}");
-      return v && typeof v === "object" ? (v as Record<string, boolean>) : {};
-    } catch {
-      return {};
-    }
-  };
+  const read = () => readStoredJson(key, {}, (v): v is Record<string, boolean> => Boolean(v) && typeof v === "object");
   const [stored, setClosed] = useState<Record<string, boolean>>(read);
   useEffect(() => setClosed(read()), [key]);
   // StreamHub's own folder starts closed; every other folder starts open.
@@ -202,14 +149,27 @@ function useClosedFolders(projectPath: string | undefined) {
       const now = path in next ? next[path] : byDefault(path);
       if (!now === byDefault(path)) delete next[path];
       else next[path] = !now;
-      try {
-        localStorage.setItem(key, JSON.stringify(next));
-      } catch {
-        /* storage blocked: closed until the page reloads */
-      }
+      writeStored(key, JSON.stringify(next)); // storage blocked: closed until the page reloads
       return next;
     });
   return { closed, toggle };
+}
+
+/** An on/off choice remembered in this browser ("1" / "0" under the key). */
+function useStoredFlag(key: string): [boolean, (on: boolean) => void] {
+  const [on, setOn] = useState(() => readStored(key) === "1");
+  const set = (v: boolean) => {
+    setOn(v);
+    writeStored(key, v ? "1" : "0");
+  };
+  return [on, set];
+}
+
+/** Open issues per file (ignored ones left out), the number of files indexed and when. */
+function issueIndex(report: IssueReport | null) {
+  const counts = new Map<string, number>();
+  for (const i of report?.items ?? []) if (i.status !== "ignored") counts.set(i.path, (counts.get(i.path) ?? 0) + 1);
+  return { counts, files: report?.summary?.files ?? 0, updated: report?.summary?.updated ?? null };
 }
 
 function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) => void }) {
@@ -315,40 +275,11 @@ function FilesPanel({
   const tree = useMemo(() => buildTree(files), [files]);
   const folders = useClosedFolders(project?.path);
   // The issue index: open issues per file, reloaded when the project's details change.
-  const [index, setIndex] = useState<{ counts: Map<string, number>; files: number; updated: string | null }>({ counts: new Map(), files: 0, updated: null });
   const indexing = Boolean(activity?.label);
-  useEffect(() => {
-    if (!project) return;
-    const load = () =>
-      api.issues().then(
-        (r) => {
-          const counts = new Map<string, number>();
-          for (const i of r.items) if (i.status !== "ignored") counts.set(i.path, (counts.get(i.path) ?? 0) + 1);
-          setIndex({ counts, files: r.summary?.files ?? 0, updated: r.summary?.updated ?? null });
-        },
-        () => undefined
-      );
-    load();
-    if (!indexing) return;
-    const t = window.setInterval(load, 3000);
-    return () => window.clearInterval(t);
-  }, [project, issueStamp, indexing]);
+  const report = useIssueReport(project, issueStamp, indexing);
+  const index = useMemo(() => issueIndex(report), [report]);
   // The upload area is collapsed by default; the choice is remembered in this browser.
-  const [uploadOpen, setUploadOpenState] = useState(() => {
-    try {
-      return localStorage.getItem("ccb.uploadOpen") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const setUploadOpen = (open: boolean) => {
-    setUploadOpenState(open);
-    try {
-      localStorage.setItem("ccb.uploadOpen", open ? "1" : "0");
-    } catch {
-      /* storage blocked: only this session remembers it */
-    }
-  };
+  const [uploadOpen, setUploadOpen] = useStoredFlag("ccb.uploadOpen");
   const rows = tree.length ? (
     <TreeRows nodes={tree} onOpen={onOpenFile} />
   ) : (
@@ -402,49 +333,12 @@ function FilesPanel({
   );
 }
 function lastTab() {
-  try {
-    const t = localStorage.getItem("ccb.sideTab");
-    if (t === "fetch") return "automation"; // the Fetch tab became part of Automation
-    return t && ["files", "tasks", "changes", "health", "automation"].includes(t) ? t : "files";
-  } catch {
-    return "files";
-  }
+  const t = readStored("ccb.sideTab");
+  if (t === "fetch") return "automation"; // the Fetch tab became part of Automation
+  return t && ["files", "tasks", "changes", "health", "automation"].includes(t) ? t : "files";
 }
 
-export function SidePanel({
-  files,
-  todos,
-  changes,
-  onOpenFile,
-  onUndo,
-  onUndoTo,
-  onUploaded,
-  busy,
-  fetchItems,
-  onRunFetch,
-  onSaveFetch,
-  onEditSchedule,
-  onAttach,
-  project,
-  runbooks,
-  runbookTemplates,
-  onCreateRunbook,
-  onRunRunbook,
-  chains = [],
-  scripts = [],
-  onCreateChain,
-  onRunChain,
-  onRunScript,
-  onChainSteps,
-  queue,
-  schedules,
-  pausedUntil,
-  onSchedule,
-  reviewTick,
-  issueStamp = "",
-  activity = null,
-  filesRefreshing = false,
-}: {
+type SidePanelProps = {
   reviewTick: number;
   /** Changes when the project's issue details change. */
   issueStamp?: string;
@@ -485,43 +379,18 @@ export function SidePanel({
   onRunScript?: (path: string) => void;
   onChainSteps?: (name: string, op: "add" | "remove" | "up" | "down", opts?: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number }) => Promise<void>;
   queue: QueueEntry[];
-}) {
-  // "N file(s) with issues" on the Files tab leads to Changes > Issues: the section is opened,
-  // the tab switched, and the section scrolled into view once it is shown.
-  const [tabRequest, setTabRequest] = useState<{ id: string; n: number } | null>(null);
-  // Open issues (not ignored) for the count next to the Issues heading; reloaded like the index line.
-  const [openIssues, setOpenIssues] = useState(0);
-  const issuesBusy = Boolean(activity?.label);
-  useEffect(() => {
-    if (!project) {
-      setOpenIssues(0);
-      return;
-    }
-    const load = () => api.issues().then((r) => setOpenIssues(r.items.filter((i) => i.status !== "ignored").length), () => undefined);
-    load();
-    if (!issuesBusy) return;
-    const t = window.setInterval(load, 3000);
-    return () => window.clearInterval(t);
-  }, [project, issueStamp, issuesBusy]);
-  const showIssues = () => {
-    openSection("health.issues");
-    setTabRequest((r) => ({ id: "health", n: (r?.n ?? 0) + 1 }));
-    window.setTimeout(() => document.getElementById("section-health.issues")?.scrollIntoView({ behavior: "smooth", block: "start" }), 450);
-  };
-  // From Runs: the History tab, scrolled to that task's change set, which lights up briefly.
-  const [litChange, setLitChange] = useState<number | null>(null);
-  const [confirmUndo, setConfirmUndo] = useState<number | null>(null);
-  const showChange = (seq: number) => {
-    setTabRequest((r) => ({ id: "changes", n: (r?.n ?? 0) + 1 }));
-    setLitChange(seq);
-    window.setTimeout(() => document.getElementById(`change-${seq}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 450);
-    window.setTimeout(() => setLitChange((x) => (x === seq ? null : x)), 2500);
-  };
-  const filesPanel = (
-    <FilesPanel activity={activity} files={files} issueStamp={issueStamp} onShowIssues={showIssues} refreshing={filesRefreshing} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
-  );
+};
 
-  const tasksPanel = (
+/** Actions tab: Copilot's checklist for the current task and the runs in the queue. */
+function TasksPanel({
+  todos,
+  queue,
+  pausedUntil,
+  onOpenFile,
+  onShowChange,
+}: Pick<SidePanelProps, "todos" | "queue" | "pausedUntil" | "onOpenFile"> & { onShowChange: (seq: number) => void }) {
+  const active = queue.filter((q) => q.status === "queued" || q.status === "running").length;
+  return (
     <div>
       <PanelSection badge={todos.length ? <SectionCount n={todos.filter((t) => !t.done).length} /> : null} id="tasks.plan" title="Checklist">
       <div className="space-y-1">
@@ -541,17 +410,128 @@ export function SidePanel({
       )}
       </div>
       </PanelSection>
-      <PanelSection
-        badge={queue.some((q) => q.status === "queued" || q.status === "running") ? <SectionCount n={queue.filter((q) => q.status === "queued" || q.status === "running").length} /> : null}
-        id="tasks.queue"
-        title="Runs"
-      >
-        <QueuePanel onOpen={onOpenFile} onShowChange={showChange} pausedUntil={pausedUntil} queue={queue} />
+      <PanelSection badge={active ? <SectionCount n={active} /> : null} id="tasks.queue" title="Runs">
+        <QueuePanel onOpen={onOpenFile} onShowChange={onShowChange} pausedUntil={pausedUntil} queue={queue} />
       </PanelSection>
     </div>
   );
+}
 
-  const changesPanel = (
+/** Restore on an older change set: a button, then a confirmation in its place. */
+function RestoreControl({
+  newer,
+  busy,
+  confirming,
+  onAsk,
+  onCancel,
+  onRestore,
+}: { newer: number; busy: boolean; confirming: boolean; onAsk: () => void; onCancel: () => void; onRestore: () => void }) {
+  if (!confirming) {
+    return (
+      <button
+        className="ml-auto shrink-0 rounded px-1 hover:bg-black/5 hover:text-foreground disabled:opacity-40 dark:hover:bg-white/5"
+        disabled={busy}
+        onClick={onAsk}
+        title={`Put the files back as they were before this change set: undoes it and the ${newer} newer one(s), newest first`}
+        type="button"
+      >
+        Restore
+      </button>
+    );
+  }
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1">
+      <span>Restore: undo {newer + 1} change sets?</span>
+      <button className="rounded bg-black/10 px-1.5 text-foreground hover:bg-black/15 dark:bg-white/15 dark:hover:bg-white/20" onClick={onRestore} type="button">
+        Yes
+      </button>
+      <button className="rounded px-1.5 hover:bg-black/5 dark:hover:bg-white/5" onClick={onCancel} type="button">
+        Cancel
+      </button>
+    </span>
+  );
+}
+
+/** One change set in History: its time, title and files with their line counts. */
+function ChangeSetCard({
+  change: c,
+  newer,
+  lit,
+  busy,
+  confirming,
+  onConfirm,
+  onUndoTo,
+  onOpenFile,
+}: {
+  change: ChangeSetView;
+  /** How many change sets are newer (0 = the latest). */
+  newer: number;
+  lit: boolean;
+  busy: boolean;
+  confirming: boolean;
+  onConfirm: (seq: number | null) => void;
+  onUndoTo?: (changeSet: string) => void;
+  onOpenFile: (path: string) => void;
+}) {
+  const counts = new Map((c.counts ?? []).map((x) => [x.path, x]));
+  // Restore on an older change set; a confirmation that is open stays until it is answered.
+  const restore = newer > 0 && Boolean(c.changeSet) && (Boolean(onUndoTo) || confirming);
+  return (
+    <div
+      className={cn("rounded-lg border p-2 transition-colors", lit ? "border-black/40 bg-black/5 dark:border-white/40 dark:bg-white/10" : "border-black/10 dark:border-white/10")}
+      id={`change-${c.seq}`}
+    >
+      <div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
+        {c.time}
+        {newer === 0 && <span className="ml-auto shrink-0">latest: Undo takes this back</span>}
+        {restore && (
+          <RestoreControl
+            busy={busy}
+            confirming={confirming}
+            newer={newer}
+            onAsk={() => onConfirm(c.seq)}
+            onCancel={() => onConfirm(null)}
+            onRestore={() => {
+              onConfirm(null);
+              onUndoTo?.(c.changeSet as string);
+            }}
+          />
+        )}
+      </div>
+      {c.title && (
+        <div className="mb-1 line-clamp-2 text-sm" title={c.title}>
+          {c.title}
+        </div>
+      )}
+      {c.files.map((f) => {
+        const n = counts.get(f);
+        return (
+          <button className="flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs hover:underline" key={f} onClick={() => onOpenFile(f)} type="button">
+            <span className="min-w-0 flex-1 truncate">{f}</span>
+            {n && (n.deleted ? <span className="shrink-0 font-sans text-muted-foreground">deleted</span> : <ChangePill added={n.added} removed={n.removed} />)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** History tab: Undo, and the change sets of this session, newest first. */
+function ChangesPanel({
+  changes,
+  busy,
+  litChange,
+  confirmUndo,
+  onConfirmUndo,
+  onUndo,
+  onUndoTo,
+  onOpenFile,
+}: Pick<SidePanelProps, "changes" | "busy" | "onUndo" | "onUndoTo" | "onOpenFile"> & {
+  litChange: number | null;
+  confirmUndo: number | null;
+  onConfirmUndo: (seq: number | null) => void;
+}) {
+  return (
     <div>
       <div className="flex flex-col gap-2">
       <GradientButton
@@ -562,72 +542,36 @@ export function SidePanel({
         variant="subtle"
       />
       {changes.length ? (
-        [...changes].reverse().map((c, i) => {
-          const counts = new Map((c.counts ?? []).map((x) => [x.path, x]));
-          return (
-            <div
-              className={cn("rounded-lg border p-2 transition-colors", litChange === c.seq ? "border-black/40 bg-black/5 dark:border-white/40 dark:bg-white/10" : "border-black/10 dark:border-white/10")}
-              id={`change-${c.seq}`}
-              key={c.seq}
-            >
-              <div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
-                {c.time}
-                {i === 0 && <span className="ml-auto shrink-0">latest: Undo takes this back</span>}
-                {i > 0 && onUndoTo && c.changeSet && confirmUndo !== c.seq && (
-                  <button
-                    className="ml-auto shrink-0 rounded px-1 hover:bg-black/5 hover:text-foreground disabled:opacity-40 dark:hover:bg-white/5"
-                    disabled={busy}
-                    onClick={() => setConfirmUndo(c.seq)}
-                    title={`Put the files back as they were before this change set: undoes it and the ${i} newer one(s), newest first`}
-                    type="button"
-                  >
-                    Restore
-                  </button>
-                )}
-                {i > 0 && confirmUndo === c.seq && c.changeSet && (
-                  <span className="ml-auto flex shrink-0 items-center gap-1">
-                    <span>Restore: undo {i + 1} change sets?</span>
-                    <button
-                      className="rounded bg-black/10 px-1.5 text-foreground hover:bg-black/15 dark:bg-white/15 dark:hover:bg-white/20"
-                      onClick={() => {
-                        setConfirmUndo(null);
-                        onUndoTo?.(c.changeSet as string);
-                      }}
-                      type="button"
-                    >
-                      Yes
-                    </button>
-                    <button className="rounded px-1.5 hover:bg-black/5 dark:hover:bg-white/5" onClick={() => setConfirmUndo(null)} type="button">
-                      Cancel
-                    </button>
-                  </span>
-                )}
-              </div>
-              {c.title && (
-                <div className="mb-1 line-clamp-2 text-sm" title={c.title}>
-                  {c.title}
-                </div>
-              )}
-              {c.files.map((f) => {
-                const n = counts.get(f);
-                return (
-                  <button className="flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs hover:underline" key={f} onClick={() => onOpenFile(f)} type="button">
-                    <span className="min-w-0 flex-1 truncate">{f}</span>
-                    {n && (n.deleted ? <span className="shrink-0 font-sans text-muted-foreground">deleted</span> : <ChangePill added={n.added} removed={n.removed} />)}
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })
+        [...changes].reverse().map((c, i) => (
+          <ChangeSetCard
+            busy={busy}
+            change={c}
+            confirming={confirmUndo === c.seq}
+            key={c.seq}
+            lit={litChange === c.seq}
+            newer={i}
+            onConfirm={onConfirmUndo}
+            onOpenFile={onOpenFile}
+            onUndoTo={onUndoTo}
+          />
+        ))
       ) : (
         <p className="text-muted-foreground text-sm">Files changed in this session are listed here. Each message is one undoable change set.</p>
       )}
       </div>
     </div>
   );
+}
 
-  const healthPanel = (
+/** Code health tab: the issues and the code review. */
+function HealthPanel({
+  openIssues,
+  activity,
+  issueStamp,
+  reviewTick,
+  onOpenFile,
+}: { openIssues: number; activity: Activity | null; issueStamp: string; reviewTick: number; onOpenFile: (path: string) => void }) {
+  return (
     <div>
       <PanelSection
         badge={
@@ -650,89 +594,173 @@ export function SidePanel({
       </PanelSection>
     </div>
   );
+}
+
+/** Automation tab: schedules, runbooks, scripts, hooks and chains. */
+function AutomationPanel({
+  schedules,
+  onSchedule,
+  onEditSchedule,
+  runbooks,
+  runbookTemplates,
+  fetchItems,
+  busy,
+  onAttach,
+  onCreateRunbook,
+  onSaveFetch,
+  onOpenFile,
+  onRunFetch,
+  onRunRunbook,
+  scripts,
+  onRunScript,
+  files,
+  chains,
+  onCreateChain,
+  onRunChain,
+  onChainSteps,
+}: Pick<
+  SidePanelProps,
+  | "schedules"
+  | "onSchedule"
+  | "onEditSchedule"
+  | "runbooks"
+  | "runbookTemplates"
+  | "fetchItems"
+  | "busy"
+  | "onAttach"
+  | "onCreateRunbook"
+  | "onSaveFetch"
+  | "onOpenFile"
+  | "onRunFetch"
+  | "onRunRunbook"
+  | "onRunScript"
+  | "files"
+  | "onCreateChain"
+  | "onRunChain"
+  | "onChainSteps"
+> & { scripts: string[]; chains: ChainItem[] }) {
+  return (
+    <div>
+      <PanelSection badge={schedules.length ? <SectionCount n={schedules.length} /> : null} id="automation.scheduled" title="Scheduled">
+        <div className="space-y-2">
+          <button
+            className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-black/10 px-2 py-1.5 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+            onClick={() => onSchedule({ kind: "chat" })}
+            type="button"
+          >
+            <Plus className="h-3.5 w-3.5" /> New schedule
+          </button>
+          <SchedulesList onEdit={onEditSchedule} schedules={schedules} />
+        </div>
+      </PanelSection>
+      <PanelSection badge={runbooks.length + fetchItems.length ? <SectionCount n={runbooks.length + fetchItems.length} /> : null} id="automation.runbooks" title="Runbooks">
+        <RunbooksPanel
+          busy={busy}
+          onAttach={onAttach}
+          onCreate={onCreateRunbook}
+          onCreateText={onSaveFetch}
+          onOpen={onOpenFile}
+          onRun={(kind, name) => (kind === "text" ? onRunFetch(name) : onRunRunbook(name))}
+          onSchedule={(kind, name) => onSchedule({ kind: kind === "text" ? "fetch" : "runbook", name })}
+          runbooks={runbooks}
+          templates={runbookTemplates}
+          texts={fetchItems}
+        />
+      </PanelSection>
+      {onRunScript && (
+        <PanelSection badge={scripts.length ? <SectionCount n={scripts.length} /> : null} id="automation.scripts" title="Scripts">
+          <ScriptsPanel busy={busy} onOpen={onOpenFile} onRun={onRunScript} onSchedule={(path) => onSchedule({ kind: "script", name: path })} scripts={scripts} />
+        </PanelSection>
+      )}
+      <PanelSection id="automation.hooks" title="Hooks">
+        <HooksPanel onOpen={onOpenFile} refreshKey={files} />
+      </PanelSection>
+      {onCreateChain && onRunChain && (
+        <PanelSection badge={chains.length ? <SectionCount n={chains.length} /> : null} id="automation.chains" title="Chains">
+          <ChainsPanel
+            busy={busy}
+            chains={chains}
+            onCreate={onCreateChain}
+            onOpen={onOpenFile}
+            onRun={onRunChain}
+            onSchedule={(name) => onSchedule({ kind: "chain", name })}
+            onSteps={onChainSteps}
+            runbookNames={runbookRows(runbooks, fetchItems).map((r) => ({ name: r.name, title: r.kind === "text" ? `${r.title} (text)` : r.title }))}
+            scripts={scripts}
+          />
+        </PanelSection>
+      )}
+    </div>
+  );
+}
+
+export function SidePanel(props: SidePanelProps) {
+  const { files, todos, changes, onOpenFile, onUndo, onUndoTo, onUploaded, busy, project, queue, pausedUntil, reviewTick } = props;
+  const { chains = [], scripts = [], issueStamp = "", activity = null, filesRefreshing = false } = props;
+  // "N file(s) with issues" on the Files tab leads to Changes > Issues: the section is opened,
+  // the tab switched, and the section scrolled into view once it is shown.
+  const [tabRequest, setTabRequest] = useState<{ id: string; n: number } | null>(null);
+  // Open issues (not ignored) for the count next to the Issues heading; reloaded like the index line.
+  const report = useIssueReport(project, issueStamp, Boolean(activity?.label));
+  const openIssues = project && report ? report.items.filter((i) => i.status !== "ignored").length : 0;
+  const showIssues = () => {
+    openSection("health.issues");
+    setTabRequest((r) => ({ id: "health", n: (r?.n ?? 0) + 1 }));
+    window.setTimeout(() => document.getElementById("section-health.issues")?.scrollIntoView({ behavior: "smooth", block: "start" }), 450);
+  };
+  // From Runs: the History tab, scrolled to that task's change set, which lights up briefly.
+  const [litChange, setLitChange] = useState<number | null>(null);
+  const [confirmUndo, setConfirmUndo] = useState<number | null>(null);
+  const showChange = (seq: number) => {
+    setTabRequest((r) => ({ id: "changes", n: (r?.n ?? 0) + 1 }));
+    setLitChange(seq);
+    window.setTimeout(() => document.getElementById(`change-${seq}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 450);
+    window.setTimeout(() => setLitChange((x) => (x === seq ? null : x)), 2500);
+  };
 
   return (
     <SmoothTab
       columns={2}
       request={tabRequest}
       defaultTabId={lastTab()}
-      onChange={(id) => {
-        try {
-          localStorage.setItem("ccb.sideTab", id); // per browser: the side panel reopens on this tab
-        } catch {
-          /* storage blocked */
-        }
-      }}
+      onChange={(id) => writeStored("ccb.sideTab", id)} // per browser: the side panel reopens on this tab
       items={[
-        { id: "files", title: "Files", icon: FolderTree, color: "bg-zinc-700", content: filesPanel },
         {
-          id: "automation",
-          title: "Automation",
-          icon: Workflow,
+          id: "files",
+          title: "Files",
+          icon: FolderTree,
           color: "bg-zinc-700",
           content: (
-            <div>
-              <PanelSection badge={schedules.length ? <SectionCount n={schedules.length} /> : null} id="automation.scheduled" title="Scheduled">
-                <div className="space-y-2">
-                  <button
-                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-black/10 px-2 py-1.5 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
-                    onClick={() => onSchedule({ kind: "chat" })}
-                    type="button"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> New schedule
-                  </button>
-                  <SchedulesList onEdit={onEditSchedule} schedules={schedules} />
-                </div>
-              </PanelSection>
-              <PanelSection badge={runbooks.length + fetchItems.length ? <SectionCount n={runbooks.length + fetchItems.length} /> : null} id="automation.runbooks" title="Runbooks">
-                <RunbooksPanel
-                  busy={busy}
-                  onAttach={onAttach}
-                  onCreate={onCreateRunbook}
-                  onCreateText={onSaveFetch}
-                  onOpen={onOpenFile}
-                  onRun={(kind, name) => (kind === "text" ? onRunFetch(name) : onRunRunbook(name))}
-                  onSchedule={(kind, name) => onSchedule({ kind: kind === "text" ? "fetch" : "runbook", name })}
-                  runbooks={runbooks}
-                  templates={runbookTemplates}
-                  texts={fetchItems}
-                />
-              </PanelSection>
-              {onRunScript && (
-                <PanelSection badge={scripts.length ? <SectionCount n={scripts.length} /> : null} id="automation.scripts" title="Scripts">
-                  <ScriptsPanel busy={busy} onOpen={onOpenFile} onRun={onRunScript} onSchedule={(path) => onSchedule({ kind: "script", name: path })} scripts={scripts} />
-                </PanelSection>
-              )}
-              <PanelSection id="automation.hooks" title="Hooks">
-                <HooksPanel onOpen={onOpenFile} refreshKey={files} />
-              </PanelSection>
-              {onCreateChain && onRunChain && (
-                <PanelSection badge={chains.length ? <SectionCount n={chains.length} /> : null} id="automation.chains" title="Chains">
-                  <ChainsPanel
-                    busy={busy}
-                    chains={chains}
-                    onCreate={onCreateChain}
-                    onOpen={onOpenFile}
-                    onRun={onRunChain}
-                    onSchedule={(name) => onSchedule({ kind: "chain", name })}
-                    onSteps={onChainSteps}
-                    runbookNames={runbookRows(runbooks, fetchItems).map((r) => ({ name: r.name, title: r.kind === "text" ? `${r.title} (text)` : r.title }))}
-                    scripts={scripts}
-                  />
-                </PanelSection>
-              )}
-            </div>
+            <FilesPanel activity={activity} files={files} issueStamp={issueStamp} onShowIssues={showIssues} refreshing={filesRefreshing} onOpenFile={onOpenFile} onUploaded={onUploaded} project={project} />
           ),
         },
-        { id: "changes", title: "History", icon: FileClock, color: "bg-zinc-700", content: changesPanel },
-        { id: "tasks", title: "Actions", icon: ListTodo, color: "bg-zinc-700", content: tasksPanel },
+        { id: "automation", title: "Automation", icon: Workflow, color: "bg-zinc-700", content: <AutomationPanel {...props} chains={chains} scripts={scripts} /> },
+        {
+          id: "changes",
+          title: "History",
+          icon: FileClock,
+          color: "bg-zinc-700",
+          content: (
+            <ChangesPanel
+              busy={busy}
+              changes={changes}
+              confirmUndo={confirmUndo}
+              litChange={litChange}
+              onConfirmUndo={setConfirmUndo}
+              onOpenFile={onOpenFile}
+              onUndo={onUndo}
+              onUndoTo={onUndoTo}
+            />
+          ),
+        },
+        { id: "tasks", title: "Actions", icon: ListTodo, color: "bg-zinc-700", content: <TasksPanel onOpenFile={onOpenFile} onShowChange={showChange} pausedUntil={pausedUntil} queue={queue} todos={todos} /> },
         {
           id: "health",
           title: "Code health",
           icon: HeartPulse,
           color: "bg-zinc-700",
           badge: <BetaTag title="Beta: Issues and Code review are still being refined; their checks run without a language model and can miss problems or report ones that are not real." />,
-          content: healthPanel,
+          content: <HealthPanel activity={activity} issueStamp={issueStamp} onOpenFile={onOpenFile} openIssues={openIssues} reviewTick={reviewTick} />,
         },
       ]}
     />

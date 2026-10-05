@@ -97,8 +97,8 @@ function DiffLineRow({ line, html }: { line: DiffLine; html: string | undefined 
   const look = LINE_LOOK[line.kind];
   return (
     <tr className={cn(look.row)}>
-      <td className="w-10 select-none px-2 text-right text-muted-foreground/60">{line.oldNo ?? ""}</td>
-      <td className="w-10 select-none px-2 text-right text-muted-foreground/60">{line.newNo ?? ""}</td>
+      <td className="w-10 select-none px-2 text-right text-muted-foreground/75">{line.oldNo ?? ""}</td>
+      <td className="w-10 select-none px-2 text-right text-muted-foreground/75">{line.newNo ?? ""}</td>
       <td className="whitespace-pre px-2">
         <span className={cn("mr-2 select-none", look.signClass)}>{look.sign}</span>
         <LineText html={html} text={line.text} />

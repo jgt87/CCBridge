@@ -115,6 +115,19 @@ Describe 'Runbooks and fetch prompts with an agent (Copilot mocked)' {
             $global:ccbAgentSent[0].agent | Should Be ''
             $global:ccbAgentSent[0].long | Should Be $false
             @($s.Events | Where-Object { $_.type -eq 'status' -and $_.text -match 'came from' }).Count | Should Be 0
+            $global:ccbAgentSent[0].text | Should Match 'personal assistant'   # no sources line: Microsoft 365 data, as before
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+    It 'sends a runbook that reads only the web with the research role' {
+        $p = New-AgentProject
+        try {
+            [IO.File]::WriteAllText((Join-Path $p 'Runbooks\prices.runbook.md'), "---`ntitle: Prices`noutput: Runbooks/Exports/prices.json`nitemsKey: items`nsources: web`n---`nList prices as JSON.")
+            $global:ccbAgentSent = @(); $global:ccbPlanFirst = $false; $global:ccbAgentName = ''
+            $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p
+            Invoke-RunbookJob $s 'prices'
+            $global:ccbAgentSent[0].text | Should Match 'careful researcher'
+            $global:ccbAgentSent[0].text | Should Not Match 'personal assistant|Microsoft 365 data'
+            Test-Path (Join-Path $p 'Runbooks\Exports\prices.json') | Should Be $true
         } finally { Remove-Item $p -Recurse -Force }
     }
 }

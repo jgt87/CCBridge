@@ -1,0 +1,1 @@
+Scope: work only from the data provided. Say which files, sheets and columns you used, and which rows you left out and why (blanks, duplicates, outliers). State your assumptions about units, currency, periods and date formats. Show how each figure was calculated so it can be checked. If the data cannot answer the question, say so instead of estimating or inventing values.

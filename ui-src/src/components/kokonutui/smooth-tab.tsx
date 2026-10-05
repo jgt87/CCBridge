@@ -93,7 +93,7 @@ function TabCardContent({
           <h3 className="bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 font-semibold text-2xl tracking-tight [text-shadow:_0_1px_1px_rgb(0_0_0_/_10%)]">
             {title}
           </h3>
-          <p className="max-w-[90%] text-black/50 text-sm leading-relaxed dark:text-white/50">
+          <p className="max-w-[90%] text-black/50 text-sm leading-relaxed dark:text-white/65">
             {description}
           </p>
         </div>

@@ -9,6 +9,7 @@ import { api, type EdgeCacheInfo, type Setting } from "@/lib/api";
 import { formatBytes } from "@/lib/project-overview";
 import { notifyEnabled, notifySupported, setNotifyEnabled } from "@/lib/notify";
 import { cn } from "@/lib/utils";
+import { settingControlKind } from "./setting-kind";
 import { cachedEdgeCache, cachedSettings, loadEdgeCache, loadSettings, rememberEdgeCache, rememberSettings } from "@/lib/settings-cache";
 
 /** A setting's value as text: a command list one per line, a switch as on/off. */
@@ -23,11 +24,8 @@ function defaultText(s: Setting): string {
   return asDraft(s.default);
 }
 
-/** A select whose options are exactly on and off (in any order). */
-export function isOnOff(options: string[] | undefined): boolean {
-  const o = [...(options ?? [])].sort();
-  return o.length === 2 && o[0] === "off" && o[1] === "on";
-}
+// A select whose options are exactly on and off: kept exported from here as before.
+export { isOnOff } from "./setting-kind";
 
 /** How an option shows in a list: first letter capitalised, dashes as spaces ("named-sites" -> "Named sites"). */
 // Values whose plain capitalised form would not say what they do.
@@ -47,6 +45,93 @@ const ON_OFF = [
   { id: "on" as const, label: "On" },
   { id: "off" as const, label: "Off" },
 ];
+
+/** The control of one setting (not lists: see ListSettingRow), by settingControlKind. */
+function SettingControl({ s, draft, setDraft, save }: { s: Setting; draft: string; setDraft: (v: string) => void; save: (value: Setting["value"]) => void }) {
+  const kind = settingControlKind(s);
+  if (kind === "info") return <span className={cn(fieldClass, "inline-flex items-center border-transparent font-mono")}>{asDraft(s.value)}</span>;
+  // A toggle saves true/false; a select of just on and off looks like every other switch but keeps saving "on"/"off".
+  if (kind === "switch") return <Segmented label={s.label} onChange={(o) => save(s.type === "toggle" ? o === "on" : o)} options={ON_OFF} value={draft === "on" ? "on" : "off"} />;
+  if (kind === "tiers") {
+    return <Segmented label={s.label} onChange={(v) => save(v)} options={(s.options ?? []).map((o) => ({ id: o, label: optionLabel(o) }))} value={String(s.value ?? "standard")} />;
+  }
+  if (kind === "select") {
+    return (
+      <select aria-label={s.label} className={fieldClass} onChange={(e) => save(e.target.value)} value={draft}>
+        {(s.options ?? []).map((o) => (
+          <option key={o} value={o}>
+            {optionLabel(o)}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <input
+      aria-label={s.label}
+      className={fieldClass}
+      max={s.max}
+      min={s.min}
+      onBlur={() => draft !== String(s.value ?? "") && save(draft)}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      step="any"
+      type="number"
+      value={draft}
+    />
+  );
+}
+
+/** A list setting (commands, protected paths): one entry per line, saved when leaving the box. */
+function ListBox({ s, draft, setDraft, save }: { s: Setting; draft: string; setDraft: (v: string) => void; save: (value: Setting["value"]) => void }) {
+  return (
+    <textarea
+      aria-label={s.label}
+      className="min-h-[4.5rem] w-full rounded-md border border-black/10 bg-transparent px-2 py-1 font-mono text-xs outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30"
+      onBlur={() => draft !== asDraft(s.value) && save(draft.split("\n").map((l) => l.trim()).filter(Boolean))}
+      onChange={(e) => setDraft(e.target.value)}
+      placeholder={s.type === "commands" ? "none (every command asks)" : (s.placeholder ?? "none")}
+      spellCheck={false}
+      value={draft}
+    />
+  );
+}
+
+/** Enforcement: what the chosen tier does, under the switch, changing as you switch. */
+function EnforcementNotes({ value, notes }: { value: Setting["value"]; notes: React.ReactNode }) {
+  const tier = ENFORCEMENT_TIERS[String(value ?? "standard")] ?? ENFORCEMENT_TIERS.standard;
+  return (
+    <>
+      <ul className="mt-1.5 space-y-0.5 text-xs">
+        {tier.map((line) => (
+          <li className="flex gap-1.5" key={line}>
+            <span className="text-muted-foreground">&bull;</span>
+            <span>{line}</span>
+          </li>
+        ))}
+      </ul>
+      {notes}
+    </>
+  );
+}
+
+/** "Saved" for a moment after a change, and reset to the default (only when the setting was changed). */
+function SettingSide({ s, saved, onReset }: { s: Setting; saved: boolean; onReset: () => void }) {
+  if (s.type === "info") return null;
+  return (
+    <>
+      <span className={cn("text-muted-foreground text-xs", !saved && "invisible")}>Saved</span>
+      <button
+        className={cn("rounded p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5", !s.custom && "invisible")}
+        onClick={onReset}
+        title={`Reset to the default (${defaultText(s)})`}
+        type="button"
+      >
+        <RotateCcw className="h-3.5 w-3.5" />
+      </button>
+    </>
+  );
+}
 
 /** One setting from the app (config\harness.local.json): saved on change, with "reset to default". */
 function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => void }) {
@@ -68,20 +153,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
     }
   };
 
-  const side =
-    s.type === "info" ? null : (
-      <>
-        <span className={cn("text-muted-foreground text-xs", !saved && "invisible")}>Saved</span>
-        <button
-          className={cn("rounded p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5", !s.custom && "invisible")}
-          onClick={() => save(null)}
-          title={`Reset to the default (${defaultText(s)})`}
-          type="button"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </button>
-      </>
-    );
+  const side = <SettingSide onReset={() => save(null)} s={s} saved={saved} />;
   const help = (
     <>
       {s.help}
@@ -89,82 +161,17 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
     </>
   );
   const notes = error ? <div className="text-rose-500 text-xs">{error}</div> : null;
+  const kind = settingControlKind(s);
 
-  // A list (commands, protected paths): one per line, the full width under the text, saved when leaving the box.
-  if (s.type === "commands" || s.type === "list") {
-    return (
-      <SettingLine
-        below={
-          <textarea
-            aria-label={s.label}
-            className="min-h-[4.5rem] w-full rounded-md border border-black/10 bg-transparent px-2 py-1 font-mono text-xs outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30"
-            onBlur={() => draft !== asDraft(s.value) && save(draft.split("\n").map((l) => l.trim()).filter(Boolean))}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={s.type === "commands" ? "none (every command asks)" : (s.placeholder ?? "none")}
-            spellCheck={false}
-            value={draft}
-          />
-        }
-        help={help}
-        notes={notes}
-        side={side}
-        title={s.label}
-      />
-    );
-  }
-
-  const control =
-    s.type === "info" ? (
-      <span className={cn(fieldClass, "inline-flex items-center border-transparent font-mono")}>{asDraft(s.value)}</span>
-    ) : s.type === "toggle" ? (
-      <Segmented label={s.label} onChange={(o) => save(o === "on")} options={ON_OFF} value={draft === "on" ? "on" : "off"} />
-    ) : s.type === "select" && s.key === "enforcement" ? (
-      <Segmented label={s.label} onChange={(v) => save(v)} options={(s.options ?? []).map((o) => ({ id: o, label: optionLabel(o) }))} value={String(s.value ?? "standard")} />
-    ) : s.type === "select" && isOnOff(s.options) ? (
-      // A choice of just on and off looks like every other switch (the value saved stays "on"/"off").
-      <Segmented label={s.label} onChange={(o) => save(o)} options={ON_OFF} value={draft === "on" ? "on" : "off"} />
-    ) : s.type === "select" ? (
-      <select aria-label={s.label} className={fieldClass} onChange={(e) => save(e.target.value)} value={draft}>
-        {(s.options ?? []).map((o) => (
-          <option key={o} value={o}>
-            {optionLabel(o)}
-          </option>
-        ))}
-      </select>
-    ) : (
-      <input
-        aria-label={s.label}
-        className={fieldClass}
-        max={s.max}
-        min={s.min}
-        onBlur={() => draft !== String(s.value ?? "") && save(draft)}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-        step="any"
-        type="number"
-        value={draft}
-      />
-    );
-  // Enforcement: what the chosen tier does, under the switch, changing as you switch.
-  if (s.key === "enforcement") {
-    const tier = ENFORCEMENT_TIERS[String(s.value ?? "standard")] ?? ENFORCEMENT_TIERS.standard;
+  // A list (commands, protected paths): the box goes the full width under the text.
+  if (kind === "list") return <SettingLine below={<ListBox draft={draft} s={s} save={save} setDraft={setDraft} />} help={help} notes={notes} side={side} title={s.label} />;
+  const control = <SettingControl draft={draft} s={s} save={save} setDraft={setDraft} />;
+  if (kind === "tiers") {
     return (
       <SettingLine
         control={control}
         help="How strictly the file checks, tests and hooks hold Copilot to their findings. Problems that break a file always go back to Copilot; the tiers differ in how often a task waits for a fix and what happens with likely mistakes. Default: Standard."
-        notes={
-          <>
-            <ul className="mt-1.5 space-y-0.5 text-xs">
-              {tier.map((line) => (
-                <li className="flex gap-1.5" key={line}>
-                  <span className="text-muted-foreground">&bull;</span>
-                  <span>{line}</span>
-                </li>
-              ))}
-            </ul>
-            {notes}
-          </>
-        }
+        notes={<EnforcementNotes notes={notes} value={s.value} />}
         side={side}
         title={s.label}
       />
@@ -304,6 +311,94 @@ function NotificationSetting() {
   );
 }
 
+/** Closes on Escape while the window is open. */
+function useEscapeKey(onClose: () => void) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+}
+
+/** "Reset all to defaults", asking once more first. */
+function ResetAllControl({ anyCustom, onReset }: { anyCustom: boolean; onReset: () => void }) {
+  const [confirm, setConfirm] = useState(false);
+  if (!confirm) {
+    return (
+      <button
+        className="inline-flex h-8 items-center gap-1 rounded-md px-2.5 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5"
+        disabled={!anyCustom}
+        onClick={() => setConfirm(true)}
+        title={anyCustom ? "Set every setting below back to the app default" : "All settings have the app defaults"}
+        type="button"
+      >
+        <RotateCcw className="h-3.5 w-3.5" /> Reset all to defaults
+      </button>
+    );
+  }
+  return (
+    <>
+      <span className="text-muted-foreground text-xs">Reset all?</span>
+      <button
+        className="h-8 rounded-md border border-black/10 px-2.5 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+        onClick={() => {
+          setConfirm(false);
+          onReset();
+        }}
+        type="button"
+      >
+        Yes, reset
+      </button>
+      <button className="h-8 rounded-md px-2.5 text-xs hover:bg-black/5 dark:hover:bg-white/5" onClick={() => setConfirm(false)} type="button">
+        Cancel
+      </button>
+    </>
+  );
+}
+
+/** The settings themselves: this browser, this computer, sign-in, then the app's groups. */
+function SettingsBody({
+  settings,
+  resetNote,
+  theme,
+  onTheme,
+  onSaved,
+}: { settings: Setting[]; resetNote: string; theme: ThemeChoice; onTheme: (t: ThemeChoice) => void; onSaved: (list: Setting[]) => void }) {
+  const groups = useMemo(() => {
+    const m = new Map<string, Setting[]>();
+    for (const s of settings) if (s.group !== "Sign-in") m.set(s.group, [...(m.get(s.group) ?? []), s]);
+    return [...m.entries()];
+  }, [settings]);
+  return (
+    <>
+      {resetNote && <div className="pt-2 text-muted-foreground text-sm">{resetNote}</div>}
+      <SettingsGroup first title="This browser">
+        <SettingLine
+          control={<Segmented label="Theme" onChange={onTheme} options={THEMES} value={theme} />}
+          help="System follows Windows (also when it switches). Default: System."
+          title="Theme"
+        />
+        <NotificationSetting />
+      </SettingsGroup>
+      <SettingsGroup title="This computer">
+        <ToolsSection />
+      </SettingsGroup>
+      <SettingsGroup title="Sign-in">
+        <SsoSection />
+      </SettingsGroup>
+      {groups.map(([group, list]) => (
+        <SettingsGroup key={group} title={group}>
+          {list.map((s) => (
+            <SettingRow key={s.key} onSaved={onSaved} s={s} />
+          ))}
+          {group === "Privacy and retention" && <ClearHistoryRow />}
+          {group === "Privacy and retention" && <ClearEdgeCacheRow />}
+        </SettingsGroup>
+      ))}
+    </>
+  );
+}
+
 /** Settings for this computer (saved in config\harness.local.json; kept across updates). */
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // Shown at once from what was loaded in the background; refreshed quietly while open.
@@ -313,7 +408,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setSettingsState(list);
   };
   const [error, setError] = useState("");
-  const [confirmReset, setConfirmReset] = useState(false);
   const [resetNote, setResetNote] = useState("");
   useEffect(() => {
     loadSettings().then(setSettingsState, (e) => setError((e as Error).message));
@@ -325,7 +419,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   };
   const anyCustom = (settings ?? []).some((s) => s.custom) || theme !== "system";
   const resetAll = async () => {
-    setConfirmReset(false);
     try {
       const r = await api.resetSettings();
       setSettings(r.settings);
@@ -338,16 +431,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       setError((e as Error).message);
     }
   };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  const groups = useMemo(() => {
-    const m = new Map<string, Setting[]>();
-    for (const s of settings ?? []) if (s.group !== "Sign-in") m.set(s.group, [...(m.get(s.group) ?? []), s]);
-    return [...m.entries()];
-  }, [settings]);
+  useEscapeKey(onClose);
 
   return (
     <ModalBackdrop onClose={onClose}>
@@ -362,27 +446,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <div className="text-muted-foreground text-xs">For this computer; changes apply right away and are kept across updates.</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {confirmReset ? (
-              <>
-                <span className="text-muted-foreground text-xs">Reset all?</span>
-                <button className="h-8 rounded-md border border-black/10 px-2.5 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5" onClick={resetAll} type="button">
-                  Yes, reset
-                </button>
-                <button className="h-8 rounded-md px-2.5 text-xs hover:bg-black/5 dark:hover:bg-white/5" onClick={() => setConfirmReset(false)} type="button">
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <button
-                className="inline-flex h-8 items-center gap-1 rounded-md px-2.5 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5"
-                disabled={!anyCustom}
-                onClick={() => setConfirmReset(true)}
-                title={anyCustom ? "Set every setting below back to the app default" : "All settings have the app defaults"}
-                type="button"
-              >
-                <RotateCcw className="h-3.5 w-3.5" /> Reset all to defaults
-              </button>
-            )}
+            <ResetAllControl anyCustom={anyCustom} onReset={resetAll} />
             <button className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5" onClick={onClose} title="Close (Esc)" type="button">
               <X className="h-4 w-4" />
             </button>
@@ -392,34 +456,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           {error && <div className="pt-2 text-rose-500 text-sm">{error}</div>}
           {/* The first time, before the background load: everything at once, not group by group. */}
           {!settings && !error && <div className="pt-4 text-muted-foreground text-sm">Loading settings...</div>}
-          {settings && (
-            <>
-          {resetNote && <div className="pt-2 text-muted-foreground text-sm">{resetNote}</div>}
-          <SettingsGroup first title="This browser">
-            <SettingLine
-              control={<Segmented label="Theme" onChange={changeTheme} options={THEMES} value={theme} />}
-              help="System follows Windows (also when it switches). Default: System."
-              title="Theme"
-            />
-            <NotificationSetting />
-          </SettingsGroup>
-          <SettingsGroup title="This computer">
-            <ToolsSection />
-          </SettingsGroup>
-          <SettingsGroup title="Sign-in">
-            <SsoSection />
-          </SettingsGroup>
-          {groups.map(([group, list]) => (
-            <SettingsGroup key={group} title={group}>
-              {list.map((s) => (
-                <SettingRow key={s.key} onSaved={setSettings} s={s} />
-              ))}
-              {group === "Privacy and retention" && <ClearHistoryRow />}
-              {group === "Privacy and retention" && <ClearEdgeCacheRow />}
-            </SettingsGroup>
-          ))}
-            </>
-          )}
+          {settings && <SettingsBody onSaved={setSettings} onTheme={changeTheme} resetNote={resetNote} settings={settings} theme={theme} />}
         </div>
       </div>
     </ModalBackdrop>
