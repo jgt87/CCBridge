@@ -137,6 +137,37 @@ function Repair-RunCommand([AllowEmptyString()][string]$Command) {
     Repair-EscapedTypeName (ConvertFrom-AngleEntities $Command)
 }
 
+function Get-InlineScripts([AllowEmptyString()][string]$Html) {
+    <# The JavaScript blocks written inside an HTML page: <script> without src whose type is empty,
+       JavaScript or module (not JSON, templates or other data). Returns @{ line; code } with the
+       file line the code starts on. #>
+    foreach ($m in [regex]::Matches($Html, '(?is)<script\b([^>]*)>(.*?)</script\s*>')) {
+        $attrs = $m.Groups[1].Value
+        if ($attrs -match '(?i)\bsrc\s*=') { continue }
+        $type = [regex]::Match($attrs, '(?i)\btype\s*=\s*["'']?([^"''\s>]+)')
+        if ($type.Success -and $type.Groups[1].Value -notmatch '^(?i)(text/javascript|application/javascript|module)$') { continue }
+        $code = $m.Groups[2].Value
+        if (-not $code.Trim()) { continue }
+        $start = $m.Groups[2].Index
+        @{ line = ([regex]::Matches($Html.Substring(0, $start), "`n")).Count + 1; code = $code }
+    }
+}
+
+function Get-UselessCheckCommand([AllowEmptyString()][string]$Command) {
+    <# A run command that cannot work here, with what to do instead, or $null: node --check on a file
+       that is not JavaScript (an HTML page), or a bash here-string (<<<), which neither cmd.exe nor
+       PowerShell has. #>
+    $nc = [regex]::Match($Command, '(?i)\bnode(?:\.exe)?\s+(?:--check|-c)\s+"?([^\s"]+)')
+    if ($nc.Success -and $nc.Groups[1].Value -notmatch '(?i)\.(m?js|cjs)$') {
+        return "node --check only reads JavaScript files (.js, .mjs, .cjs), not $($nc.Groups[1].Value). The helper program itself compiles the scripts in changed .js files and in the <script> blocks of changed HTML pages after every round and sends you any syntax error, so no command is needed for that"
+    }
+    $plain = ($Command -replace "'[^']*'", "''")
+    if ($plain -match '<<<') {
+        return 'the command uses <<<, a bash here-string; commands run in cmd.exe on Windows and PowerShell has no <<< either. Write a script file with a write block and run that instead. To check the JavaScript in a page you do not need a command: the helper program compiles the <script> blocks of changed HTML pages after every round and sends you any syntax error'
+    }
+    $null
+}
+
 function Test-LongPowerShellCommand([AllowEmptyString()][string]$Command, [int]$MaxChars = 300) {
     <# A script packed into one command line (powershell -Command "..."): quoting through cmd.exe
        breaks these easily and nobody can read them when approving. Returns why, or $null. #>
@@ -1855,5 +1886,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

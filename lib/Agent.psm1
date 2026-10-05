@@ -1777,7 +1777,7 @@ function Test-ScriptSyntax {
        (ConvertTo-CheckableScript); errors about import/export are left out, as the check cannot
        tell those apart from what it changed. #>
     param($State, [string[]]$Paths)
-    $files = @($Paths | Where-Object { $_ -match '(?i)\.(m?js|cjs)$' } | Select-Object -First 10)
+    $files = @($Paths | Where-Object { $_ -match '(?i)\.(m?js|cjs|html?)$' } | Select-Object -First 10)
     if (-not $files.Count -or -not $State.Config.cdpPort) { return }
     $cdpPort = $State.Config.cdpPort
     $target = $null; $s = $null
@@ -1790,12 +1790,17 @@ function Test-ScriptSyntax {
             if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
             $src = (Read-TextFile $full).Text
             if ($src.Length -gt 1000000) { continue }
-            $r = Invoke-Cdp $s 'Runtime.compileScript' @{ expression = (ConvertTo-CheckableScript $src); sourceURL = $rel; persistScript = $false }
-            $d = $r.exceptionDetails
-            if (-not $d) { continue }
-            $msg = if ($d.exception.description) { ($d.exception.description -split "`n")[0] } else { "$($d.text)" }
-            if ($msg -match '\b(import|export)\b') { continue }
-            "${rel}:$([int]$d.lineNumber + 1): JavaScript syntax error: $msg"
+            # A page: each inline <script> block on its own, numbered by its line in the page.
+            $parts = if ($rel -match '(?i)\.html?$') { @(Get-InlineScripts $src) } else { @(@{ line = 1; code = $src }) }
+            foreach ($part in $parts) {
+                $r = Invoke-Cdp $s 'Runtime.compileScript' @{ expression = (ConvertTo-CheckableScript $part.code); sourceURL = $rel; persistScript = $false }
+                $d = $r.exceptionDetails
+                if (-not $d) { continue }
+                $msg = if ($d.exception.description) { ($d.exception.description -split "`n")[0] } else { "$($d.text)" }
+                if ($msg -match '\b(import|export)\b') { continue }
+                $where = if ($rel -match '(?i)\.html?$') { ' (in a <script> block)' } else { '' }
+                "${rel}:$([int]$part.line + [int]$d.lineNumber): JavaScript syntax error${where}: $msg"
+            }
         }
         Write-CCBLog info agent 'Script syntax check' @{ files = $files.Count }
     } catch {
@@ -2360,6 +2365,11 @@ function Invoke-AgentAction {
                 Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = 'type name removed by the chat' })
                 return @{ ok = $false; summary = 'run skipped (type name removed)'; output = "not executed: $(Format-RemovedTypeName $gone)" }
             }
+        }
+        $useless = Get-UselessCheckCommand $evt.target
+        if ($useless) {
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = 'not run: this command cannot work here' })
+            return @{ ok = $false; summary = 'run skipped (command cannot work here)'; output = "not executed: $useless." }
         }
         $packed = Test-LongPowerShellCommand $evt.target
         if ($packed) {
@@ -2974,7 +2984,7 @@ function Invoke-AgentTurn {
                         }
                     }
                     # Changed JavaScript files: a syntax check in Edge (also files no page loads).
-                    $jsChanged = @($changes | Where-Object { ($_.added -or $_.removed) -and -not $_.deleted -and $_.path -match '(?i)\.(m?js|cjs)$' } | ForEach-Object { $_.path })
+                    $jsChanged = @($changes | Where-Object { ($_.added -or $_.removed) -and -not $_.deleted -and $_.path -match '(?i)\.(m?js|cjs|html?)$' } | ForEach-Object { $_.path })
                     if ($jsChanged.Count -and "$($State.Config.pageCheck)" -ne 'off' -and $State.Mode -ne 'plan') {
                         $syntax = @(Test-ScriptSyntax $State $jsChanged)
                         if ($syntax.Count) { $pageIssues = @($pageIssues) + $syntax }

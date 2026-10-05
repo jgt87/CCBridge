@@ -6,6 +6,14 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.90] - 2026-10-05
+
+### Added
+- The JavaScript written inside HTML pages (inline `<script>` blocks; not `src`, JSON or template blocks) is now compiled after every round like `.js` files, and a syntax error comes back to Copilot with its line in the page.
+
+### Fixed
+- Commands that cannot work here are not run, with the reason: `node --check` on a page or other non-JavaScript file (Copilot used it to check HTML), and commands with a bash here-string (`<<<`). Copilot is told that StreamHub checks page scripts itself.
+
 ## [v0.1.89] - 2026-10-05
 
 ### Added
@@ -1020,7 +1028,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.89...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.90...HEAD
+[v0.1.90]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.90
 [v0.1.89]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.89
 [v0.1.88]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.88
 [v0.1.87]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.87
