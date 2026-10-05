@@ -10,6 +10,7 @@ import {
   ListTodo,
   Play,
   Workflow,
+  Camera,
   RotateCcw,
   TerminalSquare,
   X,
@@ -55,6 +56,7 @@ const ICONS: Record<string, React.ReactNode> = {
   edit: <FilePen className="h-4 w-4 text-muted-foreground" />,
   run: <TerminalSquare className="h-4 w-4 text-muted-foreground" />,
   runbook: <Workflow className="h-4 w-4 text-muted-foreground" />,
+  screenshot: <Camera className="h-4 w-4 text-muted-foreground" />,
   todo: <ListTodo className="h-4 w-4 text-muted-foreground" />,
   move: <FolderInput className="h-4 w-4 text-muted-foreground" />,
   restore: <RotateCcw className="h-4 w-4 text-muted-foreground" />,
@@ -62,6 +64,7 @@ const ICONS: Record<string, React.ReactNode> = {
 
 const VERBS: Record<string, string> = {
   runbook: "Run runbook",
+  screenshot: "Screenshot",
   read: "Read",
   glob: "List",
   grep: "Search",

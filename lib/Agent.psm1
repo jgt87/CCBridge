@@ -1692,12 +1692,15 @@ function Get-StepFailureInfo {
     $info
 }
 
+# With every automatic screenshot: how to see a part the page does not show when it opens.
+$script:ScreenshotHint = 'The screenshot shows the page as it first opens. If the part you changed is in another view, tab or dialog, send a text block whose first line is ACTION screenshot PAGE, with one line per step to get there: click CSS-SELECTOR, or click text=LABEL for a button or tab by its text, or wait MILLISECONDS. You get a new screenshot after those steps.'
+
 function Test-WebPage {
     <# Opens project pages in a spare Edge tab (served read-only by the web app at /preview/<token>/)
        and collects what goes wrong while they load: JavaScript errors, console errors, and files
        that fail to load (missing styles.css, a fetch() of a JSON file that is not there). The tab
        is closed afterwards. Returns one line per problem. #>
-    param($State, [string[]]$Pages, [int]$WaitSec = 6, [switch]$Screenshot)
+    param($State, [string[]]$Pages, [int]$WaitSec = 6, [switch]$Screenshot, $Steps = @())
     if (-not $State.PreviewPort) { return }
     $State.PageShots = @()
     $cdpPort = $State.Config.cdpPort
@@ -1749,6 +1752,24 @@ function Test-WebPage {
                 }
             }
             if (-not $loaded) { $problems.Add("$page did not finish loading within $WaitSec seconds") }
+            # Steps Copilot gave to reach the part it changed (another view, tab or dialog).
+            if ($Screenshot -and $loaded) {
+                foreach ($step in @($Steps)) {
+                    if ($step.kind -eq 'wait') { $until = (Get-Date).AddMilliseconds([int]$step.ms); while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $s 100 }; continue }
+                    $target = "$($step.target)"
+                    $byText = $target -match '^(?i)text\s*=\s*(.+)$'
+                    $what = ConvertTo-Json $(if ($byText) { $Matches[1].Trim().Trim('"', "'") } else { $target }) -Compress
+                    $js = if ($byText) {
+                        "(() => { const t = $what.toLowerCase(); const els = [...document.querySelectorAll('button, a, [role=button], [role=tab], summary, label, input[type=button], input[type=submit]')]; const el = els.find(e => (e.innerText || e.value || '').trim().toLowerCase() === t) || els.find(e => (e.innerText || e.value || '').trim().toLowerCase().includes(t)); if (!el) return 'missing'; el.scrollIntoView({ block: 'center' }); el.click(); return 'ok'; })()"
+                    } else {
+                        "(() => { let el; try { el = document.querySelector($what); } catch (e) { return 'bad selector'; } if (!el) return 'missing'; el.scrollIntoView({ block: 'center' }); el.click(); return 'ok'; })()"
+                    }
+                    $res = try { "$((Invoke-Cdp $s 'Runtime.evaluate' @{ expression = $js; returnByValue = $true }).result.value)" } catch { 'error' }
+                    if ($res -ne 'ok') { $problems.Add("screenshot step 'click $target': $(if ($res -eq 'missing') { 'nothing on the page matches it' } else { $res })") }
+                    # Let the page react (and record any error the click caused).
+                    $until = (Get-Date).AddMilliseconds(800); while ((Get-Date) -lt $until) { $m = Receive-CdpEvent $s 100; if ($m -and $m.method -eq 'Runtime.exceptionThrown') { $d = $m.params.exceptionDetails; $problems.Add("$page JavaScript error after 'click $target': $(if ($d.exception.description) { ($d.exception.description -split "`n")[0] } else { $d.text })") } }
+                }
+            }
             if ($Screenshot -and $loaded) {
                 # How the page looks now, for Copilot and the user (.streamhub/Screenshots/).
                 try {
@@ -2173,6 +2194,24 @@ function Invoke-AgentAction {
             [void]$State.CheckDisputes.Add((Get-CheckKey $path $finding))
             try { Add-CheckDispute $root $path $finding $reason 'copilot' } catch { Write-CCBLogError agent 'check dispute' $_ }
             return @{ ok = $true; summary = "check disputed: $path"; output = "Noted: '$finding' in $path is left out for the rest of this task." }
+        }
+        'screenshot' {
+            # A screenshot of a project page after the clicks Copilot names (the automatic one shows
+            # the page as it first opens). Read-only: the page is served from the preview address.
+            $page = if ("$($Action.arg)".Trim()) { "$($Action.arg)".Trim().TrimStart('/') } else { 'index.html' }
+            $steps = @(Get-ScreenshotSteps "$($Action.body)")
+            $evt.target = $page + $(if ($steps.Count) { ' (' + (@($steps | ForEach-Object { if ($_.kind -eq 'click') { "click $($_.target)" } else { "wait $($_.ms)" } }) -join ', ') + ')' } else { '' })
+            Add-AgentEvent $State 'action' $evt
+            if (-not $State.PreviewPort) { return @{ ok = $false; summary = 'screenshot not available'; output = 'error: screenshots need the web app (its page preview); none was taken.' } }
+            $full = try { Resolve-ProjectPath $root $page } catch { $null }
+            if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf) -or $page -notmatch '(?i)\.html?$') { return @{ ok = $false; summary = "no page $page"; output = "error: $page is not an HTML page of the project. Name the page file, for example index.html." } }
+            $problems = @(Test-WebPage $State @($page) -Screenshot -Steps $steps)
+            $shot = @($State.PageShots | Where-Object { $_ } | Select-Object -Last 1)
+            $State.PageShots = @()
+            if (-not $shot.Count) { return @{ ok = $false; summary = 'no screenshot'; output = "error: the page could not be captured.$(if ($problems.Count) { "`n" + ($problems -join "`n") })" } }
+            Add-AgentEvent $State 'status' @{ text = "Screenshot of $($evt.target): $($shot[0]) (shown to Copilot)."; path = $shot[0] }
+            $note = if ($problems.Count) { "`nProblems seen:`n" + (($problems | Select-Object -First 10 | ForEach-Object { "- $_" }) -join "`n") } else { '' }
+            return @{ ok = $true; summary = "screenshot of $page"; attach = (Join-Path $root $shot[0].Replace('/', '\')); output = "Attached: a screenshot of $($evt.target) as it looks now. Compare it with what was asked.$note" }
         }
         'find' {
             $name = if ($Action.arg) { $Action.arg } else { "$($Action.body)".Split("`n")[0].Trim() }
@@ -3014,7 +3053,7 @@ function Invoke-AgentTurn {
                         Write-CCBLog info agent 'Asking Copilot for a consistency review' @{ files = $changes.Count; issues = $issues.Count }
                         Add-AgentEvent $State 'status' @{ text = "Big change: asking Copilot to review $(@($changes).Count) changed file(s) for leftovers, dead code and broken references$(if ($issues.Count) { " ($($issues.Count) problem(s) found by the local checks)" })." }
                         $message = New-ReviewMessage $State $changes $issues
-                        if ($attach.Count) { $message += "`n`nAttached: a screenshot of the page as it looks now. Check it against the request too." }
+                        if ($attach.Count) { $message += "`n`nAttached: a screenshot of the page as it looks now. Check it against the request too. $script:ScreenshotHint" }
                         continue
                     }
                 } elseif ($pagesToRecheck.Count -and $pageRechecks -lt 1 -and -not $State.Cancel) {
@@ -3031,7 +3070,7 @@ function Invoke-AgentTurn {
                     Add-AgentEvent $State 'status' @{ text = "Page check after the fix: $($pagesToRecheck -join ', ') loaded without errors." }
                 }
                 if ($attach.Count) {
-                    $message = "Attached: a screenshot of the page as it looks now, after your changes. Compare it with what was asked (layout, parts that are missing, overlap or are cut off, colours, text). If something is wrong, fix it, then send done again. If it looks right, send done."
+                    $message = "Attached: a screenshot of the page as it looks now, after your changes. Compare it with what was asked (layout, parts that are missing, overlap or are cut off, colours, text). If something is wrong, fix it, then send done again. If it looks right, send done. $script:ScreenshotHint"
                     continue
                 }
                 break

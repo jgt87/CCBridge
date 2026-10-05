@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.91] - 2026-10-06
+
+### Added
+- Screenshots of the part that changed: the automatic screenshot shows a page as it first opens, so a change in another view, tab or dialog (a Month view behind a toggle) was not visible. Copilot can now send `ACTION screenshot PAGE` with up to five steps (`click CSS-SELECTOR`, `click text=LABEL`, `wait MILLISECONDS`); StreamHub opens the page in its preview tab, follows the steps, and attaches the new screenshot, saying when a step matched nothing or caused a JavaScript error. Every automatic screenshot message tells Copilot about it.
+
 ## [v0.1.90] - 2026-10-05
 
 ### Added
@@ -1028,7 +1033,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.90...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.91...HEAD
+[v0.1.91]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.91
 [v0.1.90]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.90
 [v0.1.89]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.89
 [v0.1.88]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.88

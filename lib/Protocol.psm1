@@ -2,7 +2,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$script:ActionTypes = @('read', 'glob', 'grep', 'find', 'web', 'write', 'edit', 'run', 'runbook', 'remember', 'todo', 'dispute', 'done')
+$script:ActionTypes = @('read', 'glob', 'grep', 'find', 'web', 'screenshot', 'write', 'edit', 'run', 'runbook', 'remember', 'todo', 'dispute', 'done')
 $script:PlainInfo = @('', 'text', 'txt', 'plaintext', 'plain', 'none')
 
 function Get-ActionBlocks {
@@ -30,7 +30,7 @@ function Get-ActionBlocks {
         # Older form, still accepted: the action name as the label (```read). Copilot also sometimes
         # leaves the label empty (or "text") and writes the bare action name as the first line.
         if ($script:PlainInfo -contains $type -and -not $arg -and $j -lt $lines.Length) {
-            $first = [regex]::Match($lines[$j], '^\s*ACTION\s+(read|glob|grep|find|web|write|edit|run|runbook|remember|todo|dispute|done)\b[:\s]*(.*)$', 'IgnoreCase')
+            $first = [regex]::Match($lines[$j], '^\s*ACTION\s+(read|glob|grep|find|web|screenshot|write|edit|run|runbook|remember|todo|dispute|done)\b[:\s]*(.*)$', 'IgnoreCase')
             if (-not $first.Success) { $first = [regex]::Match($lines[$j], '^\s*(read|glob|grep|web|write|edit|run|todo|done)\b[:\s]*(.*)$') }
             if ($first.Success) { $type = $first.Groups[1].Value.ToLowerInvariant(); $arg = $first.Groups[2].Value.Trim(); $j++ }
         }
@@ -118,6 +118,16 @@ function Get-TodoItems([string]$Body) {
     })
 }
 
+function Get-ScreenshotSteps([AllowEmptyString()][string]$Body) {
+    <# The steps of a screenshot action, one per line: "click CSS-SELECTOR", "click text=LABEL"
+       (a button, link or tab by its visible text) or "wait MILLISECONDS". At most 5 steps. #>
+    @(foreach ($l in "$Body".Replace("`r`n", "`n").Split("`n")) {
+        $t = $l.Trim().TrimStart('-', '*').Trim()
+        if ($t -match '^(?i)click\s+(.+)$') { @{ kind = 'click'; target = $Matches[1].Trim().Trim('`') } }
+        elseif ($t -match '^(?i)wait\s+(\d{1,5})\s*(?:ms)?$') { @{ kind = 'wait'; ms = [Math]::Min(5000, [int]$Matches[1]) } }
+    }) | Select-Object -First 5
+}
+
 function Test-ProposalText([AllowEmptyString()][string]$Text) {
     <# Whether a reply (its done summary or last text) proposes work instead of doing it: a heading
        line such as "Proposed Month view:" or "Suggested approach:", or words such as "I propose",
@@ -169,4 +179,4 @@ function Get-NextSteps {
     @($steps | Select-Object -First $Max)
 }
 
-Export-ModuleMember -Function Test-ProposalText, Get-ActionBlocks, Get-ActionPaths, Get-TodoItems, Get-NextSteps
+Export-ModuleMember -Function Get-ScreenshotSteps, Test-ProposalText, Get-ActionBlocks, Get-ActionPaths, Get-TodoItems, Get-NextSteps
