@@ -194,6 +194,14 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ path = $req.QueryString['path']; text = (Read-TextFile $full).Text }
         }
         '^GET /api/queue$' { return Send-Json $Ctx @{ queue = @(Get-QueueView $State 100); pausedUntil = $State.PausedUntil } }
+        '^POST /api/copilot-theme$' {
+            # The app's theme (per browser): the worker gives the Copilot tab the same (Update-CopilotTheme).
+            $b = Read-JsonBody $Ctx
+            $v = [string]$b.theme
+            if (@('light', 'dark', 'system') -notcontains $v) { throw 'theme must be light, dark or system' }
+            $State.CopilotTheme = $v
+            return Send-Json $Ctx @{ ok = $true }
+        }
         '^POST /api/response-mode$' {
             $b = Read-JsonBody $Ctx
             $v = [string]$b.value

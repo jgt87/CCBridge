@@ -1,7 +1,10 @@
 // Light / dark / system theme, chosen in Settings and kept in this browser. Applied before the
 // page draws (main.tsx), so there is no flash of the other theme. "system" follows Windows, also
 // when it switches while the app is open. Pages that draw in theme colours (Mermaid diagrams)
-// listen for the "ccb-theme" event to redraw.
+// listen for the "ccb-theme" event to redraw. The choice is also sent to the server, which gives
+// the Copilot tab the same theme (setting copilotTheme).
+
+import { api } from "./api";
 
 export type ThemeChoice = "system" | "light" | "dark";
 
@@ -30,6 +33,11 @@ function apply(choice: ThemeChoice) {
   window.dispatchEvent(new Event("ccb-theme"));
 }
 
+/** Tells the server which theme the app shows; a server that is not reachable just misses it. */
+function tellCopilot(choice: ThemeChoice) {
+  api.setCopilotTheme(choice).catch(() => undefined);
+}
+
 export function setThemeChoice(choice: ThemeChoice) {
   try {
     if (choice === "system") localStorage.removeItem(KEY);
@@ -38,12 +46,16 @@ export function setThemeChoice(choice: ThemeChoice) {
     /* storage blocked: applies until the page reloads */
   }
   apply(choice);
+  tellCopilot(choice);
 }
 
 /** Once at start: apply the choice, and follow Windows while the choice is "system". */
 export function initTheme() {
   apply(getThemeChoice());
+  tellCopilot(getThemeChoice());
   media().addEventListener("change", () => {
     if (getThemeChoice() === "system") apply("system");
   });
+  // Again when the window comes back into view: the server may have restarted meanwhile.
+  window.addEventListener("focus", () => tellCopilot(getThemeChoice()));
 }

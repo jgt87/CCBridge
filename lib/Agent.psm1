@@ -257,6 +257,7 @@ function Get-Bridge($State) {
         $signIn = if ("$($State.Config.signIn)" -eq 'private') { 'private' } else { 'single-sign-on' }
             $script:Bridge = Connect-Copilot -Port $State.Config.cdpPort -SaveReplyFrames $save -SignIn $signIn
         $State.Copilot = 'ready'; $State.CopilotMessage = ''
+        $State.CopilotThemeApplied = $null; Update-CopilotTheme $State   # a new connection: the tab gets StreamHub's theme again
         # Page health check: the parts CCBridge relies on are where selectors.json says.
         try {
             $health = @(Test-CopilotPage $script:Bridge)
@@ -276,15 +277,37 @@ function Get-Bridge($State) {
     }
 }
 
+function Get-CopilotThemeWanted($State) {
+    <# The theme the Copilot tab should get: StreamHub's theme (light, dark, or system = follow
+       Windows), or 'system' when the setting copilotTheme is off. $null before the app said which. #>
+    if (-not $State.CopilotTheme) { return $null }
+    $on = $State.Config.copilotTheme
+    if ($null -ne $on -and (-not [bool]$on -or "$on" -eq 'off')) { return 'system' }
+    "$($State.CopilotTheme)"
+}
+
+function Update-CopilotTheme($State) {
+    <# Applies the wanted theme to the Copilot tab when it differs from what was applied on this
+       connection. Only on the worker's thread (one connection, one user at a time), and only when
+       connected: a new connection starts without the override and gets it right after connecting. #>
+    $want = Get-CopilotThemeWanted $State
+    if (-not $want -or $want -eq $State.CopilotThemeApplied) { return }
+    if (-not $script:Bridge -or $script:Bridge.Session.Lost) { return }
+    try { Set-CopilotTheme $script:Bridge $want; $State.CopilotThemeApplied = $want }
+    catch { Write-CCBLogError agent 'Copilot theme' $_; $State.CopilotThemeApplied = $want }   # not retried in a loop
+}
+
 function Reset-Bridge($State) {
     if ($script:Bridge) { try { Disconnect-Copilot $script:Bridge } catch { } }
     $script:Bridge = $null
     $State.Copilot = 'idle'
+    $State.CopilotThemeApplied = $null   # the override ends with the connection
 }
 
 function Send-ToCopilot {
     param($State, [string]$Message, [string]$Agent = '', [switch]$Long, [string[]]$Files = @(), [switch]$OptionalFiles)   # -Agent mentions Researcher/Analyst; -Long: agent runs take minutes; -Files are attached (-OptionalFiles: left out when they cannot be)
     $bridge = Get-Bridge $State
+    Update-CopilotTheme $State   # a theme chosen while a task ran
     if ($State.ResponseMode -in 'auto', 'quick', 'deep') {
         try { $State.ResponseModeActual = Set-CopilotResponseMode $bridge $State.ResponseMode } catch { Write-CCBLogError agent 'Response mode' $_ }
     }
@@ -2948,6 +2971,7 @@ function Start-AgentWorker {
                 Write-CCBLog info agent 'Retrying the Copilot connection'
                 $State.Tasks.Enqueue(@{ kind = 'connect' })
             }
+            Update-CopilotTheme $State   # idle: a theme just chosen in the app reaches the Copilot tab at once
             Start-Sleep -Milliseconds 150; continue
         }
         # Jobs (MCP) track a task from queue to result.
@@ -3084,4 +3108,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

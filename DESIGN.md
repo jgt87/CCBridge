@@ -239,6 +239,7 @@ Flat and unassuming: controls look like part of the page until you need them.
 - **Do** use the 192px control width and 32px height for every Settings control so the columns align.
 - **Do** keep colour for content only: syntax, Added Green / Removed Rose change counts and diff rows, Signal Red errors.
 - **Do** show state as plain words with a small grey icon ("Copilot connected").
+- **Do** keep the Copilot pane in the same theme as StreamHub (setting copilotTheme); the two sit side by side in one window.
 - **Do** let native controls follow the theme (`color-scheme: dark` under `.dark`, options on the popover colors); a native select list is drawn by the browser, not by the page's classes.
 
 ### Don't:

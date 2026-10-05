@@ -604,6 +604,8 @@ export const api = {
     call<{ path: string; text: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),
   chat: (text: string, opts: ChatOptions = {}) => call<{ ok: boolean }>("POST", "/api/chat", { text, ...opts }),
   setResponseMode: (value: string) => call<{ ok: boolean }>("POST", "/api/response-mode", { value }),
+  /** The app's theme, so the Copilot tab can show the same (setting copilotTheme). */
+  setCopilotTheme: (theme: "light" | "dark" | "system") => call<{ ok: boolean }>("POST", "/api/copilot-theme", { theme }),
   fetchList: () => call<{ items: FetchItem[] }>("GET", "/api/fetch").then((r) => (Array.isArray(r.items) ? r.items : [])),
   saveFetch: (name: string, prompt: string, web?: FetchWeb) => call<{ ok: boolean; item: FetchItem }>("POST", "/api/fetch", { name, prompt, ...(web ?? {}) }),
   runFetch: (name: string) => call<{ ok: boolean }>("POST", "/api/fetch/run", { name }),

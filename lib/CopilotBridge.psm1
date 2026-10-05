@@ -1214,6 +1214,20 @@ function Send-CopilotPrompt {
     }
 }
 
+function Set-CopilotTheme {
+    <# The Copilot tab shows light or dark: the tab is told which theme the system prefers
+       (Emulation.setEmulatedMedia prefers-color-scheme), so a Copilot page that follows the system
+       theme switches at once. 'system' clears it (Copilot follows Windows again). Nothing is saved
+       in Edge or the account: the override lasts while this connection is open. #>
+    param([Parameter(Mandatory)]$Bridge, [ValidateSet('light', 'dark', 'system')][string]$Theme)
+    # Assigned directly, not from an if expression: that would unwrap the list (an empty one becomes
+    # nothing, a single entry becomes an object), and Edge expects a list.
+    $features = @()
+    if ($Theme -ne 'system') { $features = @(@{ name = 'prefers-color-scheme'; value = $Theme }) }
+    $null = Invoke-Cdp $Bridge.Session 'Emulation.setEmulatedMedia' @{ features = $features }
+    Write-CCBLog verbose bridge "Copilot tab theme: $Theme"
+}
+
 function Get-AlnumText([string]$Text) { ($Text -replace '[^\p{L}\p{N}]', '').ToLowerInvariant() }
 
 function Merge-LateReplyText {
@@ -1788,4 +1802,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

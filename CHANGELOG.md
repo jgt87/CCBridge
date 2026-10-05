@@ -6,6 +6,14 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.80] - 2026-10-05
+
+### Added
+
+- The Copilot window follows StreamHub's theme: choose Light or Dark in Settings > This browser > Theme and the Copilot tab next to it switches too (System leaves Copilot to follow Windows). Only the Copilot tab is told which theme to show, through StreamHub's own connection to it; nothing changes in Edge or your Microsoft 365 account, and it is applied again after every reconnect. Copilot must be set to follow the system theme, which is its default. Setting Copilot > "Copilot follows the app's theme" turns it off.
+
+Nothing yet.
+
 ## [v0.1.79] - 2026-10-05
 
 ### Fixed
@@ -931,7 +939,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.79...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.80...HEAD
+[v0.1.80]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.80
 [v0.1.79]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.79
 [v0.1.78]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.78
 [v0.1.77]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.77

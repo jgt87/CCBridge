@@ -61,6 +61,7 @@
     "chatEvents": 1500,
     "note": "How much of what StreamHub generates per project is kept (Settings > Retention); 0 = no limit."
   },
+  "copilotTheme": true,
   "pacing": {
     "newChatSettleSec": 3,
     "beforeSendSec": 1,
