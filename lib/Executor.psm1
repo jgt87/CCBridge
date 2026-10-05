@@ -154,6 +154,22 @@ function Repair-StrippedScriptTag([AllowEmptyString()][string]$Text) {
     [regex]::Replace($Text, '(?m)(?<=^|[\s>])([\w.~/-]+\.(?:m?js))script>', '<script src="$1"></script>')
 }
 
+function Close-LoneScriptTag([string]$Path, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New) {
+    <# The whole new text of a page file: a <script src="PATH"> line the change added, alone on its
+       line and not closed by the next line, lost its </script> on the way; close it (a script with
+       src has no content). Lines the file already had are left as they are. #>
+    if ($Path -notmatch '(?i)\.(html?|xhtml|vue|svelte|php|aspx|cshtml)$') { return $New }
+    $had = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($l in "$Old".Replace("`r`n", "`n").Split("`n")) { [void]$had.Add($l.Trim()) }
+    $lines = "$New".Split("`n")
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        if ($lines[$i] -notmatch '^\s*<script\b[^<>]*\bsrc\s*=\s*"[^"]*"[^<>]*>\s*$' -or $had.Contains($lines[$i].Trim())) { continue }
+        $next = $null; for ($k = $i + 1; $k -lt $lines.Length; $k++) { if ($lines[$k].Trim()) { $next = $lines[$k].Trim(); break } }
+        if ($next -notmatch '^</script') { $lines[$i] = $lines[$i].TrimEnd("`r", ' ', "`t") + '</script>' + $(if ($lines[$i].EndsWith("`r")) { "`r" } else { '' }) }
+    }
+    $lines -join "`n"
+}
+
 function Repair-CodeText([string]$Path, [string]$Text) {
     <# Text from Copilot made fit for the file: &lt; / &gt; back to < and > (not in markup), and in
        code files the invisible characters a web chat brings along removed (zero-width spaces,
@@ -1078,13 +1094,15 @@ function Get-WritePreview {
     param([string]$ProjectRoot, [string]$Path, [string]$Content)
     $full = Resolve-ProjectPath $ProjectRoot $Path
     $old = if (Test-Path -LiteralPath $full -PathType Leaf) { (Read-TextFile $full).Text } else { $null }
-    [pscustomobject]@{ path = (ConvertTo-RelativePath $ProjectRoot $full); exists = ($null -ne $old); old = $old; new = (Repair-CodeText $full $Content) }
+    [pscustomobject]@{ path = (ConvertTo-RelativePath $ProjectRoot $full); exists = ($null -ne $old); old = $old; new = (Close-LoneScriptTag $full $old (Repair-CodeText $full $Content)) }
 }
 
 function Invoke-WriteAction {
     param([string]$ProjectRoot, [string]$Path, [string]$Content, $Checkpoint)
     $full = Assert-Writable $ProjectRoot $Path
     $Content = Repair-CodeText $full $Content
+    $prior = if ($full -match '(?i)[.](html?|xhtml|vue|svelte|php|aspx|cshtml)$' -and (Test-Path -LiteralPath $full -PathType Leaf)) { try { (Read-TextFile $full).Text } catch { '' } } else { '' }
+    $Content = Close-LoneScriptTag $full $prior $Content
     if (Test-Path -LiteralPath $full -PathType Leaf) { $info = Read-TextFile $full; $bom = $info.Bom; $crlf = $info.Crlf; $encName = $info.Encoding }
     else { $fmt = Get-NewFileFormat $full $Content $ProjectRoot; $bom = $fmt.Bom; $crlf = $fmt.Crlf; $encName = $fmt.Encoding }
     if ($Checkpoint) { Save-CheckpointFile $Checkpoint $ProjectRoot $full }
@@ -1593,6 +1611,7 @@ function Get-EditResult {
         $text = $text.Substring(0, $hit.start) + $replace + $text.Substring($hit.start + $hit.length)
         $after = $hit.start + $replace.Length
     }
+    $text = Close-LoneScriptTag $full $info.Text $text
     # A tag damaged on the way is the cause, not a half block: say so first.
     $bad = Find-DamagedHtmlLine $full $info.Text $text
     if ($bad) { return [pscustomobject]@{ ok = $false; error = "not written: $(Format-DamagedHtml $bad)" } }
@@ -1836,5 +1855,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

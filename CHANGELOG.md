@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.87] - 2026-10-05
+
+### Fixed
+- Edits whose text Copilot's own output damaged around a script tag (seen on Copilot's page: `<script src="PATH.js"></script>` followed by the end marker came out as `<script src="PATH.js">` and `</EPLACE`): a damaged end marker (`</EPLACE`, `REPLACE` alone, or only `>>>`) now ends the edit instead of being written into the file, and a `<script src="...">` line whose `</script>` was eaten is closed again (unless the next line closes it).
+
 ## [v0.1.86] - 2026-10-05
 
 ### Fixed
@@ -996,7 +1001,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.86...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.87...HEAD
+[v0.1.87]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.87
 [v0.1.86]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.86
 [v0.1.85]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.85
 [v0.1.84]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.84

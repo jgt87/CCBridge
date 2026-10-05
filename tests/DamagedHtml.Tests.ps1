@@ -8,6 +8,7 @@ Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
 Import-Module (Join-Path $root 'lib\Lint.psm1') -Force
+Import-Module (Join-Path $root 'lib\Protocol.psm1') -Force
 
 Describe 'Find-DamagedHtmlLine' {
     $old = "<head>`n  <link rel=`"stylesheet`" href=`"styles.css`">`n</head>"
@@ -91,6 +92,23 @@ Describe 'The HTML file check finds what is left of a damaged tag' {
         $bad = @(Test-FileContent 'index.html' "<html>`n<head>`n  data/example-manifest.jsscript>`n</head>`n<body></body>`n</html>`n")
         ($bad -join ' ') | Should Match "line 3: 'data/example-manifest.jsscript>' is what is left of a damaged <script> tag"
         @(Test-FileContent 'index.html' "<html>`n<head>`n  <script src=`"data/example-manifest.js`"></script>`n</head>`n<body></body>`n</html>`n").Count | Should Be 0
+    }
+}
+Describe 'An edit whose end marker and script close were eaten' {
+    It 'takes </EPLACE, REPLACE alone or >>> as the end marker, not ordinary text' {
+        foreach ($m in '</EPLACE', 'EPLACE', 'REPLACE', '>>>', '>>>>>>> REPLACE') { & (Get-Module Protocol) { param($x) Get-EditMarker $x } $m | Should Be 'replace' }
+        foreach ($t in 'replace', 'Replace the text', '> quoted', '>>') { & (Get-Module Protocol) { param($x) Get-EditMarker $x } $t | Should BeNullOrEmpty }
+        $fence = '````'
+        $reply = "${fence}text`nACTION edit index.html`n<<<<<<< SEARCH`n  data/example.jsscript>`n=======`n  <script src=`"data/example.js`">`n</EPLACE`n${fence}"
+        $a = @(Get-ActionBlocks $reply)[0]
+        $a.edits[0].replace | Should Be '  <script src="data/example.js">'
+    }
+    It 'closes an added script tag with src whose </script> is missing, and leaves the two-line form alone' {
+        Close-LoneScriptTag 'index.html' '' "<head>`n  <script src=`"data/example.js`">`n</head>" | Should Be "<head>`n  <script src=`"data/example.js`"></script>`n</head>"
+        Close-LoneScriptTag 'index.html' '' "<script src=`"a.js`" defer>`n</script>" | Should Be "<script src=`"a.js`" defer>`n</script>"
+        Close-LoneScriptTag 'index.html' '' '<script>' | Should Be '<script>'
+        Close-LoneScriptTag 'index.html' '<script src="old.js">' "<script src=`"old.js`">`nx" | Should Be "<script src=`"old.js`">`nx"
+        Close-LoneScriptTag 'notes.md' '' '<script src="a.js">' | Should Be '<script src="a.js">'
     }
 }
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

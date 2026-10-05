@@ -75,6 +75,9 @@ function Get-EditMarker([string]$Line) {
     $t = $Line.Trim()
     if ($t -match '^(?:<|&lt;){5,9} ?SEARCH\b') { return 'search' }
     if ($t -match '^(?:>|&gt;){5,9} ?REPLACE\b') { return 'replace' }
+    # The end marker damaged on the way (some tenants filter text near HTML tags): "</EPLACE",
+    # "REPLACE" alone, or only the arrows. Upper case only, so file text is not taken for it.
+    if ($t -cmatch '^(?:[<>/]|&lt;|&gt;)*\s*R?EPLACE$' -or $t -match '^(?:>|&gt;){3,9}$') { return 'replace' }
     if ($t -match '^={5,9}$') { return 'divider' }
     $null
 }
