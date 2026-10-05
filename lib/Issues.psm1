@@ -176,9 +176,9 @@ function Get-FileIssues {
     $lines = $t.Split("`n")
     foreach ($r in $raw) {
         $k = "$($r.category)|$($r.message -replace '\d+', '#')"; $seen[$k] = 1 + [int]$seen[$k]
-        $text = $(if ($r.line -gt 0 -and $r.line -le $lines.Count) { $lines[$r.line - 1].Trim() } else { '' })
-        if ($text.Length -gt 300) { $text = $text.Substring(0, 300) }
-        [pscustomobject]@{ id = (Get-IssueId $r.category $Path $r.message $seen[$k]); line = $r.line; category = $r.category; message = $r.message; text = $text }
+        $lineText = $(if ($r.line -gt 0 -and $r.line -le $lines.Count) { $lines[$r.line - 1].Trim() } else { '' })
+        if ($lineText.Length -gt 300) { $lineText = $lineText.Substring(0, 300) }
+        [pscustomobject]@{ id = (Get-IssueId $r.category $Path $r.message $seen[$k]); line = $r.line; category = $r.category; message = $r.message; text = $lineText }
     }
 }
 
@@ -275,6 +275,29 @@ function Get-IgnoredFindings([string]$ProjectRoot) {
     @($ix.ignored.Values | ForEach-Object { [pscustomobject]$_ })
 }
 
+function Set-IgnoredCheck {
+    <# Ignores (or with -Undo shows again) a finding of the round's file check, by the same rules as
+       Code health > Issues: file, category (error for the file checks, so Issues hides it too;
+       check for the other notes), message without numbers and the code line. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Path, [string]$Category = 'error', [string]$Message, [string]$LineText = '', [switch]$Undo)
+    $msg = "$Message" -replace '^\s*line \d+:\s*', ''
+    $key = Get-IgnoreKey $Path $Category $msg $LineText
+    Use-IssueLock {
+        $ix = Read-IssueIndex $ProjectRoot
+        if ($Undo) { $ix.ignored.Remove($key) } else { $ix.ignored[$key] = @{ path = $Path.Replace('\', '/'); category = $Category; message = $msg; text = (ConvertTo-IgnoreText $LineText); at = (Get-Date).ToString('s') } }
+        Save-IssueIndex $ProjectRoot $ix
+    }
+}
+
+function Test-CheckIgnored {
+    <# Whether a finding of the round's check is on the ignore list (as error or as check). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string]$Path, [string]$Message, [string]$LineText = '', $Ignored = $null)
+    $list = if ($Ignored) { $Ignored } else { (Use-IssueLock { Read-IssueIndex $ProjectRoot }).ignored }
+    $msg = "$Message" -replace '^\s*line \d+:\s*', ''
+    foreach ($c in 'error', 'check') { if ($list.ContainsKey((Get-IgnoreKey $Path $c $msg $LineText))) { return $true } }
+    $false
+}
+
 function Set-IgnoredFinding {
     <# Ignores (or with -Undo shows again) a code review finding: by its file and the first line it
        quotes, so a later review that reports the same line again leaves it out. #>
@@ -337,4 +360,4 @@ function New-FixMessage {
     $sb.ToString().TrimEnd()
 }
 
-Export-ModuleMember -Function Get-IgnoredFindings, Set-IgnoredFinding, Test-IgnoredFinding, Format-IgnoredForReview, Get-IgnoreKey, Get-FileIssues, Get-IssueCandidates, Update-IssueIndex, Get-IssueReport, Set-IssueState, New-FixMessage, Get-IssueIndexPath, Read-IssueIndex, Import-ProjectIssues, Get-AppIssueIndex, Get-AppIssueIndexPath
+Export-ModuleMember -Function Set-IgnoredCheck, Test-CheckIgnored, Get-IgnoredFindings, Set-IgnoredFinding, Test-IgnoredFinding, Format-IgnoredForReview, Get-IgnoreKey, Get-FileIssues, Get-IssueCandidates, Update-IssueIndex, Get-IssueReport, Set-IssueState, New-FixMessage, Get-IssueIndexPath, Read-IssueIndex, Import-ProjectIssues, Get-AppIssueIndex, Get-AppIssueIndexPath

@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -390,6 +390,21 @@ function Invoke-ApiRequest($Ctx, $State) {
             $null = Submit-AgentTask $State @{ kind = 'chain'; name = [string]$b.name } 'user'
             return Send-Json $Ctx @{ ok = $true }
         }
+        '^POST /api/checks/ignore$' {
+            # A finding of the round's file check that is wrong for this code (the File check card):
+            # on the ignore list (also in Code health > Issues) and in the false-alarm log.
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $path = "$($b.path)"; $text = "$($b.text)"
+            if (-not $path -or -not $text) { throw 'Which finding?' }
+            $line = if ($text -match '^\s*line (\d+):') { [int]$Matches[1] } else { 0 }
+            $lineText = ''
+            if ($line -gt 0) { try { $lineText = ((Read-TextFile (Resolve-ProjectPath $State.ProjectRoot $path)).Text.Replace("`r`n", "`n").Split("`n"))[$line - 1] } catch { } }
+            $category = if ("$($b.source)" -in 'file', 'tool') { 'error' } else { 'check' }
+            Set-IgnoredCheck $State.ProjectRoot $path $category $text $lineText -Undo:([bool]$b.undo)
+            if (-not $b.undo) { Add-CheckDispute $State.ProjectRoot $path $text 'ignored in the chat' 'user' $lineText }
+            return Send-Json $Ctx @{ ok = $true }
+        }
         '^GET /api/tools$' {
             # Optional tools (Python, Node.js...) with what each install did; Settings > This computer.
             return Send-Json $Ctx @{ tools = @(Get-InstallableTools) }
@@ -446,8 +461,14 @@ function Invoke-ApiRequest($Ctx, $State) {
             # While Copilot is busy the message waits in the queue.
             $task = @{ kind = 'chat'; text = [string]$b.text }
             # A message to one of Copilot's agents (picked in the message box), or an answer to its plan.
+            # Agent: Auto - a fixed rule on the words picks Researcher, Analyst or Copilot itself.
+            $autoWhy = ''
+            if ("$($b.agent)" -eq 'auto' -and -not $b.agentAnswer -and -not $b.planFirst -and -not $b.approve) {
+                $pick = Get-AutoAgent ([string]$b.text)
+                if ($pick.agent) { $b.agent = $pick.agent; $autoWhy = $pick.why }
+            }
             if ("$($b.agent)" -in 'researcher', 'analyst') {
-                $t = @{ kind = 'agent'; agent = [string]$b.agent; text = [string]$b.text; followUp = [bool]$b.agentAnswer }
+                $t = @{ kind = 'agent'; agent = [string]$b.agent; text = [string]$b.text; followUp = [bool]$b.agentAnswer; autoWhy = $autoWhy }
                 $null = Submit-AgentTask $State $t 'user'
                 return Send-Json $Ctx @{ ok = $true }
             }

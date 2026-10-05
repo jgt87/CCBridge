@@ -27,6 +27,15 @@ $script:FixPattern = '(?i)\b(fix|fixes|fixing|repair|solve|debug|repareer|herste
 $script:TestPattern = '(?i)\b(tests?|testing|unit ?tests?|pester|pytest|jest|vitest|spec|specs)\b'
 $script:SecurityPattern = '(?i)\b(login|log ?in|sign ?in|auth|authentication|passwords?|tokens?|api ?keys?|secrets?|sql|query|queries|database|user input|forms?|uploads?|cookies?|sessions?|permissions?|encrypt|xss|injection|sanitize|wachtwoord)\b'
 $script:JsPattern = '(?i)\b(javascript|typescript|node(\.?js)?|npm|react|vue|svelte|angular)\b|\.(m?js|cjs|jsx?|tsx?)\b'
+$script:OfficePattern = '(?i)\b(word|powerpoint|excel)[ -]?(document|doc|file|bestand|presentation|presentatie|deck|workbook|sheet)s?\b|\b(docx?|pptx?|xlsx?|slide ?decks?|slides)\b|\.(docx?|pptx?|xlsx?)\b'
+$script:DataPattern = '(?i)\b(csv|tsv|excel|xlsx|xls|spreadsheets?|data ?files?|import (the )?data|export (the )?data|parse|parsing|columns?|rows?)\b|\.(csv|tsv|xlsx?)\b'
+$script:BigTaskPattern = '(?i)\b(build|create|make|develop)\s+(an?|the|my|me an?|me the)?\s*(new\s+)?(app|application|website|web ?site|tool|dashboard|portal|system|game)\b|\b(multiple|several|all the) (pages|screens|features|parts)\b|\bfrom scratch\b'
+$script:ScriptPattern = '(?i)\b(scripts?|automat\w*|schedul\w*|chains?|cron|task scheduler|batch job)\b|scripts/'
+$script:UiPattern = '(?i)\b(ui|ux|user interface|layout|screens?|responsive|accessib\w*|a11y|loading state|empty state|design)\b'
+$script:HttpPattern = '(?i)\b(apis?|rest|endpoints?|http|https|fetch|invoke-restmethod|invoke-webrequest|webhooks?|requests?|rate limit)\b'
+$script:CSharpPattern = '(?i)c#|\b(csharp|dotnet|\.net|asp\.net|blazor|wpf|winforms)\b|\.(cs|csproj|sln)\b'
+$script:ReactPattern = '(?i)\b(react|jsx|tsx|use(State|Effect|Memo|Callback|Ref|Context)|next\.?js)\b'
+$script:PrivacyPattern = '(?i)\b(personal data|pii|privacy|gdpr|avg|customer data|employee data|e-?mail addresses|phone numbers|persoonsgegevens)\b'
 $script:BatchPattern = '(?i)\b(batch ?(file|script)s?|cmd ?files?)\b|\.(cmd|bat)\b'
 # Requests that build or change code get the code quality rules (rules/quality.md), once per chat.
 $script:BuildPattern = '(?i)\b(build\s+(a|an|me|the|new|it)|create|add|implement|make|write|develop|extend|refactor|rewrite|clean ?up|improve|feature|component|module|function|class|page|app|tool|script|bouw|maak|voeg|schrijf|verbeter)\b'
@@ -69,6 +78,10 @@ function Get-ProjectTraits {
     if (@($Paths | Where-Object { $_ -match '(?i)^source/' }).Count) { $t.Add('source') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.(m?js|cjs|jsx?|tsx?)$' -and $_ -notmatch '(?i)(^|/)(node_modules|dist|build)/|\.min\.js$' }).Count) { $t.Add('javascript') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.(cmd|bat)$' }).Count) { $t.Add('batch') }
+    if (@($Paths | Where-Object { $_ -match '(?i)\.(csv|tsv|xlsx?)$' }).Count) { $t.Add('data') }
+    if (@($Paths | Where-Object { $_ -match '(?i)\.(cs|csproj|sln)$' }).Count) { $t.Add('csharp') }
+    if (@($Paths | Where-Object { $_ -match '(?i)\.(docx?|pptx?|xlsx?|docm|pptm|xlsm)$' }).Count) { $t.Add('office') }
+    if (@($Paths | Where-Object { $_ -match '(?i)\.(jsx|tsx)$' -and $_ -notmatch '(?i)(^|/)node_modules/' }).Count) { $t.Add('react') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.Tests\.ps1$|(^|/)test_[^/]+\.py$|_test\.py$|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)(tests?|__tests__)/' }).Count) { $t.Add('tests') }
     $t.ToArray()
 }
@@ -113,6 +126,17 @@ function Get-PromptModules {
     if (($Text -match $script:SecurityPattern) -or ($web -and $Text -match $script:BuildPattern)) { $ids.Add('rules:security') }
     if (($traits -contains 'javascript') -or ($Text -match $script:JsPattern)) { $ids.Add('rules:javascript') }
     if (($traits -contains 'batch') -or ($Text -match $script:BatchPattern)) { $ids.Add('rules:batch') }
+    # A question about the code (how, why, where) that asks for no change: answer, do not edit.
+    if ($Text -match $script:CodeQuestionPattern -and $Text -notmatch $script:ChangePattern -and $Text -notmatch $script:FixPattern) { $ids.Add('rules:questions') }
+    if (($traits -contains 'data') -or ($traits -contains 'source') -or ($Text -match $script:DataPattern)) { $ids.Add('rules:data') }
+    if (($traits -contains 'office') -or ($Text -match $script:OfficePattern)) { $ids.Add('rules:office') }
+    if (($Text -match $script:BigTaskPattern) -or $Text.Length -gt 600) { $ids.Add('rules:bigtask') }
+    if ($Text -match $script:ScriptPattern) { $ids.Add('rules:scripts') }
+    if (($web -and ($Text -match $script:AppPartPattern -or $Text -match $script:BuildPattern)) -or ($Text -match $script:UiPattern)) { $ids.Add('rules:ui') }
+    if ($Text -match $script:HttpPattern) { $ids.Add('rules:http') }
+    if (($traits -contains 'csharp') -or ($Text -match $script:CSharpPattern)) { $ids.Add('rules:csharp') }
+    if (($traits -contains 'react') -or ($Text -match $script:ReactPattern)) { $ids.Add('rules:react') }
+    if (($traits -contains 'source') -or ($Text -match $script:PrivacyPattern)) { $ids.Add('rules:privacy') }
     if ($Text -match $script:RunbookPattern) { $ids.Add('rules:runbook') }
     # Online information: how to use web sources, and the web action for the exact text of a page.
     if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }
@@ -243,4 +267,30 @@ function New-PromptMessage {
     $body
 }
 
-Export-ModuleMember -Function Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage
+# --- Agent: auto (the agent picker next to Response) ---------------------------------------
+# StreamHub picks one of Copilot's agents by fixed words, never by understanding the request.
+# Kept narrow on purpose: an agent run takes minutes and may count against a monthly limit, so a
+# request goes to an agent only when it clearly asks for what the agent is for.
+$script:AutoCodeWork = '(?i)\b(code|script|function|component|button|page|app|website|dashboard|bug|error|compile|build|refactor|deploy|install|repo(sitory)?)\b|\.(ps1|psm1|py|js|ts|tsx|jsx|html?|css|cs|java|sql|cmd|bat)\b'
+$script:AutoResearch = '(?i)\b(research|investigate|deep[ -]?dive|look into|find out (what|how|why|whether|which)|state of the art|market (analysis|research|overview|size|trends?)|competitors?|competitive (landscape|analysis)|industry trends?|best practices (for|in|on)|literature|with (sources|citations|references)|cite (your )?sources|onderzoek|zoek uit|marktanalyse|concurrent(en|ie))\b'
+$script:AutoAnalysis = '(?i)\b(analy[sz]e|analysis|analyses|chart|charts|graph|plot|visuali[sz]e|trend|trends|statistics?|correlat\w*|forecast|regression|distribution|outliers?|pivot|average|median|breakdown|analyseer|grafiek|statistiek)\b'
+$script:AutoDataFile = '(?i)[^\s''"()@/]+\.(csv|tsv|xlsx|xlsm|xls|json|parquet)\b'
+
+function Get-AutoAgent {
+    <# Which agent answers a message when the picker says Auto: @{ agent = researcher | analyst | '';
+       why }. Analyst: analysis words and a data file attached or named (csv, xlsx, json...).
+       Researcher: words that ask for research (research, investigate, competitors, market, with
+       sources...) in a request of five words or more. Not for work on code or app parts (that stays
+       with Copilot and the helper program's actions); plain chat otherwise. #>
+    param([AllowEmptyString()][string]$Text)
+    if (-not $Text -or -not $Text.Trim()) { return @{ agent = ''; why = '' } }
+    if ($Text -match $script:AutoCodeWork -or $Text -match $script:FixPattern) { return @{ agent = ''; why = 'work on code or an app stays with Copilot' } }
+    $data = [regex]::Match($Text, $script:AutoDataFile)
+    $ana = [regex]::Match($Text, $script:AutoAnalysis)
+    if ($data.Success -and $ana.Success) { return @{ agent = 'analyst'; why = "analysis ('$($ana.Value)') of a data file ($($data.Value))" } }
+    $res = [regex]::Match($Text, $script:AutoResearch)
+    if ($res.Success -and @($Text.Trim() -split '\s+').Count -ge 5) { return @{ agent = 'researcher'; why = "a request for research ('$($res.Value)')" } }
+    @{ agent = ''; why = '' }
+}
+
+Export-ModuleMember -Function Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage

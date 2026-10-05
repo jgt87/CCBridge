@@ -6,6 +6,7 @@ Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Log.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Guardrails.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Office.psm1')
 
 $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
@@ -30,7 +31,12 @@ function Get-TextEncoding([string]$Name) {
 
 function Read-TextFile([string]$Path) {
     <# Text with LF line endings, plus how to write it back: its encoding (utf8, utf8bom, ansi,
-       utf16le, utf16be), BOM, and CRLF when most of its lines end that way. #>
+       utf16le, utf16be), BOM, and CRLF when most of its lines end that way. A Word, PowerPoint or
+       Excel file (.docx, .pptx, .xlsx) is its text as Markdown, with encoding 'office' (Office.psm1). #>
+    if ((Get-OfficeKind $Path) -in 'word', 'slides', 'sheet') {
+        $o = ConvertFrom-OfficeFile $Path
+        return [pscustomobject]@{ Text = $o.text.Replace("`r`n", "`n"); Bom = $false; Crlf = $false; Encoding = 'office'; Note = $o.note }
+    }
     $bytes = [IO.File]::ReadAllBytes($Path)
     $enc = Get-TextEncodingName $bytes
     $skip = switch ($enc) { 'utf8bom' { 3 } 'utf16le' { 2 } 'utf16be' { 2 } default { 0 } }
@@ -48,6 +54,8 @@ function Write-TextFile([string]$Path, [string]$Text, [bool]$Bom = $false, [bool
         if ($Encoding -eq 'utf8' -or -not $Bom) { Write-CCBLog verbose executor "Saved with a BOM so Windows PowerShell 5.1 reads its non-ASCII text: $Path" }
         $Bom = $true; $Encoding = 'utf8bom'
     }
+    # A Word document is written from its Markdown text (Assert-Writable allows only .docx made here).
+    if ($Path -match '(?i)\.docx$') { Write-DocxFile $Path $Text; return }
     $dir = Split-Path -Parent $Path
     if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir -Force }
     $t = $Text.Replace("`r`n", "`n")
@@ -93,6 +101,12 @@ function Test-BinaryFile([string]$Path) {
         for ($k = 0; $k -lt $n; $k++) { if ($buf[$k] -eq 0) { return $true } }
         $false
     } finally { $fs.Dispose() }
+}
+
+function Test-TextReadable([string]$Path) {
+    <# Whether Read-TextFile gives this file as text: a text file, or a Word/PowerPoint/Excel file. #>
+    if ((Get-OfficeKind $Path) -in 'word', 'slides', 'sheet') { return $true }
+    -not (Test-BinaryFile $Path)
 }
 
 # Copilot's web page sends < and > in our prompts as &lt; and &gt;, so Copilot sometimes copies
@@ -281,8 +295,8 @@ function Get-UndoFileChange([string]$Full, [string]$Backup, [string]$Rel, [bool]
        files get no line counts. #>
     $now = if (Test-Path -LiteralPath $Full -PathType Leaf) { $Full } else { $null }
     $after = if ($WasNew) { $null } else { $Backup }
-    $text = { param($p) if ($p -and -not (Test-BinaryFile $p)) { (Read-TextFile $p).Text } else { $null } }
-    $binary = ($now -and (Test-BinaryFile $now)) -or ($after -and (Test-Path -LiteralPath $after) -and (Test-BinaryFile $after))
+    $text = { param($p) if ($p -and (Test-TextReadable $p)) { (Read-TextFile $p).Text } else { $null } }
+    $binary = ($now -and -not (Test-TextReadable $now)) -or ($after -and (Test-Path -LiteralPath $after) -and -not (Test-TextReadable $after))
     $o = [ordered]@{ path = $Rel; deleted = $WasNew; added = 0; removed = 0; binary = [bool]$binary; preview = $null }
     if (-not $binary) {
         $old = "$(& $text $now)"; $new = "$(& $text $after)"
@@ -362,10 +376,11 @@ function Get-ChangeSetContents {
         $old = ''
         if ($Checkpoint.Files[$rel] -ne 'new') {
             $b = Join-Path $Checkpoint.Dir ($rel.Replace('/', '\'))
-            if ((Test-Path -LiteralPath $b) -and -not (Test-BinaryFile $b)) { $old = (Read-TextFile $b).Text }
+            if ((Test-Path -LiteralPath $b) -and (Test-TextReadable $b)) { try { $old = (Read-TextFile $b).Text } catch { } }
         }
         $exists = Test-Path -LiteralPath $full -PathType Leaf
-        $new = if ($exists -and -not (Test-BinaryFile $full)) { (Read-TextFile $full).Text } else { '' }
+        $new = ''
+        if ($exists -and (Test-TextReadable $full)) { try { $new = (Read-TextFile $full).Text } catch { } }
         if ($old -ceq $new) { continue }
         @{ path = $rel; created = ($Checkpoint.Files[$rel] -eq 'new'); deleted = (-not $exists); old = $(if ($old.Length -gt 200000) { $old.Substring(0, 200000) } else { $old }); new = $(if ($new.Length -gt 200000) { $new.Substring(0, 200000) } else { $new }) }
     }
@@ -685,9 +700,34 @@ function Get-FileOutline {
        HTML (head/body, style and script blocks, elements with an id, headings), JavaScript /
        TypeScript (functions, classes, arrow functions), CSS (@media blocks, section comments,
        selectors), PowerShell (functions), Markdown (headings), Python (classes, functions and
-       methods, the main block). At most $Max entries. #>
+       methods, the main block), XML (elements of the first three levels, with their name/id/key
+       attribute), YAML (keys of the first two levels). At most $Max entries. #>
     param([string]$Text, [string]$Path, [int]$Max = 80)
     $ext = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+    if ($ext -match '^\.(xml|csproj|vbproj|fsproj|props|targets|config|xaml|resx|nuspec|plist|xsd|xsl|xslt|wsdl|svg)$') {
+        $xo = New-Object System.Collections.Generic.List[string]
+        try {
+            $settings = New-Object Xml.XmlReaderSettings
+            $settings.DtdProcessing = [Xml.DtdProcessing]::Ignore; $settings.XmlResolver = $null
+            $xr = [Xml.XmlReader]::Create((New-Object IO.StringReader $Text), $settings)
+            try {
+                while ($xr.Read() -and $xo.Count -lt $Max) {
+                    if ($xr.NodeType -ne [Xml.XmlNodeType]::Element -or $xr.Depth -gt 2) { continue }
+                    $label = ''
+                    foreach ($an in 'Name', 'name', 'id', 'Id', 'key', 'Key', 'Include', 'x:Name', 'x:Key') { $v = $xr.GetAttribute($an); if ($v) { $label = " $an=`"$v`""; break } }
+                    $xo.Add("$(([Xml.IXmlLineInfo]$xr).LineNumber)  $('  ' * $xr.Depth)<$($xr.Name)$label>")
+                }
+            } finally { $xr.Dispose() }
+        } catch { }   # not well-formed: the outline up to that point (the file check reports it)
+        return $xo.ToArray()
+    }
+    if ($ext -match '^\.ya?ml$') {
+        $yl = $Text.Replace("`r`n", "`n").Split("`n"); $yo = New-Object System.Collections.Generic.List[string]
+        for ($k = 0; $k -lt $yl.Length -and $yo.Count -lt $Max; $k++) {
+            if ($yl[$k] -match '^( {0,2})(- )?([\w.-]+|"[^"]+"|''[^'']+''):(\s|$)' -and $yl[$k] -notmatch '^\s*#') { $yo.Add("$($k + 1)  $($Matches[1])$($Matches[2])$($Matches[3])") }
+        }
+        return $yo.ToArray()
+    }
     $lines = $Text.Replace("`r`n", "`n").Split("`n")
     $out = New-Object System.Collections.Generic.List[string]
     $open = @{}   # block name -> start line
@@ -770,8 +810,11 @@ function Invoke-ReadAction {
         try {
             $full = Resolve-ProjectPath $ProjectRoot $p
             if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $p`n(file not found)"; continue }
-            if (Test-BinaryFile $full) { "### $p`n(binary file, $((Get-Item -LiteralPath $full).Length) bytes - not shown)"; continue }
-            $raw = (Read-TextFile $full).Text.Replace("`r`n", "`n")
+            $office = Get-OfficeKind $full
+            if ($office -eq 'old') { "### $p`n($(Get-OfficeLabel $full), which cannot be read as text here. The helper program attaches the file to this message when it can: read it from the attachment. To change it, write a new .docx or .csv.)"; continue }
+            if (-not $office -and (Test-BinaryFile $full)) { "### $p`n(binary file, $((Get-Item -LiteralPath $full).Length) bytes - not shown)"; continue }
+            $info = Read-TextFile $full
+            $raw = $info.Text.Replace("`r`n", "`n")
             $lines = $raw.Split("`n")
             $total = $lines.Length
             $from = [Math]::Min($r.From, [Math]::Max(1, $total)); $to = [Math]::Min($r.To, $total)
@@ -793,8 +836,13 @@ function Invoke-ReadAction {
             }
             $whole = ($from -eq 1 -and $last -eq $total)
             $head = if ($whole) { "### $p" } else { "### $p (lines $from-$last of $total$widened)" }
+            if ($office) {
+                # Shown as Markdown; a .docx made here can be changed with write/edit on this text.
+                $how = if ($office -eq 'word' -and (Test-OwnDocx $full)) { 'write or edit this text to change it' } elseif ($office -eq 'word') { 'made in Word: not rewritten here' } else { 'read only here' }
+                $head += "`n($(Get-OfficeLabel $full) shown as Markdown text$(if ($info.Note) { "; $($info.Note)" }); $how)"
+            }
             $note = if ($last -lt $to) {
-                $ol = @(Get-FileOutline ($lines -join "`n") $full)
+                $ol = @(Get-FileOutline ($lines -join "`n") $(if ($office) { "$full.md" } else { $full }))
                 "`n(cut to fit: showing lines $from-$last of $total. Read $($p):$($last + 1)-$to for the rest, or only the part you need using this outline.)" +
                 $(if ($ol.Count) { "`nOutline of ${p}:`n" + ($ol -join "`n") } else { '' })
             } else { '' }
@@ -865,6 +913,8 @@ function Assert-Writable([string]$ProjectRoot, [string]$Path) {
         $hm = [regex]::Match($head, '^\s*//\s*Generated from (\S+) by the helper program')
         if ($hm.Success -and (Test-DataCopiesOn)) { throw "$Path is generated from $($hm.Groups[1].Value) by the helper program and is rewritten from it automatically. Do not edit it: change $($hm.Groups[1].Value) (or the runbook or script that writes it) instead." }
     }
+    $office = Get-OfficeWriteRefusal $full (Test-Path -LiteralPath $full -PathType Leaf)
+    if ($office) { throw $office }
     $guard = Test-ProtectedPath $rel
     if ($guard) { throw "$Path is protected (the user listed $guard as protected files) and is read-only. Leave it unchanged; put what you need in another file." }
     if (Test-InSource $ProjectRoot $full) {

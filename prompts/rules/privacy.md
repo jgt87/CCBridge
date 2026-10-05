@@ -1,0 +1,1 @@
+- Personal data: keep it out of logs, test files, examples and error messages; use made-up names in samples. Keep data on this computer and in the project: no uploads or external services unless the user asks. Store only the fields the task needs.

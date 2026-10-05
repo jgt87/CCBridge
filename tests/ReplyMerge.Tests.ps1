@@ -39,3 +39,22 @@ Describe 'Reply reconstruction from Chathub frames' {
         $r.Text.Replace("[name]:`n            ", '') | Should BeExactly $r.ServerText
     }
 }
+
+Describe 'A part of the reply that arrives after the end signal (Merge-LateReplyText)' {
+    $have = "Here is the plan for the change.`n`n1. Read the settings file first.`n2. Add the new option to the form."
+    It 'adds only the new tail when the page holds a longer version of the same reply' {
+        $page = $have + "`n3. Save the option and show it in the list of settings.`n4. Test it."
+        $r = Merge-LateReplyText $have $page
+        $r.how | Should Be 'tail'
+        $r.text | Should Be $page
+    }
+    It 'keeps the reply when the page has nothing more, or shows another reply' {
+        Merge-LateReplyText $have $have | Should BeNullOrEmpty
+        Merge-LateReplyText $have ($have + ' Done.') | Should BeNullOrEmpty
+        Merge-LateReplyText $have ('A completely different answer about something else entirely, ' * 3) | Should BeNullOrEmpty
+    }
+    It 'uses the page text when the end of the reply cannot be found in it' {
+        $page = "Here is the plan for the change.`n`n1. Read the settings file first, then the form.`n2. Add the new option to the form and the list of settings it shows."
+        (Merge-LateReplyText "Here is the plan for the change.`n`n1. Read the settings file first." $page).how | Should Be 'page'
+    }
+}

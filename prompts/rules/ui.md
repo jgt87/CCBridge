@@ -1,0 +1,1 @@
+- User interface: every view handles loading, empty and error states (with a message that says what to do). Everything works with the keyboard, with visible focus, and every control has a label. The layout works from a phone width up. Reuse the app's existing colours, spacing and components instead of adding new styles.

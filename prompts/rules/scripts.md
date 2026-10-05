@@ -1,0 +1,1 @@
+- Scripts and automation: a script can run twice without harm (check before creating, skip what is done). A script that changes or deletes data has a dry-run switch that only reports what it would do. Take paths and options as parameters, not as fixed values in the code. Log what it did to Logs/, stop on errors with a clear message, and end with exit code 0 only on success.

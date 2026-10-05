@@ -4,7 +4,8 @@ import type { ChatOptions } from "@/lib/api";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MarkdownView } from "./markdown-view";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
-import type { Activity, AgentEvent, Preview, Reference, UndoChange } from "@/lib/api";
+import type { Activity, AgentEvent, CheckFinding, Preview, Reference, UndoChange } from "@/lib/api";
+import { ChecksCard } from "./checks-card";
 import { UndoCard } from "./undo-card";
 import { stripActionBlocks } from "@/lib/diff";
 import { thinkingTexts } from "@/lib/thinking-texts";
@@ -23,7 +24,8 @@ export type TranscriptItem =
   | { kind: "next"; seq: number; steps: string[] }
   | { kind: "clarify"; seq: number; request: string; questions: ClarifyQuestion[]; summary?: string; planId?: string }
   | { kind: "plan"; seq: number; request: string; plan: string; planId?: string }
-  | { kind: "error"; seq: number; text: string; time: string; errId?: string; code?: string; hint?: string; detail?: string; version?: string };
+  | { kind: "error"; seq: number; text: string; time: string; errId?: string; code?: string; hint?: string; detail?: string; version?: string }
+  | { kind: "checks"; seq: number; text: string; items: CheckFinding[] };
 
 // --- Building the transcript from events ------------------------------------------------
 
@@ -132,6 +134,10 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
     ctx.items.push({ kind: "assistant", seq: e.seq, text: e.text ?? "", uncertain: e.uncertain ?? 0, references: e.references ?? [], ...(e.agent ? { agent: e.agent } : {}) }),
   action: mergeAction,
   "action-result": mergeActionResult,
+  checks: (e, ctx) => {
+    const items = Array.isArray(e.findings) ? e.findings : e.findings ? [e.findings as unknown as CheckFinding] : [];
+    if (items.length) ctx.items.push({ kind: "checks", seq: e.seq, text: e.text ?? "", items });
+  },
   undo: addUndo,
 };
 
@@ -332,6 +338,8 @@ function TranscriptRow({
       return onSend ? <PlanCard onOpenFile={onOpenFile} onSend={onSend} plan={item.plan} planId={item.planId} request={item.request} /> : null;
     case "error":
       return <ErrorNote item={item} />;
+    case "checks":
+      return <ChecksCard items={item.items} text={item.text} />;
   }
 }
 

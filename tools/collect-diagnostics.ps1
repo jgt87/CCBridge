@@ -61,6 +61,19 @@ $logDir = Get-CCBLogDir
 $logs = @(Get-ChildItem $logDir -Filter 'ccbridge-*.log' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge (Get-Date).Date.AddDays(1 - $Days) })
 if ($logs.Count) { $null = New-Item -ItemType Directory -Path (Join-Path $stage 'logs'); $logs | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stage 'logs') } }
 
+# 3b. False alarms of the file checks (disputed by Copilot or ignored by you), per project: to turn
+#     into test samples so the same false alarm cannot come back.
+$od = if ($env:OneDriveCommercial) { $env:OneDriveCommercial } else { $env:OneDrive }
+if ($od -and (Test-Path -LiteralPath (Join-Path $od 'CCBridge'))) {
+    foreach ($proj in @(Get-ChildItem -LiteralPath (Join-Path $od 'CCBridge') -Directory -ErrorAction SilentlyContinue)) {
+        $f = Join-Path $proj.FullName '.streamhub\check-disputes.json'
+        if (Test-Path -LiteralPath $f) {
+            $dir = Join-Path $stage 'check-disputes'; $null = New-Item -ItemType Directory -Force -Path $dir
+            Copy-Item -LiteralPath $f -Destination (Join-Path $dir "$($proj.Name).json")
+        }
+    }
+}
+
 # 4. Optional: raw reply frames (contain Copilot's full answers).
 if ($IncludeReplies) {
     $rep = Join-Path $env:LOCALAPPDATA 'CCBridge\replies'
@@ -72,6 +85,7 @@ CCBridge diagnostics $stamp
 environment.json  versions, PowerShell, Edge, settings (no personal data)
 config-*.json     settings files, including your *.local.json overrides
 page-check.json   whether CCBridge's selectors still find Copilot's controls (only if Edge with Copilot was open)
+check-disputes\   file-check findings Copilot disputed or you ignored, per project (file, finding, code line)
 logs\             diagnostic logs; user name, profile/OneDrive paths and email addresses are masked
 $(if ($IncludeReplies) { 'replies\          RAW COPILOT REPLIES - full answer text, may contain Microsoft 365 data' })
 Log level when collected: $($envInfo.logLevel). For detailed logs, turn on verbose logging, reproduce the problem, then collect again.

@@ -149,7 +149,7 @@ function Connect-Copilot {
 
 function Get-CopilotPacing {
     <# Pauses from harness.json "pacing" (defaults when missing). #>
-    $p = @{ newChatSettleSec = 3.0; beforeSendSec = 1.0; betweenPromptsSec = 5.0 }
+    $p = @{ newChatSettleSec = 3.0; beforeSendSec = 1.0; betweenPromptsSec = 5.0; lateReplySec = 2.0 }
     try {
         $cfg = Get-CCBridgeConfig harness (Split-Path -Parent $script:ModuleDir)
         if ($cfg.pacing) { foreach ($k in @($p.Keys)) { if ($null -ne $cfg.pacing.$k) { $p[$k] = [double]$cfg.pacing.$k } } }
@@ -1208,9 +1208,69 @@ function Send-CopilotPrompt {
             $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $OnStatus -LostSec 0
             if ($r.Result -eq 'Lost') { $r.Result = 'NoAnswer' }
         }
+        if ($r.Result -eq 'Success' -and -not $r.Cancelled) { $r = Update-LateReply $Bridge $r }
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
         $r
     }
+}
+
+function Get-AlnumText([string]$Text) { ($Text -replace '[^\p{L}\p{N}]', '').ToLowerInvariant() }
+
+function Merge-LateReplyText {
+    <# The reply with a part that arrived after the end signal, or $null when the page has nothing more.
+       $Have = the reply as received; $PageText = the same reply read from the page a moment later.
+       Only text that clearly continues the reply counts: the page text must start like the reply and
+       be longer. When the end of the reply is found in the page text, only the new tail is added (the
+       received text keeps its code intact); otherwise the page text is used. #>
+    param([AllowEmptyString()][string]$Have, [AllowEmptyString()][string]$PageText)
+    $a = Get-AlnumText $Have; $b = Get-AlnumText $PageText
+    if ($b.Length -le $a.Length + 20) { return $null }                   # not clearly longer
+    $head = $a.Substring(0, [Math]::Min(80, $a.Length))
+    if (-not $head -or -not $b.Substring(0, [Math]::Min(600, $b.Length)).Contains($head)) { return $null }   # another reply
+    # The received text's last line, found in the page text: add what follows it.
+    $lines = @($Have.TrimEnd() -split "\r?\n" | Where-Object { $_.Trim().Length -ge 8 })
+    if ($lines.Count) {
+        $last = $lines[-1].Trim()
+        $at = $PageText.LastIndexOf($last, [StringComparison]::Ordinal)
+        if ($at -ge 0) {
+            $tail = $PageText.Substring($at + $last.Length)
+            if ((Get-AlnumText $tail).Length -gt 20) { return [pscustomobject]@{ text = $Have.TrimEnd() + $tail; how = 'tail' } }
+            return $null
+        }
+    }
+    [pscustomobject]@{ text = $PageText; how = 'page' }
+}
+
+function Update-LateReply {
+    <# After Copilot signalled the end of a reply: wait a moment (pacing lateReplySec), then read the
+       reply from the page. If Copilot is still answering (Stop visible) wait for it, and if the page
+       holds a longer version of the same reply, use that. Parts that arrive after the end signal were
+       otherwise dropped at the next send. #>
+    param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)]$Reply)
+    $sec = if ($Bridge.PSObject.Properties['Pacing'] -and $Bridge.Pacing -and $null -ne $Bridge.Pacing['lateReplySec']) { [double]$Bridge.Pacing['lateReplySec'] } else { 2.0 }
+    if ($sec -le 0) { return $Reply }
+    try {
+        $until = (Get-Date).AddSeconds($sec)
+        while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $Bridge.Session 200 }
+        # Still answering: wait (at most 120 s) until Stop is gone.
+        $limit = (Get-Date).AddSeconds(120); $waited = $false
+        while ((Get-Date) -lt $limit) {
+            $st = Get-PageReplyState $Bridge
+            if (-not $st -or -not $st.stop) { break }
+            $waited = $true
+            $until = (Get-Date).AddSeconds(1)
+            while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $Bridge.Session 200 }
+        }
+        $pt = Get-PageReplyText $Bridge -Fresh
+        if ($pt.how -ne 'state' -and -not $waited) { return $Reply }       # visible text only: not exact enough to compare
+        $late = Merge-LateReplyText "$($Reply.Text)" "$($pt.text)"
+        if (-not $late) { return $Reply }
+        Write-CCBLog info bridge 'A part of the reply arrived after the end signal; using the longer reply' @{ before = "$($Reply.Text)".Length; after = $late.text.Length; how = $late.how; waited = $waited }
+        $Reply.Text = $late.text
+        if ($late.how -eq 'page' -and $Reply.PSObject.Properties['Uncertain']) { $Reply.Uncertain = [int]$Reply.Uncertain + 1 }
+        if ($Reply.PSObject.Properties['LateText']) { $Reply.LateText = $true } else { $Reply | Add-Member -NotePropertyName LateText -NotePropertyValue $true }
+    } catch { Write-CCBLog verbose bridge "Late-reply check failed: $($_.Exception.Message)" }
+    $Reply
 }
 
 function Send-CopilotPromptUnlocked {
@@ -1728,4 +1788,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

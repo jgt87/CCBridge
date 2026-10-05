@@ -11,9 +11,22 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^v\d+\.\d+\.\d+$')][string]$Version,
     [string]$NotesFile,
-    [switch]$NoPublish
+    [switch]$NoPublish,
+    [switch]$SkipGate   # only for an emergency: builds without the tests and the repository scan
 )
 $ErrorActionPreference = 'Stop'
+
+# Release gate: the whole Pester suite (in Windows PowerShell 5.1, with its own module paths) and
+# StreamHub's file checks over this repository must pass, or nothing is built, tagged or published.
+if (-not $SkipGate) {
+    $repo = Split-Path -Parent $PSScriptRoot
+    Write-Host 'Release gate: tests...'
+    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'run-tests.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Release gate: tests failed; nothing was built. Fix them first (or -SkipGate in an emergency).' }
+    Write-Host 'Release gate: repository scan...'
+    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'scan-repo.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Release gate: the file checks report problems in this repository (a check that flags correct code, or broken code); nothing was built.' }
+}
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 function Invoke-Native([string]$Exe, [string[]]$Arguments) {

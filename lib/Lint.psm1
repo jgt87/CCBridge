@@ -4,6 +4,7 @@
 # agent reports only problems a change added (Get-NewFileIssues compares with the file before).
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'Config.psm1')   # Test-CheckSwitch: the check families can be turned off
 
 function Hide([string]$Text, [string]$Pattern) {
     # Each match becomes spaces, line breaks kept (so line numbers stay right).
@@ -487,6 +488,204 @@ function Test-LocalReferences([string]$Text, [string]$Path, [string]$ProjectRoot
 }
 
 
+function Get-CodeMask {
+    <# The text with strings and comments blanked (same length, line breaks kept) for the file's
+       language, so a rule or a fix touches code only. $null for files without a known mask. #>
+    param([string]$Path, [string]$Text)
+    if ($Path -match '(?i)\.(m?js|cjs|jsx|ts|mts|cts|tsx)$') { return (Get-JsMask $Text).masked }
+    if ($Path -match '(?i)\.pyw?$') { return Hide $Text $script:MaskPython }
+    if ($Path -match '(?i)\.ps[md]?1$') { return Hide $Text '@''[\s\S]*?\n''@|@"[\s\S]*?\n"@|"(?:[^"`\n]|`.)*"|''[^''\n]*''|<#[\s\S]*?#>|#[^\n]*' }
+    if ($Path -match '(?i)\.(css|scss|less)$') { return Hide $Text $script:MaskCss }
+    $null
+}
+
+function Find-GeneratedCodeIssues {
+    <# Mistakes typical of generated code that break a file, beyond its syntax rules: characters a
+       chat answer brings along (typographic quotes, non-breaking and zero-width spaces, citation
+       markers, HTML entities, a chat sentence as the first line, a whole file of escaped line
+       breaks), and per language what the code is not allowed to be (TypeScript in .js, imports in
+       functions, ES modules mixed with CommonJS, Python 2 print, PowerShell 7 in a 5.1 script,
+       // comments and SCSS in CSS, single % in a batch for loop). Only outside strings and comments
+       where the language allows that to be told apart. Non-ASCII characters are written as \u. #>
+    param([string]$Path, [string]$Text)
+    if ($Path -notmatch $script:CodeExt -or $Path -match '(?i)\.(md|markdown|txt|html?|xml|svg|json|jsonc|ya?ml|toml|csv|tsv)$') { return }
+    if (-not (Test-CheckSwitch 'generated')) { return }   # setting checks.generated
+    $js = $Path -match '(?i)\.(m?js|cjs|jsx|ts|mts|cts|tsx)$'
+    $py = $Path -match '(?i)\.pyw?$'
+    $ps = $Path -match '(?i)\.ps[md]?1$'
+    $masked = if ($js) { (Get-JsMask $Text).masked } elseif ($py) { Hide $Text $script:MaskPython } elseif ($ps) { Hide $Text '@''[\s\S]*?\n''@|@"[\s\S]*?\n"@|"(?:[^"`\n]|`.)*"|''[^''\n]*''|<#[\s\S]*?#>|#[^\n]*' } elseif ($Path -match '(?i)\.(css|scss|less)$') { Hide $Text $script:MaskCss } else { $Text }
+    $first = { param($m, $msg) if ($m.Success) { "line $(LineAt $Text $m.Index): $msg" } }
+
+    # What a chat answer brings along.
+    & $first ([regex]::Match($masked, '[=(,\[:+]\s*[\u201C\u201D\u2018\u2019]|[\u201C\u201D\u2018\u2019]\s*[);,\]]')) 'typographic quotes (curly quotes) used as code quotes: write straight quotes " and '''
+    & $first ([regex]::Match($masked, '[\u00A0\u200B\u200C\u200D\u2060]|(?!\A)\uFEFF')) 'a non-breaking or zero-width space in the code (from a chat answer): replace it with a normal space or remove it'
+    # In the code itself: a marker inside a string or a comment does not break anything.
+    & $first ([regex]::Match($masked, '\u3010[^\u3011\n]{0,40}\u2020|:contentReference\[oaicite|\bturn\d+(search|view|file)\d+\b|\[\d{1,2}\]\(https?://')) 'a citation marker from the chat answer is in the code: remove it'
+    if ($Path -notmatch '(?i)\.(jsx|tsx|vue|svelte)$') { & $first ([regex]::Match($masked, '&amp;&amp;|&quot;|&#39;|&amp;(?=\s)|\s&lt;=?\s|\s&gt;=?\s')) 'HTML entities in the code (&amp; &quot; &lt;): write the characters themselves' }
+    $lead = [regex]::Match($Text, '\A\s*([^\n]*)')
+    if ($lead.Groups[1].Value -match '^(Here is|Here''s|Below is|Sure[,!]|Certainly|Of course|I''ve|I have|The (updated|following|corrected|complete) )') { 'line 1: the file starts with a sentence from the chat answer instead of code' }
+    $lines = $Text.Split("`n").Count
+    if ($lines -le 2 -and $Text.Length -gt 200 -and ([regex]::Matches($Text, '\\n')).Count -ge 5) { 'the whole file is on one line with \n written out: write real line breaks' }
+
+    if ($js) {
+        if ($Path -match '(?i)\.(m?js|cjs|jsx)$') {
+            & $first ([regex]::Match($masked, '(?m)^\s*(export\s+)?(interface|type)\s+[A-Za-z_]\w*\s*(<[^>\n]*>)?\s*[={]|\bfunction\s*\w*\s*\([^)\n]*\w\s*:\s*(string|number|boolean|any|unknown|void)\b|\)\s*:\s*(string|number|boolean|any|unknown|void|Promise<)|\sas\s+(const|string|number|any|unknown)\b|(?m)^\s*(private|public|protected|readonly)\s+\w')) 'TypeScript syntax in a JavaScript file: remove the types, or make it a .ts file'
+        }
+        & $first ([regex]::Match($masked, '(?m)^[ \t]+import\s+(?:[\w*{][^;\n]*\sfrom\s|["''])')) 'an import inside a block or function: imports go at the top level of the file (or use await import())'
+        if ($masked -match '(?m)^\s*(import\s+[\w*{]|export\s+(default|const|function|class|\{))' -and $masked -match '\bmodule\.exports\b|(?m)^\s*exports\.\w+\s*=') { 'the file mixes ES modules (import/export) with CommonJS (module.exports): use one of the two' }
+        $defaults = [regex]::Matches($masked, '(?m)^\s*export\s+default\b')
+        if ($defaults.Count -gt 1) { "line $(LineAt $Text $defaults[1].Index): a second export default (a file has one)" }
+        $seen = @{}
+        foreach ($d in [regex]::Matches($masked, '(?m)^(?:export\s+)?(?:const|let|class)\s+([A-Za-z_$][\w$]*)')) {
+            $n = $d.Groups[1].Value
+            if ($seen.ContainsKey($n)) { "line $(LineAt $Text $d.Index): '$n' is declared a second time at the top level (line $($seen[$n])): JavaScript stops with a SyntaxError"; break }
+            $seen[$n] = LineAt $Text $d.Index
+        }
+    }
+    if ($py) {
+        # On the code with comments blanked (not strings: print 'x' is the statement to find).
+        & $first ([regex]::Match((Hide $Text '#[^\n]*'), '(?m)^\s*print[ \t]+(?![=(])\S')) 'Python 2 print statement: write print(...)'
+        & $first ([regex]::Match($Text, '(?m)\b[rRbB]?[fF]"[^"\n]*\{[^}"\n]*"[^"\n]*"[^}\n]*\}')) 'the same quotes inside an f-string expression only work from Python 3.12: use the other quote type inside the braces'
+    }
+    if ($ps -and (Test-CheckSwitch 'powershell7') -and $Text -notmatch '(?im)^\s*#requires\s+.*(-version\s+[6-9]|-psedition\s+core)') {
+        # Command names only when the script does not define a function of that name itself.
+        $own = @([regex]::Matches($Text, '(?im)^\s*function\s+([\w-]+)') | ForEach-Object { $_.Groups[1].Value })
+        $names = @('Join-String', 'Get-Error', 'Test-Json', 'ConvertFrom-Markdown', 'Get-Uptime' | Where-Object { $own -notcontains $_ })
+        $cmd = if ($names.Count) { '|\b(' + ($names -join '|') + ')\b' } else { '' }
+        $m7 = [regex]::Match($masked, '(?i)ConvertFrom-Json\b[^\n|;]*-AsHashtable|ForEach-Object\s+[^\n|;]*-Parallel\b' + $cmd + '|Invoke-(RestMethod|WebRequest)\b[^\n|;]*-(SkipCertificateCheck|Authentication|StatusCodeVariable|ResponseHeadersVariable)\b|Get-Content\b[^\n|;]*-AsByteStream')
+        & $first $m7 'PowerShell 7 only (Windows PowerShell 5.1 does not have it): use a 5.1 way, or add #Requires -Version 7'
+    }
+    if ($Path -match '(?i)\.css$') {
+        & $first ([regex]::Match($masked, '(?m)(?<![:\w/])//[^\n]*')) '// is not a comment in CSS (the next rule is skipped): use /* */'
+        & $first ([regex]::Match($masked, '(?m)^\s*\$[\w-]+\s*:|@(mixin|include|extend)\b')) 'SCSS syntax ($variables, @mixin, @include) in a .css file: use CSS variables (--name) or make it .scss'
+    }
+    if ($Path -match '(?i)\.(cmd|bat)$') {
+        & $first ([regex]::Match($Text, '(?im)^(?!\s*(rem\b|::)).*\bfor\b[^\n]*?\s%[a-z]\s+in\b')) 'a for loop variable in a batch file needs %% (%%i, not %i)'
+        if ($Text -match '![A-Za-z_]\w*!' -and $Text -notmatch '(?i)enabledelayedexpansion') { & $first ([regex]::Match($Text, '![A-Za-z_]\w*!')) '!name! needs setlocal enabledelayedexpansion' }
+    }
+}
+
+function Find-LanguagePitfalls {
+    <# Mistakes that pass a syntax check but break at run time, seen in real work: control characters
+       where a backslash was lost (\t, \v in a path or string), mixed line endings, and Windows
+       PowerShell 5.1 traps (a program's arguments losing their inner double quotes, stderr becoming
+       an error under ErrorActionPreference Stop, a JSON array arriving as one object, a parameter
+       overwritten by a variable that differs only in case, automatic variables used as names), and
+       a member declared twice in a TypeScript interface. #>
+    param([string]$Path, [string]$Text, [bool]$Mixed = $false)   # $Mixed: the original text has both CRLF and LF
+    if ($Path -notmatch $script:CodeExt -or $Path -match '(?i)\.(md|markdown|txt|csv|tsv)$') { return }
+    if (-not (Test-CheckSwitch 'generated')) { return }
+    $first = { param($m, $msg) if ($m.Success) { "line $(LineAt $Text $m.Index): $msg" } }
+    # A control character (not tab or line break) in code: almost always a lost backslash.
+    & $first ([regex]::Match($Text, '[\x00-\x08\x0B\x0C\x0E-\x1F]')) 'a control character in the file (often a backslash that got lost, like \v or \f in a path): write the backslash again'
+    # A tab right after a backslash path part inside quotes: \t was read as a tab.
+    & $first ([regex]::Match($Text, '(?m)[A-Za-z]:\\[^''"\n]*\t[^''"\n]*[''"]')) 'a tab inside a Windows path (\t was read as a tab): write \\t, or use / or a raw string'
+    if ($Mixed) { 'the file mixes CRLF and LF line endings: use one kind' }
+
+    if ($Path -match '(?i)\.ps[md]?1$') {
+        $tok = $null; $errs = $null
+        $ast = [Management.Automation.Language.Parser]::ParseInput($Text, [ref]$tok, [ref]$errs)
+        if (@($errs).Count) { return }   # the syntax check reports it already
+        # Inner double quotes in an argument to a program: Windows PowerShell 5.1 drops them.
+        foreach ($c in @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] }, $true))) {
+            # Named programs only (cmd /c "..." is the safe way to pass quotes, so cmd is left alone).
+            $name = "$($c.GetCommandName())"
+            if ($name -notmatch '(?i)^(python|py|node|npm|npx|dotnet|git|powershell|pwsh|java|curl)(\.exe)?$') { continue }
+            foreach ($e in @($c.CommandElements | Select-Object -Skip 1)) {
+                $s = $e.Extent.Text
+                if (($s.StartsWith("'") -and $s.Contains('"')) -or ($s.StartsWith('"') -and $s -match '`"')) {
+                    "line $($e.Extent.StartLineNumber): this argument to $name holds double quotes, which Windows PowerShell 5.1 drops when it starts a program: avoid inner double quotes (pass a file, or use single quotes inside)"
+                    break
+                }
+            }
+        }
+        # Stop on errors plus a program's output captured with 2>&1: its stderr becomes an error.
+        if ($Text -match '(?im)^\s*\$ErrorActionPreference\s*=\s*[''"]?Stop') {
+            # Not when the preference is lowered on that line or just before it.
+            foreach ($m in [regex]::Matches($Text, '(?m)^[^#\n]*&\s*(\$[\w.]+|[''"][^''"\n]+\.exe[''"]|\w+\.exe)[^\n#]*2>&1')) {
+                $start = [Math]::Max(0, $Text.LastIndexOf("`n", [Math]::Max(0, $m.Index - 1)))
+                $start = [Math]::Max(0, $Text.LastIndexOf("`n", [Math]::Max(0, $start - 1)))
+                $context = $Text.Substring($start, $m.Index + $m.Length - $start)
+                if ($context -match '(?i)\$ErrorActionPreference\s*=\s*[''"]?(Continue|SilentlyContinue)') { continue }
+                "line $(LineAt $Text $m.Index): with `$ErrorActionPreference = Stop a program writing to stderr stops the script here: run it through cmd /c `"... 2>&1`" or lower the preference around it"
+                break
+            }
+        }
+        # A JSON array from ConvertFrom-Json is one object in 5.1 unless the call is in parentheses.
+        & $first ([regex]::Match($Text, '@\((?!\()[^()\n]*\|\s*ConvertFrom-Json\s*\)\s*\|')) 'in Windows PowerShell 5.1 a JSON array arrives as one object here: put the call in parentheses, @((... | ConvertFrom-Json)) | ...'
+        # A parameter overwritten by a variable that only differs in case (names ignore case).
+        foreach ($fn in @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))) {
+            $params = @()
+            if ($fn.Parameters) { $params += @($fn.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath }) }
+            if ($fn.Body.ParamBlock) { $params += @($fn.Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath }) }
+            if (-not $params.Count) { continue }
+            foreach ($a in @($fn.Body.FindAll({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] }, $true))) {
+                if ($a.Left -isnot [Management.Automation.Language.VariableExpressionAst]) { continue }
+                $v = $a.Left.VariablePath.UserPath
+                # Reworking the parameter itself ($changed = @($Changed | ...)) is deliberate; an
+                # unrelated value that lands on it is the mistake.
+                $hit = @($params | Where-Object { $_ -ieq $v -and $_ -cne $v -and $a.Right.Extent.Text -notmatch ('(?i)\$' + [regex]::Escape($_) + '\b') })
+                if ($hit.Count) { "line $($a.Extent.StartLineNumber): `$$v overwrites the parameter `$$($hit[0]) (variable names ignore case): use another name"; break }
+            }
+        }
+        # a, b + c is (a, b) + c: the comma binds before + (an item meant as one string becomes several).
+        $plus = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.BinaryExpressionAst] -and $n.Operator -eq 'Plus' -and $n.Left -is [Management.Automation.Language.ArrayLiteralAst] }, $true)) | Select-Object -First 1
+        if ($plus) { "line $($plus.Extent.StartLineNumber): in a, b + c the comma binds first, so this adds to the whole list (a, b) instead of to the last item: put the last item in parentheses, a, (b + c)" }
+        # Automatic variables used as names.
+        $auto = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [Management.Automation.Language.VariableExpressionAst] -and $n.Left.VariablePath.UserPath -match '^(?i)(args|input|matches|host|error|pid|home|this|PSItem|_)$' }, $true)) | Select-Object -First 1
+        if ($auto) { "line $($auto.Extent.StartLineNumber): `$$($auto.Left.VariablePath.UserPath) is an automatic variable PowerShell sets itself: use another name" }
+    }
+    if ($Path -match '(?i)\.(ts|tsx|mts|cts)$') {
+        # A member declared twice in one interface or object type.
+        $masked = (Get-JsMask $Text).masked
+        foreach ($blk in [regex]::Matches($masked, '(?:interface\s+\w+[^{]*|type\s+\w+\s*=\s*)\{([^{}]*)\}')) {
+            $seen = @{}
+            foreach ($mem in [regex]::Matches($blk.Groups[1].Value, '(?m)^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*)\??\s*:')) {
+                $n = $mem.Groups[1].Value
+                if ($seen.ContainsKey($n)) { "line $(LineAt $Text ($blk.Groups[1].Index + $mem.Index)): '$n' is declared twice in this type: TypeScript reports a duplicate identifier"; break }
+                $seen[$n] = $true
+            }
+        }
+    }
+}
+
+function Get-RealTool([string]$Name) {
+    # A tool on PATH (not the Store's python.exe stub), looked up once.
+    if (-not $script:Tools) { $script:Tools = @{} }
+    if (-not $script:Tools.ContainsKey($Name)) {
+        $c = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
+        $script:Tools[$Name] = if ($c) { $c.Source } else { '' }
+    }
+    $script:Tools[$Name]
+}
+
+function Test-ToolSyntax {
+    <# The language's own syntax check, when its tool is installed: node --check for JavaScript,
+       python -m py_compile for Python. "line N: ..." texts; nothing when the tool is missing. #>
+    param([string]$Path, [AllowEmptyString()][string]$Text)
+    $kind = if ($Path -match '(?i)\.(m?js|cjs)$') { 'node' } elseif ($Path -match '(?i)\.py$') { 'python' } else { return }
+    if (-not (Test-CheckSwitch 'tools')) { return }   # setting checks.tools
+    $exe = Get-RealTool $kind
+    if (-not $exe) { return }
+    $dir = Join-Path $env:TEMP ('streamhub-check-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Force -Path $dir
+    $file = Join-Path $dir ([IO.Path]::GetFileName($Path))
+    try {
+        [IO.File]::WriteAllText($file, $Text, (New-Object Text.UTF8Encoding($false)))
+        # Through cmd /c: with ErrorActionPreference Stop, a program's stderr would become an error here.
+        $args2 = if ($kind -eq 'node') { "--check `"$file`"" } else { "-m py_compile `"$file`"" }
+        $out = cmd /c "`"$exe`" $args2 2>&1"
+        if ($LASTEXITCODE -eq 0) { return }
+        $all = (@($out) | ForEach-Object { "$_" }) -join "`n"
+        if ($kind -eq 'node' -and $all -match 'Cannot use import statement|import\.meta|Unexpected token .?export') { return }   # a module read as CommonJS: not a syntax error
+        $line = if ($all -match ':(\d+)\r?\n' -or $all -match 'line (\d+)') { $Matches[1] } else { '' }
+        $msg = @($all.Split("`n") | Where-Object { $_ -match '(SyntaxError|IndentationError|TabError)' }) | Select-Object -First 1
+        if (-not $msg) { $msg = @($all.Split("`n") | Where-Object { $_.Trim() }) | Select-Object -Last 1 }
+        $msg = "$msg".Trim() -replace [regex]::Escape($file), $Path
+        "$(if ($line) { "line ${line}: " })$kind says: $msg"
+    } catch { } finally { try { [IO.Directory]::Delete($dir, $true) } catch { } }
+}
+
 function Test-FileContent {
     <# The problems in a file's text, by its type: "line N: problem" (or a whole-file problem).
        Also for every code file: leftover edit or merge markers and ``` fence lines. #>
@@ -522,6 +721,8 @@ function Test-FileContent {
         '(?i)\.(csv|tsv)$' { & $add (Test-Csv $t $Path); break }
     }
     & $add (Test-Duplicates $t $Path)
+    & $add (Find-GeneratedCodeIssues $Path $t)
+    & $add (Find-LanguagePitfalls $Path $t ($Text.Contains("`r`n") -and [regex]::IsMatch($Text, '(?<!\r)\n')))
     $issues.ToArray()
 }
 
@@ -534,10 +735,15 @@ function Get-NewFileIssues {
         @(Test-FileContent $Path $text $Crlf) + @(Test-LocalReferences $text.Replace("`r`n", "`n") $Path $ProjectRoot) +
             @(if ($Path -match '(?i)\.ps[md]?1$') { Test-PsCommands $text $ProjectRoot }) | Where-Object { $_ }
     }
+    # The fixed rules; when they find nothing, the language's own syntax check (node, python, when
+    # installed) for what they cannot see (one problem is not reported twice).
     $after = @(& $all $New)
+    $tool = @(if (-not $after.Count) { Test-ToolSyntax $Path "$New".Replace("`r`n", "`n") })
+    $after = @(@($after) + $tool | Where-Object { $_ })
     if (-not $after.Count) { return }
     $before = @{}
     if ("$Old") { foreach ($i in @(& $all $Old)) { $k = $i -replace '\d+', '#'; $before[$k] = 1 + [int]$before[$k] } }
+    if ($tool.Count -and "$Old") { foreach ($i in @(Test-ToolSyntax $Path "$Old".Replace("`r`n", "`n"))) { $k = $i -replace '\d+', '#'; $before[$k] = 1 + [int]$before[$k] } }
     foreach ($i in $after) {
         $k = $i -replace '\d+', '#'
         if ($before[$k]) { $before[$k]--; continue }
@@ -545,4 +751,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences

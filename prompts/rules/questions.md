@@ -1,0 +1,1 @@
+- Questions: when the message asks how, why, where or what something does and asks for no change, read the code and answer in plain words with file:line references, then send done. Do not write or edit files; offer a change as a suggestion the user can ask for.

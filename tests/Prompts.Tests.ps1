@@ -226,12 +226,12 @@ Describe 'Settings' {
 }
 Describe 'Case-specific prompt modules' {
     It 'picks modules from the project contents' {
-        (Get-ProjectTraits @('index.html', 'src/App.tsx', 'tools/build.ps1', 'source/data.csv')) -join ',' | Should Be 'code,web,powershell,source,javascript'
+        (Get-ProjectTraits @('index.html', 'src/App.tsx', 'tools/build.ps1', 'source/data.csv')) -join ',' | Should Be 'code,web,powershell,source,javascript,data,react'
         (Get-ProjectTraits @('main.py')) -join ',' | Should Be 'code,python'
         @(Get-ProjectTraits @('notes.md')).Count | Should Be 0
     }
     It 'picks modules from the request when the project does not show it yet' {
-        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:web,rules:moving,rules:quality,rules:security,rules:javascript'
+        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:web,rules:moving,rules:quality,rules:security,rules:javascript,rules:ui,rules:react'
         (Get-PromptModules 'Split the parser into two modules' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:moving'
         (Get-PromptModules 'Write a pytest for the parser' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:python,rules:quality,rules:testing'
         (Get-PromptModules 'Fix the bug' @{ Traits = @('nocommands') }) -join ',' | Should Be 'rules:folders,rules:environment,rules:debugging'
@@ -246,6 +246,24 @@ Describe 'Case-specific prompt modules' {
         (Get-PromptModules 'Update start.cmd' $none) -join ',' | Should Match 'rules:batch'
         (Get-ProjectTraits @('start.cmd', 'tests/App.Tests.ps1', 'lib/App.psm1')) -join ',' | Should Be 'code,powershell,batch,tests'
         Get-EnvironmentText | Should Match '^- This computer: Windows PowerShell 5\.1 and Edge'
+    }
+    It 'adds the question, data, bigger task, script, UI, web service, C#, React and privacy rules only when they apply' {
+        $none = @{ Traits = @() }
+        $pick = { param($text, $ctx) ((Get-PromptModules $text $ctx | Where-Object { $_ -notin 'actions:run', 'rules:folders', 'rules:environment' }) -join ',') }
+        & $pick 'Fix the build' $none | Should Be 'rules:debugging'
+        & $pick 'How does the calendar view load its data?' $none | Should Be 'rules:questions'
+        & $pick 'Change how the calendar loads its data' $none | Should Be ''
+        & $pick 'Import the bank export.csv' $none | Should Be 'rules:data'
+        & $pick 'Build me an app for tracking expenses' $none | Should Match 'rules:bigtask'
+        & $pick 'Update the export script in Scripts/' $none | Should Match 'rules:scripts'
+        & $pick 'Make the page layout responsive' $none | Should Match 'rules:ui'
+        & $pick 'Call the weather API every hour' $none | Should Be 'rules:http'
+        & $pick 'Add a WPF window' $none | Should Match 'rules:csharp'
+        & $pick 'Add a useEffect that loads the list' $none | Should Match 'rules:react'
+        & $pick 'Remove the customer data from the logs' $none | Should Be 'rules:privacy'
+        & $pick 'Rename the title' @{ Traits = @('source', 'csharp', 'react') } | Should Be 'rules:source,rules:data,rules:csharp,rules:react,rules:privacy'
+        (Get-ProjectTraits @('data/bank.csv', 'App/App.csproj', 'src/List.tsx')) -join ',' | Should Match 'data.*csharp.*react'
+        (& $pick ('Please ' + ('x ' * 320)) $none) | Should Match 'rules:bigtask'   # a long request
     }
     It 'sends the web rules with a web project, after the core rules' {
         $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Fix the bug' -Sent (New-Sent) -Context @{ Location = 'L'; Full = 'F'; Traits = @('web') }
@@ -327,5 +345,26 @@ Describe 'Code quality rules' {
         $part | Should Match 'never an empty catch'
         $part | Should Not Match '(?i)ccbridge|streamhub'
         $part.Length -lt 900 | Should Be $true
+    }
+}
+
+Describe 'Agent: Auto picks an agent by fixed words (Get-AutoAgent)' {
+    $cases = @(
+        @{ text = 'Analyse the sales trend per region in @Work/sales.xlsx and make a chart'; agent = 'analyst' },
+        @{ text = 'What is the average order value in orders.csv?'; agent = 'analyst' },
+        @{ text = 'Research the current market for e-bikes in the Netherlands with sources'; agent = 'researcher' },
+        @{ text = 'Investigate how our competitors price their support plans'; agent = 'researcher' },
+        @{ text = 'Add a chart of sales.csv to the dashboard page'; agent = '' },
+        @{ text = 'Research why the build script fails'; agent = '' },
+        @{ text = 'Summarise my emails from today'; agent = '' },
+        @{ text = 'research'; agent = '' },
+        @{ text = 'Hello, how are you?'; agent = '' }
+    )
+    foreach ($c in $cases) {
+        It "sends '$($c.text)' to '$($c.agent)'" {
+            $r = Get-AutoAgent $c.text
+            $r.agent | Should Be $c.agent
+            if ($c.agent) { $r.why | Should Not BeNullOrEmpty }
+        }
     }
 }

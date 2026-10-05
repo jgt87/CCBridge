@@ -118,6 +118,8 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
       <span className={cn(fieldClass, "inline-flex items-center border-transparent font-mono")}>{asDraft(s.value)}</span>
     ) : s.type === "toggle" ? (
       <Segmented label={s.label} onChange={(o) => save(o === "on")} options={ON_OFF} value={draft === "on" ? "on" : "off"} />
+    ) : s.type === "select" && s.key === "enforcement" ? (
+      <Segmented label={s.label} onChange={(v) => save(v)} options={(s.options ?? []).map((o) => ({ id: o, label: optionLabel(o) }))} value={String(s.value ?? "standard")} />
     ) : s.type === "select" && isOnOff(s.options) ? (
       // A choice of just on and off looks like every other switch (the value saved stays "on"/"off").
       <Segmented label={s.label} onChange={(o) => save(o)} options={ON_OFF} value={draft === "on" ? "on" : "off"} />
@@ -143,8 +145,58 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
         value={draft}
       />
     );
+  // Enforcement: what the chosen tier does, under the switch, changing as you switch.
+  if (s.key === "enforcement") {
+    const tier = ENFORCEMENT_TIERS[String(s.value ?? "standard")] ?? ENFORCEMENT_TIERS.standard;
+    return (
+      <SettingLine
+        control={control}
+        help="How strictly the file checks, tests and hooks hold Copilot to their findings. Problems that break a file always go back to Copilot; the tiers differ in how often a task waits for a fix and what happens with likely mistakes. Default: Standard."
+        notes={
+          <>
+            <ul className="mt-1.5 space-y-0.5 text-xs">
+              {tier.map((line) => (
+                <li className="flex gap-1.5" key={line}>
+                  <span className="text-muted-foreground">&bull;</span>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
+            {notes}
+          </>
+        }
+        side={side}
+        title={s.label}
+      />
+    );
+  }
   return <SettingLine control={control} help={help} notes={notes} side={side} title={s.label} />;
 }
+
+/** What each enforcement tier does (lib/CheckPolicy.psm1, Get-Enforcement). */
+const ENFORCEMENT_TIERS: Record<string, string[]> = {
+  light: [
+    "Light: fewest Copilot messages, for quick changes or when the daily limit is close.",
+    "Problems that break a file go back to Copilot; done waits for a fix once.",
+    "Likely mistakes are only shown in the chat, not sent to Copilot.",
+    "Failing tests and beforeDone hooks are shown in the chat, not sent back.",
+    "Mechanical slips (curly quotes, odd spaces, HTML entities in code, mixed line endings) are fixed by StreamHub without a word.",
+  ],
+  standard: [
+    "Standard: the balance for everyday work (recommended).",
+    "Problems that break a file go back to Copilot; done waits for a fix up to twice.",
+    "Likely mistakes go to Copilot once per task and never hold up done.",
+    "Failing tests and beforeDone hooks go back to Copilot up to twice.",
+    "Mechanical slips are fixed by StreamHub, and Copilot is told so it stops making them.",
+  ],
+  strict: [
+    "Strict: most thorough, for code that runs unattended (chains, schedules); costs more Copilot messages.",
+    "Problems that break a file go back to Copilot; done waits for a fix up to three times.",
+    "Likely mistakes go to Copilot and hold up done once.",
+    "Failing tests and beforeDone hooks go back to Copilot up to three times.",
+    "Mechanical slips are not fixed by StreamHub: Copilot fixes them itself, so every change is its own and checked.",
+  ],
+};
 
 /** Settings > Privacy: forget the open project's conversation (asks once more first). */
 function ClearHistoryRow() {

@@ -87,6 +87,7 @@ export interface AgentEvent {
     | "script"
     | "review"
     | "kind"
+    | "checks"
     | "clarify"
     | "plan-ready"
     | "next-steps"
@@ -120,6 +121,8 @@ export interface AgentEvent {
   next?: string;
   /** next-steps: follow-ups found in Copilot's last reply, offered as one-click prompts. */
   steps?: string[];
+  /** A "checks" event: the round's file-check findings. */
+  findings?: CheckFinding[];
   /** error: id also written to the log, category, what to do, technical detail, CCBridge version. */
   errId?: string;
   code?: string;
@@ -263,7 +266,7 @@ export interface ChatOptions {
   feedback?: string;
   approve?: boolean;
   /** Ask one of Copilot's agents (it is mentioned in the message). */
-  agent?: "researcher" | "analyst";
+  agent?: "auto" | "researcher" | "analyst";
   /** An answer to the agent's plan: goes into the agent's chat, without a new mention. */
   agentAnswer?: boolean;
 }
@@ -351,6 +354,15 @@ export interface ChangeCount {
   removed: number;
   created?: boolean;
   deleted?: boolean;
+}
+
+/** One finding of a round's file check: error breaks the file, warning is a likely mistake. */
+export interface CheckFinding {
+  path: string;
+  line: number;
+  text: string;
+  level: "error" | "warning";
+  source: string;
 }
 
 /** An optional tool on this computer (Settings > This computer). */
@@ -614,6 +626,7 @@ export const api = {
     call<{ exists: boolean; error: string | null; hooks: HookItem[]; path: string }>("GET", "/api/hooks").then((r) => ({ ...r, hooks: Array.isArray(r.hooks) ? r.hooks : r.hooks ? [r.hooks as unknown as HookItem] : [] })),
   createHooks: () => call<{ ok: boolean; path: string }>("POST", "/api/hooks/create"),
   tools: () => call<{ tools: ToolItem[] }>("GET", "/api/tools").then((r) => (Array.isArray(r.tools) ? r.tools : r.tools ? [r.tools as unknown as ToolItem] : [])),
+  ignoreCheck: (path: string, text: string, source: string) => call<{ ok: boolean }>("POST", "/api/checks/ignore", { path, text, source }),
   installTool: (name: string) => call<{ ok: boolean; started: boolean }>("POST", "/api/tools/install", { name }),
   /** Add a runbook or script step to a chain, or remove / move one (index from 0). */
   chainSteps: (name: string, op: "add" | "remove" | "up" | "down", opts: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number } = {}) =>

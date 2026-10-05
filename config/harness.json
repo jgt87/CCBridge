@@ -35,6 +35,13 @@
   "autoTests": true,
   "pageScreenshot": true,
   "pageCheck": "on",
+  "enforcement": "standard",
+  "checks": {
+    "generated": true,
+    "tools": true,
+    "powershell7": true,
+    "quality": true
+  },
   "issues": {
     "enabled": "on",
     "autoFix": "error",
@@ -58,6 +65,7 @@
     "newChatSettleSec": 3,
     "beforeSendSec": 1,
     "betweenPromptsSec": 5,
-    "note": "Pauses that give Copilot's page time to finish its own work: after a new chat is ready, between typing the prompt and pressing Send, and the minimum gap after the previous reply. Completing tasks matters more than speed."
+    "lateReplySec": 2,
+    "note": "Pauses that give Copilot's page time to finish its own work: after a new chat is ready, between typing the prompt and pressing Send, the minimum gap after the previous reply, and the wait after a reply ended before it is read once more from the page (a part that arrives late is added; 0 = off). Completing tasks matters more than speed."
   }
 }

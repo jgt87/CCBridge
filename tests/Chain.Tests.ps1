@@ -229,9 +229,9 @@ Describe 'Running a chain' {
             [IO.File]::WriteAllText((Join-Path $p 'Runbooks\broken.chain.md'), "1. runbook: nope")
             $s = New-State $p
             Invoke-ChainJob $s 'broken'
-            (@($s.Events) | Where-Object type -eq 'error' | Select-Object -Last 1).text | Should Match 'cannot start'
-        } finally { Remove-Item $p -Recurse -Force }
-    }
+            (@($s.Events) | Where-Object type -eq 'error' | Select-Object -Last 1).text | Should Match 'cannot start'
+        } finally { Remove-Item $p -Recurse -Force }
+    }
     It 'runs one script on its own (Automation > Scripts) with the same rules, as its own change set' {
         $p = New-TestProject
         try {

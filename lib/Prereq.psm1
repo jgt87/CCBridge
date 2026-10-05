@@ -105,7 +105,9 @@ function Get-ToolVersion([string]$Exe, [string[]]$Arguments = @('--version')) {
     # python.exe stub in WindowsApps does not count: it only offers to install Python).
     $c = Get-Command $Exe -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
     if (-not $c) { return $null }
-    $out = try { & $c.Source @Arguments 2>&1 | Select-Object -First 1 } catch { $null }
+    # Some tools print their version to stderr: under Stop that would be an error, not the version.
+    $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $out = try { & $c.Source @Arguments 2>&1 | Select-Object -First 1 } catch { $null } } finally { $ErrorActionPreference = $saved }
     $line = "$out".Trim()
     if (-not $line) { return '(installed; version unknown)' }
     $line

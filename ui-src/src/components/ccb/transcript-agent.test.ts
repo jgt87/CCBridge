@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("./markdown-view", () => ({ MarkdownView: () => null }));
 vi.mock("./action-card", () => ({ ActionCard: () => null }));
 vi.mock("./undo-card", () => ({ UndoCard: () => null }));
+vi.mock("./checks-card", () => ({ ChecksCard: () => null }));
 vi.mock("@/components/kokonutui/ai-text-loading", () => ({ default: () => null }));
 import type { AgentEvent } from "@/lib/api";
 import { buildTranscript } from "./transcript";

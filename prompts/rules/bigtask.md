@@ -1,0 +1,1 @@
+- Bigger tasks: first send a todo with the steps, small enough to check one by one. Then build one step per reply, keep the app working after each step, and tick the step off before the next one. Start with the part everything else needs (data, structure), and leave polish for last.

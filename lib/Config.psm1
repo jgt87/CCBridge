@@ -96,6 +96,11 @@ $script:SettingDefs = @(
     @{ key = 'pageCheck'; group = 'Checks and issues'; label = 'Page check'; help = 'After web files change, open the page in a browser tab and report JavaScript errors and files that fail to load.'; type = 'select'; options = @('on', 'off') }
     @{ key = 'autoTests'; group = 'Checks and issues'; label = 'Run the project''s tests'; help = 'After a task that changed code, and when AGENTS.md has no verify: line, run the project''s own tests for the changed files (Pester for PowerShell; pytest or unittest when Python is installed; npm test when package.json has a test script). A failure goes back to Copilot to fix, at most twice.'; type = 'toggle' }
     @{ key = 'pageScreenshot'; group = 'Checks and issues'; label = 'Show Copilot the changed page'; help = 'With the page check: a screenshot of the changed page goes to Copilot once per task, to compare with what was asked (saved in .streamhub/Screenshots). Costs one more Copilot message when nothing else needs fixing.'; type = 'toggle' }
+    @{ key = 'enforcement'; group = 'Checks and issues'; label = 'Enforcement'; help = 'How strictly the checks hold Copilot to them. Light: only problems that break a file go back, done waits once, failing tests are shown only. Standard: problems that break a file hold up done (twice), likely mistakes are said once, failing tests go back twice. Strict: likely mistakes hold up done too (once), three tries for errors and tests; costs more Copilot messages.'; type = 'select'; options = @('light', 'standard', 'strict') }
+    @{ key = 'checks.generated'; group = 'Checks and issues'; label = 'Check for chat-answer leftovers'; help = 'Curly quotes, odd spaces, citation markers or HTML entities in code, TypeScript in .js, imports in functions, Python 2 print, // in CSS and similar mistakes typical of generated code.'; type = 'toggle' }
+    @{ key = 'checks.tools'; group = 'Checks and issues'; label = 'Syntax check with installed tools'; help = 'When the file checks find nothing: node --check for JavaScript and python -m py_compile for Python, when they are installed.'; type = 'toggle' }
+    @{ key = 'checks.powershell7'; group = 'Checks and issues'; label = 'Warn about PowerShell 7 features'; help = 'Commands and parameters a PowerShell 5.1 script cannot use (ConvertFrom-Json -AsHashtable, ForEach-Object -Parallel...). Off when your scripts run in PowerShell 7.'; type = 'toggle' }
+    @{ key = 'checks.quality'; group = 'Checks and issues'; label = 'Quality notes'; help = 'Debug leftovers, swallowed errors, personal paths, very long files and similar notes. Never block a task: Copilot is told once.'; type = 'toggle' }
     @{ key = 'evidence'; group = 'Checks and issues'; label = 'Task report (evidence)'; help = 'After a task that changed files, a short report of what was asked, what changed and which checks passed, in .streamhub/Evidence/ of the project; the chat links to it.'; type = 'select'; options = @('on', 'off') }
     @{ key = 'issues.enabled'; group = 'Checks and issues'; label = 'Issue detection'; help = 'Keep an index of problems in every project file (file checks, secrets, code health) and scan the changed files after each task.'; type = 'select'; options = @('on', 'off') }
     @{ key = 'issues.autoFix'; group = 'Checks and issues'; label = 'Fix automatically'; help = 'Problems a task adds that StreamHub sends back to Copilot to fix, one file at a time: error (broken syntax, missing files, typos), secret (keys and passwords in code), health (functions that are too complex). The rest is only reported.'; type = 'select'; options = @('error', 'error,secret', 'error,secret,health', 'none') }
@@ -209,6 +214,20 @@ function Test-DataCopiesOn([string]$AppRoot) {
     try { $v = (Get-CCBridgeConfig harness $AppRoot).dataCopies; ($null -eq $v) -or [bool]$v } catch { $true }
 }
 
+function Test-CheckSwitch([string]$Name, [string]$AppRoot) {
+    <# Setting checks.NAME (generated, tools, powershell7, quality): on unless turned off. Read from
+       disk, kept until the settings files change, so every runspace (and Lint) sees a change. #>
+    if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
+    $stamp = ''
+    foreach ($f in 'harness.json', 'harness.local.json') { $p = Join-Path $AppRoot "config\$f"; if (Test-Path -LiteralPath $p) { $stamp += "$((Get-Item -LiteralPath $p).LastWriteTimeUtc.Ticks);" } }
+    if ($script:CheckSwitchStamp -ne $stamp) {
+        $script:CheckSwitches = try { (Get-CCBridgeConfig harness $AppRoot).checks } catch { $null }
+        $script:CheckSwitchStamp = $stamp
+    }
+    $v = if ($script:CheckSwitches) { $script:CheckSwitches.$Name } else { $null }
+    ($null -eq $v) -or ([bool]$v -and "$v" -ne 'off')
+}
+
 function Reset-CCBridgeSettings {
     <# Puts every adjustable setting back to the app default (removes them from harness.local.json;
        other local values, such as the ports, stay). Returns the keys that were changed. #>
@@ -243,4 +262,4 @@ function Get-CCBridgeEnvironment {
     }
 }
 
-Export-ModuleMember -Function Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings
+Export-ModuleMember -Function Test-CheckSwitch, Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings

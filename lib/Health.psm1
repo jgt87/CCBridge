@@ -100,8 +100,8 @@ function Get-BraceFunctionMetrics([string]$Text, [string]$Path) {
             $close = Get-MatchingBrace $m $open
             if ($close -lt 0) { continue }
             $taken[$open] = $true
-            $args = if ($x.Groups[2].Success -and $x.Groups[2].Value.Trim()) { @($x.Groups[2].Value.Split(',') | Where-Object { $_.Trim() }).Count } elseif ($x.Groups[3].Success -and $x.Groups[3].Value) { 1 } else { 0 }
-            $starts.Add(@{ name = $(if ($name) { $name } else { '(anonymous)' }); start = $x.Index; open = $open; close = $close; params = $args })
+            $paramCount = if ($x.Groups[2].Success -and $x.Groups[2].Value.Trim()) { @($x.Groups[2].Value.Split(',') | Where-Object { $_.Trim() }).Count } elseif ($x.Groups[3].Success -and $x.Groups[3].Value) { 1 } else { 0 }
+            $starts.Add(@{ name = $(if ($name) { $name } else { '(anonymous)' }); start = $x.Index; open = $open; close = $close; params = $paramCount })
         }
     }
     foreach ($f in $starts) {

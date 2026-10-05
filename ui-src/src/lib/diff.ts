@@ -98,7 +98,7 @@ const ACTION_TYPES = new Set(["read", "glob", "grep", "find", "web", "write", "e
 const PLAIN_LABELS = new Set(["", "text", "txt", "plaintext", "plain", "none"]);
 /** First line of an action in a plain block: "ACTION read" (any action), or, in older replies, the bare
  *  name of one of the actions the helper also takes that way (lib/Protocol.psm1 keeps the same lists). */
-const ACTION_LINE = /^\s*action\s+(read|glob|grep|find|web|write|edit|run|remember|todo|done)\b/i;
+const ACTION_LINE = /^\s*action\s+(read|glob|grep|find|web|write|edit|run|remember|todo|dispute|done)\b/i;
 const BARE_ACTION_LINE = /^\s*(read|glob|grep|web|write|edit|run|todo|done)\b/;
 
 /** Removes CCBridge action blocks from a reply; they are shown as cards instead. */

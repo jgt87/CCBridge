@@ -1,0 +1,1 @@
+- Web services and APIs: give every request a timeout, check the HTTP status before using the body, and retry only temporary failures (timeouts, 429, 5xx) a few times with a growing pause, honouring Retry-After. Show the user a clear message when a call fails. Keys and tokens come from settings or environment variables, never from code; never log them.

@@ -38,7 +38,7 @@ import { buildTranscript, Transcript } from "@/components/ccb/transcript";
 import { type AgentEvent, type AppState, api, type ChainItem, type ChangeSetView, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
 
-type AgentChoice = "copilot" | "researcher" | "analyst";
+type AgentChoice = "auto" | "copilot" | "researcher" | "analyst";
 
 const MODES: PromptMode[] = [
   { id: "ask", label: "Ask before changes", description: "Approve every file change and command", icon: <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" /> },
@@ -298,13 +298,14 @@ export default function App() {
     return list;
   }, [projectEvents]);
 
-  // Who answers the next message (the agent picker next to Response); kept per browser.
+  // Who answers the next message (the agent picker next to Response); kept per browser. Auto (the
+  // default) lets StreamHub pick by fixed words: Researcher, Analyst or Copilot itself.
   const [agent, setAgentState] = useState<AgentChoice>(() => {
     try {
       const v = localStorage.getItem("ccb.agent");
-      return v === "researcher" || v === "analyst" ? v : "copilot";
+      return v === "researcher" || v === "analyst" || v === "copilot" ? v : "auto";
     } catch {
-      return "copilot";
+      return "auto";
     }
   });
   const setAgent = (v: AgentChoice) => {
@@ -318,7 +319,10 @@ export default function App() {
 
   const send = async (text: string) => {
     try {
-      await api.chat(text, agent === "copilot" ? { clarify: clarifyFirst } : { agent });
+      await api.chat(
+        text,
+        agent === "copilot" ? { clarify: clarifyFirst } : agent === "auto" ? { agent, clarify: clarifyFirst } : { agent },
+      );
       setDraft("");
       // Sent while busy = queued: say when it runs (only while StreamHub stays open).
       if (state.busy) {
@@ -642,9 +646,10 @@ export default function App() {
                         aria-label="Who answers"
                         className="shrink-0 rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                         onChange={(e) => setAgent(e.target.value as AgentChoice)}
-                        title="Who answers the next message: Copilot (with StreamHub's instructions), or one of Copilot's agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat."
+                        title="Who answers the next message: Copilot (with StreamHub's instructions), or one of Copilot's agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat. Auto: StreamHub picks by fixed words - Analyst when you ask for analysis, a chart or a trend of a data file (csv, xlsx, json) you attach or name; Researcher when you ask to research, investigate, compare competitors or the market, or for sources; Copilot itself for everything else, including all work on code."
                         value={agent}
                       >
+                        <option value="auto">Agent: Auto</option>
                         <option value="copilot">Agent: none (Copilot)</option>
                         <option value="researcher">Agent: Researcher</option>
                         <option value="analyst">Agent: Analyst</option>

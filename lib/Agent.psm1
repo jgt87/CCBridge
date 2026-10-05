@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -1368,12 +1368,14 @@ function Invoke-AgentRun {
        continues the agent's chat (answers to Researcher's plan), without a new mention. The reply
        says which agent answered; Researcher's plan and questions end with an 'agent-plan' event,
        so the person answers them (StreamHub never answers for them). #>
-    param($State, [Parameter(Mandatory)][string]$Agent, [Parameter(Mandatory)][string]$Text, [switch]$FollowUp)
+    param($State, [Parameter(Mandatory)][string]$Agent, [Parameter(Mandatory)][string]$Text, [switch]$FollowUp, [string]$AutoWhy = '')
     $name = Get-AgentDisplayName $Agent
     $State.Busy = $true; $State.Cancel = $false
     try {
         Add-AgentEvent $State 'user' @{ text = $Text; agent = $name }
-        Add-AgentEvent $State 'kind' @{ taskKind = 'agent'; agent = $name }
+        Add-AgentEvent $State 'kind' @{ taskKind = 'agent'; agent = $name; auto = [bool]$AutoWhy }
+        # Agent: Auto picked this agent (Get-AutoAgent): say why, so a wrong pick is easy to spot.
+        if ($AutoWhy) { Add-AgentEvent $State 'status' @{ text = "Agent Auto picked $name for $AutoWhy. To send this to Copilot itself, choose Agent: none and send it again." } }
         if (-not $FollowUp -or -not $State.AgentChat) { Start-NewChat $State }
         $State.AgentChat = $name
         Add-AgentEvent $State 'status' @{ text = $(if ($FollowUp) { "Sending your answer to $name; it works on it now (this can take several minutes)." } else { "Asking $name (this can take several minutes)..." }) }
@@ -2019,7 +2021,13 @@ function Invoke-AgentAction {
             $out = (Invoke-ReadAction $root $paths -MaxCharsPerFile 200000) -join "`n`n"
             $usedBy = try { Format-ImportUsers $root $paths } catch { '' }   # who imports it or uses its ids, functions, hooks
             if ($usedBy) { $out += "`n`n$usedBy" }
-            return @{ ok = $true; summary = "read $($paths.Count) file(s)"; output = $out; readPaths = @($paths) }
+            # Old binary Office files (.doc, .ppt, .xls) cannot be read here: Copilot reads them from an attachment.
+            $files = @(foreach ($rp in $paths) {
+                $fp = $rp -replace ':(outline|\d+(-\d+)?)$', ''
+                if ((Get-OfficeKind $fp) -ne 'old') { continue }
+                try { $f = Resolve-ProjectPath $root $fp; if (Test-Path -LiteralPath $f -PathType Leaf) { $f } } catch { }
+            })
+            return @{ ok = $true; summary = "read $($paths.Count) file(s)"; output = $out; readPaths = @($paths); attach = @($files) }
         }
         'glob' {
             $pat = if ($Action.arg) { $Action.arg } else { $Action.body.Split("`n")[0].Trim() }
@@ -2032,6 +2040,20 @@ function Invoke-AgentAction {
             $glob = if ($Action.arg) { if ($lines.Count) { $lines[0].Trim() } } elseif ($lines.Count -gt 1) { $lines[1].Trim() }
             $evt.target = $pat; Add-AgentEvent $State 'action' $evt
             return @{ ok = $true; summary = "searched $pat"; output = (Invoke-GrepAction $root $pat $glob) }
+        }
+        'dispute' {
+            # Copilot says a finding of the file check is wrong: left out for the rest of this task
+            # and recorded (.streamhub/check-disputes.json); only the user can ignore it for good.
+            $path = "$($Action.arg)".Trim()
+            $bodyLines = @("$($Action.body)".Replace("`r", '').Split("`n") | Where-Object { $_.Trim() })
+            $finding = if ($bodyLines.Count) { $bodyLines[0].Trim() -replace '^-\s*', '' -replace ('^' + [regex]::Escape($path) + ':\s*'), '' } else { '' }
+            $reason = (@($bodyLines | Select-Object -Skip 1) -join ' ').Trim()
+            $evt.target = "$path$(if ($finding) { ": $finding" })"; Add-AgentEvent $State 'action' $evt
+            if (-not $path -or -not $finding) { return @{ ok = $false; summary = 'dispute without a finding'; output = 'error: write ACTION dispute PATH, then the finding as it was reported on the next line, then why it is wrong.' } }
+            if ($null -eq $State.CheckDisputes) { $State.CheckDisputes = New-Object 'System.Collections.Generic.HashSet[string]' }
+            [void]$State.CheckDisputes.Add((Get-CheckKey $path $finding))
+            try { Add-CheckDispute $root $path $finding $reason 'copilot' } catch { Write-CCBLogError agent 'check dispute' $_ }
+            return @{ ok = $true; summary = "check disputed: $path"; output = "Noted: '$finding' in $path is left out for the rest of this task." }
         }
         'find' {
             $name = if ($Action.arg) { $Action.arg } else { "$($Action.body)".Split("`n")[0].Trim() }
@@ -2464,7 +2486,14 @@ function Invoke-AgentTurn {
         $syntaxNudges = 0   # times "done" was refused because a changed file has a syntax error
         $verifyNudges = 0   # times "done" was refused because the project's verify command failed
         $doneReminded = $false   # the one reminder at "done" (tests, README) was sent
-        $shotShown = $false; $attach = @()   # a screenshot of a changed page goes to Copilot once per task
+        $shotShown = $false; $attach = @(); $fileAttach = @()   # a screenshot of a changed page goes to Copilot once per task
+        $warnedKeys = New-Object System.Collections.Generic.HashSet[string]   # likely mistakes are said once per task
+        $enf = Get-Enforcement "$($State.Config.enforcement)"; $warnNudges = 0   # setting enforcement: light, standard, strict
+        # Files Copilot is fixing (path -> line of the problem) and rollbacks of changes that made a file worse.
+        $fixTargets = @{}; $rollbacks = @{}
+        if ($State.IssueFix -and $State.IssueFix.path) { $fixTargets["$($State.IssueFix.path)".Replace('\', '/').ToLowerInvariant()] = 0 }
+        $State.CheckDisputes = New-Object System.Collections.Generic.HashSet[string]   # findings Copilot disputed in this task
+        $hookNudges = 0; $pagesToRecheck = @(); $pageRechecks = 0   # beforeDone hook tries; pages with errors, checked again once after the fix
         $ev = @{ syntaxLast = $null; page = $null; reviewed = $false; verify = $null }   # for the evidence file
         $msgStart = [int]$State.MessagesSent
         $lastReply = ''; $doneText = ''   # for the suggested next steps after the turn
@@ -2481,11 +2510,11 @@ function Invoke-AgentTurn {
             $message = Limit-Text $message $State.Config.promptCharBudget
 
             Write-CCBLog verbose agent "Round ${round}: sending" @{ chars = $message.Length }
-            $r = Send-ToCopilot $State $message -Files @($attach) -OptionalFiles
-            if ($attach.Count) {
-                foreach ($why in @((Get-Bridge $State).AttachErrors)) { Add-AgentEvent $State 'status' @{ text = "The screenshot was not shown to Copilot: $why" } }
+            $r = Send-ToCopilot $State $message -Files @(@($attach) + @($fileAttach)) -OptionalFiles
+            if ($attach.Count -or $fileAttach.Count) {
+                foreach ($why in @((Get-Bridge $State).AttachErrors)) { Add-AgentEvent $State 'status' @{ text = "A file was not shown to Copilot: $why" } }
             }
-            $attach = @()
+            $attach = @(); $fileAttach = @()
             if ($r.Cancelled) {
                 if ($r.CopilotFinished -and "$($r.Text)".Trim()) {
                     Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @() }
@@ -2534,6 +2563,15 @@ function Invoke-AgentTurn {
             $State.LastTurnActed = $true
             $results = New-Object Collections.Generic.List[object]
             $isDone = $false
+            # A change that is meant to fix a reported problem: the file as it was, to roll back to
+            # when the change makes it worse.
+            $roundSnap = @{}
+            foreach ($a in $actions) {
+                if ($a.type -notin 'write', 'edit' -or -not $a.arg) { continue }
+                $rp = "$($a.arg)".Trim().Replace('\', '/')
+                if (-not $fixTargets.ContainsKey($rp.ToLowerInvariant()) -or $roundSnap.ContainsKey($rp)) { continue }
+                try { $roundSnap[$rp] = (Read-TextFile (Resolve-ProjectPath $State.ProjectRoot $rp)).Text } catch { }
+            }
             for ($k = 0; $k -lt $actions.Count; $k++) {
                 if ($State.Cancel) { break }
                 $a = $actions[$k]
@@ -2548,6 +2586,7 @@ function Invoke-AgentTurn {
                     continue
                 }
                 $res = Invoke-AgentAction $State $a $id $checkpoint $r.Uncertain
+                if ($res.attach) { $fileAttach = @(@($fileAttach) + @($res.attach) | Select-Object -Unique | Select-Object -First 5) }
                 if (-not $res.reported) {
                     $result = @{ id = $id; ok = $res.ok; status = $(if ($res.ok) { 'ok' } else { 'failed' }); summary = $res.summary; output = (Limit-Text $res.output 4000); changed = [bool]$res.changed }
                     if (-not $res.ok) {
@@ -2576,7 +2615,63 @@ function Invoke-AgentTurn {
             $roundChanged = @($results | ForEach-Object { $_.changedPath } | Where-Object { $_ } | Select-Object -Unique)
             if ($null -ne $State.ChatFiles) { foreach ($f in @($results | ForEach-Object { @($_.readPaths) + @($_.changedPath) } | Where-Object { $_ })) { [void]$State.ChatFiles.Add("$f".Replace('\', '/')) } }
             if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
-                $syntax = @(@(foreach ($p in $roundChanged) {
+                # The project's afterEdit hooks first (a formatter changes the files), so the checks
+                # below see the files as they stay; a failing hook goes back like a file check.
+                $hookIssues = @(try { Invoke-ProjectHooks $State 'afterEdit' $roundChanged } catch { Write-CCBLogError agent 'hooks' $_ })
+                # Mechanical problems with one right answer (curly quotes, odd spaces, HTML entities in
+                # code, mixed line endings...): fixed here by enforcement (light: silently, standard:
+                # and Copilot is told, strict: left to Copilot). Each fix is a card with its diff.
+                $autoFixed = New-Object System.Collections.Generic.List[string]
+                if ($enf.autoFix -ne 'off') {
+                    foreach ($p in $roundChanged) {
+                        try {
+                            $full = Resolve-ProjectPath $State.ProjectRoot $p
+                            if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Test-BinaryFile $full)) { continue }
+                            $info = Read-TextFile $full   # the text with LF only; .Crlf = what most lines had
+                            $fix = Repair-MechanicalIssues $p $info.Text
+                            $fixList = @($fix.fixes)
+                            # Mixed line endings (a command wrote some lines): the file on disk, written
+                            # again with the kind most lines have.
+                            $raw = [IO.File]::ReadAllText($full)
+                            if ($raw.Contains("`r`n") -and [regex]::IsMatch($raw, '(?<!\r)\n')) { $fixList += "line endings made all $(if ($info.Crlf) { 'CRLF' } else { 'LF' })" }
+                            if (-not $fixList.Count) { continue }
+                            # A fix that would add a problem that breaks the file is not applied.
+                            $broke = @(Get-NewFileIssues $p $info.Text $fix.text $info.Crlf $State.ProjectRoot | Where-Object { (Get-CheckLevel $_ 'file') -eq 'error' })
+                            if ($broke.Count) { Write-CCBLog info agent "Auto-fix of $p not applied: it would add $($broke.Count) problem(s)"; continue }
+                            $fix = [pscustomobject]@{ text = $fix.text; fixes = $fixList }
+                            Write-TextFile $full $fix.text $info.Bom $info.Crlf $info.Encoding
+                            $rel = $p.Replace('\', '/')
+                            Add-OwnChangeEvent $State 'edit' $rel "Fixed automatically: $(@($fix.fixes) -join '; ')." @{ path = $rel; exists = $true; old = $info.Text; new = $fix.text }
+                            $autoFixed.Add("${rel}: $(@($fix.fixes) -join '; ')")
+                        } catch { Write-CCBLogError agent "Auto-fix $p" $_ }
+                    }
+                }
+                foreach ($rp in @($roundSnap.Keys)) {
+                    try {
+                        if ([int]$rollbacks[$rp] -ge 2) { continue }   # at most twice per file per task
+                        $full = Resolve-ProjectPath $State.ProjectRoot $rp
+                        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+                        $info = Read-TextFile $full
+                        $worse = @(Get-NewFileIssues $rp $roundSnap[$rp] $info.Text $info.Crlf $State.ProjectRoot | Where-Object { (Get-CheckLevel $_ 'file') -eq 'error' })
+                        if (-not $worse.Count) { continue }
+                        $rollbacks[$rp] = 1 + [int]$rollbacks[$rp]
+                        Write-TextFile $full $roundSnap[$rp] $info.Bom $info.Crlf $info.Encoding
+                        Add-OwnChangeEvent $State 'restore' $rp "Rolled back Copilot's change to ${rp}: it added $($worse.Count) new problem(s), first: $($worse[0])" @{ path = $rp; exists = $true; old = $info.Text; new = $roundSnap[$rp] }
+                        # A wider read around the problem it was fixing (whole blocks), to understand the context.
+                        $center = [int]$fixTargets[$rp.ToLowerInvariant()]
+                        $spec = if ($center -gt 0) { "${rp}:$([Math]::Max(1, $center - 40))-$($center + 40)" } else { $rp }
+                        $context = (Invoke-ReadAction $State.ProjectRoot @($spec) -MaxCharsPerFile 12000) -join "`n"
+                        $results.Add(@{ head = "### Rolled back: $rp"; output = "Your change to $rp made it worse, so it is back as it was before that change. New problems it caused:`n" + (($worse | Select-Object -First 5 | ForEach-Object { "- $_" }) -join "`n") + "`nBefore you fix it again, understand the context: below is the code around the original problem, as whole blocks. Check what it really does and confirm the cause, then make a change that fixes that cause and keeps the rest working.`n$context" })
+                    } catch { Write-CCBLogError agent "Rollback check $rp" $_ }
+                }
+                if ($autoFixed.Count -and $enf.autoFix -eq 'tell') {
+                    $results.Add(@{ head = '### Fixed by the helper program'; output = "These mechanical problems in your last changes were fixed for you; write them this way from now on:`n" + (($autoFixed | ForEach-Object { "- $_" }) -join "`n") })
+                }
+                # Every finding with its source, so it gets a level (CheckPolicy.psm1): errors break the
+                # file and "done" waits for them; warnings are likely mistakes, said once per task.
+                $found = New-Object System.Collections.Generic.List[object]
+                $quality = Test-CheckSwitch 'quality'   # setting: quality notes
+                foreach ($p in $roundChanged) {
                     try {
                         $full = Resolve-ProjectPath $State.ProjectRoot $p
                         if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Test-BinaryFile $full)) { continue }
@@ -2584,22 +2679,52 @@ function Invoke-AgentTurn {
                         $rel = $p.Replace('\', '/')
                         $before = ''
                         if ($checkpoint.Files[$rel] -eq 'existed') { $bk = Join-Path $checkpoint.Dir ($rel.Replace('/', '\')); if (Test-Path -LiteralPath $bk) { $before = (Read-TextFile $bk).Text } }
-                        foreach ($issue in @(@(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot) + @(Find-ChangeSmells $rel $before $now.Text) + @(Find-QualityIssues $rel $before $now.Text))) { "${rel}: $issue" }
+                        foreach ($i in @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot)) { $found.Add((ConvertTo-CheckFinding $rel $i $(if ($i -match ' says: ') { 'tool' } else { 'file' }))) }
+                        if ($quality) {
+                            foreach ($i in @(Find-ChangeSmells $rel $before $now.Text)) { $found.Add((ConvertTo-CheckFinding $rel $i 'smell')) }
+                            foreach ($i in @(Find-QualityIssues $rel $before $now.Text)) { $found.Add((ConvertTo-CheckFinding $rel $i 'quality')) }
+                        }
                     } catch { Write-CCBLogError agent "File check $p" $_ }
-                }) + @(if ("$($State.Config.pageCheck)" -ne 'off') { Test-ScriptSyntax $State $roundChanged }))
+                }
+                # Other findings come as "PATH: message" (or without a path).
+                $other = {
+                    param($text, $source)
+                    if ("$text" -match '^([^\s:][^:\n]*\.[\w]+):\s*(.+)$') { ConvertTo-CheckFinding $Matches[1] $Matches[2] $source } else { ConvertTo-CheckFinding '' "$text" $source }
+                }
+                if ("$($State.Config.pageCheck)" -ne 'off') { foreach ($i in @(Test-ScriptSyntax $State $roundChanged)) { $found.Add((& $other $i 'script')) } }
                 # Import index: the changed files again, and what the round broke elsewhere (an import
                 # of a moved file, an id, function or hook others still use).
-                try { $syntax = @($syntax) + @(Update-ImportsAfterRound $State.ProjectRoot $roundChanged) } catch { Write-CCBLogError agent 'import index' $_ }
+                try { foreach ($i in @(Update-ImportsAfterRound $State.ProjectRoot $roundChanged)) { $found.Add((& $other $i 'imports')) } } catch { Write-CCBLogError agent 'import index' $_ }
                 # A new .env file that .gitignore does not cover would end up in git.
-                try { $syntax = @($syntax) + @(Find-UnignoredEnv $State.ProjectRoot $roundChanged) } catch { Write-CCBLogError agent 'env check' $_ }
-                # The project's afterEdit hooks (a formatter, a check): a failure goes back like a file check.
-                try { $syntax = @($syntax) + @(Invoke-ProjectHooks $State 'afterEdit' $roundChanged) } catch { Write-CCBLogError agent 'hooks' $_ }
+                try { foreach ($i in @(Find-UnignoredEnv $State.ProjectRoot $roundChanged)) { $found.Add((& $other $i 'env')) } } catch { Write-CCBLogError agent 'env check' $_ }
+                foreach ($i in @($hookIssues | Where-Object { $_ })) { $found.Add((ConvertTo-CheckFinding '' "$i" 'hook')) }
+                # Left out: what Copilot disputed in this task, what the user ignored, and warnings
+                # already said in this task.
+                $ignoredList = try { (Read-IssueIndex $State.ProjectRoot).ignored } catch { @{} }
+                $keep = @($found | Where-Object {
+                    $f = $_
+                    if ($State.CheckDisputes -and $State.CheckDisputes.Contains($f.key)) { return $false }
+                    if ($f.path) {
+                        $lineText = ''
+                        if ($f.line -gt 0) { try { $lineText = ((Read-TextFile (Resolve-ProjectPath $State.ProjectRoot $f.path)).Text.Replace("`r`n", "`n").Split("`n"))[$f.line - 1] } catch { } }
+                        if (Test-CheckIgnored $State.ProjectRoot $f.path $f.text $lineText $ignoredList) { return $false }
+                    }
+                    if ($f.level -eq 'warning') { if ($warnedKeys.Contains($f.key)) { return $false }; [void]$warnedKeys.Add($f.key) }
+                    $true
+                })
+                $syntax = @($keep | Where-Object level -eq 'error' | ForEach-Object { "$(if ($_.path) { "$($_.path): " })$($_.text)" })
+                foreach ($f in @($keep | Where-Object { $_.level -eq 'error' -and $_.path })) { $k2 = $f.path.ToLowerInvariant(); if (-not $fixTargets.ContainsKey($k2)) { $fixTargets[$k2] = [int]$f.line } }
                 $ev.syntaxLast = @($syntax)
-                if ($syntax.Count) {
-                    Write-CCBLog info agent 'File check problems after this round' @{ count = $syntax.Count }
-                    Add-AgentEvent $State 'status' @{ text = "File check: $($syntax.Count) problem(s) in the changed files; Copilot is asked to fix them." }
-                    $results.Add(@{ head = '### File check of the files changed in this reply'; output = (($syntax | Select-Object -First 15 | ForEach-Object { "- $_" }) -join "`n") + "`nFix these first: each one breaks the file or is a likely mistake." })
-                    if ($isDone -and $syntaxNudges -lt 2) { $isDone = $false; $syntaxNudges++ }
+                if ($keep.Count) {
+                    Write-CCBLog info agent 'File check findings after this round' @{ errors = $syntax.Count; warnings = $keep.Count - $syntax.Count }
+                    Add-AgentEvent $State 'checks' @{ text = "File check: $($syntax.Count) problem(s) that break a file, $($keep.Count - $syntax.Count) likely mistake(s); Copilot is asked to look at them."; findings = @($keep | Select-Object -First 30 | ForEach-Object { @{ path = $_.path; line = $_.line; text = $_.text; level = $_.level; source = $_.source } }) }
+                    # Light: only what breaks a file goes to Copilot; the chat card shows the rest.
+                    $toSend = @(if ($enf.sendWarnings) { $keep } else { $keep | Where-Object level -eq 'error' })
+                    if ($toSend.Count) { $results.Add(@{ head = '### File check of the files changed in this reply'; output = (Format-CheckResults $toSend) }) }
+                    # What holds up "done": errors (1, 2 or 3 times by enforcement); under strict also
+                    # likely mistakes, once.
+                    if ($syntax.Count -and $isDone -and $syntaxNudges -lt $enf.errorTries) { $isDone = $false; $syntaxNudges++ }
+                    elseif ($isDone -and $enf.warningsBlock -and $warnNudges -lt 1 -and @($keep | Where-Object level -eq 'warning').Count) { $isDone = $false; $warnNudges++ }
                 }
             }
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
@@ -2636,7 +2761,7 @@ function Invoke-AgentTurn {
                         $tail = ("$($vr.output)".Split("`n") | Select-Object -Last 25) -join "`n"
                         $ev.verify = @{ command = $verifyCmd; passed = $passed; exit = $vr.exitCode; tail = $tail }
                         Add-AgentEvent $State 'status' @{ text = "${verifyLabel}: ``$verifyCmd`` $(if ($passed) { 'passed' } elseif ($vr.timedOut) { 'timed out' } else { "failed (exit $($vr.exitCode))" })." }
-                        if (-not $passed -and $verifyNudges -lt 2 -and -not $State.Cancel) {
+                        if (-not $passed -and $verifyNudges -lt $enf.testTries -and -not $State.Cancel) {
                             $verifyNudges++
                             $fence = '```'
                             $what = $(if ($isTests) { "The project's tests failed" } else { "The project's check failed" })
@@ -2645,11 +2770,16 @@ function Invoke-AgentTurn {
                         }
                     }
                 }
-                # The project's beforeDone hooks: a failure goes back to Copilot (with the verify tries).
-                if ($checkpoint.Files.Count -and $verifyNudges -lt 2 -and -not $State.Cancel) {
+                # The project's beforeDone hooks: a failure goes back to Copilot (its own two tries, so
+                # failing tests do not stop the hooks from running).
+                if ($checkpoint.Files.Count -and $hookNudges -lt [Math]::Max(1, $enf.hookTries) -and -not $State.Cancel) {
                     $hookFails = @(try { Invoke-ProjectHooks $State 'beforeDone' } catch { Write-CCBLogError agent 'hooks' $_ })
-                    if ($hookFails.Count) {
-                        $verifyNudges++
+                    if ($hookFails.Count -and $hookNudges -ge $enf.hookTries) {
+                        # Light: a failing hook is shown, not sent back.
+                        $hookNudges = 99
+                        Add-AgentEvent $State 'status' @{ text = "A beforeDone hook failed (enforcement Light: shown here, not sent back to Copilot): $(("$($hookFails[0])" -split "`n")[0])" }
+                    } elseif ($hookFails.Count) {
+                        $hookNudges++
                         $fence = '```'
                         $message = "A check of the project failed, so the task is not finished:`n$fence`n$($hookFails -join "`n`n")`n$fence`nFix the cause, then send done again."
                         continue
@@ -2670,6 +2800,7 @@ function Invoke-AgentTurn {
                             $wantShot = (-not $shotShown) -and "$($State.Config.pageScreenshot)" -notin 'False', 'off' -and -not $State.ReviewByCaller
                             $pageIssues = @(Test-WebPage $State $pages -Screenshot:$wantShot)
                             $ev.page = @($pageIssues)
+                            if ($pageIssues.Count) { $pagesToRecheck = @($pages) }   # opened again after Copilot's fix
                             if (-not $pageIssues.Count) { Add-AgentEvent $State 'status' @{ text = "Page check: $($pages -join ', ') loaded without errors." } }
                         }
                     }
@@ -2685,8 +2816,8 @@ function Invoke-AgentTurn {
                         $paths = @($changes | Where-Object { $_.added -or $_.removed } | ForEach-Object { $_.path })
                         if ($paths.Count) {
                             $issues = @(@(Test-ProjectConsistency $State.ProjectRoot $paths) + @($pageIssues | ForEach-Object { "page check: $_" }))
-                            $text = if ($issues.Count) { "Local checks found $($issues.Count) problem(s):`n" + (($issues | ForEach-Object { "- $_" }) -join "`n") } else { 'Local checks (JSON, PowerShell syntax, local file references, page load) found no problems.' }
-                            Add-AgentEvent $State 'status' @{ text = $text; checks = @($issues); review = 'caller' }
+                            $checkText = if ($issues.Count) { "Local checks found $($issues.Count) problem(s):`n" + (($issues | ForEach-Object { "- $_" }) -join "`n") } else { 'Local checks (JSON, PowerShell syntax, local file references, page load) found no problems.' }
+                            Add-AgentEvent $State 'status' @{ text = $checkText; checks = @($issues); review = 'caller' }
                         }
                         break
                     }
@@ -2707,6 +2838,18 @@ function Invoke-AgentTurn {
                         if ($attach.Count) { $message += "`n`nAttached: a screenshot of the page as it looks now. Check it against the request too." }
                         continue
                     }
+                } elseif ($pagesToRecheck.Count -and $pageRechecks -lt 1 -and -not $State.Cancel) {
+                    # The page check found errors and Copilot has fixed them since: open the pages again
+                    # (no screenshot) to see that the fix worked; what is left goes back once more.
+                    $pageRechecks++
+                    Add-AgentEvent $State 'status' @{ text = "Checking $($pagesToRecheck -join ', ') again after the fix..." }
+                    $again = @(Test-WebPage $State $pagesToRecheck)
+                    $ev.page = @($again)
+                    if ($again.Count) {
+                        $message = "The page check still finds problems after your fix:`n" + (($again | Select-Object -First 15 | ForEach-Object { "- $_" }) -join "`n") + "`nFix them, then send done again."
+                        continue
+                    }
+                    Add-AgentEvent $State 'status' @{ text = "Page check after the fix: $($pagesToRecheck -join ', ') loaded without errors." }
                 }
                 if ($attach.Count) {
                     $message = "Attached: a screenshot of the page as it looks now, after your changes. Compare it with what was asked (layout, parts that are missing, overlap or are cut off, colours, text). If something is wrong, fix it, then send done again. If it looks right, send done."
@@ -2847,7 +2990,7 @@ function Start-AgentWorker {
                 }
                 'fetch' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-FetchJob $State $task.name }
                 'runbook' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-RunbookJob $State $task.name }
-                'agent' { Invoke-AgentRun $State ([string]$task.agent) ([string]$task.text) -FollowUp:([bool]$task.followUp) }
+                'agent' { Invoke-AgentRun $State ([string]$task.agent) ([string]$task.text) -FollowUp:([bool]$task.followUp) -AutoWhy ([string]$task.autoWhy) }
                 'chain' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ChainJob $State $task.name }
                 'script' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ScriptJob $State $task.name }
                 'review' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ReviewJob $State $task }

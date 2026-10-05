@@ -1,0 +1,1 @@
+- C# and .NET: nullable reference types on, using or await using for everything that is disposed, async all the way (no .Result or .Wait()), and specific exceptions instead of catching Exception. Without the .NET SDK, Windows still has csc.exe of the .NET Framework (C# 5) in %WINDIR%\Microsoft.NET\Framework64\v4.0.30319 to build a small program.

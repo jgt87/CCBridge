@@ -1,0 +1,1 @@
+- React: hooks only at the top level of components, every list item with a stable key (not the index when items move), state holds only what cannot be derived from props or other state, effects clean up after themselves, and components stay small with one job each.
