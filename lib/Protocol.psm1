@@ -118,6 +118,20 @@ function Get-TodoItems([string]$Body) {
     })
 }
 
+function Test-ProposalText([AllowEmptyString()][string]$Text) {
+    <# Whether a reply (its done summary or last text) proposes work instead of doing it: a heading
+       line such as "Proposed Month view:" or "Suggested approach:", or words such as "I propose",
+       "Would you like me to implement", "Voorstel", together with a list of at least 3 points.
+       A fixed text rule (CCBridge has no language model). #>
+    $t = ($Text -replace '(?s)`{3,}.*?`{3,}', '')
+    if (-not $t.Trim()) { return $false }
+    $items = [regex]::Matches($t, '(?m)^\s*(?:[-*+]|\d+[.)])\s+\S').Count
+    if ($items -lt 3) { return $false }
+    $heading = $t -match '(?im)^[\s#*_>]*(?:proposed|proposal|suggested|suggestion|recommended|plan for|voorgesteld|voorstel)\b[^\n]{0,80}:[\s*_]*$'
+    $words = $t -match '(?i)\b(?:I (?:would |could )?(?:propose|suggest|recommend)|my (?:proposal|suggestion|recommendation)|(?:would you like|do you want|want) me to (?:implement|build|add|make|create|apply|go ahead)|shall I (?:implement|build|add|make|create|apply|go ahead)|ik stel voor|mijn voorstel|zal ik (?:dit |het )?(?:bouwen|toevoegen|maken|aanpassen|doorvoeren))\b'
+    [bool]($heading -or $words)
+}
+
 function Get-NextSteps {
     <# Suggested follow-ups in a reply, as prompts the user can send: the list under a heading such as
        "Next steps", "Remaining steps", "Follow-ups", "What's next" or "Volgende stappen", and
@@ -155,4 +169,4 @@ function Get-NextSteps {
     @($steps | Select-Object -First $Max)
 }
 
-Export-ModuleMember -Function Get-ActionBlocks, Get-ActionPaths, Get-TodoItems, Get-NextSteps
+Export-ModuleMember -Function Test-ProposalText, Get-ActionBlocks, Get-ActionPaths, Get-TodoItems, Get-NextSteps

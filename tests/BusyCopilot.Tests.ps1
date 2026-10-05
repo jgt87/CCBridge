@@ -35,4 +35,17 @@ Describe 'Send-CopilotPrompt keeps waiting while Copilot is busy' {
         $err | Should Match 'No complete reply within [12] s'
         $w.Elapsed.TotalSeconds | Should BeLessThan 3.5
     }
+    It 'never calls a request lost (and sends it again) while the page shows Copilot at work' {
+        $global:ccbStops = 0
+        Mock -ModuleName CopilotBridge Get-PageReplyState { [pscustomobject]@{ fresh = 0; lastFresh = $false; replies = 1; copies = 0; stop = $true; lastLen = 0; lastHasCopy = $false; bar = ''; agentBusy = $false } }
+        $r = $null; $err = $null
+        try { $r = & (Get-Module CopilotBridge) { param($b) Send-CopilotPromptUnlocked -Bridge $b -Text 'hello' -TimeoutSec 3 -MaxTimeoutSec 3 -StallSec 0 -LostSec 1 } $bridge } catch { $err = $_.Exception.Message }
+        if ($r) { $r.Result | Should Not Be 'Lost' }
+        $err | Should Match 'No complete reply'
+    }
+    It 'still calls a request lost when the page shows nothing at all' {
+        Mock -ModuleName CopilotBridge Get-PageReplyState { [pscustomobject]@{ fresh = 0; lastFresh = $false; replies = 1; copies = 0; stop = $false; lastLen = 0; lastHasCopy = $false; bar = ''; agentBusy = $false } }
+        $r = & (Get-Module CopilotBridge) { param($b) Send-CopilotPromptUnlocked -Bridge $b -Text 'hello' -TimeoutSec 10 -MaxTimeoutSec 10 -StallSec 0 -LostSec 1 } $bridge
+        $r.Result | Should Be 'Lost'
+    }
 }

@@ -269,7 +269,7 @@ function Get-Bridge($State) {
             if ($bad.Count) {
                 $what = ($bad | ForEach-Object { "$($_.part) (selectors.$($_.setting): $($_.note))" }) -join '; '
                 $State.CopilotMessage = "Page check: $what"
-                Add-AgentEvent $State 'status' @{ text = "Copilot page check: $what. Copilot's page may have changed; StreamHub may not be able to $(if (@($bad | Where-Object needed).Count) { 'type or send prompts' } else { 'start new chats or read replies reliably' }). Run capture.cmd and send the report to update the selectors." }
+                Add-AgentEvent $State 'status' @{ text = "Copilot page check: $what. Copilot's page may have changed; StreamHub may not be able to $(if (@($bad | Where-Object needed).Count) { 'type or send prompts' } else { 'start new chats or read replies reliably' }). Run test-tools\capture.cmd and send the report to update the selectors." }
             }
         } catch { Write-CCBLogError agent 'Copilot page check failed' $_ }
         $script:Bridge
@@ -319,7 +319,7 @@ function Send-ToCopilot {
         $State.WorkIqActual = Set-CopilotWorkIq $bridge ($State.WorkIq -eq 'on')
         if ($State.WorkIqActual -eq 'unavailable' -and -not $State.WorkIqWarned) {
             $State.WorkIqWarned = $true
-            Add-AgentEvent $State 'status' @{ text = "Work IQ could not be switched $($State.WorkIq): the toggle is not configured or not on the page (run capture.cmd on a Microsoft 365 Copilot licence). Copilot uses its current setting." }
+            Add-AgentEvent $State 'status' @{ text = "Work IQ could not be switched $($State.WorkIq): the toggle is not configured or not on the page (run test-tools\capture.cmd on a Microsoft 365 Copilot licence). Copilot uses its current setting." }
         }
     }
     $progress = { param($t) $State.Progress = $t }.GetNewClosure()
@@ -794,6 +794,30 @@ function Publish-PlanReady {
         catch { Write-CCBLogError agent 'PLAN.md' $_ }
     }
     Add-AgentEvent $State 'plan-ready' @{ request = "$($Task.request)"; plan = $plan; planId = $planId }
+}
+
+function Publish-ProposalPlan {
+    <# After an ordinary turn that changed no files: when Copilot answered with a proposal
+       (Test-ProposalText on its done summary, else its last reply), offer it as a plan to approve
+       and build, the same card as a plan-first plan. Written to PLAN.md like any plan. #>
+    param($State, $Task, [int]$FromSeq)
+    if (-not $State.ProjectRoot) { return $false }
+    $events = @(Get-AgentEvents $State $FromSeq)
+    if (@($events | Where-Object { $_.type -in 'checkpoint', 'plan-ready', 'clarify', 'human-required' }).Count) { return $false }
+    $done = @($events | Where-Object { $_.type -eq 'done' -and "$($_.text)".Trim() } | Select-Object -Last 1)
+    $last = @($events | Where-Object { $_.type -eq 'assistant' -and "$($_.text)".Trim() } | Select-Object -Last 1)
+    $text = if ($done.Count) { "$($done[0].text)" } elseif ($last.Count) { "$($last[0].text)" } else { '' }
+    $text = ($text -replace '(?s)`{3,}.*?`{3,}', '').Trim()
+    if (-not (Test-ProposalText $text)) { return $false }
+    $request = "$($Task.text)"
+    $planId = ''
+    try {
+        $planId = New-PlanEntry $State.ProjectRoot $request
+        Add-PlanSection $State.ProjectRoot $planId "Copilot's proposal" $text 'waiting for approval'
+    } catch { Write-CCBLogError agent 'PLAN.md' $_ }
+    Write-CCBLog info agent 'Copilot answered with a proposal; offered as a plan' @{ chars = $text.Length }
+    Add-AgentEvent $State 'plan-ready' @{ request = $request; plan = $text; planId = $planId; proposal = $true }
+    $true
 }
 
 function Invoke-ClarifyStep {
@@ -3136,6 +3160,7 @@ function Start-AgentWorker {
                             if ($task.issueFix -and -not $State.IssueFixHandled) { try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError agent 'issue fix reset' $_ } }
                         }
                         if ($task.planFirst) { Publish-PlanReady $State $task $fromSeq }
+                        elseif (-not $task.planBuild -and -not $task.issueFix -and -not $State.Stop) { try { $null = Publish-ProposalPlan $State $task $fromSeq } catch { Write-CCBLogError agent 'proposal plan' $_ } }
                         if ($task.planBuild -and $task.planId) { Write-PlanResult $State "$($task.planId)" $fromSeq }
                     }
                 }
@@ -3214,4 +3239,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

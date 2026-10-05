@@ -1363,6 +1363,7 @@ function Send-CopilotPromptUnlocked {
     $pageStableSec = if ($Bridge.PSObject.Properties['PageStableSec'] -and $null -ne $Bridge.PageStableSec) { [double]$Bridge.PageStableSec } else { 1.0 }
     $nextPageCheck = (Get-Date).AddSeconds(2)
     $pageDoneSince = $null; $pageLastLen = -1; $sawStop = $false; $pageQuietSince = $null
+    $pageBusyAt = $null   # when the page last showed Copilot at work (Stop, or an agent busy)
 
     $hubPattern = [regex]::Escape($Bridge.Selectors.chatHubUrlPattern)
     $streamPattern = [regex]::Escape($(if ($Bridge.Selectors.PSObject.Properties['streamHubUrlPattern'] -and $Bridge.Selectors.streamHubUrlPattern) { $Bridge.Selectors.streamHubUrlPattern } else { '/StreamHub/' }))
@@ -1429,6 +1430,7 @@ function Send-CopilotPromptUnlocked {
             }
             if ($st) {
                 if ($st.stop) { $sawStop = $true }   # a spinner that never ends must still count as a stall
+                if ($st.stop -or $st.agentBusy) { $pageBusyAt = Get-Date }
                 if ($st.bar -and $st.bar -ne $pageBefore.bar -and $st.bar -match $script:LimitPattern) {
                     Write-CCBLog info bridge 'Copilot shows a usage limit' @{ message = $st.bar; ms = $sendWatch.ElapsedMilliseconds }
                     Add-TimelineEvent $Bridge 'returned' 'usage limit on the page'
@@ -1470,7 +1472,16 @@ function Send-CopilotPromptUnlocked {
                 }
             }
         }
-        if ($LostSec -gt 0 -and $replyRecords -eq 0 -and $sendWatch.Elapsed.TotalSeconds -ge $LostSec -and $pageLastLen -le 40) {
+        # Copilot at work on the page (Stop showing) has the request, even when nothing of its reply
+        # has arrived yet (it can think for a minute before the first word). Sending it again would
+        # give Copilot the same prompt twice.
+        $lostNow = $LostSec -gt 0 -and $replyRecords -eq 0 -and $sendWatch.Elapsed.TotalSeconds -ge $LostSec -and $pageLastLen -le 40
+        if ($lostNow -and -not ($pageBusyAt -and ((Get-Date) - $pageBusyAt).TotalSeconds -lt 5)) {
+            # Before calling it lost, look at the page once more.
+            try { $stNow = Get-PageReplyState $Bridge; if ($stNow -and ($stNow.stop -or $stNow.agentBusy)) { $pageBusyAt = Get-Date } } catch { }
+        }
+        $pageBusy = $pageBusyAt -and ((Get-Date) - $pageBusyAt).TotalSeconds -lt 5
+        if ($lostNow -and -not $pageBusy) {
             # Nothing of a reply arrived (at most a placeholder on the page): the request was lost.
             Write-CCBLog info bridge "No part of the reply arrived within $LostSec s" @{ frames = $frames.Count; pageChars = $pageLastLen; sent = @($sentTargets | Select-Object -Unique) }
             $null = Stop-CopilotReply $Bridge -DrainSec 3

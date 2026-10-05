@@ -52,7 +52,7 @@ Automating Copilot Chat may be subject to your organisation's policies; check be
 3. Create a project (it lives in `OneDrive\CCBridge\<name>`), type what to build, and approve the changes Copilot proposes.
 4. To update later: just restart StreamHub (it updates itself at every start), or double-click `update.cmd`. See [Updating](#updating).
 
-Requirements: Windows 10/11, Windows PowerShell 5.1 in FullLanguage mode, Microsoft Edge, a Microsoft 365 Copilot Chat account, OneDrive for the web app. `probe.cmd` checks a machine and writes `probe-report.txt`.
+Requirements: Windows 10/11, Windows PowerShell 5.1 in FullLanguage mode, Microsoft Edge, a Microsoft 365 Copilot Chat account, OneDrive for the web app. `test-tools\probe.cmd` checks a machine and writes `probe-report.txt`.
 
 ---
 
@@ -251,7 +251,7 @@ The server is written for a calling model that may be small: its instructions an
 
 With a Microsoft 365 Copilot licence and **Work IQ** on, Copilot can use your Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files and people in your organisation. StreamHub tells Copilot it may use that data when a task needs it, to name its sources, and to write extracted information into project files. **Sources** Copilot cited are listed under each answer (web app) and in MCP results.
 
-- **Work IQ switch**: StreamHub can set the Work IQ toggle per task (chat box header in the web app, `work_iq` in MCP). Because the toggle differs per tenant, run `capture.cmd` once on a licensed machine: it records the toggle's controls (labels and states only, no content) in `capture-report.json`, from which the selector goes into `config\selectors.local.json`. Until then StreamHub leaves the toggle as it is and says so.
+- **Work IQ switch**: StreamHub can set the Work IQ toggle per task (chat box header in the web app, `work_iq` in MCP). Because the toggle differs per tenant, run `test-tools\capture.cmd` once on a licensed machine: it records the toggle's controls (labels and states only, no content) in `capture-report.json`, from which the selector goes into `config\selectors.local.json`. Until then StreamHub leaves the toggle as it is and says so.
 - **Human in the loop, always**:
   - Copilot is instructed to use Microsoft 365 data **read-only**: no sending or forwarding mail, no creating, changing or cancelling meetings, no posting in Teams, no sharing or deleting data. When a task needs such an action it prepares it (for example an email draft in `drafts/`) for you to do yourself.
   - StreamHub never clicks anything in Copilot's replies. If Copilot proposes a Microsoft 365 action (a confirmation card or action message), the task **stops** and you are asked to review and confirm or cancel it yourself in the Copilot window.
@@ -328,7 +328,7 @@ Settings live in `config\harness.json` and `config\selectors.json`. Put your own
 | `autoUpdate` | on | Settings > Updates. Installs a new release only when a new instance of the app starts; the running app is never updated. `false` turns it off |
 | `logLevel` | `info` | `off`, `info`, `verbose`, `trace` |
 
-`selectors.json` holds the Copilot address, `chatUrl` (default `https://www.microsoft365.com/chat`, opened at start and when a new chat needs a page reload; it signs in without an extra prompt and may redirect to `m365.cloud.microsoft/chat`), `chatHosts` (the hosts on which StreamHub recognises the Copilot tab), and the CSS selectors for Copilot's message box, Send button and (via `capture.cmd`) the Work IQ toggle. If Microsoft changes the Copilot page, a selector fix in `selectors.local.json` is usually all that is needed.
+`selectors.json` holds the Copilot address, `chatUrl` (default `https://www.microsoft365.com/chat`, opened at start and when a new chat needs a page reload; it signs in without an extra prompt and may redirect to `m365.cloud.microsoft/chat`), `chatHosts` (the hosts on which StreamHub recognises the Copilot tab), and the CSS selectors for Copilot's message box, Send button and (via `test-tools\capture.cmd`) the Work IQ toggle. If Microsoft changes the Copilot page, a selector fix in `selectors.local.json` is usually all that is needed.
 
 ---
 
@@ -378,9 +378,9 @@ The zip contains:
 
 ---
 
-### Finding Copilot's limits and speed: `complexity-test.cmd`
+### Finding Copilot's limits and speed: `test-tools\complexity-test.cmd`
 
-Double-click `complexity-test.cmd` to send 19 prompts, from simple to complex, each in a new Copilot chat, and see where (if anywhere) Copilot starts to fail or refuse. Each step costs one Copilot message; it stops by itself when the daily credits run out.
+Double-click `test-tools\complexity-test.cmd` to send 19 prompts, from simple to complex, each in a new Copilot chat, and see where (if anywhere) Copilot starts to fail or refuse. Each step costs one Copilot message; it stops by itself when the daily credits run out.
 
 | Steps | What they test |
 |---|---|
@@ -396,27 +396,27 @@ Double-click `complexity-test.cmd` to send 19 prompts, from simple to complex, e
 | 18 | An agent loop of four turns in one chat (a failing test, a fix, a new feature); costs four messages |
 | 19 | Microsoft 365: a four-week synthesis of email, meetings and chats into a file |
 
-Run only the new steps with `complexity-test.cmd -From 13`.
+Run only the new steps with `test-tools\complexity-test.cmd -From 13`.
 
-Per step the report records the result (`Success`, `NoAnswer`, `OutOfCredits`, `Error`, ...), the time, when the first text arrived, the reply length, the action blocks found, Copilot's message types and filter markers, and (not for the Microsoft 365 steps) the first words of the reply, so refusals stand out. Each run creates its own folder `C:\temp\CCBridge-test-<date>` with `CCBridge-complexity-<date>.txt` and `.json`, masked like the logs (`-OutRoot D:\somewhere` picks another parent folder). Run part of the ladder with `complexity-test.cmd -From 5 -To 9`.
+Per step the report records the result (`Success`, `NoAnswer`, `OutOfCredits`, `Error`, ...), the time, when the first text arrived, the reply length, the action blocks found, Copilot's message types and filter markers, and (not for the Microsoft 365 steps) the first words of the reply, so refusals stand out. Each run creates its own folder `C:\temp\CCBridge-test-<date>` with `CCBridge-complexity-<date>.txt` and `.json`, masked like the logs (`-OutRoot D:\somewhere` picks another parent folder). Run part of the ladder with `test-tools\complexity-test.cmd -From 5 -To 9`.
 
 The same run measures speed. For every step it records the exact time (`HH:mm:ss.fff`, plus milliseconds after Send) of what the page shows (Stop button, reply text, Copy button), every connection and request the page uses (first and last data, record types such as the end of a reply), and when StreamHub had the reply and by which route (StreamHub, Chathub or the page). Network times are Edge's own. The TIMING table shows per step how long StreamHub waited after Copilot finished; the full timeline of each step follows below it. Only names, sizes and times are recorded, never prompt or reply text.
 
-`reply-timing.cmd` is a quick speed check: steps 1-3 only (three short prompts).
+`test-tools\reply-timing.cmd` is a quick speed check: steps 1-3 only (three short prompts).
 
 ## Troubleshooting
 
 **Large files.** When a file does not fit in one message, it is cut at a whole line and followed by its outline (style and script blocks, functions, elements with an id, headings, with line numbers), so Copilot reads just the part it needs. Copilot can also ask for `read PATH:outline`.
 
-**Copilot page check.** After connecting, StreamHub checks that the parts of Copilot's page it relies on (message box, Send and New chat buttons, replies and their Copy button) are where `config\selectors.json` says. If Microsoft changed the page, a message names the selector to fix; run `capture.cmd` and send the report.
+**Copilot page check.** After connecting, StreamHub checks that the parts of Copilot's page it relies on (message box, Send and New chat buttons, replies and their Copy button) are where `config\selectors.json` says. If Microsoft changed the page, a message names the selector to fix; run `test-tools\capture.cmd` and send the report.
 
 **Message limit per chat.** When Copilot reports no message count (replies read from the page), StreamHub counts messages itself against `messagesPerChat` (30) and continues in a new chat with a summary before the limit.
 
-**Reply format of your tenant (`stream-shape.cmd`).** Writes the structure of Copilot's recent replies (field names, types, lengths and status words; no answer text) to `C:\temp\CCBridge-stream-shape-<date>.txt`. Sending that file lets StreamHub support your tenant's reply format (for example StreamHub) directly, which is faster and gives back the chat message count and remaining credits.
+**Reply format of your tenant (`test-tools\stream-shape.cmd`).** Writes the structure of Copilot's recent replies (field names, types, lengths and status words; no answer text) to `C:\temp\CCBridge-stream-shape-<date>.txt`. Sending that file lets StreamHub support your tenant's reply format (for example StreamHub) directly, which is faster and gives back the chat message count and remaining credits.
 
-**Microsoft 365 fields test (`m365-fields-test.cmd`).** Asks Copilot, with Work IQ on and strictly read-only, which fields and filters it can use for a Teams channel message, a Teams group chat message, a Teams 1:1 chat message, an email and a calendar item: per topic the field names, types, a description and a placeholder example, the filters you can ask for, and the limits. It asks for no item content and keeps none (only the kinds of sources Copilot cited, never titles or addresses), and if Copilot proposes any action the topic is skipped without touching it. Needs a Microsoft 365 Copilot licence; uses one Copilot message per topic (`m365-fields-test.cmd -Topics email,calendar` for some). Report: `C:\temp\StreamHub-m365-fields-<time>.md` and `.json`; review it before sharing.
+**Microsoft 365 fields test (`test-tools\m365-fields-test.cmd`).** Asks Copilot, with Work IQ on and strictly read-only, which fields and filters it can use for a Teams channel message, a Teams group chat message, a Teams 1:1 chat message, an email and a calendar item: per topic the field names, types, a description and a placeholder example, the filters you can ask for, and the limits. It asks for no item content and keeps none (only the kinds of sources Copilot cited, never titles or addresses), and if Copilot proposes any action the topic is skipped without touching it. Needs a Microsoft 365 Copilot licence; uses one Copilot message per topic (`test-tools\m365-fields-test.cmd -Topics email,calendar` for some). Report: `C:\temp\StreamHub-m365-fields-<time>.md` and `.json`; review it before sharing.
 
-**Researcher and Analyst test (`agent-test.cmd`).** Runs Copilot's Researcher and then its Analyst agent the way StreamHub will invoke them:
+**Researcher and Analyst test (`test-tools\agent-test.cmd`).** Runs Copilot's Researcher and then its Analyst agent the way StreamHub will invoke them:
 - a new chat, with the agent picked from the `@` list after typing `@Researcher` or `@Analyst`, so Copilot inserts a real mention (`-TypeOnly` leaves it as plain text, which does not invoke the agent);
 - a fixed, harmless test prompt (web sources only for Researcher; for Analyst, a made-up `sample-sales.csv` is attached);
 - one automatic answer if the agent first asks questions or shows a plan;
@@ -426,9 +426,9 @@ un.log, "agent check").
 
 This uses up to 2 runs of your monthly agent allowance. Each run writes a folder in `C:\temp` with a zip to send: `run.log` (every step), `summary.txt`, `timeline.txt`, `page.txt` and `shape.txt`, which hold steps, timings and structure but no reply text. `frames.jsonl` next to the zip holds the full replies; share it only if you are fine with its content.
 
-To test one agent: `agent-test.cmd Researcher`. If the agent has another name in your language: `agent-test.cmd Researcher -AgentName "NAME"`. To record a run you do by hand: `agent-capture.cmd -Label researcher`.
+To test one agent: `test-tools\agent-test.cmd Researcher`. If the agent has another name in your language: `test-tools\agent-test.cmd Researcher -AgentName "NAME"`. To record a run you do by hand: `test-tools\agent-capture.cmd -Label researcher`.
 
-**How Copilot's page shows code blocks (`render-test.cmd`).** Copilot's page shows a code block by its label. A label it does not know, such as `read`, gets a note ("read isn't fully supported") or, on some tenants, is drawn as a Chart.js chart with "Invalid JSON". That is only the page's display: StreamHub reads the raw reply text, so the actions still work. Because of this, action blocks are `text` blocks with an `ACTION` first line: on every tenant tested, `text`, `plaintext` and no label show as plain code, while `read` and even `text read` can turn into a chart. `render-test.cmd` sends one short message per label (`read`, `text read`, `plaintext read`, `text`, `plaintext`, no label) and saves to `C:\temp\StreamHub-render-test-<time>.txt` how the page showed each one. Other labels: `render-test.cmd -Labels "read,json"`.
+**How Copilot's page shows code blocks (`test-tools\render-test.cmd`).** Copilot's page shows a code block by its label. A label it does not know, such as `read`, gets a note ("read isn't fully supported") or, on some tenants, is drawn as a Chart.js chart with "Invalid JSON". That is only the page's display: StreamHub reads the raw reply text, so the actions still work. Because of this, action blocks are `text` blocks with an `ACTION` first line: on every tenant tested, `text`, `plaintext` and no label show as plain code, while `read` and even `text read` can turn into a chart. `test-tools\render-test.cmd` sends one short message per label (`read`, `text read`, `plaintext read`, `text`, `plaintext`, no label) and saves to `C:\temp\StreamHub-render-test-<time>.txt` how the page showed each one. Other labels: `test-tools\render-test.cmd -Labels "read,json"`.
 
 **Reading an error.** Every error in the chat shows a category (for example `EDGE-LOST`, `SIGN-IN`, `NO-ANSWER`, `TIMEOUT`, `CREDITS`, `EDIT`), what to do, an error id and **Copy details** (id, time, version, category and the technical detail, ready to send). The same id is in the log, next to the full detail, so `diagnostics.cmd` plus the id leads straight to it. A failed step (read, grep, edit, write, run) shows its own category on its card (for example `EDIT-NOT-FOUND`, `EDIT-AMBIGUOUS`, `EDIT-HALF-BLOCK`, `EDIT-MOVE-ORDER`, `RUN-FAILED`), the possible reasons and what happens next; failed steps are always logged, also without verbose logging.
 
@@ -444,7 +444,7 @@ To test one agent: `agent-test.cmd Researcher`. If the agent has another name in
 | "Out of Copilot credits until …" | Copilot's daily limit; it resets at the time shown |
 | "message box holds N characters, expected M" or "Send button never became clickable" | Copilot's page changed: export diagnostics (`page-check.json` shows which selector fails) |
 | A reply is marked as repaired / "check this change carefully" | Copilot's filter removed text and StreamHub had to guess part of it; review the diff before approving |
-| "Work IQ could not be switched" | Run `capture.cmd` on a licensed machine and configure the toggle selector |
+| "Work IQ could not be switched" | Run `test-tools\capture.cmd` on a licensed machine and configure the toggle selector |
 | A fix is announced but you still see the old behaviour | Close StreamHub and start it again (or run `update.cmd`), then reload the browser tab (F5) |
 | Something missing on this computer? | Run `check.cmd`: every part StreamHub needs, with [OK] / [WARN] / [FAIL] and what to do (also shown at every start and after installing) |
 | Anything else | Turn on verbose logging, reproduce, run `diagnostics.cmd` |

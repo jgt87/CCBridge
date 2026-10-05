@@ -8,9 +8,9 @@
   Copilot cited (no titles, addresses or values). If Copilot proposes any action (send, schedule,
   ...) the test stops that topic and never touches it.
 
-  Needs a Microsoft 365 Copilot licence with Work IQ (the toggle from capture.cmd); uses one
+  Needs a Microsoft 365 Copilot licence with Work IQ (the toggle from test-tools\capture.cmd); uses one
   Copilot message per topic. Report: C:\temp\StreamHub-m365-fields-<time>.json and .md.
-  Only some topics:  m365-fields-test.cmd -Topics email,calendar
+  Only some topics:  test-tools\m365-fields-test.cmd -Topics email,calendar
 #>
 param([string]$Topics = 'teams-channel,teams-group-chat,teams-1to1-chat,email,calendar', [string]$OutRoot = 'C:\temp')
 $ErrorActionPreference = 'Stop'
@@ -112,7 +112,7 @@ foreach ($e in $results) {
     $md.Add('')
     $md.Add("## $($e.topic)")
     $md.Add('')
-    $toggle = if ($e.workIq -eq 'unavailable') { 'not found on the page (Copilot may still use Microsoft 365 data; capture.cmd records the toggle)' } else { $e.workIq }
+    $toggle = if ($e.workIq -eq 'unavailable') { 'not found on the page (Copilot may still use Microsoft 365 data; test-tools\capture.cmd records the toggle)' } else { $e.workIq }
     $md.Add("Work IQ toggle: $toggle; reply: $($e.result); item found: $($e.found); cited source kinds: $(if (@($e.sourceKinds).Count) { $e.sourceKinds -join ', ' } else { 'none' })")
     if ($e.note) { $md.Add(''); $md.Add("Note: $($e.note)") }
     if (@($e.fields).Count) {

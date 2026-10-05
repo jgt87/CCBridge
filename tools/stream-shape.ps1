@@ -10,8 +10,8 @@
     The summary is written to C:\temp\CCBridge-stream-shape-<date>.txt.
     -Path summarises one recording instead (agent-capture.ps1 uses it), -OutFile sets the file.
 .EXAMPLE
-    stream-shape.cmd
-    stream-shape.cmd -Count 5
+    test-tools\stream-shape.cmd
+    test-tools\stream-shape.cmd -Count 5
 #>
 param([int]$Count = 3, [string]$OutRoot = 'C:\temp', [string]$Path = '', [string]$OutFile = '')
 

@@ -87,10 +87,10 @@ function New-CCBErrorId {
 # What went wrong, by the error text: a category code and what the person can do about it.
 $script:ErrorHelp = @(
     @{ re = 'Lost the connection to the Copilot tab'; code = 'EDGE-LOST'; hint = 'Edge or its Copilot tab was closed, crashed or replaced (for example by a sign-in). StreamHub reconnects by itself; send your message again.' }
-    @{ re = 'Could not connect to the Copilot tab|no page targets|could not connect to ws'; code = 'EDGE-CONNECT'; hint = 'StreamHub could not reach Edge. Close the Edge window StreamHub opened and start StreamHub again; if it keeps happening, run probe.cmd and send the report.' }
+    @{ re = 'Could not connect to the Copilot tab|no page targets|could not connect to ws'; code = 'EDGE-CONNECT'; hint = 'StreamHub could not reach Edge. Close the Edge window StreamHub opened and start StreamHub again; if it keeps happening, run test-tools\probe.cmd and send the report.' }
     @{ re = 'human-verification'; code = 'VERIFY'; hint = 'Copilot shows a "verify you are human" check: complete it in the Copilot window in Edge, then send your message again.' }
     @{ re = '(?i)sign-in|sign in|signed in'; code = 'SIGN-IN'; hint = 'Complete the sign-in in the Copilot window in Edge; StreamHub continues afterwards (or send your message again).' }
-    @{ re = 'message box (did not appear|not found|never appeared)'; code = 'PAGE'; hint = 'Copilot''s page did not show its message box. Look at the Copilot window in Edge (the message names a screenshot). If Copilot''s page changed, run capture.cmd and send the result.' }
+    @{ re = 'message box (did not appear|not found|never appeared)'; code = 'PAGE'; hint = 'Copilot''s page did not show its message box. Look at the Copilot window in Edge (the message names a screenshot). If Copilot''s page changed, run test-tools\capture.cmd and send the result.' }
     @{ re = 'could not clear the Copilot message box|message box holds'; code = 'TYPING'; hint = 'Typing into Copilot failed. Click once into the Copilot window and send again; if it repeats, export diagnostics.' }
     @{ re = 'Send button never became clickable'; code = 'SEND'; hint = 'Copilot''s Send button did not respond. Check the Copilot window: a dialog or sign-in may be in the way.' }
     @{ re = '(?i)OutOfCredits|daily limit|usage limit'; code = 'CREDITS'; hint = 'Copilot''s daily limit is reached. The queue waits until it resets and then continues by itself; Resume now under Actions > Runs tries earlier.' }

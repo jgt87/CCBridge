@@ -15,8 +15,8 @@
 .PARAMETER StepTimeoutSec
   Longest wait for one reply (default 300).
 .EXAMPLE
-  complexity-test.cmd
-  complexity-test.cmd -From 5 -To 9
+  test-tools\complexity-test.cmd
+  test-tools\complexity-test.cmd -From 5 -To 9
 #>
 param([int]$From = 1, [int]$To = 19, [int]$StepTimeoutSec = 300, [int]$PauseSec = 3, [int]$PageCheckMs = 200, [string]$OutRoot = 'C:\temp')
 

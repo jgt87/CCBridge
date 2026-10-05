@@ -25,10 +25,10 @@
     Every step goes to run.log (no reply text), and the zip includes it. -AgentName sets the
     name shown in the @ list when it differs (another language).
 .EXAMPLE
-    agent-capture.cmd -Label researcher
-    agent-capture.cmd -Label analyst -KeepStepText
-    agent-capture.cmd -Agent Researcher
-    agent-test.cmd   (both agents, one after the other)
+    test-tools\agent-capture.cmd -Label researcher
+    test-tools\agent-capture.cmd -Label analyst -KeepStepText
+    test-tools\agent-capture.cmd -Agent Researcher
+    test-tools\agent-test.cmd   (both agents, one after the other)
 #>
 param([string]$Label = 'agent', [int]$MaxMinutes = 90, [string]$OutRoot = 'C:\temp', [switch]$KeepStepText, [int]$Seconds = 0, [switch]$NoPicker,
     [ValidateSet('', 'Researcher', 'Analyst')][string]$Agent = '', [string]$AgentName = '', [int]$RunMinutes = 40,

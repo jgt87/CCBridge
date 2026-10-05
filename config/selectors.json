@@ -11,7 +11,7 @@
     "toggle": "",
     "stateAttribute": "aria-checked",
     "onValue": "true",
-    "note": "Fill in from capture-report.json (capture.cmd on a Microsoft 365 Copilot licence). Empty toggle = Work IQ control unavailable."
+    "note": "Fill in from capture-report.json (test-tools\\capture.cmd on a Microsoft 365 Copilot licence). Empty toggle = Work IQ control unavailable."
   },
   "responseMode": {
     "button": "#gptModeSwitcher",

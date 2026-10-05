@@ -6,6 +6,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.89] - 2026-10-05
+
+### Added
+- When Copilot answers a question with a proposal instead of doing the work (a heading such as "Proposed ...:" or words such as "I suggest" or "Would you like me to implement", with a list of at least three points) and the turn changed no files, the proposal becomes a plan card with Approve and build, like a plan-first plan; it is also written to `.streamhub/PLAN.md`.
+
+### Fixed
+- A prompt could be sent to Copilot twice: when no part of the reply arrived within 25 seconds, StreamHub took the request as lost, tried to stop Copilot and sent the same prompt again in the same chat, even while Copilot was still thinking (a Microsoft 365 question can take longer than that before the first word). It now does so only when Copilot's page does not show it at work.
+
+### Changed
+- The test and capture tools (`probe`, `capture`, `complexity-test`, `reply-timing`, `stream-shape`, `agent-capture`, `agent-test`, `render-test`, `m365-fields-test`, `html-echo-test`, `rate-limit-test`) moved from the app folder into `test-tools\`. The app folder keeps only the everyday launchers (`start`, `install`, `check`, `update`, `diagnostics`, `sso-setup`); an update removes the old copies.
+
 ## [v0.1.88] - 2026-10-05
 
 ### Added
@@ -1009,7 +1020,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.88...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.89...HEAD
+[v0.1.89]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.89
 [v0.1.88]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.88
 [v0.1.87]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.87
 [v0.1.86]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.86
