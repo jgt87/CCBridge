@@ -6,6 +6,18 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.85] - 2026-10-05
+
+### Added
+- `html-echo-test.cmd`: asks Copilot to repeat made-up HTML and PowerShell lines exactly, once on the normal route and once read from the page, and reports line by line what arrived (escaped, damaged or intact).
+
+### Fixed
+- An edit or write to a markup file whose new lines hold an HTML tag damaged on the way (an attribute quote never closed, like `src="x.jsd>`, or the end of a tag left without its start, like `x.jsscript>`) is refused before anything is written; Copilot is asked to send it once more and otherwise to tell you the exact line to add by hand.
+- PowerShell where the chat removed the `[Type]` in front of `::` (`:Match(` instead of `[regex]::Match(`) is refused in commands and `.ps1` files with the safe forms to use instead; the PowerShell rules tell Copilot to avoid `[Type]::Member`.
+- Settings > This computer: updating Node.js no longer loops. The tools list no longer runs `npm config get registry` every few seconds (only the system check asks npm's registry), and when Node.js is in use the update waits and runs at StreamHub's next start (button "Updates at next start").
+- PowerShell commands from Copilot failed with parser errors ("Missing closing '}'") because Copilot's page turns [regex]::Match into [regex\]::Match (brackets that look like a Markdown link definition are escaped). StreamHub now puts .NET type names before :: back in run commands and in .ps1/.psm1/.psd1 files, and repairs &lt; / &gt; in run commands as it already did in files.
+- Scripts packed into one powershell -Command "..." line longer than 300 characters are not run: Copilot is told to write a script file and run it with -File, so it gets the PowerShell syntax check first and can be read when you approve it. One-off scripts (run once, for example to change many files) go in Work/, scripts worth keeping and running again in Scripts/ (they show under Automation > Scripts). Scripts are kept, not deleted afterwards: deleting would need your approval each time, and a kept script records how files were changed.
+
 ## [v0.1.84] - 2026-10-05
 
 ### Added
@@ -978,7 +990,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.84...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.85...HEAD
+[v0.1.85]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.85
 [v0.1.84]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.84
 [v0.1.83]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.83
 [v0.1.82]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.82

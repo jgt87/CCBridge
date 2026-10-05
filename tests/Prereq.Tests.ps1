@@ -118,7 +118,7 @@ Describe 'Optional tools' {
         ($c | Where-Object name -eq 'Python').link | Should Match '^https://www\.python\.org/'
         Mock -ModuleName Prereq Get-ToolVersion { if ($Exe -eq 'node') { 'v16.20.0' } elseif ($Exe -eq 'npm') { '8.19.4' } else { $null } }
         Mock -ModuleName Prereq Test-NpmRegistry { 'reachable' }
-        $node = @(Get-OptionalToolChecks) | Where-Object name -eq 'Node.js'
+        $node = @(Get-OptionalToolChecks -Registry) | Where-Object name -eq 'Node.js'
         $node.status | Should Be 'WARN'
         $node.detail | Should Be 'v16.20.0, npm 8.19.4, registry reachable'
     }

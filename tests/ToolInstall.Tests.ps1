@@ -54,3 +54,28 @@ Describe 'Install-OptionalTool' {
     }
     Remove-Item $fake, $src -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+Describe 'An update of a tool that is in use waits for the next start' {
+    It 'sees a folder whose program is locked as in use' {
+        $d = Join-Path $env:TEMP ('ccb-inuse-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $d | Out-Null
+        $exe = Join-Path $d 'tool.exe'; [IO.File]::WriteAllBytes($exe, [byte[]](1, 2, 3))
+        Test-FolderInUse $d | Should Be $false
+        $lock = [IO.File]::Open($exe, 'Open', 'Read', 'Read')
+        try { Test-FolderInUse $d | Should Be $true } finally { $lock.Dispose() }
+        Test-FolderInUse (Join-Path $d 'missing') | Should Be $false
+        Remove-Item $d -Recurse -Force
+    }
+    It 'records the pending update and starts it at the next start, once' {
+        $saved = $env:LOCALAPPDATA
+        $env:LOCALAPPDATA = Join-Path $env:TEMP ('ccb-lad-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $env:LOCALAPPDATA 'CCBridge') -Force | Out-Null
+        try {
+            Mock -ModuleName ToolInstall Start-ToolInstall { $global:ccbStarted += , $Name; $true }
+            $global:ccbStarted = @()
+            Add-PendingToolInstall 'node'
+            Add-PendingToolInstall 'node'
+            @(Start-PendingToolInstalls) -join ',' | Should Be 'node'
+            $global:ccbStarted -join ',' | Should Be 'node'
+            @(Start-PendingToolInstalls).Count | Should Be 0   # started once, then gone
+        } finally { Remove-Item $env:LOCALAPPDATA -Recurse -Force -ErrorAction SilentlyContinue; $env:LOCALAPPDATA = $saved }
+    }
+}

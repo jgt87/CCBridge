@@ -71,6 +71,8 @@ Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Server.psm1') -Force
 # Tools installed for this user from Settings > This computer (Node.js, .NET SDK...) are found by commands.
 try { Import-Module (Join-Path $root 'lib\ToolInstall.psm1') -Force; Add-ToolPaths } catch { }
+# An update that had to wait because the tool was in use (Node.js running) runs now, before StreamHub uses it.
+try { foreach ($n in @(Start-PendingToolInstalls -AppRoot $root)) { Write-Host "Installing the pending update of $n in the background." } } catch { }
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 $config = Get-CCBridgeConfig harness $root
 if ($Port) { $config.port = $Port }

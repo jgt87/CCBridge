@@ -1,1 +1,1 @@
-- PowerShell: scripts must run in Windows PowerShell 5.1: no ?? or ?. operators, no ternary (a ? b : c), no && or || between commands, and keep .ps1 and .psm1 files to plain ASCII characters.
+- PowerShell: scripts must run in Windows PowerShell 5.1: no ?? or ?. operators, no ternary (a ? b : c), no && or || between commands, and keep .ps1 and .psm1 files to plain ASCII characters. Avoid [Type]::Member (the chat can damage it): use -match, -replace or -split, cmdlets, or call the method on a cast value, for example ([regex]'PATTERN').Match(TEXT).

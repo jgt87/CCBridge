@@ -401,7 +401,7 @@ export interface ToolItem {
   /** The newest release from the tool's official source, and whether it is newer than the installed one. */
   latest?: string | null;
   update?: boolean;
-  install: { state: "running" | "done" | "failed"; message: string; at: string } | null;
+  install: { state: "running" | "pending" | "done" | "failed"; message: string; at: string } | null;
 }
 
 /** One of the project's hooks (.streamhub/hooks.json). */

@@ -123,6 +123,30 @@ $script:CodeTextExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|ps1|psm1|
 $script:Invisible = '[' + [char]0x200B + [char]0x200C + [char]0x200D + [char]0x2060 + [char]0xFEFF + ']'
 $script:OddSpace = '[' + [char]0x00A0 + [char]0x202F + [char]0x2007 + ']'
 
+function Repair-EscapedTypeName([AllowEmptyString()][string]$Text) {
+    <# [regex\]::Match -> [regex]::Match. Copilot's page escapes brackets that look like a Markdown link
+       definition ("[name]:"), so a .NET type before :: arrives as [Type\] or \[Type]. That is never
+       valid PowerShell, so it is put back: only a type name directly before ::. #>
+    if (-not $Text -or $Text.IndexOf('::') -lt 0) { return $Text }
+    [regex]::Replace($Text, '\\?\[([A-Za-z_][\w.]*(?:\[\])?)\\?\](?=\s*::)', '[$1]')
+}
+
+function Repair-RunCommand([AllowEmptyString()][string]$Command) {
+    <# A command from Copilot made fit to run: &lt; / &gt; back to < and >, and escaped .NET type
+       names put back (Repair-EscapedTypeName). #>
+    Repair-EscapedTypeName (ConvertFrom-AngleEntities $Command)
+}
+
+function Test-LongPowerShellCommand([AllowEmptyString()][string]$Command, [int]$MaxChars = 300) {
+    <# A script packed into one command line (powershell -Command "..."): quoting through cmd.exe
+       breaks these easily and nobody can read them when approving. Returns why, or $null. #>
+    $m = [regex]::Match($Command, '(?i)\b(powershell|pwsh)(\.exe)?\b.*?\s-(c|command|encodedcommand|ec|e)\b\s*(.*)$', 'Singleline')
+    if (-not $m.Success) { return $null }
+    $body = $m.Groups[4].Value
+    if ($body.Length -le $MaxChars) { return $null }
+    "a PowerShell command line of $($body.Length) characters (more than $MaxChars)"
+}
+
 function Repair-CodeText([string]$Path, [string]$Text) {
     <# Text from Copilot made fit for the file: &lt; / &gt; back to < and > (not in markup), and in
        code files the invisible characters a web chat brings along removed (zero-width spaces,
@@ -131,6 +155,7 @@ function Repair-CodeText([string]$Path, [string]$Text) {
         $Text = [regex]::Replace($Text, $script:Invisible, '')
         $Text = [regex]::Replace($Text, $script:OddSpace, ' ')
     }
+    if ($Path -match '(?i)\.ps[md]?1$') { $Text = Repair-EscapedTypeName $Text }
     if (Test-MarkupFile $Path) { return $Text }
     ConvertFrom-AngleEntities $Text
 }
@@ -1295,6 +1320,51 @@ $script:CommentStart = '^(//+|#+|/\*+|\*|<!--|--|;|\{/\*|rem\s|::)\s*'
 $script:Ellipsis = '(\.{3,}|' + [char]0x2026 + ')'
 $script:OmitPhrase = '(?i)\b(rest of (the )?(code|file|content|component|page|styles?|functions?|class|script|markup|html|css|logic)|(existing|previous|original|other|remaining) (code|content|functions?|methods?|styles?|rules|logic|markup|html|css|lines|imports|elements|implementation)\b.*\b(unchanged|here|as before|as is|remains?|stays?|omitted|not shown|same|goes here)|unchanged code|omitted for brevity|for brevity|truncated for|no changes (below|above|here)|same as before|keep (the )?(existing|rest)|code unchanged)\b'
 
+function Find-DamagedHtmlLine([string]$Path, [string]$Old, [string]$New) {
+    <# The first new line of a markup file with an HTML tag that arrived damaged from the chat (some
+       Copilot routes strip or mangle parts of tags): an attribute quote that is never closed
+       (<script src="x.jsd>) or the end of a tag left without its start (x.jsscript>). Lines the file
+       already had are not reported. Returns @{ line; text; why } or $null. #>
+    if ($Path -notmatch '(?i)\.(html?|xhtml|vue|svelte|jsx|tsx|php|aspx|cshtml)$') { return $null }
+    $had = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($l in "$Old".Replace("`r`n", "`n").Split("`n")) { [void]$had.Add($l.Trim()) }
+    $lines = "$New".Replace("`r`n", "`n").Split("`n")
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        $t = $lines[$i].Trim()
+        if (-not $t -or $had.Contains($t)) { continue }
+        $why = $null
+        if ($t -match '(?i)\.(js|mjs|cjs|css|json)(script|link|style)>') { $why = 'the start of a tag is missing (only its end is left)' }
+        else {
+            foreach ($m in [regex]::Matches($t, '<[A-Za-z][\w-]*(\s[^<>]*)?>')) {
+                $attrs = $m.Groups[1].Value -replace '\{[^{}]*\}', ''   # JSX expressions may hold quotes
+                if (([regex]::Matches($attrs, '"')).Count % 2 -eq 1) { $why = 'an attribute quote in a tag is never closed'; break }
+            }
+        }
+        if ($why) { return @{ line = $i + 1; text = $t; why = $why } }
+    }
+    $null
+}
+
+function Find-RemovedTypeName([AllowEmptyString()][string]$Text) {
+    <# PowerShell where the chat removed a .NET type before :: (Copilot's link filter deletes text that
+       looks like a Markdown link definition, so "[regex]::Match(" can arrive as ":Match("). That
+       cannot be repaired, because the type is gone. Returns the first such line, or $null. #>
+    foreach ($l in "$Text".Replace("`r`n", "`n").Split("`n")) {
+        $code = ($l -replace "'[^']*'", "''") -replace '"[^"]*"', '""'   # not inside strings
+        if ($code -match '(?<![\w\]\)\}$:]):[A-Za-z_]\w*\s*\(') { return $l.Trim() }
+    }
+    $null
+}
+
+function Format-RemovedTypeName([string]$Line) {
+    "the chat removed a .NET type name in front of ::, so this line arrived as: $Line. Write it without [Type]::Member, which the chat can damage: use -match, -replace or -split, a cmdlet (Get-Content -Raw, Join-Path, ...), or call the method on a cast value, for example ([regex]'PATTERN').Match(TEXT)."
+}
+
+function Format-DamagedHtml($Bad) {
+    <# What Copilot is told when a tag arrived damaged (Find-DamagedHtmlLine). #>
+    "line $($Bad.line) of the new text arrived damaged ($($Bad.why)): $($Bad.text). The chat sometimes strips or mangles parts of HTML tags on the way. Send this change once more, with the whole tag on its own line. If it arrives damaged again, stop and tell the user the exact line to put in the file by hand."
+}
+
 function Find-PlaceholderLine([string]$Old, [string]$New) {
     <# The first new line that stands for left-out code (not already in the file), or $null.
        Returns @{ line; text }. #>
@@ -1515,6 +1585,9 @@ function Get-EditResult {
         $text = $text.Substring(0, $hit.start) + $replace + $text.Substring($hit.start + $hit.length)
         $after = $hit.start + $replace.Length
     }
+    # A tag damaged on the way is the cause, not a half block: say so first.
+    $bad = Find-DamagedHtmlLine $full $info.Text $text
+    if ($bad) { return [pscustomobject]@{ ok = $false; error = "not written: $(Format-DamagedHtml $bad)" } }
     $half = Test-HalfBlock $info.Text $text $full
     if ($half) {
         # Show Copilot the whole block(s) its SEARCH cut into, as they are now, so its next edit can
@@ -1755,5 +1828,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

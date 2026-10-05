@@ -38,13 +38,14 @@ export function ToolsSection() {
     <>
       {tools.map((t) => {
         const busy = t.install?.state === "running";
+        const pending = t.install?.state === "pending";
         const label = t.update && t.latest ? `Update to ${t.latest}` : t.status === "WARN" ? "Update for me" : "Install for me";
         return (
           <SettingLine
             control={
               t.canInstall ? (
-                <button className={smallButtonClass} disabled={busy} onClick={() => install(t.name)} title="For your user only, without admin rights. Installing accepts the tool's own licence." type="button">
-                  {busy ? "Installing..." : label}
+                <button className={smallButtonClass} disabled={busy || pending} onClick={() => install(t.name)} title={pending ? "The tool is in use now; the update runs the next time StreamHub starts." : "For your user only, without admin rights. Installing accepts the tool's own licence."} type="button">
+                  {busy ? "Installing..." : pending ? "Updates at next start" : label}
                 </button>
               ) : (
                 <span className="text-muted-foreground text-xs">installed</span>

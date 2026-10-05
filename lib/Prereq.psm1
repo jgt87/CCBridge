@@ -131,7 +131,10 @@ function Test-NpmRegistry {
 function Get-OptionalToolChecks {
     <# Optional tools StreamHub uses when they are there: Pester (ships with Windows) and Python,
        Node.js, the .NET SDK and Git for projects that need them. Never a failure: INFO when a tool
-       is missing (with what it would add), WARN only for a version too old to work well. #>
+       is missing (with what it would add), WARN only for a version too old to work well.
+       -Registry also asks npm's registry (starts npm and a network request: only for the system
+       check, never for Settings, which refreshes this list every few seconds during an install). #>
+    param([switch]$Registry)
     $out = New-Object System.Collections.Generic.List[object]
     $out.Add((Invoke-SafeCheck 'Pester (PowerShell tests)' {
         $m = Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1
@@ -152,7 +155,7 @@ function Get-OptionalToolChecks {
         if (-not $v) { return New-Check 'Node.js' 'INFO' 'not installed' 'Optional: only for projects with a package.json (npm scripts and tests). StreamHub runs without it.' 'https://nodejs.org/' }
         $npm = Get-ToolVersion 'npm'
         $old = ($v -match 'v?(\d+)\.') -and [int]$Matches[1] -lt 18
-        $reg = if ($npm) { Test-NpmRegistry } else { $null }
+        $reg = if ($npm -and $Registry) { Test-NpmRegistry } else { $null }
         $blocked = $reg -eq 'blocked'
         $hint = @($(if ($old) { 'Node.js 18 or newer is recommended.' }), $(if ($blocked) { 'npm cannot reach its package registry (network or proxy): npm install will not work, so React and other npm projects cannot be built; plain HTML and JavaScript still work.' })) | Where-Object { $_ }
         New-Check 'Node.js' $(if ($old -or $blocked) { 'WARN' } else { 'OK' }) "$v$(if ($npm) { ", npm $npm$(if ($reg) { ", registry $reg" })" } else { ', no npm' })" ($hint -join ' ') $(if ($old) { 'https://nodejs.org/' } else { '' })
@@ -274,7 +277,7 @@ function Get-PrereqChecks {
     }))
 
     # Optional tools (Python, Node.js...): check.cmd and the installer show them; not at every start.
-    if ($Tools) { foreach ($c in @(Get-OptionalToolChecks)) { $out.Add($c) } }
+    if ($Tools) { foreach ($c in @(Get-OptionalToolChecks -Registry)) { $out.Add($c) } }
 
     if ($Online) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12

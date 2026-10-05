@@ -14,6 +14,12 @@ try {
     Write-Host $msg
 } catch {
     $why = $_.Exception.Message.Split("`n")[0]
+    if ($why -like 'PENDING: *') {
+        # In use now: it runs at StreamHub's next start (Start-PendingToolInstalls).
+        Set-ToolInstallStatus $Name 'pending' $why.Substring(9)
+        Write-Host $why.Substring(9)
+        exit 0
+    }
     Set-ToolInstallStatus $Name 'failed' "Not installed: $why. StreamHub works without it."
     Write-Host "Not installed: $why" -ForegroundColor Yellow
     exit 1

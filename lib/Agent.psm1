@@ -2251,6 +2251,24 @@ function Invoke-AgentAction {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "left-out code: line $($ph.line) '$($ph.text)'" })
             return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (left-out code)"; output = "error: not written: line $($ph.line) of the new text, '$($ph.text)', stands for code that was left out. $how" }
         }
+        # PowerShell whose [Type] before :: the chat removed cannot run: refuse, ask for a safe form.
+        if ($Action.arg -match '(?i)\.ps[md]?1$') {
+            $oldSet = New-Object 'System.Collections.Generic.HashSet[string]'
+            foreach ($l in "$oldText".Replace("`r`n", "`n").Split("`n")) { [void]$oldSet.Add($l.Trim()) }
+            $added = (@("$newText".Replace("`r`n", "`n").Split("`n") | Where-Object { -not $oldSet.Contains($_.Trim()) }) -join "`n")
+            $gone = Find-RemovedTypeName $added
+            if ($gone) {
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "type name removed by the chat: $gone" })
+                return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (type name removed)"; output = "error: not written: $(Format-RemovedTypeName $gone)" }
+            }
+        }
+        # An HTML tag that arrived damaged from the chat would break the page: refuse, ask for it again.
+        $bad = Find-DamagedHtmlLine $Action.arg $oldText $newText
+        if ($bad) {
+            Write-CCBLog info agent "Damaged HTML refused in $($Action.arg)" @{ line = $bad.line; why = $bad.why }
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "damaged HTML on line $($bad.line) ($($bad.why)): $($bad.text)" })
+            return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (damaged HTML tag)"; output = "error: not written: $(Format-DamagedHtml $bad)" }
+        }
         # A write that makes an existing file much shorter needs a person, also in auto mode.
         if (-not $riskWarning -and $Action.type -eq 'write' -and $oldText.Length -gt 3000 -and $newText.Length -lt $oldText.Length * 0.4) {
             $oldLines = $oldText.Split("`n").Length; $newLines = "$newText".Split("`n").Length
@@ -2266,7 +2284,24 @@ function Invoke-AgentAction {
         }
         $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0) -or [bool]$riskWarning
     } elseif ($Action.type -eq 'run') {
-        $evt.target = $Action.body.Trim()
+        $evt.target = Repair-RunCommand $Action.body.Trim()   # &lt;/&gt; and [Type\]:: from the chat put back
+        # A script packed into one powershell -Command line: written as a script file instead, which
+        # gets the syntax check before it runs and can be read when it is approved.
+        if ($evt.target -match '(?i)\b(powershell|pwsh)\b') {
+            # The code is the text after -Command, usually inside its double quotes.
+            $cm = [regex]::Match($evt.target, '(?i)\s-(c|command)\s+(.*)$', 'Singleline')
+            $payload = if ($cm.Success) { $cm.Groups[2].Value.Trim() -replace '^"(.*)"$', '$1' } else { $evt.target }
+            $gone = Find-RemovedTypeName $payload
+            if ($gone) {
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = 'type name removed by the chat' })
+                return @{ ok = $false; summary = 'run skipped (type name removed)'; output = "not executed: $(Format-RemovedTypeName $gone)" }
+            }
+        }
+        $packed = Test-LongPowerShellCommand $evt.target
+        if ($packed) {
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = "not run: $packed" })
+            return @{ ok = $false; summary = 'run skipped (script in one command line)'; output = "not executed: $packed. Write the code as a script file instead with a write block (plain ASCII, for Windows PowerShell 5.1): Work/NAME.ps1 for a one-off job, Scripts/NAME.ps1 if it is worth keeping to run again. Then run it with: powershell -NoProfile -ExecutionPolicy Bypass -File Work/NAME.ps1 (or the Scripts/ path)" }
+        }
         # Hard boundary: deleting or moving files only inside the project. Not even a person can
         # approve past it.
         $outside = Test-DeleteScope $State.ProjectRoot $evt.target

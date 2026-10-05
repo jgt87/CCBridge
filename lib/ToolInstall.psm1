@@ -130,6 +130,40 @@ function Get-InstallableTools {
     }
 }
 
+function Get-PendingToolFile { Join-Path $env:LOCALAPPDATA 'CCBridge\tool-install-pending.json' }
+
+function Test-FolderInUse([string]$Folder) {
+    <# Whether a program runs from this folder or its main program is locked (cannot be replaced now). #>
+    if (-not (Test-Path -LiteralPath $Folder)) { return $false }
+    $full = [IO.Path]::GetFullPath($Folder).TrimEnd('\') + '\'
+    foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
+        $path = try { $p.Path } catch { $null }
+        if ($path -and $path.StartsWith($full, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    foreach ($exe in @(Get-ChildItem -LiteralPath $Folder -Filter *.exe -File -ErrorAction SilentlyContinue)) {
+        try { $fs = [IO.File]::Open($exe.FullName, 'Open', 'ReadWrite', 'None'); $fs.Dispose() } catch { return $true }
+    }
+    $false
+}
+
+function Add-PendingToolInstall([string]$Name) {
+    $f = Get-PendingToolFile
+    $list = @(if (Test-Path -LiteralPath $f) { try { @(([IO.File]::ReadAllText($f) | ConvertFrom-Json)) } catch { @() } })
+    if ($list -notcontains $Name) { $list += $Name }
+    [IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject @($list) -Compress), (New-Object Text.UTF8Encoding($false)))
+}
+
+function Start-PendingToolInstalls {
+    <# At StreamHub's start, before it uses the tools: installs that had to wait because the tool was
+       in use (Node.js running) start now. Returns the names started. #>
+    param([string]$AppRoot)
+    $f = Get-PendingToolFile
+    if (-not (Test-Path -LiteralPath $f)) { return @() }
+    $list = @(try { @(([IO.File]::ReadAllText($f) | ConvertFrom-Json)) } catch { @() })
+    Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+    @(foreach ($n in $list) { if ($script:Installable.Contains("$n") -and (Start-ToolInstall "$n" $AppRoot)) { "$n" } })
+}
+
 function Get-ToolInstallStatus([string]$Name) {
     $f = Get-ToolStatusFile $Name
     if (-not (Test-Path -LiteralPath $f)) { return $null }
@@ -233,6 +267,9 @@ function Install-OptionalTool {
                     if (-not $want -or $have -ne $want.ToUpperInvariant()) { throw 'the Node.js download does not match the checksum nodejs.org publishes' }
                     Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
                     $target = Join-Path $dir 'node'
+                    # In use (StreamHub or another program runs node): replacing it now would fail or
+                    # break that program, so the update runs at StreamHub's next start instead.
+                    if (Test-FolderInUse $target) { Add-PendingToolInstall 'node'; throw 'PENDING: Node.js is in use right now, so it cannot be replaced; the update runs the next time StreamHub starts.' }
                     if (Test-Path -LiteralPath $target) { [IO.Directory]::Delete($target, $true) }
                     Move-Item -LiteralPath (Join-Path $tmp $pkg) -Destination $target
                 }
@@ -261,4 +298,4 @@ function Install-OptionalTool {
     "$($t.label) installed for your user"
 }
 
-Export-ModuleMember -Function Get-VersionNumber, Get-LatestToolVersions, Get-ToolsDir, Add-ToolPaths, Get-InstallableTools, Get-ToolInstallStatus, Set-ToolInstallStatus, Start-ToolInstall, Install-OptionalTool
+Export-ModuleMember -Function Test-FolderInUse, Add-PendingToolInstall, Start-PendingToolInstalls, Get-VersionNumber, Get-LatestToolVersions, Get-ToolsDir, Add-ToolPaths, Get-InstallableTools, Get-ToolInstallStatus, Set-ToolInstallStatus, Start-ToolInstall, Install-OptionalTool
