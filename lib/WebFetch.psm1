@@ -43,6 +43,22 @@ function Test-PrivateAddress([Net.IPAddress]$Ip) {
     [Net.IPAddress]::IsLoopback($Ip) -or $Ip.IsIPv6LinkLocal -or $Ip.IsIPv6SiteLocal -or (($b[0] -band 0xFE) -eq 0xFC) -or $Ip.Equals([Net.IPAddress]::IPv6None)
 }
 
+function Test-M365Address([string]$Url) {
+    <# Whether an address is a Microsoft 365 file or page (SharePoint, OneDrive, Teams, Outlook,
+       Microsoft 365): only Copilot, with the user's own access, can open it; a plain web request
+       gets a sign-in page. #>
+    $u = $null
+    if (-not [Uri]::TryCreate("$Url".Trim(), [UriKind]::Absolute, [ref]$u)) { return $false }
+    $h = $u.DnsSafeHost.ToLowerInvariant()
+    [bool]($h -match '(^|\.)(sharepoint\.com|sharepoint\.us|sharepoint\.cn|sharepoint-df\.com|onedrive\.live\.com|1drv\.ms|cloud\.microsoft)$' -or
+        $h -match '^(teams|outlook|www\.office|office|onedrive)\.(microsoft|office|live|office365)\.com$')
+}
+
+function Get-M365Links([AllowEmptyString()][string]$Text) {
+    <# The Microsoft 365 file links in a message. #>
+    @([regex]::Matches("$Text", '(?i)https?://[^\s<>"''()\[\]]+') | ForEach-Object { $_.Value.TrimEnd('.', ',', ';', ':') } | Where-Object { Test-M365Address $_ } | Select-Object -Unique)
+}
+
 function Test-WebAddress {
     <# Why an address may not be read, or $null. -Resolve also checks where the name points to
        (a public name can point into the local network). $Lookup is for tests. #>
@@ -209,4 +225,4 @@ function Test-SourceSites {
         Where-Object { -not (Test-HostMatch $_ $Sites) } | Select-Object -Unique)
 }
 
-Export-ModuleMember -Function Get-NamedSites, Test-HostMatch, Test-WebAddress, ConvertFrom-Html, Invoke-WebFetch, Format-WebResult, Get-WebSourceSpec, New-WebSourceBlock, Test-SourceSites
+Export-ModuleMember -Function Test-M365Address, Get-M365Links, Get-NamedSites, Test-HostMatch, Test-WebAddress, ConvertFrom-Html, Invoke-WebFetch, Format-WebResult, Get-WebSourceSpec, New-WebSourceBlock, Test-SourceSites

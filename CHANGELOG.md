@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.95] - 2026-10-06
+
+### Fixed
+- A SharePoint or OneDrive link in a message: Copilot tried StreamHub's web action, got a sign-in page and said it could not see the data, while Copilot itself can open the file with your access. The web action no longer fetches Microsoft 365 links and tells Copilot to open the file itself; a message with such a link also gets a short rule saying so, and that data the project needs goes into a project file (for example `data/NAME.csv`).
+
 ## [v0.1.94] - 2026-10-06
 
 ### Changed
@@ -1067,7 +1072,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.94...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.95...HEAD
+[v0.1.95]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.95
 [v0.1.94]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.94
 [v0.1.93]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.93
 [v0.1.92]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.92

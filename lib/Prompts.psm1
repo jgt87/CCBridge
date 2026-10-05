@@ -150,6 +150,7 @@ function Get-PromptModules {
     if ($Text -match $script:RunbookPattern -or $namesRunbook) { $ids.Add('rules:runbook') }
     # Online information: how to use web sources, and the web action for the exact text of a page.
     if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }
+    if (@(Get-M365Links $Text).Count) { $ids.Add('rules:m365links') }
     $ids.ToArray()
 }
 

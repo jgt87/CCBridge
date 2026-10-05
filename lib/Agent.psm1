@@ -2326,6 +2326,13 @@ function Invoke-AgentAction {
             $urls = @(@("$($Action.arg)") + @("$($Action.body)".Split("`n")) | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^(?i)https?://\S+$' } | Select-Object -Unique -First 3)
             $evt.target = $urls -join ', '
             if (-not $urls.Count) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed' }); return @{ ok = $false; summary = 'web without an address'; output = 'error: put one full address (https://...) per line in the web block' } }
+            # Microsoft 365 files (SharePoint, OneDrive...): the helper program only gets a sign-in
+            # page; Copilot opens them itself, with the user's access.
+            $m365 = @($urls | Where-Object { Test-M365Address $_ })
+            if ($m365.Count) {
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = 'a Microsoft 365 link: Copilot opens it itself' })
+                return @{ ok = $false; summary = 'web skipped (Microsoft 365 link)'; output = "not read: $($m365 -join ', ') is a Microsoft 365 file (SharePoint or OneDrive). The helper program cannot open it (it only gets a sign-in page), but you can: open it yourself with the user's Microsoft 365 access and use its content. If the project needs its data, write that data into a project file with a write block (for example data/NAME.csv), exactly as it is in the file. If you cannot open it, say so: the user may need to turn Work IQ on." }
+            }
             $policy = if ($State.Config.webRead) { "$($State.Config.webRead)" } else { 'named-sites' }
             if ($policy -eq 'off') { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = 'reading web pages is off' }); return @{ ok = $false; summary = 'web pages are off'; output = 'error: reading web pages is turned off in the settings; use your own web search instead.' } }
             $named = @(Get-NamedSites "$($State.TurnText)")
