@@ -6,6 +6,14 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.88] - 2026-10-05
+
+### Added
+- `rate-limit-test.cmd`: sends tiny made-up prompts back to back (40 at most; options for a gap, a new chat every N prompts and when to stop) and reports per prompt whether Copilot answered, how long it took, what it said instead, and the chat and daily-credit counters when Copilot reports them. Each prompt uses one Copilot message.
+
+### Fixed
+- Long chains no longer stop when Copilot stops answering after many requests in a row ("Sorry, I wasn't able to respond to that", then no answer): a runbook or fetch step that got no usable answer waits and is tried again in a new chat (after 2 and then 5 minutes, `pacing.chainRetrySec`), and Copilot steps get a 10-second pause between them (`pacing.chainStepSec`). Other errors, such as a runbook whose answer does not fit its shape, still stop the chain at once. Stop ends a wait right away.
+
 ## [v0.1.87] - 2026-10-05
 
 ### Fixed
@@ -1001,7 +1009,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.87...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.88...HEAD
+[v0.1.88]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.88
 [v0.1.87]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.87
 [v0.1.86]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.86
 [v0.1.85]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.85

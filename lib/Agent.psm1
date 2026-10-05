@@ -1136,6 +1136,31 @@ function Add-ChangeSetEvent {
     Add-AgentEvent $State 'checkpoint' $data
 }
 
+function Test-NoAnswerError($Events) {
+    <# Whether a step's error events are all "Copilot gave no usable answer" (it stopped, stalled or
+       said it could not respond): worth another try after a pause, unlike a broken runbook. #>
+    $errs = @($Events | Where-Object { $_.type -eq 'error' })
+    if (-not $errs.Count) { return $false }
+    foreach ($e in $errs) { if ("$($e.text)" -notmatch '(?i)NoAnswer|stopped without answering|finished without a reply|no usable answer|wasn.t able to respond') { return $false } }
+    $true
+}
+
+function Get-ChainRetryWaits($Config) {
+    <# Seconds to wait before each new try of a step Copilot gave no answer to (pacing chainRetrySec). #>
+    $w = if ($Config -and $Config.pacing -and $null -ne $Config.pacing.chainRetrySec) { @($Config.pacing.chainRetrySec) } else { @(120, 300) }
+    @($w | ForEach-Object { [double]$_ } | Where-Object { $_ -gt 0 })
+}
+
+function Wait-ChainPause($State, [double]$Seconds) {
+    <# Waits, but stops early when the user stops the chain. Returns $false when stopped. #>
+    $until = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $until) {
+        if ($State.Cancel -or $State.Stop) { return $false }
+        Start-Sleep -Milliseconds 250
+    }
+    $true
+}
+
 function Invoke-ChainJob {
     <# Runs a chain (Runbooks/NAME.chain.md): its runbooks, fetch prompts and scripts one after
        another. With stopOnError (the default) the first failing step ends the chain. Scripts run
@@ -1155,6 +1180,7 @@ function Invoke-ChainJob {
     $failed = 0; $stopped = $false
     $cp = [pscustomobject]@{ Value = $null }   # the change set, made at the first script step
     $State.InChain = $true; $State.Busy = $true; $State.Cancel = $false
+    $betweenSec = if ($State.Config -and $State.Config.pacing -and $null -ne $State.Config.pacing.chainStepSec) { [double]$State.Config.pacing.chainStepSec } else { 10 }
     try {
         Add-AgentEvent $State 'status' @{ text = "Running chain '$($item.title)' ($total step(s))..." }
         Write-CCBLog info agent "Chain $Name" @{ steps = $total }
@@ -1162,20 +1188,34 @@ function Invoke-ChainJob {
             if ($State.Cancel -or $State.Stop) { $stopped = $true; break }
             $label = "$($step.kind) $($step.target)"
             Add-AgentEvent $State 'status' @{ text = "Chain '$($item.title)', step $($step.n) of ${total}: $label" }
-            $from = [int]$State.Seq
+            # A short pause between Copilot steps: many requests in a row make Copilot stop answering.
+            if ($step.kind -ne 'script' -and $step.n -gt 1 -and $betweenSec -gt 0) { if (-not (Wait-ChainPause $State $betweenSec)) { $stopped = $true; break } }
             $ok = $true; $why = ''
-            switch ($step.kind) {
-                'runbook' {
-                    # A text runbook (NAME.prompt.md) runs as one; a checked-JSON runbook gets the inputs.
-                    if (-not @(Get-Runbooks $root | Where-Object name -eq $step.target).Count -and @(Get-FetchPrompts $root | Where-Object name -eq $step.target).Count) { Invoke-FetchJob $State $step.target }
-                    else { Invoke-RunbookJob $State $step.target -Inputs @($step.with) }
+            $waits = @(Get-ChainRetryWaits $State.Config); $try = 0
+            while ($true) {
+                $from = [int]$State.Seq
+                switch ($step.kind) {
+                    'runbook' {
+                        # A text runbook (NAME.prompt.md) runs as one; a checked-JSON runbook gets the inputs.
+                        if (-not @(Get-Runbooks $root | Where-Object name -eq $step.target).Count -and @(Get-FetchPrompts $root | Where-Object name -eq $step.target).Count) { Invoke-FetchJob $State $step.target }
+                        else { Invoke-RunbookJob $State $step.target -Inputs @($step.with) }
+                    }
+                    'fetch' { Invoke-FetchJob $State $step.target }
+                    'script' { $r = Invoke-ChainScript $State $item $step $cp; $ok = $r.ok; $why = $r.why }
                 }
-                'fetch' { Invoke-FetchJob $State $step.target }
-                'script' { $r = Invoke-ChainScript $State $item $step $cp; $ok = $r.ok; $why = $r.why }
-            }
-            if ($step.kind -ne 'script') {
-                $errs = @(Get-AgentEvents $State $from | Where-Object { $_.type -eq 'error' })
-                if ($errs.Count) { $ok = $false; $why = 'see the error above' }
+                if ($step.kind -eq 'script') { break }
+                $stepEvents = @(Get-AgentEvents $State $from)
+                $errs = @($stepEvents | Where-Object { $_.type -eq 'error' })
+                if (-not $errs.Count) { $ok = $true; $why = ''; break }
+                $ok = $false; $why = 'see the error above'
+                # Copilot gave no answer (it stops answering after many requests in a row): wait, then
+                # try the step again in a new chat. Other errors (a broken runbook) fail at once.
+                if ($try -ge $waits.Count -or -not (Test-NoAnswerError $stepEvents) -or $State.Cancel -or $State.Stop) { break }
+                $wait = $waits[$try]; $try++
+                Add-AgentEvent $State 'status' @{ text = "Copilot gave no answer to step $($step.n). Waiting $([int]$wait) s, then trying it again in a new chat (try $($try + 1) of $($waits.Count + 1))." }
+                Write-CCBLog info agent "Chain $Name step $($step.n): no answer, retry after $wait s" @{ try = $try }
+                if (-not (Wait-ChainPause $State $wait)) { break }
+                $State.NeedNewChat = $true
             }
             if ($State.Cancel -or $State.Stop) { $stopped = $true; $lines.Add("$($step.n). $label - stopped"); break }
             $lines.Add("$($step.n). $label - $(if ($ok) { 'done' } else { "failed: $why" })")
@@ -3174,4 +3214,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

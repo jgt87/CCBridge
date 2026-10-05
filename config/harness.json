@@ -67,6 +67,8 @@
     "beforeSendSec": 1,
     "betweenPromptsSec": 5,
     "lateReplySec": 2,
-    "note": "Pauses that give Copilot's page time to finish its own work: after a new chat is ready, between typing the prompt and pressing Send, the minimum gap after the previous reply, and the wait after a reply ended before it is read once more from the page (a part that arrives late is added; 0 = off). Completing tasks matters more than speed."
+    "chainStepSec": 10,
+    "chainRetrySec": [120, 300],
+    "note": "In a chain: chainStepSec pauses between Copilot steps, and a step Copilot gave no answer to is tried again in a new chat after each wait in chainRetrySec. Pauses that give Copilot's page time to finish its own work: after a new chat is ready, between typing the prompt and pressing Send, the minimum gap after the previous reply, and the wait after a reply ended before it is read once more from the page (a part that arrives late is added; 0 = off). Completing tasks matters more than speed."
   }
 }

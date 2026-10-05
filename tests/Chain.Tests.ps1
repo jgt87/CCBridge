@@ -259,3 +259,33 @@ Describe 'Running a chain' {
     }
 }
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+
+Describe 'A chain step Copilot gave no answer to' {
+    It 'is recognised by its error text, unlike other errors' {
+        Test-NoAnswerError @(@{ type = 'status'; text = 'x' }, @{ type = 'error'; text = "Runbook 'Day' got no usable answer (NoAnswer: Copilot stopped without answering)" }) | Should Be $true
+        Test-NoAnswerError @(@{ type = 'error'; text = "Runbook 'Day' failed: the answer is not valid JSON" }) | Should Be $false
+        Test-NoAnswerError @(@{ type = 'status'; text = 'fine' }) | Should Be $false
+        @(Get-ChainRetryWaits $null) -join ',' | Should Be '120,300'
+        @(Get-ChainRetryWaits ([pscustomobject]@{ pacing = [pscustomobject]@{ chainRetrySec = @(5) } })) -join ',' | Should Be '5'
+    }
+    It 'waits and tries the step again in a new chat, then carries on' {
+        $p = New-TestProject
+        try {
+            Copy-Item (Join-Path $root 'templates\runbooks\blank.runbook.md') (Join-Path $p 'Runbooks\day-01.runbook.md')
+            [IO.File]::WriteAllText((Join-Path $p 'Runbooks\days.chain.md'), "1. runbook: day-01")
+            $c = [pscustomobject]@{ commandTimeoutSec = 60; chainScripts = 'approve-once'; resultCharBudget = 40000; autoApproveCommands = @(); pacing = [pscustomobject]@{ chainStepSec = 0; chainRetrySec = @(0.2, 0.2) } }
+            $s = New-AgentState -Config $c -AppRoot $root; $s.ProjectRoot = $p
+            $global:ccbTries = 0
+            & (Get-Module Agent) {
+                param($st)
+                # Copilot gives no answer the first time, then answers.
+                function Invoke-RunbookJob { param($State, $Name, $Inputs) $global:ccbTries++; if ($global:ccbTries -eq 1) { Add-AgentEvent $State 'error' @{ text = "Runbook '$Name' got no usable answer (NoAnswer: Copilot stopped without answering)" } } else { Add-AgentEvent $State 'status' @{ text = "Runbook '$Name': saved" } } }
+                Invoke-ChainJob $st 'days'
+            } $s
+            $global:ccbTries | Should Be 2
+            $ev = @($s.Events)
+            ($ev | Where-Object { $_.type -eq 'status' -and $_.text -match 'trying it again in a new chat \(try 2 of 3\)' }) | Should Not BeNullOrEmpty
+            ($ev | Where-Object type -eq 'chain').text | Should Match 'all 1 step\(s\) done'
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+}

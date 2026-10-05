@@ -67,7 +67,7 @@ $stage = Join-Path $env:TEMP ('ccbridge-release-' + [guid]::NewGuid().ToString('
 $app = Join-Path $stage 'CCBridge'
 $null = New-Item -ItemType Directory -Force -Path $app, $dist
 
-$include = @('ccbridge.ps1', 'start.cmd', 'install.ps1', 'check.cmd', 'probe.ps1', 'probe.cmd', 'capture.cmd', 'diagnostics.cmd', 'update.cmd', 'complexity-test.cmd', 'reply-timing.cmd', 'stream-shape.cmd', 'agent-capture.cmd', 'agent-test.cmd', 'render-test.cmd', 'm365-fields-test.cmd', 'html-echo-test.cmd', 'sso-setup.cmd', 'README.md', 'AGENTS.md',
+$include = @('ccbridge.ps1', 'start.cmd', 'install.ps1', 'check.cmd', 'probe.ps1', 'probe.cmd', 'capture.cmd', 'diagnostics.cmd', 'update.cmd', 'complexity-test.cmd', 'reply-timing.cmd', 'stream-shape.cmd', 'agent-capture.cmd', 'agent-test.cmd', 'render-test.cmd', 'm365-fields-test.cmd', 'html-echo-test.cmd', 'rate-limit-test.cmd', 'sso-setup.cmd', 'README.md', 'AGENTS.md',
              'config', 'lib', 'mcp', 'prompts', 'templates', 'tools', 'ui')
 foreach ($item in $include) {
     $src = Join-Path $root $item
