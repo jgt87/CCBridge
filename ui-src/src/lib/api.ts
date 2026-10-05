@@ -82,6 +82,10 @@ export interface UndoChange {
 
 export interface AgentEvent {
   seq: number;
+  /** runbook-choice: the message the person sent, to send on to Copilot. */
+  request?: string;
+  /** Restored from the chat history after a restart (not live). */
+  restored?: boolean;
   type:
     | "user"
     | "assistant"
@@ -108,6 +112,8 @@ export interface AgentEvent {
     | "next-steps"
     /** Researcher made a research plan and waits for the person's answers. */
     | "agent-plan"
+    /** A message named a runbook: run it, or send the message to Copilot (the person chooses). */
+    | "runbook-choice"
     /** Settings > Privacy > Clear chat history: the chat shows nothing from before it. */
     | "history-cleared";
   time: string;
@@ -271,6 +277,8 @@ export interface ProjectInfo {
 /** How a message is sent: as a coding task, clarify first, plan first, with Think deeper. */
 export interface ChatOptions {
   asCoding?: boolean;
+  /** Send to Copilot without checking whether the message asks to run a runbook. */
+  noRunbook?: boolean;
   clarify?: boolean;
   planFirst?: boolean;
   /** The original request, when the text adds answers or plan feedback to it. */

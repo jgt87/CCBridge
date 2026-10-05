@@ -133,10 +133,13 @@ function Get-ChatHistoryPath([string]$ProjectRoot) { Join-Path (Get-ProjectState
 function Save-ChatEvent {
     <# Appends one event to the project's chat history. A very large event (a big file in a change
        preview) is kept without the file contents, so the card still shows what happened. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][hashtable]$Event)
-    $json = ConvertTo-Json -InputObject $Event -Depth 6 -Compress
+    param(
+        [Parameter(Mandatory)][string]$ProjectRoot,
+        [Parameter(Mandatory)][Alias('Event')][hashtable]$ChatEvent
+    )
+    $json = ConvertTo-Json -InputObject $ChatEvent -Depth 6 -Compress
     if ($json.Length -gt $script:HistoryMaxEventChars) {
-        $copy = @{}; foreach ($k in $Event.Keys) { $copy[$k] = $Event[$k] }
+        $copy = @{}; foreach ($k in $ChatEvent.Keys) { $copy[$k] = $ChatEvent[$k] }
         if ($copy.preview) { $copy.preview = @{ path = $copy.preview.path; exists = $copy.preview.exists; old = $null; new = '(too large to keep in the chat history)' } }
         foreach ($k in 'output', 'text', 'detail') { if ("$($copy[$k])".Length -gt 50000) { $copy[$k] = "$($copy[$k])".Substring(0, 50000) + "`n... (shortened in the chat history)" } }
         $json = ConvertTo-Json -InputObject $copy -Depth 6 -Compress
@@ -777,7 +780,11 @@ function Publish-PlanReady {
     $done = @($events | Where-Object { $_.type -eq 'done' } | Select-Object -Last 1)
     $last = @($events | Where-Object { $_.type -eq 'assistant' } | Select-Object -Last 1)
     $todos = @($State.Todos | Where-Object { $_ })
-    $steps = if ($todos.Count) { (($todos | ForEach-Object -Begin { $i = 0 } -Process { $i++; "$i. $($_.text)" }) -join "`n") } else { '' }
+    $steps = if ($todos.Count) {
+        $lines = @()
+        for ($i = 0; $i -lt $todos.Count; $i++) { $lines += "$($i + 1). $($todos[$i].text)" }
+        ($lines -join "`n")
+    } else { '' }
     $summary = if ($done.Count) { "$($done[0].text)" } elseif ($last.Count) { ("$($last[0].text)" -replace '(?s)```+.*?```+', '').Trim() } else { '' }
     $plan = (@($steps, $summary) | Where-Object { $_ }) -join "`n`n"
     if (-not $plan) { Add-AgentEvent $State 'status' @{ text = 'Copilot did not write a plan. Send the request again, or build without a plan.' }; return }
@@ -1212,7 +1219,6 @@ function Invoke-ScriptJob {
        deleting scripts by a person every time. What it changes is one change set. #>
     param($State, [string]$Path)
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
-    $root = $State.ProjectRoot
     $cp = [pscustomobject]@{ Value = $null }
     $State.Busy = $true; $State.Cancel = $false
     try {
@@ -1770,18 +1776,18 @@ function Invoke-ProjectHooks {
        matches, beforeDone and afterTask once. The hooks file is approved by a person once per version
        (it can run any command); commands that delete outside the project, delete data or use
        Microsoft 365 never run. Each run is a card in the chat. Returns the failures as lines. #>
-    param($State, [string]$Event, [string[]]$Paths = @())
+    param($State, [string]$HookEvent, [string[]]$Paths = @())
     $root = $State.ProjectRoot
     if (-not $root -or $State.NoCommands -or $State.Mode -eq 'plan') { return @() }
     if ("$($State.Config.hooks)" -in 'False', 'off') { return @() }   # setting: hooks paused
     $h = try { Read-Hooks $root } catch { Write-CCBLogError agent 'hooks' $_; $null }
     if (-not $h -or -not $h.exists) { return @() }
     if ($h.error) { Add-AgentEvent $State 'status' @{ text = "Hooks not run: $($h.error)." }; return @() }
-    $mine = @($h.hooks | Where-Object { $_.event -eq $Event })
+    $mine = @($h.hooks | Where-Object { $_.event -eq $HookEvent })
     if (-not $mine.Count) { return @() }
     $runs = New-Object System.Collections.Generic.List[object]
     foreach ($k in $mine) {
-        if ($Event -eq 'afterEdit') { foreach ($p in @($Paths | Where-Object { Test-HookMatch $k $_ })) { $runs.Add(@{ hook = $k; path = $p }) } }
+        if ($HookEvent -eq 'afterEdit') { foreach ($p in @($Paths | Where-Object { Test-HookMatch $k $_ })) { $runs.Add(@{ hook = $k; path = $p }) } }
         else { $runs.Add(@{ hook = $k; path = '' }) }
     }
     if (-not $runs.Count) { return @() }
@@ -1808,7 +1814,7 @@ function Invoke-ProjectHooks {
     foreach ($r in $runs) {
         if ($State.Cancel) { break }
         $cmd = Get-HookCommand $r.hook $r.path
-        $label = "$Event hook$(if ($r.hook.name) { " '$($r.hook.name)'" })$(if ($r.path) { " for $($r.path)" })"
+        $label = "$HookEvent hook$(if ($r.hook.name) { " '$($r.hook.name)'" })$(if ($r.path) { " for $($r.path)" })"
         $id = 'hook-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
         Add-AgentEvent $State 'action' @{ id = $id; action = 'run'; target = $cmd; status = 'running'; by = 'streamhub' }
         $risk = Get-CommandRisk $cmd
@@ -2144,7 +2150,21 @@ function Invoke-AgentAction {
     $preview = $null
     $riskWarning = $null
     $personOnly = $false   # Microsoft 365 commands and deletions: only a person in the app may approve
-    if ($Action.type -eq 'remember') {
+    if ($Action.type -eq 'runbook') {
+        # Run an existing runbook after this reply: a read-only export, like the Run button. Asks in
+        # Ask mode, runs straight away in auto mode.
+        $rbName = ("$($Action.arg)".Trim() -split '\s+')[0] -replace '(?i)^@?Runbooks/', '' -replace '(?i)\.runbook\.md$', ''
+        $evt.target = $rbName
+        $known = @(Get-Runbooks $root)
+        $rb = @($known | Where-Object { "$($_.name)" -ieq $rbName }) | Select-Object -First 1
+        if (-not $rb) {
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed' })
+            return @{ ok = $false; summary = "no runbook named $rbName"; output = "There is no runbook named '$rbName'. Runbooks in this project: $(if ($known.Count) { (@($known | ForEach-Object { $_.name }) -join ', ') } else { 'none' })." }
+        }
+        $Action | Add-Member -NotePropertyName runbook -NotePropertyValue $rb -Force
+        $needsApproval = ($mode -ne 'auto')
+    }
+    elseif ($Action.type -eq 'remember') {
         # A lasting project note: added to AGENTS.md (## Learned) only after approval, also in auto mode.
         $body = if ("$($Action.body)".Trim()) { $Action.body } else { $Action.arg }
         if (-not "$body".Trim()) { return @{ ok = $false; summary = 'remember without text'; output = 'error: put the fact to remember inside the block' } }
@@ -2314,6 +2334,12 @@ function Invoke-AgentAction {
                 try { Add-CheckpointCount $Checkpoint $Action.arg $before (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text } catch { Write-CCBLogError agent 'line counts' $_ }
                 if (@($artNote).Count) { $out += '; ' + ($artNote -join '; ') }
                 return @{ ok = $true; summary = $out; output = $out; changed = $true; path = $Action.arg }
+            }
+            'runbook' {
+                # It runs right after this reply (a runbook starts its own chat, so not inside this turn).
+                $rb = $Action.runbook
+                $null = Submit-AgentTask $State @{ kind = 'runbook'; name = "$($rb.name)" } 'copilot'
+                return @{ ok = $true; summary = "runbook $($rb.name) queued"; output = "Runbook '$($rb.title)' ($($rb.name)) is queued: it runs right after this reply, read-only, and saves its result to $($rb.output). Do not run it again; finish with done." }
             }
             'remember' { $null = Invoke-WriteAction $root 'AGENTS.md' $Action.newNotes $Checkpoint; return @{ ok = $true; summary = 'added to the project notes (AGENTS.md)'; output = 'saved to the project notes (AGENTS.md, ## Learned)'; changed = $true; path = 'AGENTS.md' } }
             'edit'  {
@@ -3010,8 +3036,13 @@ function Start-AgentWorker {
                     $force = if ($task.forceKind) { "$($task.forceKind)" } elseif ($task.source -eq 'mcp' -or $task.source -eq 'api') { 'work' } else { '' }
                     # "Run the meetings runbook": the runbook job sends the runbook's instructions and
                     # contents to Copilot, as the Run button does. Not for "send again as a coding task".
-                    $runReq = if ($force -ne 'coding' -and $State.ProjectRoot) { Get-RunbookRunRequest $task.text @(Get-Runbooks $State.ProjectRoot) } else { $null }
-                    if ($runReq -and $runReq.name) {
+                    $runReq = if ($force -ne 'coding' -and -not $task.noRunbook -and $State.ProjectRoot) { Get-RunbookRunRequest $task.text @(Get-Runbooks $State.ProjectRoot) } else { $null }
+                    if ($runReq -and $runReq.ask) {
+                        # A longer message that names a runbook: run it, or send the message to Copilot? The person chooses.
+                        Add-AgentEvent $State 'user' @{ text = $task.text }
+                        $rb = @(Get-Runbooks $State.ProjectRoot | Where-Object { $_.name -eq $runReq.name }) | Select-Object -First 1
+                        Add-AgentEvent $State 'runbook-choice' @{ name = $runReq.name; title = "$($rb.title)"; request = $task.text }
+                    } elseif ($runReq -and $runReq.name) {
                         Add-AgentEvent $State 'user' @{ text = $task.text }
                         Add-AgentEvent $State 'kind' @{ taskKind = 'runbook' }
                         Invoke-RunbookJob $State $runReq.name

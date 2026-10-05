@@ -510,6 +510,7 @@ function Invoke-ApiRequest($Ctx, $State) {
                 try { Add-PlanSection $State.ProjectRoot $planId $Heading $Body $Status } catch { Write-CCBLogError server 'PLAN.md' $_ }
             }
             if ($b.asCoding) { $task.forceKind = 'coding' }
+            if ($b.noRunbook) { $task.noRunbook = $true }   # "Send to Copilot" on a runbook choice: no runbook check
             if ($b.clarify) { $task.clarify = $true; $task.request = [string]$b.text }
             elseif ($b.planFirst) {
                 # Plan first: read-only turn that ends with a plan to approve in the app.

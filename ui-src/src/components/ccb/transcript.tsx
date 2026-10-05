@@ -19,6 +19,7 @@ export type TranscriptItem =
   | { kind: "user"; seq: number; text: string; taskKind?: string; agent?: string }
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[]; agent?: string }
   | { kind: "agentPlan"; seq: number; agent: string }
+  | { kind: "runbookChoice"; seq: number; name: string; title: string; request: string; restored: boolean }
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string; path?: string }
   | { kind: "undo"; seq: number; text: string; changes: UndoChange[] }
@@ -107,6 +108,8 @@ function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
 const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildContext) => void>> = {
   user: (e, ctx) => ctx.items.push({ kind: "user", seq: e.seq, text: e.text ?? "", ...(e.agent ? { agent: e.agent } : {}) }),
   "agent-plan": (e, ctx) => ctx.items.push({ kind: "agentPlan", seq: e.seq, agent: e.agent || "Researcher" }),
+  "runbook-choice": (e, ctx) =>
+    ctx.items.push({ kind: "runbookChoice", seq: e.seq, name: e.name ?? "", title: e.title ?? "", request: e.request ?? "", restored: Boolean(e.restored) }),
   // How the last message was sent (chat, project, coding, ...): shown under it.
   kind: (e, ctx) => {
     for (let i = ctx.items.length - 1; i >= 0; i--) {
@@ -229,6 +232,43 @@ function AssistantMessage({ text, references, agent }: { text: string; reference
   );
 }
 
+/** A message named a runbook without saying to run it: run it, or send the message to Copilot. */
+function RunbookChoiceCard({ item, onSend }: { item: Extract<TranscriptItem, { kind: "runbookChoice" }>; onSend?: (text: string, opts: ChatOptions) => void }) {
+  const [chosen, setChosen] = useState<"" | "run" | "copilot">("");
+  const label = item.title ? `'${item.title}' (${item.name})` : item.name;
+  if (item.restored || chosen) {
+    return (
+      <div className="flex items-start gap-2 px-1 text-muted-foreground text-sm">
+        <Info className="mt-0.5 h-4 w-4" />
+        <span>{chosen === "run" ? `Running runbook ${label}.` : chosen === "copilot" ? "Sent to Copilot." : `Your message named runbook ${label}.`}</span>
+      </div>
+    );
+  }
+  const run = () => {
+    setChosen("run");
+    // The API client is loaded here: it reads the page's session token when loaded.
+    import("@/lib/api").then(({ api }) => api.runRunbook(item.name)).catch(() => setChosen(""));
+  };
+  const toCopilot = () => {
+    setChosen("copilot");
+    onSend?.(item.request, { noRunbook: true });
+  };
+  const btn = "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs hover:bg-black/10 dark:hover:bg-white/15";
+  return (
+    <div className="space-y-2 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
+      <div>Your message names runbook {label}. Run it now, or send the message to Copilot (for example to change the runbook)?</div>
+      <div className="flex gap-1.5">
+        <button className={cn(btn, "bg-black/5 dark:bg-white/10")} onClick={run} type="button">
+          Run it
+        </button>
+        <button className={btn} disabled={!onSend} onClick={toCopilot} type="button">
+          Send to Copilot
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NoteLine({ tone, text, path, onOpenFile }: { tone: NoteTone; text: string; path?: string; onOpenFile?: (path: string) => void }) {
   const style = NOTE_STYLE[tone];
   return (
@@ -325,6 +365,8 @@ function TranscriptRow({
       return <AssistantMessage agent={item.agent} references={item.references} text={item.text} />;
     case "agentPlan":
       return onSend ? <AgentPlanCard agent={item.agent} onSend={onSend} /> : null;
+    case "runbookChoice":
+      return <RunbookChoiceCard item={item} onSend={onSend} />;
     case "action":
       return <ActionCard item={item.item} />;
     case "note":

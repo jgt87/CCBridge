@@ -161,4 +161,15 @@ Describe 'Get-RunbookRunRequest (running a runbook from the chat)' {
         Get-RunbookRunRequest 'what is a runbook' $rbs | Should BeNullOrEmpty
         Get-RunbookRunRequest 'fix the button' $rbs | Should BeNullOrEmpty
     }
+    It 'does not run a runbook that a message mentions while reporting a problem or describing a change' {
+        $days = @([pscustomobject]@{ name = 'day-01'; title = 'Monday Calendar Export'; path = 'Runbooks/day-01.runbook.md' }, [pscustomobject]@{ name = 'day-02'; title = 'Tuesday Calendar Export'; path = 'Runbooks/day-02.runbook.md' })
+        Get-RunbookRunRequest 'the runbook day-01 to 31 are incorrect as they state a day of the week like Monday, there should be no mention of a specific day, but just fetch the data for the first day within the current calendar month for file 01, second day for file 02, etc.' $days | Should BeNullOrEmpty
+        Get-RunbookRunRequest 'day-01 gives the wrong dates' $days | Should BeNullOrEmpty
+        Get-RunbookRunRequest 'day-02 should use the second day of the month instead' $days | Should BeNullOrEmpty
+        Get-RunbookRunRequest 'the Monday Calendar Export runbook has an error' $days | Should BeNullOrEmpty
+        (Get-RunbookRunRequest 'I looked at the output of day-01 yesterday and the numbers seemed fine to me overall' $days).ask | Should Be $true   # long, no run word: the person chooses
+        (Get-RunbookRunRequest 'day-01' $days).name | Should Be 'day-01'
+        (Get-RunbookRunRequest 'Monday Calendar Export' $days).name | Should Be 'day-01'
+        (Get-RunbookRunRequest 'please run day-02 now so I get the latest calendar data for this month' $days).name | Should Be 'day-02'
+    }
 }

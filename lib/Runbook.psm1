@@ -81,12 +81,21 @@ function Get-RunbookRunRequest {
     <# Whether a chat message asks to run a runbook, and which one. Naming a runbook is enough: its
        name, title or path (@Runbooks/NAME.runbook.md). Without a specific runbook, the word runbook
        (draaiboek) with a run word (run, execute, start, draai, voer uit) runs the only runbook, or
-       asks which one. Not when the message creates or changes a runbook, or asks about one.
+       asks which one. Not when the message creates or changes a runbook, asks about one, or reports
+       a problem with one (incorrect, wrong, should, instead...): those go to Copilot. A named runbook
+       runs only from a short message (8 words at most) or one with a run word, so a longer message
+       that mentions a runbook while describing something else never starts it: when such a message
+       names exactly one runbook and says nothing about changing it, @{ name; ask = $true } lets the
+       person choose (run it, or send the message to Copilot).
        Returns $null (not a run request) or @{ name } or @{ ambiguous = $true; names }. #>
     param([AllowEmptyString()][string]$Text, $Runbooks)
     if (-not "$Text".Trim()) { return $null }
     if ($Text -match '(?i)\b(create|make|write|new|add|build|edit|change|update|fix|rename|improve|delete|remove|maak|schrijf|nieuwe?|wijzig|verander|pas|verwijder)\b') { return $null }
     if ($Text -match '(?i)\b(what|why|how|explain|describe|show|open|view|look|read|which|wat|waarom|hoe|leg|toon|bekijk|welke)\b|\?\s*$') { return $null }
+    # Feedback about a runbook (it is wrong, it should do something else) is a change request.
+    if ($Text -match '(?i)\b(incorrect(ly)?|wrong|should(n.?t)?|must|instead|rather|mistakes?|errors?|broken|bugs?|problems?|issues?|missing|not right|onjuist|fout(ief)?|klopt niet|moet|moeten|zou|zouden|in plaats van)\b') { return $null }
+    $runWord = $Text -match '(?i)\b(run|re-?run|execute|start|launch|perform|draai|uitvoeren|voer)\b'
+    $short = @($Text.Trim() -split '\s+').Count -le 8
     $list = @($Runbooks | Where-Object { $_ })
     $low = $Text.ToLowerInvariant()
     $hits = @($list | Where-Object {
@@ -95,9 +104,8 @@ function Get-RunbookRunRequest {
     })
     # The longest name wins when one name contains another (meetings / meetings-next-week).
     if ($hits.Count -gt 1) { $hits = @($hits | Sort-Object { "$($_.name)".Length } -Descending | Select-Object -First 1) }
-    if ($hits.Count -eq 1) { return @{ name = $hits[0].name } }
+    if ($hits.Count -eq 1) { if ($runWord -or $short) { return @{ name = $hits[0].name } } else { return @{ name = $hits[0].name; ask = $true } } }
     $mentions = $Text -match '(?i)\b(runbooks?|draaiboek(en)?)\b|\.runbook\.md'
-    $runWord = $Text -match '(?i)\b(run|re-?run|execute|start|launch|perform|draai|uitvoeren|voer)\b'
     if (-not ($mentions -and $runWord)) { return $null }
     if ($list.Count -eq 1) { return @{ name = $list[0].name } }
     @{ ambiguous = $true; names = @($list | ForEach-Object { $_.name }) }

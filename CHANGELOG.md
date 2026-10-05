@@ -6,6 +6,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.84] - 2026-10-05
+
+### Added
+
+- Copilot can run a runbook: when it reads a request as "run this runbook" (for example "can you give me the day-01 data again"), it uses a new action (ACTION runbook NAME) and the runbook runs right after its reply, like the Run button; in Ask before changes mode you approve it first. Copilot gets this action with the runbook rules, which are now also sent when a message names one of the project's runbooks.
+- When a longer message names a runbook without saying to run it or to change it, the chat asks instead of guessing: Run it, or Send to Copilot. Neither costs a Copilot message until you choose.
+
+### Fixed
+
+- A chat message that mentioned a runbook while asking to change it (for example "the runbooks day-01 to day-31 are incorrect, they should ...") ran that runbook instead of going to Copilot. A runbook named in the chat now runs only from a short message (8 words at most, such as just its name) or with a run word (run, execute, start), and never when the message reports a problem or asks for a different result (incorrect, wrong, should, instead, error, missing, and Dutch equivalents).
+
 ## [v0.1.83] - 2026-10-05
 
 ### Fixed
@@ -967,7 +978,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.83...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.84...HEAD
+[v0.1.84]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.84
 [v0.1.83]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.83
 [v0.1.82]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.82
 [v0.1.81]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.81

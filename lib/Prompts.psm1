@@ -145,7 +145,9 @@ function Get-PromptModules {
     if (($traits -contains 'csharp') -or ($Text -match $script:CSharpPattern)) { $ids.Add('rules:csharp') }
     if (($traits -contains 'react') -or ($Text -match $script:ReactPattern)) { $ids.Add('rules:react') }
     if (($traits -contains 'source') -or ($Text -match $script:PrivacyPattern)) { $ids.Add('rules:privacy') }
-    if ($Text -match $script:RunbookPattern) { $ids.Add('rules:runbook') }
+    # Runbook rules: for requests about runbooks, and for messages that name one of the project's runbooks.
+    $namesRunbook = @($Context.Paths | Where-Object { "$_" -match '(?i)^Runbooks/([^/]+)\.runbook\.md$' -and $Text -match ('(?i)(^|[^\w-])' + [regex]::Escape($Matches[1]) + '($|[^\w-])') }).Count
+    if ($Text -match $script:RunbookPattern -or $namesRunbook) { $ids.Add('rules:runbook') }
     # Online information: how to use web sources, and the web action for the exact text of a page.
     if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }
     $ids.ToArray()

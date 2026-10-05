@@ -2,7 +2,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$script:ActionTypes = @('read', 'glob', 'grep', 'find', 'web', 'write', 'edit', 'run', 'remember', 'todo', 'dispute', 'done')
+$script:ActionTypes = @('read', 'glob', 'grep', 'find', 'web', 'write', 'edit', 'run', 'runbook', 'remember', 'todo', 'dispute', 'done')
 $script:PlainInfo = @('', 'text', 'txt', 'plaintext', 'plain', 'none')
 
 function Get-ActionBlocks {
@@ -30,7 +30,7 @@ function Get-ActionBlocks {
         # Older form, still accepted: the action name as the label (```read). Copilot also sometimes
         # leaves the label empty (or "text") and writes the bare action name as the first line.
         if ($script:PlainInfo -contains $type -and -not $arg -and $j -lt $lines.Length) {
-            $first = [regex]::Match($lines[$j], '^\s*ACTION\s+(read|glob|grep|find|web|write|edit|run|remember|todo|dispute|done)\b[:\s]*(.*)$', 'IgnoreCase')
+            $first = [regex]::Match($lines[$j], '^\s*ACTION\s+(read|glob|grep|find|web|write|edit|run|runbook|remember|todo|dispute|done)\b[:\s]*(.*)$', 'IgnoreCase')
             if (-not $first.Success) { $first = [regex]::Match($lines[$j], '^\s*(read|glob|grep|web|write|edit|run|todo|done)\b[:\s]*(.*)$') }
             if ($first.Success) { $type = $first.Groups[1].Value.ToLowerInvariant(); $arg = $first.Groups[2].Value.Trim(); $j++ }
         }

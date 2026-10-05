@@ -9,6 +9,7 @@ import {
   FolderSearch,
   ListTodo,
   Play,
+  Workflow,
   RotateCcw,
   TerminalSquare,
   X,
@@ -53,12 +54,14 @@ const ICONS: Record<string, React.ReactNode> = {
   write: <FilePlus2 className="h-4 w-4 text-muted-foreground" />,
   edit: <FilePen className="h-4 w-4 text-muted-foreground" />,
   run: <TerminalSquare className="h-4 w-4 text-muted-foreground" />,
+  runbook: <Workflow className="h-4 w-4 text-muted-foreground" />,
   todo: <ListTodo className="h-4 w-4 text-muted-foreground" />,
   move: <FolderInput className="h-4 w-4 text-muted-foreground" />,
   restore: <RotateCcw className="h-4 w-4 text-muted-foreground" />,
 };
 
 const VERBS: Record<string, string> = {
+  runbook: "Run runbook",
   read: "Read",
   glob: "List",
   grep: "Search",
