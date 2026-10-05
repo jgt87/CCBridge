@@ -29,14 +29,21 @@ function Use-IssueLock([scriptblock]$Body) {
     try { & $Body } finally { if ($got) { $mx.ReleaseMutex() }; $mx.Dispose() }
 }
 
+# Raised when the checks change, so every file is scanned again once (results of the old rules
+# would otherwise stay until the file changes). Ignored issues and statuses are kept.
+$script:RulesVersion = 2
+
 function Read-IssueIndex([string]$ProjectRoot) {
     $p = Get-IssueIndexPath $ProjectRoot
-    $ix = @{ version = 1; updated = $null; files = @{}; states = @{}; ignored = @{} }
+    $ix = @{ version = 1; rules = $script:RulesVersion; updated = $null; files = @{}; states = @{}; ignored = @{} }
     if (Test-Path -LiteralPath $p) {
         try {
             $j = [IO.File]::ReadAllText($p) | ConvertFrom-Json
             $ix.updated = $j.updated
-            foreach ($f in @($j.files.PSObject.Properties)) { $ix.files[$f.Name] = @{ size = [int64]$f.Value.size; mtime = [int64]$f.Value.mtime; issues = @($f.Value.issues | Where-Object { $_ }) } }
+            # Scanned with older rules: forget the per-file results, so the next update scans every file.
+            if ([int]$j.rules -eq $script:RulesVersion) {
+                foreach ($f in @($j.files.PSObject.Properties)) { $ix.files[$f.Name] = @{ size = [int64]$f.Value.size; mtime = [int64]$f.Value.mtime; issues = @($f.Value.issues | Where-Object { $_ }) } }
+            }
             foreach ($s in @($j.states.PSObject.Properties)) { $ix.states[$s.Name] = @{ status = "$($s.Value.status)"; attempts = [int]$s.Value.attempts; note = "$($s.Value.note)" } }
             if ($j.ignored) { foreach ($g in @($j.ignored.PSObject.Properties)) { $ix.ignored[$g.Name] = @{ path = "$($g.Value.path)"; category = "$($g.Value.category)"; message = "$($g.Value.message)"; text = "$($g.Value.text)"; at = "$($g.Value.at)" } } }
         } catch { }

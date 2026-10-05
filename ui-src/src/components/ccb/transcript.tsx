@@ -9,7 +9,7 @@ import type { Activity, AgentEvent, CheckFinding, Preview, Reference, UndoChange
 import { ChecksCard } from "./checks-card";
 import { UndoCard } from "./undo-card";
 import { stripActionBlocks } from "@/lib/diff";
-import { thinkingTexts } from "@/lib/thinking-texts";
+import { activityTexts, thinkingTexts } from "@/lib/thinking-texts";
 import { cn } from "@/lib/utils";
 import { ActionCard, type ActionItem } from "./action-card";
 
@@ -393,7 +393,7 @@ function activityText(a: Activity): string {
 
 function indicatorTexts(progress: string, stopping: boolean, activity: Activity | null, seed: number): string[] {
   if (stopping) return ["Stopping..."];
-  if (activity?.label) return [activityText(activity)];
+  if (activity?.label) return activityTexts(activityText(activity), activity.kind, seed);
   return thinkingTexts(progress ? "writing" : "waiting", seed);
 }
 

@@ -355,6 +355,11 @@ $script:CodeExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kt
 # Program code where a repeated block or a second definition is a mistake (not data or markup).
 $script:ProgramExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|cs|java|kt|go|rs|php|swift|dart|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|sh|bash)$'
 
+# A line that is only data: "key": value, a quoted or numeric entry, true/false/null, or brackets
+# (JSON records, object and array literals, tables), optionally with a window.NAME = / const NAME =
+# start. Used to leave repeated data out of the duplicate check.
+$script:DataLine = '^(?:(?:window\.|(?:var|let|const)\s+)?[\w$.]+\s*=\s*)?(?:[\[\]{}(),;\s]|(?:"[^"]*"|''[^'']*''|[\w$]+)\s*:|"[^"]*"|''[^'']*''|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null|undefined|None|True|False)\b)*$'
+
 function Test-Duplicates([string]$Text, [string]$Path) {
     <# A function defined twice in one file, or the same 8+ code lines twice: usually code that was
        added again instead of replaced. #>
@@ -380,7 +385,11 @@ function Test-Duplicates([string]$Text, [string]$Path) {
     $code = @(for ($i = 0; $i -lt $lines.Length; $i++) { $t = $lines[$i].Trim(); if ($t.Length -gt 3 -and $t -notmatch '^[\s{}()\[\];,]*$') { @{ t = $t; n = $i + 1 } } })
     $win = @{}
     for ($i = 0; $i + 8 -le $code.Count; $i++) {
-        $key = ($code[$i..($i + 7)] | ForEach-Object { $_.t }) -join "`n"
+        $part = @($code[$i..($i + 7)] | ForEach-Object { $_.t })
+        # Data repeats by nature (JSON records in a data copy, object and array literals, tables):
+        # 8 lines that are all data are no sign of code added twice.
+        if (@($part | Where-Object { $_ -notmatch $script:DataLine }).Count -eq 0) { continue }
+        $key = $part -join "`n"
         if ($win.ContainsKey($key)) {
             $j = $win[$key]   # where the same 8 lines were first
             if ($i - $j -ge 8) { return "line $($code[$i].n): these lines repeat lines $($code[$j].n)-$($code[$j + 7].n) (code added again instead of replaced?)" }

@@ -139,7 +139,10 @@ function Get-ActivityView($State) {
        Copilot". The worker's step comes first; else the background index run. #>
     $view = $null
     foreach ($a in $State.Activity, $State.Indexing) {
-        if ($a -and $a.label -and -not $view) { $view = @{ label = [string]$a.label; done = [int]$a.done; total = [int]$a.total; current = [string]$a.current; background = [bool]($a -eq $State.Indexing) } }
+        if ($a -and $a.label -and -not $view) {
+            $bg = [bool]($a -eq $State.Indexing)
+            $view = @{ label = [string]$a.label; kind = $(if ($bg) { 'index' } else { [string]$a.kind }); done = [int]$a.done; total = [int]$a.total; current = [string]$a.current; background = $bg }
+        }
     }
     $view
 }

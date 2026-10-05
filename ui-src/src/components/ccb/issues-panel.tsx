@@ -1,3 +1,4 @@
+import { isIndexing } from "@/lib/activity";
 import { ChevronDown, ChevronRight, EyeOff, RefreshCw, Wrench } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Activity, IssueCategory, IssueItem, IssueReport } from "@/lib/api";
@@ -23,7 +24,7 @@ function timeOf(s: string | null | undefined) {
 
 /** The index status line: indexing progress while it runs, else what the index holds. */
 function IndexStatus({ report, activity }: { report: IssueReport | null; activity?: Activity | null }) {
-  if (activity?.label) {
+  if (activity && isIndexing(activity)) {
     return (
       <span>
         {activity.label}
@@ -60,7 +61,7 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
     );
   }, []);
   useEffect(load, [tick, load]);
-  const indexing = Boolean(activity?.label) || Boolean(report?.indexing.running);
+  const indexing = isIndexing(activity) || Boolean(report?.indexing.running);
   // While the index runs, refresh now and then so the counts grow.
   useEffect(() => {
     if (!indexing) return;

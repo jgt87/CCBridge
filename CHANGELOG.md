@@ -6,6 +6,16 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.94] - 2026-10-06
+
+### Changed
+- More light lines while waiting for and receiving a reply, including a set about making chips (cleanrooms, wafers, lithography, yield) and a mad-scientist set.
+- The waiting indicator says what StreamHub itself is doing (opening a new chat, checking or screenshotting a page, checking scripts, running tests, checks and hooks, indexing, pausing in a chain, an agent at work, Copilot still busy) instead of Copilot's waiting lines, with light lines of its own for each.
+
+### Fixed
+- JSON data in JavaScript files (data copies such as `window.NAME = [...]`, object and array literals, tables) was reported as "these lines repeat" in Issues: repeated lines that are only data no longer count; repeated code still does. When the checks change like this, the issue index scans every file again once, so old reports disappear; ignored issues are kept.
+- Screenshots with click steps (`ACTION screenshot` with `click` lines) left their browser tab open in StreamHub's Edge; the tab is closed again.
+
 ## [v0.1.93] - 2026-10-06
 
 ### Added
@@ -1057,7 +1067,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.93...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.94...HEAD
+[v0.1.94]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.94
 [v0.1.93]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.93
 [v0.1.92]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.92
 [v0.1.91]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.91

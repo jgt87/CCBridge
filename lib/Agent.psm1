@@ -37,7 +37,7 @@ function New-AgentState {
         WorkIq = $(if ($Config.workIq) { [string]$Config.workIq } else { 'leave' }); WorkIqActual = $null; WorkIqWarned = $false
         # Issue cycle: what the worker is doing besides Copilot (shown like "waiting for Copilot"),
         # the background indexer's progress, and the fix task being worked on.
-        Activity = [hashtable]::Synchronized(@{ label = ''; done = 0; total = 0; current = '' })
+        Activity = [hashtable]::Synchronized(@{ label = ''; kind = ''; done = 0; total = 0; current = '' })
         Indexing = [hashtable]::Synchronized(@{ running = $false; label = ''; done = 0; total = 0; current = ''; project = $null; last = $null; error = $null })
         IssueFix = $null; IssueFixHandled = $false
         AgentChat = $null   # the agent (Researcher) whose plan waits for the person's answer in the current chat
@@ -326,7 +326,7 @@ function Send-ToCopilot {
     $cancel = { [bool]$State.Cancel }.GetNewClosure()
     # An agent's progress lines ("Searching for release details") show in the waiting indicator.
     $who = if ($Agent) { $Agent } elseif ($State.AgentChat) { [string]$State.AgentChat } else { 'Copilot' }
-    $status = { param($t) $State.Activity.label = "${who}: $t" }.GetNewClosure()
+    $status = { param($t) $State.Activity.kind = $(if ($who -eq 'Copilot') { 'busy' } else { 'agent' }); $State.Activity.label = "${who}: $t" }.GetNewClosure()
     try {
         $stall = if ($State.Config.PSObject.Properties['stallSec']) { [int]$State.Config.stallSec } else { 90 }
         $timeout = [int]$State.Config.replyTimeoutSec
@@ -357,7 +357,7 @@ function Send-ToCopilot {
         }
         Reset-Bridge $State   # the next send reconnects
         throw
-    } finally { $State.Progress = ''; if ("$($State.Activity.label)" -like "${who}: *") { $State.Activity.label = '' } }
+    } finally { $State.Progress = ''; if ("$($State.Activity.label)" -like "${who}: *") { $State.Activity.label = ''; $State.Activity.kind = '' } }
     if ($r.Throttling -and $r.Throttling.maxNumUserMessagesInConversation) {
         $State.Throttle = @{ used = [int]$r.Throttling.numUserMessagesInConversation; max = [int]$r.Throttling.maxNumUserMessagesInConversation }
     } elseif (-not $r.Cancelled) {
@@ -1176,7 +1176,25 @@ function Get-ChainRetryWaits($Config) {
     @($w | ForEach-Object { [double]$_ } | Where-Object { $_ -gt 0 })
 }
 
-function Wait-ChainPause($State, [double]$Seconds) {
+function Enter-Activity($State, [string]$Kind, [string]$Label) {
+    <# What StreamHub is busy with now, for the chat's waiting indicator: a kind (newchat, page,
+       syntax, tests, index, wait, agent, busy; the app adds light lines per kind) and a plain label.
+       Returns what was there before, for Exit-Activity. #>
+    $prev = @{ kind = "$($State.Activity.kind)"; label = "$($State.Activity.label)" }
+    $State.Activity.kind = $Kind; $State.Activity.label = $Label
+    $prev
+}
+
+function Exit-Activity($State, $Prev) {
+    $State.Activity.kind = "$($Prev.kind)"; $State.Activity.label = "$($Prev.label)"
+}
+
+function Wait-ChainPause($State, [double]$Seconds, [string]$Label = 'Pausing before the next step') {
+    $prev = Enter-Activity $State 'wait' $Label
+    try { Wait-ChainPauseCore $State $Seconds } finally { Exit-Activity $State $prev }
+}
+
+function Wait-ChainPauseCore($State, [double]$Seconds) {
     <# Waits, but stops early when the user stops the chain. Returns $false when stopped. #>
     $until = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $until) {
@@ -1239,7 +1257,7 @@ function Invoke-ChainJob {
                 $wait = $waits[$try]; $try++
                 Add-AgentEvent $State 'status' @{ text = "Copilot gave no answer to step $($step.n). Waiting $([int]$wait) s, then trying it again in a new chat (try $($try + 1) of $($waits.Count + 1))." }
                 Write-CCBLog info agent "Chain $Name step $($step.n): no answer, retry after $wait s" @{ try = $try }
-                if (-not (Wait-ChainPause $State $wait)) { break }
+                if (-not (Wait-ChainPause $State $wait "Waiting $([int]$wait) s, then trying step $($step.n) again in a new chat")) { break }
                 $State.NeedNewChat = $true
             }
             if ($State.Cancel -or $State.Stop) { $stopped = $true; $lines.Add("$($step.n). $label - stopped"); break }
@@ -1702,6 +1720,14 @@ function Get-ScreenshotHint([string]$Page) {
 }
 
 function Test-WebPage {
+    <# The page check with its label for the waiting indicator (Test-WebPageCore does the work). #>
+    param($State, [string[]]$Pages, [int]$WaitSec = 6, [switch]$Screenshot, $Steps = @())
+    $what = (@($Pages) | Select-Object -First 3) -join ', '
+    $prev = Enter-Activity $State 'page' $(if ($Screenshot) { "Taking a screenshot of $what" } else { "Checking $what in a browser tab" })
+    try { Test-WebPageCore @PSBoundParameters } finally { Exit-Activity $State $prev }
+}
+
+function Test-WebPageCore {
     <# Opens project pages in a spare Edge tab (served read-only by the web app at /preview/<token>/)
        and collects what goes wrong while they load: JavaScript errors, console errors, and files
        that fail to load (missing styles.css, a fetch() of a JSON file that is not there). The tab
@@ -1762,18 +1788,18 @@ function Test-WebPage {
             if ($Screenshot -and $loaded) {
                 foreach ($step in @($Steps)) {
                     if ($step.kind -eq 'wait') { $until = (Get-Date).AddMilliseconds([int]$step.ms); while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $s 100 }; continue }
-                    $target = "$($step.target)"
-                    $byText = $target -match '^(?i)text\s*=\s*(.+)$'
-                    $what = ConvertTo-Json $(if ($byText) { $Matches[1].Trim().Trim('"', "'") } else { $target }) -Compress
+                    $clickOn = "$($step.target)"
+                    $byText = $clickOn -match '^(?i)text\s*=\s*(.+)$'
+                    $what = ConvertTo-Json $(if ($byText) { $Matches[1].Trim().Trim('"', "'") } else { $clickOn }) -Compress
                     $js = if ($byText) {
                         "(() => { const t = $what.toLowerCase(); const els = [...document.querySelectorAll('button, a, [role=button], [role=tab], summary, label, input[type=button], input[type=submit]')]; const el = els.find(e => (e.innerText || e.value || '').trim().toLowerCase() === t) || els.find(e => (e.innerText || e.value || '').trim().toLowerCase().includes(t)); if (!el) return 'missing'; el.scrollIntoView({ block: 'center' }); el.click(); return 'ok'; })()"
                     } else {
                         "(() => { let el; try { el = document.querySelector($what); } catch (e) { return 'bad selector'; } if (!el) return 'missing'; el.scrollIntoView({ block: 'center' }); el.click(); return 'ok'; })()"
                     }
                     $res = try { "$((Invoke-Cdp $s 'Runtime.evaluate' @{ expression = $js; returnByValue = $true }).result.value)" } catch { 'error' }
-                    if ($res -ne 'ok') { $problems.Add("screenshot step 'click $target': $(if ($res -eq 'missing') { 'nothing on the page matches it' } else { $res })") }
+                    if ($res -ne 'ok') { $problems.Add("screenshot step 'click $clickOn': $(if ($res -eq 'missing') { 'nothing on the page matches it' } else { $res })") }
                     # Let the page react (and record any error the click caused).
-                    $until = (Get-Date).AddMilliseconds(800); while ((Get-Date) -lt $until) { $m = Receive-CdpEvent $s 100; if ($m -and $m.method -eq 'Runtime.exceptionThrown') { $d = $m.params.exceptionDetails; $problems.Add("$page JavaScript error after 'click $target': $(if ($d.exception.description) { ($d.exception.description -split "`n")[0] } else { $d.text })") } }
+                    $until = (Get-Date).AddMilliseconds(800); while ((Get-Date) -lt $until) { $m = Receive-CdpEvent $s 100; if ($m -and $m.method -eq 'Runtime.exceptionThrown') { $d = $m.params.exceptionDetails; $problems.Add("$page JavaScript error after 'click $clickOn': $(if ($d.exception.description) { ($d.exception.description -split "`n")[0] } else { $d.text })") } }
                 }
             }
             if ($Screenshot -and $loaded) {
@@ -1840,6 +1866,12 @@ function Get-BeforeAfterNotes {
 }
 
 function Test-ScriptSyntax {
+    param($State, [string[]]$Paths)
+    $prev = Enter-Activity $State 'syntax' 'Checking the scripts for syntax errors'
+    try { Test-ScriptSyntaxCore $State $Paths } finally { Exit-Activity $State $prev }
+}
+
+function Test-ScriptSyntaxCore {
     <# Compiles changed JavaScript files in a spare Edge tab (compile only: nothing runs) and returns
        one line per syntax error. Module syntax is turned into classic script first
        (ConvertTo-CheckableScript); errors about import/export are left out, as the check cannot
@@ -1909,6 +1941,12 @@ function New-ReviewMessage {
 }
 
 function Invoke-ProjectHooks {
+    param($State, [string]$HookEvent, [string[]]$Paths = @())
+    $prev = Enter-Activity $State 'tests' "Running the project's $HookEvent hooks"
+    try { Invoke-ProjectHooksCore $State $HookEvent $Paths } finally { Exit-Activity $State $prev }
+}
+
+function Invoke-ProjectHooksCore {
     <# Runs the project's hooks for one moment (Hooks.psm1): afterEdit for each changed file that
        matches, beforeDone and afterTask once. The hooks file is approved by a person once per version
        (it can run any command); commands that delete outside the project, delete data or use
@@ -2030,6 +2068,11 @@ function Add-ChatScopeFiles($State, [string]$Text) {
 }
 
 function Start-NewChat($State) {
+    $prev = Enter-Activity $State 'newchat' 'Opening a new Copilot chat'
+    try { Start-NewChatCore $State } finally { Exit-Activity $State $prev }
+}
+
+function Start-NewChatCore($State) {
     try { New-CopilotChat (Get-Bridge $State) }
     catch {
         if ("$($_.Exception.Message)" -match 'the page shows a sign-in page') {
@@ -2607,7 +2650,7 @@ function Get-IssueBaseline($State) {
     <# Step 1: the index is current before a change; returns the ids of the issues already there
        (only issues a change adds are fixed automatically). $null when issues are off or failed. #>
     if (-not (Get-IssueSettings $State).enabled -or -not $State.ProjectRoot) { return $null }
-    $State.Activity.label = 'Indexing the project for issues before the change'
+    $State.Activity.kind = 'index'; $State.Activity.label = 'Indexing the project for issues before the change'
     try {
         $null = Update-IssueIndex $State.ProjectRoot -Progress $State.Activity
         $ids = @{}
@@ -2647,7 +2690,7 @@ function Invoke-IssueCycle {
     if (-not $cfg.enabled -or $null -eq $Baseline) { return }
     $root = $State.ProjectRoot
     $list = @($Paths | Where-Object { $_ } | ForEach-Object { $_.Replace('\', '/') } | Select-Object -Unique)
-    $State.Activity.label = "Scanning $($list.Count) changed file(s) for issues"
+    $State.Activity.kind = 'index'; $State.Activity.label = "Scanning $($list.Count) changed file(s) for issues"
     try { $null = Update-IssueIndex $root -Paths $list -Progress $State.Activity } finally { $State.Activity.label = '' }
     $changed = @{}; foreach ($p in $list) { $changed[$p] = $true }
     $report = @(Get-IssueReport $root | Where-Object { $changed.ContainsKey($_.path) -and $_.status -ne 'ignored' })
@@ -2748,7 +2791,7 @@ function Invoke-AgentTurn {
         # Issue cycle step 1: index before the change (not for plain chat or plan mode).
         if ($kind -ne 'chat' -and $State.Mode -ne 'plan') { $baseline = Get-IssueBaseline $State }
         if ($kind -ne 'chat' -and $State.ProjectRoot) {
-            $State.Activity.label = 'Updating the import index'
+            $State.Activity.kind = 'index'; $State.Activity.label = 'Updating the import index'
             try { $null = Update-ImportIndex $State.ProjectRoot } catch { Write-CCBLogError agent 'import index' $_ } finally { $State.Activity.label = '' }
         }
         # The app shows how a message was sent, with "Send again as a coding task" for plain chat.
@@ -3038,7 +3081,8 @@ function Invoke-AgentTurn {
                     elseif ($why -or $risk.m365 -or $risk.destructive) { $ev.verify = @{ command = $verifyCmd; skipped = 'the command deletes files or works with Microsoft 365, so it only runs by hand' } }
                     else {
                         Add-AgentEvent $State 'status' @{ text = "${verifyLabel}: running ``$verifyCmd``..." }
-                        $vr = Invoke-RunAction $State.ProjectRoot $verifyCmd ([int]$State.Config.commandTimeoutSec) 6000 { $State.Cancel }
+                        $prevAct = Enter-Activity $State 'tests' $(if ($isTests) { 'Running the tests' } else { "Running the project's check" })
+                        try { $vr = Invoke-RunAction $State.ProjectRoot $verifyCmd ([int]$State.Config.commandTimeoutSec) 6000 { $State.Cancel } } finally { Exit-Activity $State $prevAct }
                         $passed = ($vr.exitCode -eq 0)
                         $tail = ("$($vr.output)".Split("`n") | Select-Object -Last 25) -join "`n"
                         $ev.verify = @{ command = $verifyCmd; passed = $passed; exit = $vr.exitCode; tail = $tail }

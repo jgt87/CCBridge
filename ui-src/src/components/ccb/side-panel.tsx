@@ -1,3 +1,4 @@
+import { isIndexing } from "@/lib/activity";
 import { ChevronRight, ExternalLink, File, FileClock, Folder, FolderCog, FolderLock, FolderOpen, FolderTree, HeartPulse, ListTodo, Lock, Plus, RefreshCw, SquareCheck, Square, Workflow } from "lucide-react";
 import type React from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -281,7 +282,7 @@ function FilesPanel({
   const tree = useMemo(() => buildTree(files), [files]);
   const folders = useClosedFolders(project?.path);
   // The issue index: open issues per file, reloaded when the project's details change.
-  const indexing = Boolean(activity?.label);
+  const indexing = isIndexing(activity);
   const report = useIssueReport(project, issueStamp, indexing);
   const index = useMemo(() => issueIndex(report), [report]);
   // The upload area is collapsed by default; the choice is remembered in this browser.
@@ -729,7 +730,7 @@ export function SidePanel(props: SidePanelProps) {
   // the tab switched, and the section scrolled into view once it is shown.
   const [tabRequest, setTabRequest] = useState<{ id: string; n: number } | null>(null);
   // Open issues (not ignored) for the count next to the Issues heading; reloaded like the index line.
-  const report = useIssueReport(project, issueStamp, Boolean(activity?.label));
+  const report = useIssueReport(project, issueStamp, isIndexing(activity));
   const openIssues = project && report ? report.items.filter((i) => i.status !== "ignored").length : 0;
   const showIssues = () => {
     openSection("health.issues");

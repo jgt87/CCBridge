@@ -1,3 +1,4 @@
+import { isIndexing } from "@/lib/activity";
 import type { Activity } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { BetaTag } from "./beta-tag";
@@ -20,7 +21,7 @@ function IssueCount({ withIssues, onShowIssues }: { withIssues: number; onShowIs
 }
 
 function IndexStatus({ activity, files, withIssues, updated, onShowIssues }: IndexBarProps) {
-  const state = indexState(Boolean(activity?.label), files, withIssues);
+  const state = indexState(isIndexing(activity), files, withIssues);
   if (state === "busy") return <span className="truncate">{`${activity?.label.replace(/ for issues.*$/, "")}...`}</span>;
   if (state === "never") return <span className="truncate">Not indexed yet</span>;
   // Nothing found: only when it was indexed, no issue text.
@@ -45,7 +46,7 @@ interface IndexBarProps {
 /** The issue index of the project: a bar that runs left to right while it indexes, and a short status line. */
 export function IndexBar(props: IndexBarProps) {
   const { activity } = props;
-  const running = Boolean(activity?.label);
+  const running = isIndexing(activity);
   const pct = running && activity?.total ? Math.min(100, Math.round((activity.done / activity.total) * 100)) : null;
   return (
     <div>

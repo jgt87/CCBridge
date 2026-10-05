@@ -210,6 +210,8 @@ export interface AppState {
 
 export interface Activity {
   label: string;
+  /** What kind of work: newchat, page, syntax, tests, index, wait, agent, busy (empty from older servers). */
+  kind?: string;
   done: number;
   total: number;
   current: string;

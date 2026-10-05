@@ -38,6 +38,8 @@ Describe 'The screenshot hint and a page name that is not a page' {
         $s.PreviewPort = 1; $s.PreviewToken = 'none'; $s.LastShotPage = 'home.html'   # nothing listens: no picture, but the page is chosen
         $null = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'screenshot'; arg = 'PAGE'; body = 'click text=Week' }) 'a1' $null 0 } $s
         (@($s.Events | Where-Object type -eq 'action'))[0].target | Should Match '^home\.html'
+        # The tab it opened is closed again (a click step once overwrote the tab it had to close).
+        try { @((Invoke-RestMethod "http://127.0.0.1:$((Get-CCBridgeConfig harness $root).cdpPort)/json/list" -TimeoutSec 3) | Where-Object { $_.url -match '^http://localhost:1/preview/' }).Count | Should Be 0 } catch [System.Net.WebException] { }
         Remove-Item $p, $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
