@@ -30,6 +30,9 @@ $expected = @(
     '<div class="card">Text &amp; more</div>'
     'if (a < b && c > d) { x = [1, 2]; }'
     '$m = [regex]::Match($t, "x")'
+    '####### SEARCH'
+    '####### REPLACE'
+    '####### END'
 )
 $fence = '````'
 $prompt = "Repeat the text inside the block below exactly, character for character, inside one ${fence}text block, with no other words before or after it and no changes. Write real less-than and greater-than characters, not &lt; or &gt;.`n`n${fence}text`n" + ($expected -join "`n") + "`n${fence}"
@@ -64,7 +67,8 @@ try {
             $bad = 0; $esc = 0
             for ($i = 0; $i -lt $expected.Count; $i++) {
                 $want = $expected[$i]
-                $have = if ($i -lt $got.Count) { $got[$i] } else { '(missing)' }
+                # Found anywhere in the reply (an extra line must not shift the rest), else the line at this place.
+                $have = if (@($got) -ccontains $want) { $want } elseif ($i -lt $got.Count) { $got[$i] } else { '(missing)' }
                 if ($have -ceq $want) { Say ("   ok       {0}" -f $want) }
                 elseif (($have.Replace('&lt;', '<').Replace('&gt;', '>')) -ceq $want) { $esc++; Say ("   ESCAPED  {0}   (came back as &lt; / &gt;: the page escapes them in the question)" -f $want) 'DarkGray' }
                 else { $bad++; Say ("   DAMAGED  sent: {0}" -f $want) 'Yellow'; Say ("            got:  {0}" -f $have) 'Yellow' }

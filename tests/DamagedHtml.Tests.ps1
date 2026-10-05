@@ -111,4 +111,19 @@ Describe 'An edit whose end marker and script close were eaten' {
         Close-LoneScriptTag 'notes.md' '' '<script src="a.js">' | Should Be '<script src="a.js">'
     }
 }
+Describe 'An edit whose start marker was damaged or lost' {
+    It 'takes SEARCH or EARCH alone, with leftover arrows, as the start marker, not ordinary text' {
+        foreach ($m in 'SEARCH', 'EARCH', '<<< SEARCH', '&lt;&lt;SEARCH', 'SEARCH line 12', '<<<<<<< SEARCH') { & (Get-Module Protocol) { param($x) Get-EditMarker $x } $m | Should Be 'search' }
+        foreach ($t in 'search', 'SEARCH the file', 'Search') { & (Get-Module Protocol) { param($x) Get-EditMarker $x } $t | Should BeNullOrEmpty }
+    }
+    It 'reads a block without a start marker but with one divider as one pair' {
+        $p = @(& (Get-Module Protocol) { param($t) Get-EditPairs $t } "`n  elements.caption.textContent = x;`n  render();`n=======`n  render();`n>>>>>>> REPLACE")
+        $p.Count | Should Be 1
+        $p[0].search | Should Be "  elements.caption.textContent = x;`n  render();"
+        $p[0].replace | Should Be '  render();'
+    }
+    It 'leaves a block with two dividers and no start marker alone (it cannot tell the pairs apart)' {
+        @(& (Get-Module Protocol) { param($t) Get-EditPairs $t } "a`n=======`nb`n=======`nc").Count | Should Be 0
+    }
+}
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

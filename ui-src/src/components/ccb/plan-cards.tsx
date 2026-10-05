@@ -129,17 +129,29 @@ export function ClarifyCard({
   );
 }
 
+/** What the plan card holds: a plan-first plan, a proposal Copilot made, or a reply that stopped
+    before the change (it said what it would still do). */
+export type PlanVariant = "plan" | "proposal" | "unfinished";
+
+const PLAN_TEXT: Record<PlanVariant, { title: string; build: string }> = {
+  plan: { title: "Plan to approve", build: "Approve and build" },
+  proposal: { title: "Copilot's proposal", build: "Approve and build" },
+  unfinished: { title: "Copilot stopped before making the change", build: "Continue and build" },
+};
+
 /** Plan first: Copilot's plan to approve (then it builds) or to change. */
 export function PlanCard({
   request,
   plan,
   planId,
+  variant = "plan",
   onSend,
   onOpenFile,
 }: {
   request: string;
   plan: string;
   planId?: string;
+  variant?: PlanVariant;
   onSend: (text: string, opts: ChatOptions) => void;
   onOpenFile?: (path: string) => void;
 }) {
@@ -149,7 +161,11 @@ export function PlanCard({
 
   const build = () => {
     setSent("build");
-    onSend(`Build this now, following the approved plan below. Change files with action blocks.\n\nRequest: ${request}\n\nApproved plan:\n${plan}`, { asCoding: true, planId, approve: true });
+    const text =
+      variant === "unfinished"
+        ? `Continue and make the change now: read what you still need, then change the files with action blocks in this task. Do not stop before the change is made.\n\nRequest: ${request}\n\nWhat you said you would do:\n${plan}`
+        : `Build this now, following the approved plan below. Change files with action blocks.\n\nRequest: ${request}\n\nApproved plan:\n${plan}`;
+    onSend(text, { asCoding: true, planId, approve: true });
   };
   const change = () => {
     setSent("change");
@@ -159,7 +175,7 @@ export function PlanCard({
   return (
     <div className="rounded-xl border border-black/20 p-3 dark:border-white/20">
       <div className="mb-2 flex items-center gap-1.5 font-medium text-sm">
-        <ClipboardCheck className="h-4 w-4" /> Plan to approve
+        <ClipboardCheck className="h-4 w-4" /> {PLAN_TEXT[variant].title}
       </div>
       <div className="whitespace-pre-wrap text-sm">{plan}</div>
       {changing && !sent && (
@@ -177,7 +193,7 @@ export function PlanCard({
           </button>
         )}
         <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={Boolean(sent)} onClick={build} type="button">
-          {sent === "build" ? "Building..." : "Approve and build"}
+          {sent === "build" ? "Building..." : PLAN_TEXT[variant].build}
         </button>
       </div>
     </div>

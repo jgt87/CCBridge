@@ -6,6 +6,24 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.93] - 2026-10-06
+
+### Added
+- Before/after check for visual changes: before the first change to a web file in a task, StreamHub takes a screenshot of the page, and after the change compares it pixel for pixel with the new one. When the page looks exactly the same, the chat says so, Copilot gets both screenshots with that finding (it is measured, not Copilot's opinion), and after Copilot's fix the page is checked once more. When it changed, Copilot is told how much and where. It cannot tell whether a change is right, only whether anything changed.
+
+### Changed
+- Edits whose SEARCH text is in the file more than once are less strict. StreamHub now takes the only match inside the lines Copilot read in this task (`read FILE:START-END`); Copilot can point with `<<<<<<< SEARCH line NUMBER` (the match nearest that line) or change every match with `<<<<<<< SEARCH all`; and when nothing shows which one is meant, the card says "needs a more exact SEARCH" (grey, not a red failure) and Copilot is told exactly how to point, instead of being asked to read the file again.
+- Settings opens on the App section, now first in the list.
+
+### Changed
+- A reply that stops before the change (Copilot ends with "Need to inspect the CSS before making the change" or "I will update ..." and changed nothing) gets a card "Copilot stopped before making the change" with Continue and build, which sends Copilot back to make the change. A proposal's card is now titled "Copilot's proposal".
+- `html-echo-test.cmd` compares lines by content, so an extra line in the reply no longer marks every line after it as damaged.
+- New edit markers: Copilot is taught `####### SEARCH`, `####### REPLACE` and `####### END` (each alone on its line, with `line NUMBER` or `all` after SEARCH when needed). They have none of the `<` and `>` that the chat damaged on some tenants, and no line in any language or file format looks like them, so a `=======` line in the code (a reStructuredText heading, a merge conflict) is no longer mistaken for the divider. Only an exact whole line counts (seven `#`, the word in capitals), and only inside an edit block, so comments such as `# SEARCH` or `##### END` stay code. The old `<<<<<<<` / `=======` / `>>>>>>>` markers are still read. `html-echo-test.cmd` checks that the new markers arrive intact.
+
+### Fixed
+- Edits whose `<<<<<<< SEARCH` line was damaged or removed on the way (the edit then failed three times with "edit block has no SEARCH/REPLACE pairs"): `SEARCH` or `EARCH` alone on a line, with leftover arrows, counts as the start marker, and a block without one but with a single `=======` line is read as one pair (the lines before it are the SEARCH).
+- The screenshot action failed when Copilot copied the placeholder `PAGE` from the hint: the hint now names the page that was screenshotted, and a name that is not a page file uses that page (and says so).
+
 ## [v0.1.92] - 2026-10-06
 
 ### Changed
@@ -1039,7 +1057,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.92...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.93...HEAD
+[v0.1.93]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.93
 [v0.1.92]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.92
 [v0.1.91]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.91
 [v0.1.90]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.90

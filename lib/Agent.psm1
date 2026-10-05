@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -808,15 +808,16 @@ function Publish-ProposalPlan {
     $last = @($events | Where-Object { $_.type -eq 'assistant' -and "$($_.text)".Trim() } | Select-Object -Last 1)
     $text = if ($done.Count) { "$($done[0].text)" } elseif ($last.Count) { "$($last[0].text)" } else { '' }
     $text = ($text -replace '(?s)`{3,}.*?`{3,}', '').Trim()
-    if (-not (Test-ProposalText $text)) { return $false }
+    $unfinished = -not (Test-ProposalText $text)
+    if ($unfinished -and -not (Test-UnfinishedText $text)) { return $false }
     $request = "$($Task.text)"
     $planId = ''
     try {
         $planId = New-PlanEntry $State.ProjectRoot $request
-        Add-PlanSection $State.ProjectRoot $planId "Copilot's proposal" $text 'waiting for approval'
+        Add-PlanSection $State.ProjectRoot $planId $(if ($unfinished) { 'Copilot stopped before the change' } else { "Copilot's proposal" }) $text 'waiting for approval'
     } catch { Write-CCBLogError agent 'PLAN.md' $_ }
-    Write-CCBLog info agent 'Copilot answered with a proposal; offered as a plan' @{ chars = $text.Length }
-    Add-AgentEvent $State 'plan-ready' @{ request = $request; plan = $text; planId = $planId; proposal = $true }
+    Write-CCBLog info agent $(if ($unfinished) { 'Copilot stopped before the change; offered as a plan' } else { 'Copilot answered with a proposal; offered as a plan' }) @{ chars = $text.Length }
+    Add-AgentEvent $State 'plan-ready' @{ request = $request; plan = $text; planId = $planId; proposal = $true; unfinished = $unfinished }
     $true
 }
 
@@ -1675,7 +1676,7 @@ function Get-StepFailureInfo {
         'does not contain them yet' { @{ code = 'EDIT-MOVE-ORDER'; reasons = @('Copilot removes code from this file and links another file, but that file does not hold the code yet (missing, or only a placeholder).', 'Copilot sent the edit before (or instead of) writing the new file.'); next = "Nothing was changed, so no code is lost. $copilotRetries" }; break }
         'half open|half closed' { @{ code = 'EDIT-HALF-BLOCK'; reasons = @('Copilot''s SEARCH covered only part of a block (for example the first lines of a <style> or <script> block, or a function without its closing brace).', 'Copilot shortened a long block without a line containing only ... between its first and last lines.'); next = "Nothing was changed. $copilotRetries" }; break }
         'matches \d+ places|matches more than once' { @{ code = 'EDIT-AMBIGUOUS'; reasons = @('The SEARCH text occurs more than once in the file (for example a repeated closing tag or line).', 'Copilot copied too few lines to point at one place.'); next = "Nothing was changed. $copilotRetries" }; break }
-        'no SEARCH/REPLACE pairs' { @{ code = 'EDIT-FORMAT'; reasons = @('Copilot''s edit block had no <<<<<<< SEARCH / ======= / >>>>>>> REPLACE markers (or they were not at the start of a line).', 'Copilot meant to replace the whole file; that needs a write block.'); next = "Nothing was changed. $copilotRetries" }; break }
+        'no SEARCH/REPLACE pairs' { @{ code = 'EDIT-FORMAT'; reasons = @('Copilot''s edit block had no ####### SEARCH / ####### REPLACE / ####### END markers (or they were not at the start of a line).', 'Copilot meant to replace the whole file; that needs a write block.'); next = "Nothing was changed. $copilotRetries" }; break }
         'SEARCH text not found' { @{ code = 'EDIT-NOT-FOUND'; reasons = @('The file changed since Copilot read it: an earlier edit in this task, or you edited it.', 'Copilot''s SEARCH lines differ slightly from the file: spaces, quotes, or a line it remembered differently.', 'The change was already made earlier, but with different text.', 'Copilot shortened SEARCH without a line containing only ... (only its first lines were given).'); next = "Nothing was changed. Copilot gets the reason plus the file's closest current lines. $copilotRetries" }; break }
         'is in Source/|read-only' { @{ code = 'SOURCE-DATA'; reasons = @('The step tried to change a file in Source/, which holds your source data and is read-only.'); next = 'Nothing was changed. Copilot is told to write its result elsewhere (for example Work/ or output/).' }; break }
         'file not found|\(file not found\)' { @{ code = 'FILE-NOT-FOUND'; reasons = @('The path does not exist in the project: a typo, another folder, or a file that was never created.', 'For a new file Copilot should use a write block, not an edit.'); next = $copilotRetries }; break }
@@ -1693,7 +1694,12 @@ function Get-StepFailureInfo {
 }
 
 # With every automatic screenshot: how to see a part the page does not show when it opens.
-$script:ScreenshotHint = 'The screenshot shows the page as it first opens. If the part you changed is in another view, tab or dialog, send a text block whose first line is ACTION screenshot PAGE, with one line per step to get there: click CSS-SELECTOR, or click text=LABEL for a button or tab by its text, or wait MILLISECONDS. You get a new screenshot after those steps.'
+function Get-ScreenshotHint([string]$Page) {
+    <# With every automatic screenshot: how to see a part the page does not show when it opens. Names
+       the page that was screenshotted (a placeholder was copied literally). #>
+    if (-not $Page) { $Page = 'index.html' }
+    "The screenshot shows $Page as it first opens. If the part you changed is in another view, tab or dialog, send a text block whose first line is ACTION screenshot $Page, with one line per step to get there: click CSS-SELECTOR, or click text=LABEL for a button or tab by its text, or wait MILLISECONDS. You get a new screenshot after those steps."
+}
 
 function Test-WebPage {
     <# Opens project pages in a spare Edge tab (served read-only by the web app at /preview/<token>/)
@@ -1702,7 +1708,7 @@ function Test-WebPage {
        is closed afterwards. Returns one line per problem. #>
     param($State, [string[]]$Pages, [int]$WaitSec = 6, [switch]$Screenshot, $Steps = @())
     if (-not $State.PreviewPort) { return }
-    $State.PageShots = @()
+    $State.PageShots = @(); $State.PageShotMap = @{}
     $cdpPort = $State.Config.cdpPort
     foreach ($page in @($Pages | Select-Object -First 3)) {
         $base = "http://localhost:$($State.PreviewPort)/preview/$($State.PreviewToken)/"
@@ -1779,6 +1785,7 @@ function Test-WebPage {
                     $name = 'page-' + (Get-Date).ToString('yyyyMMdd-HHmmss') + '-' + ($(if ($page) { $page } else { 'site' }) -replace '[^\w.-]+', '-').Trim('-') + '.png'
                     [IO.File]::WriteAllBytes((Join-Path $dir $name), [Convert]::FromBase64String($shot.data))
                     $State.PageShots = @($State.PageShots) + @(".streamhub/Screenshots/$name")
+                    $State.PageShotMap[$page] = ".streamhub/Screenshots/$name"
                 } catch { Write-CCBLogError agent "Screenshot of $page" $_ }
             }
             foreach ($p in ($problems | Select-Object -Unique -First 20)) { $p }
@@ -1790,6 +1797,46 @@ function Test-WebPage {
             if ($target) { try { $null = Invoke-RestMethod "http://127.0.0.1:$cdpPort/json/close/$($target.id)" } catch { } }
         }
     }
+}
+
+function Save-BeforeShot {
+    <# Before the first change to a web file in a task: a screenshot of the page it shows up on (the
+       file itself when it is a page, else index.html), to compare with the screenshot after the
+       change (Compare-Screenshots). Once per page per task; only when screenshots are on. #>
+    param($State, [string]$Path)
+    if ($Path -notmatch '(?i)\.(html?|css|scss|less|m?js|cjs|jsx|tsx|vue|svelte)$') { return }
+    if (-not $State.PreviewPort -or -not $State.ProjectRoot -or $State.ReviewByCaller -or $State.Mode -eq 'plan') { return }
+    if ("$($State.Config.pageCheck)" -eq 'off' -or "$($State.Config.pageScreenshot)" -in 'False', 'off') { return }
+    if ($null -eq $State.BeforeShots) { $State.BeforeShots = @{} }
+    $rel = $Path.Replace('\', '/').TrimStart('/')
+    $page = if ($rel -match '(?i)\.html?$') { $rel } else { 'index.html' }
+    if ($State.BeforeShots.ContainsKey($page)) { return }
+    $State.BeforeShots[$page] = ''
+    $full = try { Resolve-ProjectPath $State.ProjectRoot $page } catch { $null }
+    if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { return }   # a new page has no before
+    try {
+        $null = @(Test-WebPage $State @($page) -Screenshot)
+        $shot = "$($State.PageShotMap[$page])"
+        $State.PageShots = @(); $State.PageShotMap = @{}
+        if ($shot) { $State.BeforeShots[$page] = $shot; Write-CCBLog info agent "Screenshot before the change: $page" }
+    } catch { Write-CCBLogError agent "Screenshot before the change of $page" $_ }
+}
+
+function Get-BeforeAfterNotes {
+    <# For each page with a screenshot before and after this task's changes: the comparison line,
+       and whether it looks exactly the same. #>
+    param($State, $AfterMap)
+    $notes = @(); $same = @(); $pairs = @()
+    foreach ($page in @($AfterMap.Keys)) {
+        $before = if ($State.BeforeShots) { "$($State.BeforeShots[$page])" } else { '' }
+        if (-not $before) { continue }
+        try {
+            $r = Compare-Screenshots (Join-Path $State.ProjectRoot $before.Replace('/', '\')) (Join-Path $State.ProjectRoot "$($AfterMap[$page])".Replace('/', '\'))
+            $notes += Format-ShotComparison $page $r
+            if ($r.same) { $same += $page; $pairs += @{ page = $page; before = $before; after = "$($AfterMap[$page])" } }
+        } catch { Write-CCBLogError agent "Comparing screenshots of $page" $_ }
+    }
+    @{ notes = $notes; same = $same; pairs = $pairs }
 }
 
 function Test-ScriptSyntax {
@@ -2151,6 +2198,13 @@ function Invoke-AgentAction {
     switch ($Action.type) {
         'read' {
             $paths = Get-ActionPaths $Action
+            # Lines Copilot read in this task (PATH:START-END): a SEARCH that matches several places
+            # takes the one among them (Find-EditTarget).
+            if ($null -eq $State.ReadRanges) { $State.ReadRanges = @{} }
+            foreach ($rp in $paths) {
+                $rm = [regex]::Match("$rp", '^(.+?):(\d+)-(\d+)$')
+                if ($rm.Success) { $key = $rm.Groups[1].Value.Replace('\', '/').TrimStart('/').ToLowerInvariant(); $State.ReadRanges[$key] = @(@($State.ReadRanges[$key]) + @(@{ from = [int]$rm.Groups[2].Value; to = [int]$rm.Groups[3].Value }) | Where-Object { $_ }) }
+            }
             $evt.target = $paths -join ', '; Add-AgentEvent $State 'action' $evt
             $out = (Invoke-ReadAction $root $paths -MaxCharsPerFile 200000) -join "`n`n"
             $usedBy = try { Format-ImportUsers $root $paths } catch { '' }   # who imports it or uses its ids, functions, hooks
@@ -2198,7 +2252,11 @@ function Invoke-AgentAction {
         'screenshot' {
             # A screenshot of a project page after the clicks Copilot names (the automatic one shows
             # the page as it first opens). Read-only: the page is served from the preview address.
-            $page = if ("$($Action.arg)".Trim()) { "$($Action.arg)".Trim().TrimStart('/') } else { 'index.html' }
+            $asked = "$($Action.arg)".Trim().Trim('`', '"', "'").TrimStart('/')
+            $fallback = if ($State.LastShotPage) { "$($State.LastShotPage)" } else { 'index.html' }
+            # Not a page file name (a placeholder such as PAGE copied from the hint): the page of the last screenshot.
+            $page = if ($asked -match '(?i)\.html?$') { $asked } else { $fallback }
+            $pageNote = if ($asked -and $asked -ne $page) { " ('$asked' is not a page file, so $page was used)" } else { '' }
             $steps = @(Get-ScreenshotSteps "$($Action.body)")
             $evt.target = $page + $(if ($steps.Count) { ' (' + (@($steps | ForEach-Object { if ($_.kind -eq 'click') { "click $($_.target)" } else { "wait $($_.ms)" } }) -join ', ') + ')' } else { '' })
             Add-AgentEvent $State 'action' $evt
@@ -2211,7 +2269,7 @@ function Invoke-AgentAction {
             if (-not $shot.Count) { return @{ ok = $false; summary = 'no screenshot'; output = "error: the page could not be captured.$(if ($problems.Count) { "`n" + ($problems -join "`n") })" } }
             Add-AgentEvent $State 'status' @{ text = "Screenshot of $($evt.target): $($shot[0]) (shown to Copilot)."; path = $shot[0] }
             $note = if ($problems.Count) { "`nProblems seen:`n" + (($problems | Select-Object -First 10 | ForEach-Object { "- $_" }) -join "`n") } else { '' }
-            return @{ ok = $true; summary = "screenshot of $page"; attach = (Join-Path $root $shot[0].Replace('/', '\')); output = "Attached: a screenshot of $($evt.target) as it looks now. Compare it with what was asked.$note" }
+            return @{ ok = $true; summary = "screenshot of $page"; attach = (Join-Path $root $shot[0].Replace('/', '\')); output = "Attached: a screenshot of $($evt.target)$pageNote as it looks now. Compare it with what was asked.$note" }
         }
         'find' {
             $name = if ($Action.arg) { $Action.arg } else { "$($Action.body)".Split("`n")[0].Trim() }
@@ -2295,9 +2353,13 @@ function Invoke-AgentAction {
             $p = Get-WritePreview $root $Action.arg $content
             $preview = @{ path = $p.path; exists = $p.exists; old = (Get-PreviewText $p.old); new = (Get-PreviewText $p.new) }
         } else {
+            $readKey = "$($Action.arg)".Replace('\', '/').TrimStart('/').ToLowerInvariant()
+            $read = if ($State.ReadRanges) { @($State.ReadRanges[$readKey]) } else { @() }
+            foreach ($pair in @($Action.edits)) { if ($pair -is [hashtable]) { $pair.readRanges = $read } }
             $er = Get-EditResult $root $Action.arg $Action.edits
             if (-not $er.ok) {
-                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = $er.error })
+                # Several matches and no way to tell: not broken, Copilot only has to point at one.
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = $(if ($er.ambiguous) { 'ambiguous' } else { 'failed' }); error = $er.error })
                 return @{ ok = $false; summary = "edit $($Action.arg) failed"; output = "error: $($er.error)" }
             }
             if ($er.unchanged) {
@@ -2474,6 +2536,7 @@ function Invoke-AgentAction {
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ preview = $preview })
     }
 
+    if ($Action.type -in 'write', 'edit') { Save-BeforeShot $State "$($Action.arg)" }
     try {
         switch ($Action.type) {
             'write' {
@@ -2705,6 +2768,7 @@ function Invoke-AgentTurn {
         $verifyNudges = 0   # times "done" was refused because the project's verify command failed
         $doneReminded = $false   # the one reminder at "done" (tests, README) was sent
         $shotShown = $false; $attach = @(); $fileAttach = @()   # a screenshot of a changed page goes to Copilot once per task
+        $State.BeforeShots = @{}; $State.ReadRanges = @{}; $shotAgain = $false; $sameNudged = $false; $shotNote = ''   # before/after comparison (Save-BeforeShot)
         $warnedKeys = New-Object System.Collections.Generic.HashSet[string]   # likely mistakes are said once per task
         $enf = Get-Enforcement "$($State.Config.enforcement)"; $warnNudges = 0   # setting enforcement: light, standard, strict
         # Files Copilot is fixing (path -> line of the problem) and rollbacks of changes that made a file worse.
@@ -3015,8 +3079,9 @@ function Invoke-AgentTurn {
                         if (-not $pages.Count -and (Test-Path -LiteralPath (Join-Path $State.ProjectRoot 'index.html'))) { $pages = @('index.html') }
                         if ($pages.Count) {
                             Add-AgentEvent $State 'status' @{ text = "Checking $($pages -join ', ') in a browser tab for JavaScript errors and files that fail to load..." }
-                            $wantShot = (-not $shotShown) -and "$($State.Config.pageScreenshot)" -notin 'False', 'off' -and -not $State.ReviewByCaller
+                            $wantShot = ((-not $shotShown) -or $shotAgain) -and "$($State.Config.pageScreenshot)" -notin 'False', 'off' -and -not $State.ReviewByCaller
                             $pageIssues = @(Test-WebPage $State $pages -Screenshot:$wantShot)
+                            if ($wantShot) { $State.LastShotPage = "$(@($pages)[0])" }
                             $ev.page = @($pageIssues)
                             if ($pageIssues.Count) { $pagesToRecheck = @($pages) }   # opened again after Copilot's fix
                             if (-not $pageIssues.Count) { Add-AgentEvent $State 'status' @{ text = "Page check: $($pages -join ', ') loaded without errors." } }
@@ -3040,11 +3105,27 @@ function Invoke-AgentTurn {
                         break
                     }
                     $shots = @($State.PageShots | Where-Object { $_ })
-                    $State.PageShots = @()
-                    if ($shots.Count -and -not $shotShown) {
-                        $shotShown = $true
+                    $afterMap = if ($State.PageShotMap) { $State.PageShotMap.Clone() } else { @{} }
+                    $State.PageShots = @(); $State.PageShotMap = @{}
+                    $shotNote = ''
+                    if ($shots.Count -and ((-not $shotShown) -or $shotAgain)) {
+                        $again = $shotAgain
+                        $shotShown = $true; $shotAgain = $false
                         foreach ($sh in $shots) { Add-AgentEvent $State 'status' @{ text = "Screenshot of the page after the change: $sh (shown to Copilot)."; path = $sh } }
                         $attach = @($shots | Select-Object -First 2 | ForEach-Object { Join-Path $State.ProjectRoot $_.Replace('/', '\') })
+                        # Before/after: a page that looks exactly the same did not get the change (or it is
+                        # in a view the page does not open with). Measured, not Copilot's opinion.
+                        $ba = Get-BeforeAfterNotes $State $afterMap
+                        foreach ($pg in @($ba.same)) { Add-AgentEvent $State 'status' @{ text = "Before/after check: $pg looks exactly the same as before the change$(if ($again) { ', also after Copilot''s fix' })."; path = "$((@($ba.pairs) | Where-Object { $_.page -eq $pg } | Select-Object -First 1).before)" } }
+                        if (@($ba.notes).Count) {
+                            $shotNote = 'Before/after check by the helper program (pixels, not an opinion): ' + (@($ba.notes) -join '; ') + '.'
+                            if (@($ba.same).Count) {
+                                $p0 = @($ba.pairs)[0]
+                                $attach = @((Join-Path $State.ProjectRoot $p0.after.Replace('/', '\')), (Join-Path $State.ProjectRoot $p0.before.Replace('/', '\')))
+                                $shotNote += ' The first image is the page now, the second the page before your changes. If your change should show on this page as it opens, it is not working yet: check that the page loads the changed file, that the selectors match and that nothing overrides the new style, fix it and send done again. If it is in another view, use ACTION screenshot with the steps to get there.'
+                                if (-not $sameNudged) { $sameNudged = $true; $shotAgain = $true }
+                            } else { $shotNote += ' Check that this is the change that was asked for.' }
+                        }
                     }
                     if ($pageIssues.Count -or (Test-NeedsReview $State $changes)) {
                         $reviewed = $true
@@ -3053,7 +3134,7 @@ function Invoke-AgentTurn {
                         Write-CCBLog info agent 'Asking Copilot for a consistency review' @{ files = $changes.Count; issues = $issues.Count }
                         Add-AgentEvent $State 'status' @{ text = "Big change: asking Copilot to review $(@($changes).Count) changed file(s) for leftovers, dead code and broken references$(if ($issues.Count) { " ($($issues.Count) problem(s) found by the local checks)" })." }
                         $message = New-ReviewMessage $State $changes $issues
-                        if ($attach.Count) { $message += "`n`nAttached: a screenshot of the page as it looks now. Check it against the request too. $script:ScreenshotHint" }
+                        if ($attach.Count) { $message += "`n`nAttached: a screenshot of the page as it looks now. Check it against the request too. $(Get-ScreenshotHint $State.LastShotPage)" + $(if ($shotNote) { "`n`n$shotNote" } else { '' }) }
                         continue
                     }
                 } elseif ($pagesToRecheck.Count -and $pageRechecks -lt 1 -and -not $State.Cancel) {
@@ -3070,7 +3151,7 @@ function Invoke-AgentTurn {
                     Add-AgentEvent $State 'status' @{ text = "Page check after the fix: $($pagesToRecheck -join ', ') loaded without errors." }
                 }
                 if ($attach.Count) {
-                    $message = "Attached: a screenshot of the page as it looks now, after your changes. Compare it with what was asked (layout, parts that are missing, overlap or are cut off, colours, text). If something is wrong, fix it, then send done again. If it looks right, send done. $script:ScreenshotHint"
+                    $message = "Attached: a screenshot of the page as it looks now, after your changes. Compare it with what was asked (layout, parts that are missing, overlap or are cut off, colours, text). If something is wrong, fix it, then send done again. If it looks right, send done. $(Get-ScreenshotHint $State.LastShotPage)" + $(if ($shotNote) { "`n`n$shotNote" } else { '' })
                     continue
                 }
                 break

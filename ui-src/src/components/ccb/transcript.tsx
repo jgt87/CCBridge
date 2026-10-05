@@ -1,6 +1,6 @@
 import { openExternal } from "@/lib/links";
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
-import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard } from "./plan-cards";
+import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard, type PlanVariant } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MarkdownView } from "./markdown-view";
@@ -25,7 +25,7 @@ export type TranscriptItem =
   | { kind: "undo"; seq: number; text: string; changes: UndoChange[] }
   | { kind: "next"; seq: number; steps: string[] }
   | { kind: "clarify"; seq: number; request: string; questions: ClarifyQuestion[]; summary?: string; planId?: string }
-  | { kind: "plan"; seq: number; request: string; plan: string; planId?: string }
+  | { kind: "plan"; seq: number; request: string; plan: string; planId?: string; variant?: PlanVariant }
   | { kind: "error"; seq: number; text: string; time: string; errId?: string; code?: string; hint?: string; detail?: string; version?: string }
   | { kind: "checks"; seq: number; text: string; items: CheckFinding[] };
 
@@ -128,8 +128,9 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
     if (qs.length) ctx.items.push({ kind: "clarify", seq: e.seq, request: x.request ?? "", questions: qs, summary: x.summary, planId: x.planId || undefined });
   },
   "plan-ready": (e, ctx) => {
-    const x = e as AgentEvent & { request?: string; plan?: string; planId?: string };
-    if (x.plan) ctx.items.push({ kind: "plan", seq: e.seq, request: x.request ?? "", plan: x.plan, planId: x.planId || undefined });
+    const x = e as AgentEvent & { request?: string; plan?: string; planId?: string; proposal?: boolean; unfinished?: boolean };
+    const variant: PlanVariant = x.unfinished ? "unfinished" : x.proposal ? "proposal" : "plan";
+    if (x.plan) ctx.items.push({ kind: "plan", seq: e.seq, request: x.request ?? "", plan: x.plan, planId: x.planId || undefined, variant });
   },
   "next-steps": (e, ctx) => {
     if (e.steps?.length) ctx.items.push({ kind: "next", seq: e.seq, steps: e.steps });
@@ -378,7 +379,7 @@ function TranscriptRow({
     case "clarify":
       return onSend ? <ClarifyCard onOpenFile={onOpenFile} onSend={onSend} planId={item.planId} questions={item.questions} request={item.request} summary={item.summary} /> : null;
     case "plan":
-      return onSend ? <PlanCard onOpenFile={onOpenFile} onSend={onSend} plan={item.plan} planId={item.planId} request={item.request} /> : null;
+      return onSend ? <PlanCard onOpenFile={onOpenFile} onSend={onSend} plan={item.plan} planId={item.planId} request={item.request} variant={item.variant} /> : null;
     case "error":
       return <ErrorNote item={item} />;
     case "checks":

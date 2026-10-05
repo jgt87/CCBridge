@@ -1566,7 +1566,7 @@ function Set-EditIndent {
     @{ text = ($out -join "`n") }
 }
 
-function Find-EditTarget([string]$Text, [string]$Search, [int]$After = -1) {
+function Find-EditTarget([string]$Text, [string]$Search, [int]$After = -1, [int]$NearLine = 0, [switch]$All, $ReadRanges = @()) {
     <# Where $Search is in $Text: one exact match (or, failing that, one match ignoring trailing
        whitespace per line). When it matches several places and $After is the end of the previous
        change in the same edit block, the first match after it is taken (changes come in file
@@ -1595,14 +1595,32 @@ function Find-EditTarget([string]$Text, [string]$Search, [int]$After = -1) {
     if ($hits.Count -eq 1) { if ($note) { $hits[0].note = $note }; return $hits[0] }
     if (-not $hits.Count) { return @{ error = "SEARCH text not found in the file. $(Get-ClosestLines $Text $Search)" } }
     $lines = @($hits | ForEach-Object { Get-LineNumber $Text $_.start })
+    $where = "lines $(($lines | Select-Object -First 8) -join ', ')"
+    # SEARCH all: every match (a rename), applied from the last one up.
+    if ($All) { return @{ all = $true; hits = $hits.ToArray(); note = "changed all $($hits.Count) places ($where)" } }
+    # SEARCH line N: the match nearest that line.
+    if ($NearLine -gt 0) {
+        $best = 0
+        for ($k = 1; $k -lt $hits.Count; $k++) { if ([Math]::Abs($lines[$k] - $NearLine) -lt [Math]::Abs($lines[$best] - $NearLine)) { $best = $k } }
+        return @{ start = $hits[$best].start; length = $hits[$best].length; note = "matched $($hits.Count) places ($where); changed the one at line $($lines[$best]), nearest to line $NearLine" }
+    }
     if ($After -ge 0) {
         $next = $hits | Where-Object { $_.start -ge $After } | Select-Object -First 1
         if ($next) {
             $line = Get-LineNumber $Text $next.start
-            return @{ start = $next.start; length = $next.length; note = "matched $($hits.Count) places (lines $(($lines | Select-Object -First 6) -join ', ')); changed the one at line $line, the first after the previous change" }
+            return @{ start = $next.start; length = $next.length; note = "matched $($hits.Count) places ($where); changed the one at line $line, the first after the previous change" }
         }
     }
-    @{ error = "SEARCH text matches $($hits.Count) places (lines $(($lines | Select-Object -First 6) -join ', ')); include more surrounding lines so it matches only one" }
+    # Exactly one match in the lines Copilot read in this task: that is the one it is looking at.
+    $ranges = @($ReadRanges | Where-Object { $_ })
+    if ($ranges.Count) {
+        $inRead = @(for ($k = 0; $k -lt $hits.Count; $k++) { foreach ($r in $ranges) { if ($lines[$k] -ge $r.from -and $lines[$k] -le $r.to) { $k; break } } })
+        if ($inRead.Count -eq 1) {
+            $k = $inRead[0]
+            return @{ start = $hits[$k].start; length = $hits[$k].length; note = "matched $($hits.Count) places ($where); changed the one at line $($lines[$k]), the only one in the lines you read" }
+        }
+    }
+    @{ ambiguous = $true; error = "SEARCH text matches $($hits.Count) places ($where), and nothing shows which one you mean. Point at it: put its line number on the marker line, ####### SEARCH line NUMBER, or write ####### SEARCH all to change every one" }
 }
 
 function Get-EditResult {
@@ -1611,7 +1629,7 @@ function Get-EditResult {
     try { $full = Assert-Writable $ProjectRoot $Path } catch { return [pscustomobject]@{ ok = $false; error = $_.Exception.Message } }
     if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return [pscustomobject]@{ ok = $false; error = "file not found: $Path (use write to create it)" } }
     if (-not $Edits -or -not @($Edits).Count) {
-        return [pscustomobject]@{ ok = $false; error = 'edit block has no SEARCH/REPLACE pairs. Each change needs a line <<<<<<< SEARCH, the exact current lines, a line =======, the new lines, and a line >>>>>>> REPLACE, with real < and > characters at the start of the line. To replace the whole file, use a write block instead.' }
+        return [pscustomobject]@{ ok = $false; error = 'edit block has no SEARCH/REPLACE pairs. Each change needs a line ####### SEARCH, the exact current lines, a line ####### REPLACE, the new lines, and a line ####### END, each marker on a line of its own. To replace the whole file, use a write block instead.' }
     }
     $info = Read-TextFile $full
     $text = $info.Text
@@ -1623,14 +1641,22 @@ function Get-EditResult {
         $n++
         $search = $e.search.Replace("`r`n", "`n")
         $replace = Repair-CodeText $full $e.replace.Replace("`r`n", "`n")
-        $hit = Find-EditTarget $text $search $after
-        if ($hit.error -and $search -match '&lt;|&gt;') { $hit = Find-EditTarget $text (ConvertFrom-AngleEntities $search) $after }
+        $hint = @{ NearLine = [int]$e.line; All = [bool]$e.all; ReadRanges = @($e.readRanges) }
+        $hit = Find-EditTarget $text $search $after @hint
+        if ($hit.error -and $search -match '&lt;|&gt;') { $hit = Find-EditTarget $text (ConvertFrom-AngleEntities $search) $after @hint }
         if ($hit.error -and $hit.error -like 'SEARCH text not found*') {
             # Not an error when the change is already in the file (Copilot sent an edit again).
             $done = Test-AlreadyApplied $text $search $replace
             if ($done.applied) { $applied.Add("pair ${n}: already applied - $($done.evidence)"); continue }
         }
+        if ($hit.ambiguous) { return [pscustomobject]@{ ok = $false; ambiguous = $true; error = "pair $n`: $($hit.error). Nothing was changed." } }
         if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed. Read the file again and send a corrected edit block." } }
+        if ($hit.all) {
+            foreach ($h in @($hit.hits | Sort-Object { $_.start } -Descending)) { $text = $text.Substring(0, $h.start) + $replace + $text.Substring($h.start + $h.length) }
+            $notes.Add("pair ${n}: $($hit.note)")
+            $after = -1
+            continue
+        }
 
         if ($hit.note -eq 'matched ignoring indentation') {
             $fix = Set-EditIndent $search $text.Substring($hit.start, $hit.length) $replace $full

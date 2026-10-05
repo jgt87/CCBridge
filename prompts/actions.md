@@ -26,13 +26,13 @@ creates or replaces a whole file
 
 ````text
 ACTION edit PATH
-<<<<<<< SEARCH
+####### SEARCH
 EXACT CURRENT LINES
-=======
+####### REPLACE
 NEW LINES
->>>>>>> REPLACE
+####### END
 ````
-changes part of a file (several SEARCH/REPLACE pairs may follow each other)
+changes part of a file (several SEARCH/REPLACE/END groups may follow each other)
 
 ```text
 ACTION done

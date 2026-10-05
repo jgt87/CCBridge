@@ -21,3 +21,23 @@ Describe 'The screenshot action' {
         (@(Get-ScreenshotSteps 'wait 99999'))[0].ms | Should Be 5000
     }
 }
+
+Describe 'The screenshot hint and a page name that is not a page' {
+    Import-Module (Join-Path $root 'lib\Config.psm1') -Force
+    Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
+    It 'names the page that was screenshotted, not a placeholder' {
+        $h = & (Get-Module Agent) { Get-ScreenshotHint 'pages/plan.html' }
+        $h | Should Match 'ACTION screenshot pages/plan\.html'
+        $h | Should Not MatchExactly 'ACTION screenshot PAGE[ ,]'
+    }
+    It 'uses the page of the last screenshot when the action names no page file' {
+        $env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+        $p = Join-Path $env:TEMP ('ccb-shotp-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        [IO.File]::WriteAllText((Join-Path $p 'home.html'), '<p>x</p>')
+        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+        $s.PreviewPort = 1; $s.PreviewToken = 'none'; $s.LastShotPage = 'home.html'   # nothing listens: no picture, but the page is chosen
+        $null = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'screenshot'; arg = 'PAGE'; body = 'click text=Week' }) 'a1' $null 0 } $s
+        (@($s.Events | Where-Object type -eq 'action'))[0].target | Should Match '^home\.html'
+        Remove-Item $p, $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}

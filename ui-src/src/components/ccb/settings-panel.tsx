@@ -372,8 +372,13 @@ function SettingsBody({
     for (const s of settings) if (s.group !== "Sign-in") m.set(s.group, [...(m.get(s.group) ?? []), s]);
     return [...m.entries()];
   }, [settings]);
-  const sections = useMemo(() => [...FIXED_SECTIONS, ...groups.map(([g]) => g)], [groups]);
-  const [chosen, setChosen] = useState<string>(() => readStored(SECTION_KEY) ?? FIXED_SECTIONS[0]);
+  // App first, then this browser, this computer and sign-in, then the other groups.
+  const sections = useMemo(() => {
+    const names = groups.map(([g]) => g);
+    const first = names.filter((g) => g === FIRST_SECTION);
+    return [...first, ...FIXED_SECTIONS, ...names.filter((g) => g !== FIRST_SECTION)];
+  }, [groups]);
+  const [chosen, setChosen] = useState<string>(() => readStored(SECTION_KEY) ?? FIRST_SECTION);
   const current = sections.includes(chosen) ? chosen : sections[0];
   const choose = (name: string) => {
     setChosen(name);
@@ -435,7 +440,9 @@ function SettingsBody({
   );
 }
 
-/** Sections that are not app settings groups, always first in the list. */
+/** The group shown at the top of the list, and the first time Settings opens. */
+const FIRST_SECTION = "App";
+/** Sections that are not app settings groups, right after it. */
 const FIXED_SECTIONS = ["This browser", "This computer", "Sign-in"];
 /** The section shown last time (this browser). */
 const SECTION_KEY = "ccb.settingsSection";

@@ -57,4 +57,27 @@ Describe 'Publish-ProposalPlan' {
     }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
+Describe 'Test-UnfinishedText' {
+    It 'recognises a reply that says what it still has to do before the change' {
+        Test-UnfinishedText 'Need to inspect the current CSS definitions for .board and .grid before making the height change.' | Should Be $true
+        Test-UnfinishedText 'I will update the header next.' | Should Be $true
+        Test-UnfinishedText 'The change requires checking how the layout calculates the heights first.' | Should Be $true
+        Test-UnfinishedText 'Ik moet eerst de stijlen controleren.' | Should Be $true
+    }
+    It 'leaves answers and summaries of finished work alone' {
+        Test-UnfinishedText 'The page loads its data from data/example.json.' | Should Be $false
+        Test-UnfinishedText 'Changed the header height to 64px and updated the grid.' | Should Be $false
+        Test-UnfinishedText 'You need to restart the app after installing.' | Should Be $false
+    }
+    It 'offers an unfinished reply as a plan to continue' {
+        $env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+        $p = Join-Path $env:TEMP ('ccb-unf-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+        Add-AgentEvent $s 'done' @{ text = 'Need to inspect the current CSS before making the height change.' }
+        Publish-ProposalPlan $s @{ text = 'Make the calendars 700px high' } 0 | Should Be $true
+        $ev = @($s.Events | Where-Object type -eq 'plan-ready')[0]
+        $ev.unfinished | Should Be $true
+        Remove-Item $p, $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

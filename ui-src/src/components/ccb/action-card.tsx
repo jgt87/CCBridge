@@ -87,9 +87,11 @@ function StatusBadge({ status }: { status: string }) {
     rejected: "text-muted-foreground",
     skipped: "text-muted-foreground",
     interrupted: "text-muted-foreground",
+    ambiguous: "text-muted-foreground",
   };
   const label: Record<string, string> = {
     interrupted: "interrupted (StreamHub restarted)",
+    ambiguous: "needs a more exact SEARCH",
     running: "running",
     awaiting: "needs approval",
     ok: "done",

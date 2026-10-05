@@ -36,11 +36,12 @@ function Get-ActionBlocks {
         }
         # In an edit block, code fences inside a SEARCH/REPLACE section are file content
         # (e.g. a markdown example), not the end of the block.
-        $inPair = $false
+        $inPair = $false; $newStyle = $false
         while ($j -lt $lines.Length) {
             $line = $lines[$j]
             if ($type -eq 'edit') {
-                $marker = Get-EditMarker $line
+                if ($line.Trim() -cmatch '^#{7} SEARCH(?:\s+(?:line\s*\d+|all))?$') { $newStyle = $true }
+                $marker = Get-EditMarker $line -NewOnly:$newStyle
                 if ($marker -eq 'search') { $inPair = $true }
                 elseif ($marker -eq 'replace') { $inPair = $false }
             }
@@ -50,7 +51,7 @@ function Get-ActionBlocks {
                 # next action block (Copilot left out the last one): then it closes the block.
                 $replaceAhead = $false
                 for ($k = $j + 1; $k -lt $lines.Length; $k++) {
-                    if ((Get-EditMarker $lines[$k]) -eq 'replace') { $replaceAhead = $true; break }
+                    if ((Get-EditMarker $lines[$k] -NewOnly:$newStyle) -eq 'replace') { $replaceAhead = $true; break }
                     if ($lines[$k] -match '^\s{0,3}(`{3,}|~{3,})\s*[A-Za-z]+') { break }
                 }
                 if (-not $replaceAhead) { break }
@@ -69,11 +70,22 @@ function Get-ActionBlocks {
     $actions.ToArray()
 }
 
-function Get-EditMarker([string]$Line) {
-    <# 'search', 'divider', 'replace' or $null. Tolerates what Copilot sometimes sends: indented
-       markers, and markers written as &lt; / &gt; (the page shows our < and > to Copilot that way). #>
+function Get-EditMarker([string]$Line, [switch]$NewOnly) {
+    <# 'search', 'divider', 'replace' (the end of a pair) or $null. Copilot is taught
+       ####### SEARCH / ####### REPLACE / ####### END: whole lines no language uses, without the
+       < > that the chat can damage. Still accepted: <<<<<<< SEARCH / ======= / >>>>>>> REPLACE,
+       indented markers, &lt; / &gt;, and markers damaged on the way. #>
     $t = $Line.Trim()
+    if ($t -cmatch '^#{7} SEARCH(?:\s+(?:line\s*\d+|all))?$') { return 'search' }
+    if ($t -cmatch '^#{7} REPLACE$') { return 'divider' }
+    if ($t -cmatch '^#{7} END$') { return 'replace' }
+    # In a block written with the new markers, an old-looking line (======= in a reStructuredText
+    # heading or a merge conflict) is file content.
+    if ($NewOnly) { return $null }
     if ($t -match '^(?:<|&lt;){5,9} ?SEARCH\b') { return 'search' }
+    # The start marker damaged on the way (its < can be taken for a tag and cut): "SEARCH" or
+    # "EARCH" alone, with what is left of the arrows. Upper case only, so file text is not taken for it.
+    if ($t -cmatch '^(?:[<>/]|&lt;|&gt;)*\s*S?EARCH(?:\s+(?:line\s*\d+|all))?$') { return 'search' }
     if ($t -match '^(?:>|&gt;){5,9} ?REPLACE\b') { return 'replace' }
     # The end marker damaged on the way (some tenants filter text near HTML tags): "</EPLACE",
     # "REPLACE" alone, or only the arrows. Upper case only, so file text is not taken for it.
@@ -84,23 +96,47 @@ function Get-EditMarker([string]$Line) {
 
 function Get-EditPairs([string]$Body) {
     <# SEARCH/REPLACE pairs of an edit block. The closing REPLACE marker of a pair may be missing
-       when the next pair or the end of the block follows. #>
+       when the next pair or the end of the block follows. A block whose SEARCH marker was lost on
+       the way, with exactly one ======= line, is one pair: the lines before it are the SEARCH. #>
+    $all = "$Body".Replace("`r`n", "`n").Split("`n")
+    $newStyle = [bool](@($all | Where-Object { $_.Trim() -cmatch '^#{7} SEARCH(?:\s+(?:line\s*\d+|all))?$' }).Count)
+    $markers = @($all | ForEach-Object { Get-EditMarker $_ -NewOnly:$newStyle })
+    if (-not @($markers | Where-Object { $_ -eq 'search' }).Count -and @($markers | Where-Object { $_ -eq 'divider' }).Count -eq 1) {
+        $d = [array]::IndexOf($markers, 'divider')
+        $before = @(if ($d -gt 0) { $all[0..($d - 1)] })
+        $after = @(for ($k = $d + 1; $k -lt $all.Length; $k++) { if ($markers[$k] -eq 'replace') { break }; $all[$k] })
+        # Leading and trailing blank lines are not part of the code the edit is about.
+        while ($before.Count -and -not $before[0].Trim()) { $before = @($before | Select-Object -Skip 1) }
+        while ($after.Count -and -not $after[-1].Trim()) { $after = @($after | Select-Object -First ($after.Count - 1)) }
+        if ($before.Count) { return @(@{ search = ($before -join "`n"); replace = ($after -join "`n"); markerLost = $true }) }
+    }
     $pairs = New-Object System.Collections.Generic.List[object]
-    $state = 'outside'; $search = $null; $replace = $null
+    $state = 'outside'; $search = $null; $replace = $null; $hint = @{}
     foreach ($line in $Body.Replace("`r`n", "`n").Split("`n")) {
-        $marker = Get-EditMarker $line
+        $marker = Get-EditMarker $line -NewOnly:$newStyle
         if ($marker -eq 'search') {
-            if ($state -eq 'replace') { $pairs.Add(@{ search = ($search -join "`n"); replace = ($replace -join "`n") }) }
+            if ($state -eq 'replace') { $pairs.Add((New-EditPair $search $replace $hint)) }
             $state = 'search'; $search = New-Object System.Collections.Generic.List[string]; $replace = New-Object System.Collections.Generic.List[string]
+            # Which match is meant when the SEARCH text is in the file more than once.
+            $hint = @{}
+            $hm = [regex]::Match($line, '(?i)SEARCH\s+(?:line\s*(\d+)|(all))\b')
+            if ($hm.Success) { if ($hm.Groups[1].Success) { $hint.line = [int]$hm.Groups[1].Value } else { $hint.all = $true } }
             continue
         }
         if ($marker -eq 'divider' -and $state -eq 'search') { $state = 'replace'; continue }
-        if ($marker -eq 'replace' -and $state -eq 'replace') { $pairs.Add(@{ search = ($search -join "`n"); replace = ($replace -join "`n") }); $state = 'outside'; continue }
+        if ($marker -eq 'replace' -and $state -eq 'replace') { $pairs.Add((New-EditPair $search $replace $hint)); $state = 'outside'; continue }
         if ($state -eq 'search') { $search.Add($line) }
         elseif ($state -eq 'replace') { $replace.Add($line) }
     }
-    if ($state -eq 'replace') { $pairs.Add(@{ search = ($search -join "`n"); replace = ($replace -join "`n") }) }
+    if ($state -eq 'replace') { $pairs.Add((New-EditPair $search $replace $hint)) }
     $pairs.ToArray()
+}
+
+function New-EditPair($Search, $Replace, $Hint) {
+    $p = @{ search = ($Search -join "`n"); replace = ($Replace -join "`n") }
+    if ($Hint -and $Hint.line) { $p.line = $Hint.line }
+    if ($Hint -and $Hint.all) { $p.all = $true }
+    $p
 }
 
 function Get-ActionPaths($Action) {
@@ -142,6 +178,19 @@ function Test-ProposalText([AllowEmptyString()][string]$Text) {
     [bool]($heading -or $words)
 }
 
+function Test-UnfinishedText([AllowEmptyString()][string]$Text) {
+    <# Whether a reply that changed nothing says, in the first person, work it still has to do
+       before the change ("Need to inspect the CSS before making the change", "I will update",
+       "requires checking ... first"). A fixed text rule; the code blocks are left out. #>
+    $t = ($Text -replace '(?s)`{3,}.*?`{3,}', '')
+    if (-not $t.Trim()) { return $false }
+    [bool]($t -match '(?im)^\s*(?:I\s+)?(?:still\s+)?need to (?:inspect|check|read|look|review|see|examine|find|open|verify|update|change|edit|add|make|confirm)\b' -or
+        $t -match '(?i)\bI(?:''ll| will| still need to| need to| have to| must) (?:first |now |next )?(?:inspect|check|read|look|review|examine|update|change|edit|add|make|apply|implement|fix)\b' -or
+        $t -match '(?i)\bbefore (?:making|applying|doing) (?:the|this|these|that|any) (?:change|changes|edit|edits|fix)\b' -or
+        $t -match '(?i)\brequires? (?:checking|inspecting|reading|looking at|reviewing)\b[^.]{0,120}\bfirst\b' -or
+        $t -match '(?i)\b(?:ik moet|moet ik)\b[^.]{0,80}\b(?:controleren|bekijken|nakijken|lezen|aanpassen|wijzigen|toevoegen)\b')
+}
+
 function Get-NextSteps {
     <# Suggested follow-ups in a reply, as prompts the user can send: the list under a heading such as
        "Next steps", "Remaining steps", "Follow-ups", "What's next" or "Volgende stappen", and
@@ -179,4 +228,4 @@ function Get-NextSteps {
     @($steps | Select-Object -First $Max)
 }
 
-Export-ModuleMember -Function Get-ScreenshotSteps, Test-ProposalText, Get-ActionBlocks, Get-ActionPaths, Get-TodoItems, Get-NextSteps
+Export-ModuleMember -Function Test-UnfinishedText, Get-ScreenshotSteps, Test-ProposalText, Get-ActionBlocks, Get-ActionPaths, Get-TodoItems, Get-NextSteps

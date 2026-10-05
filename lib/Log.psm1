@@ -97,6 +97,7 @@ $script:ErrorHelp = @(
     @{ re = '(?i)throttl'; code = 'THROTTLED'; hint = 'Copilot is limiting requests. Wait a minute and try again.' }
     @{ re = 'No complete reply within'; code = 'TIMEOUT'; hint = 'Copilot took longer than replyTimeoutSec. Raise it in config\harness.local.json, or split the task into smaller steps.' }
     @{ re = '(?i)NoAnswer|stopped without answering|finished without a reply|no usable answer'; code = 'NO-ANSWER'; hint = 'Copilot did not answer. Usually a source it needed was unavailable or the request was blocked. Try again, rephrase, or start a New chat.' }
+    @{ re = 'matches \d+ places, and nothing shows which one'; code = 'EDIT-WHICH'; hint = 'The text Copilot wanted to change appears more than once in the file, and nothing showed which place it meant. Nothing was changed; Copilot is asked to point at the right place by its line number. Nothing is needed from you.' }
     @{ re = 'SEARCH text|SEARCH/REPLACE|edit block|half open|does not contain them yet|matches \d+ places'; code = 'EDIT'; hint = 'An edit could not be applied safely and nothing was changed. Copilot gets the reason and usually corrects it in its next reply.' }
     @{ re = 'Source/|source data'; code = 'SOURCE-DATA'; hint = 'Files in Source/ are read-only. Ask for the result in another folder (for example Work/ or output/).' }
     @{ re = 'Open or create a project'; code = 'NO-PROJECT'; hint = 'Open or create a project first (Switch worktree).' }
