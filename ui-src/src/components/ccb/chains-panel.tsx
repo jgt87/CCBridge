@@ -8,8 +8,12 @@ const flatButton =
 const field =
   "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
 
-/** One step as a short line: "runbook meetings", "script Scripts/x.ps1 -Week 1", "runbook summary + 1 file". */
+/** One step as a short line: "runbook meetings", "script Scripts/x.ps1 -Week 1", "runbook summary + 1 file", "download sales.csv to Downloads/sales.csv". */
 export function stepText(s: ChainStep): string {
+  if (s.kind === "download") {
+    const file = decodeURIComponent(s.target.split("?")[0].split("/").pop() || s.target);
+    return `download ${file} to ${s.args || "Downloads/"}`;
+  }
   const extra = s.kind === "script" && s.args ? ` ${s.args}` : s.kind === "runbook" && s.with?.length ? ` + ${s.with.length} file${s.with.length === 1 ? "" : "s"}` : "";
   return `${s.kind} ${s.target}${extra}`;
 }
@@ -31,7 +35,7 @@ export function ChainsPanel({
   /** Runbooks a step can run (both kinds). */
   runbookNames?: { name: string; title: string }[];
   /** Change a chain's steps; resolves when done (the list reloads), rejects with the reason. */
-  onSteps?: (name: string, op: "add" | "remove" | "up" | "down", opts?: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number }) => Promise<void>;
+  onSteps?: (name: string, op: "add" | "remove" | "up" | "down", opts?: { kind?: "runbook" | "script" | "download"; target?: string; args?: string; index?: number }) => Promise<void>;
   busy: boolean;
   onCreate: (name: string) => Promise<void>;
   onRun: (name: string) => void;
@@ -158,7 +162,7 @@ export function ChainsPanel({
 
 const iconButton = "rounded p-0.5 hover:bg-black/5 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent dark:hover:bg-white/5";
 
-/** Adds a runbook or a script from Scripts/ as the chain's last step. */
+/** Adds a runbook, a script from Scripts/ or a download from SharePoint/OneDrive as the chain's last step. */
 function AddStep({
   chain,
   runbooks,
@@ -174,15 +178,21 @@ function AddStep({
   const [args, setArgs] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [link, setLink] = useState("");
   const isScript = pick.startsWith("script:");
+  const isDownload = pick === "download:";
   const add = async () => {
     setSaving(true);
     setError("");
     try {
-      const target = pick.slice(pick.indexOf(":") + 1);
-      await onSteps(chain, "add", { kind: isScript ? "script" : "runbook", target, args: isScript ? args : "" });
+      if (isDownload) await onSteps(chain, "add", { kind: "download", target: link.trim(), args: args.trim() });
+      else {
+        const target = pick.slice(pick.indexOf(":") + 1);
+        await onSteps(chain, "add", { kind: isScript ? "script" : "runbook", target, args: isScript ? args : "" });
+      }
       setPick("");
       setArgs("");
+      setLink("");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -212,13 +222,23 @@ function AddStep({
               ))}
             </optgroup>
           )}
+          <optgroup label="Microsoft 365">
+            <option value="download:">Download a file from SharePoint or OneDrive</option>
+          </optgroup>
         </select>
-        <button className={cn(flatButton, "shrink-0 border border-black/10 dark:border-white/10")} disabled={!pick || saving} onClick={add} type="button">
+        <button className={cn(flatButton, "shrink-0 border border-black/10 dark:border-white/10")} disabled={!pick || saving || (isDownload && !link.trim())} onClick={add} type="button">
           <Plus className="h-3 w-3" /> Add
         </button>
       </div>
       {isScript && (
         <input aria-label="Script arguments" className={cn(field, "py-0.5 text-xs")} onChange={(e) => setArgs(e.target.value)} placeholder="Optional arguments, e.g. -Week current" value={args} />
+      )}
+      {isDownload && (
+        <>
+          <input aria-label="Link to the file" className={cn(field, "py-0.5 text-xs")} onChange={(e) => setLink(e.target.value)} placeholder="Link to the file (SharePoint or OneDrive, https://...)" value={link} />
+          <input aria-label="Save as" className={cn(field, "py-0.5 text-xs")} onChange={(e) => setArgs(e.target.value)} placeholder="Save as, e.g. Downloads/sales.csv (empty: Downloads/ with the file's own name)" value={args} />
+          <p className="text-muted-foreground text-xs">StreamHub's Edge fetches it with your Microsoft 365 sign-in each time the chain runs. You approve each link once.</p>
+        </>
       )}
       {!runbooks.length && !scripts.length && <p className="text-muted-foreground text-xs">No runbooks or scripts yet: create a runbook above, or put a script in Scripts/.</p>}
       {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}

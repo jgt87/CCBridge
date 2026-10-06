@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.98] - 2026-10-06
+
+### Added
+- Chains can download a file from SharePoint or OneDrive: a step `download: LINK to Downloads/NAME.csv` (or Automation > Chains > Add a step > Download a file from SharePoint or OneDrive). StreamHub's own Edge fetches it with your Microsoft 365 sign-in, so it works with the company sign-in and nothing has to be synced; on a schedule each run gets the latest version, and the data conversion and `DataTools.load` pick it up. Only https links to SharePoint or OneDrive, only into the project (by default `Downloads/` with the file's own name), never into `Source/`, `.streamhub/` or protected files. You approve each link and place once (never from MCP); after that it runs unattended. A sign-in page, a viewer page or a folder link instead of the file is reported with what to do, and the earlier download stays. Each download is part of the chain's change set (Undo).
+- A dashboard builds on the CSV itself: `DataTools.load("Source/sales.csv")` in `data/data-tools.js` (version 2) gives a page the rows of a data file. Served over http(s) (Open app, a dev server), it reads and parses the CSV, TSV or JSON itself, so the page shows the latest file; opened from disk, where a browser lets a page read no files, it loads the converted copy StreamHub keeps (`data/NAME.js`) with a script tag. StreamHub writes `data/data-index.js` (which copy belongs to which file) after each task, Copilot is told to load data only this way (one script tag, no fetch of its own), and a project's older `data-tools.js` is replaced by the new version (one the project wrote itself is left alone). Copilot's edits to both files are refused. Checked in Edge both ways: from disk and served, and a row added to the CSV shows at once when served.
+
+### Fixed
+- The chat did not always scroll to the newest line: it followed only new items, not a reply streaming in, a card getting its output or code and images laying out, and its smooth scroll stopped short when more arrived meanwhile. It now stays at the bottom while anything grows, stops following when you scroll up to read, and comes back down when you send a message or a step waits for your approval.
+
 ## [v0.1.97] - 2026-10-06
 
 ### Added
@@ -1102,7 +1111,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.97...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.98...HEAD
+[v0.1.98]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.98
 [v0.1.97]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.97
 [v0.1.96]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.96
 [v0.1.95]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.95

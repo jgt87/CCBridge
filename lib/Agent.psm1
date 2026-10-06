@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -1255,7 +1255,7 @@ function Invoke-ChainJob {
             $label = "$($step.kind) $($step.target)"
             Add-AgentEvent $State 'status' @{ text = "Chain '$($item.title)', step $($step.n) of ${total}: $label" }
             # A short pause between Copilot steps: many requests in a row make Copilot stop answering.
-            if ($step.kind -ne 'script' -and $step.n -gt 1 -and $betweenSec -gt 0) { if (-not (Wait-ChainPause $State $betweenSec)) { $stopped = $true; break } }
+            if ($step.kind -notin 'script', 'download' -and $step.n -gt 1 -and $betweenSec -gt 0) { if (-not (Wait-ChainPause $State $betweenSec)) { $stopped = $true; break } }
             $ok = $true; $why = ''
             $waits = @(Get-ChainRetryWaits $State.Config); $try = 0
             while ($true) {
@@ -1268,8 +1268,9 @@ function Invoke-ChainJob {
                     }
                     'fetch' { Invoke-FetchJob $State $step.target }
                     'script' { $r = Invoke-ChainScript $State $item $step $cp; $ok = $r.ok; $why = $r.why }
+                    'download' { $r = Invoke-ChainDownload $State $item $step $cp; $ok = $r.ok; $why = $r.why }
                 }
-                if ($step.kind -eq 'script') { break }
+                if ($step.kind -in 'script', 'download') { break }
                 $stepEvents = @(Get-AgentEvents $State $from)
                 $errs = @($stepEvents | Where-Object { $_.type -eq 'error' })
                 if (-not $errs.Count) { $ok = $true; $why = ''; break }
@@ -1397,6 +1398,62 @@ function Invoke-ChainScript {
     if ($fixed.Count) { $out += "`nSource/ and protected files are read-only; StreamHub put back: $($fixed -join '; ')" }
     Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = "ran $($sc.path): $status"; output = (Limit-Text $out 4000); changed = $true }
     @{ ok = $ok; why = $status }
+}
+
+function Invoke-ChainDownload {
+    <# One download step of a chain: a SharePoint or OneDrive file into the project through
+       StreamHub's Edge (signed in to Microsoft 365). A person approves each link and place once
+       (refused without one, as in MCP); after that it runs on schedules too. The file replaces the
+       earlier download in the chain's change set (Undo takes it back). Returns @{ ok; why }. #>
+    param($State, $Chain, $Step, $CheckpointBox)
+    $root = $State.ProjectRoot
+    $bad = Test-DownloadAddress $Step.target
+    if ($bad) { return @{ ok = $false; why = $bad } }
+    $t = Get-DownloadTarget $root $Step.target $Step.args
+    if ($t.error) { return @{ ok = $false; why = $t.error } }
+    $id = 'chain-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $evt = @{ id = $id; action = 'web'; target = "$($Step.target) -> $($t.rel)" }
+    $key = "download: $($Step.target) to $($t.rel)"
+    if (-not (Test-ScriptApproved $root $key 'download')) {
+        if ($State.Headless) { return @{ ok = $false; why = 'a download needs a person to approve it once in the StreamHub window' } }
+        Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; warning = "Chain '$($Chain.title)' downloads this file from Microsoft 365 into $($t.rel), with your sign-in in StreamHub's Edge. Once approved, this link and place download without asking (also on a schedule)." })
+        $d = Wait-Approval $State $id $true
+        if ($d.decision -ne 'approve') {
+            Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }
+            return @{ ok = $false; why = 'not approved' }
+        }
+        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'running'; decidedBy = $d.by }
+        Add-ApprovedScript $root $key 'download'
+    } else {
+        Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'running' })
+    }
+    $tmp = Join-Path $env:TEMP ('ccb-dl-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Force -Path $tmp
+    try {
+        $null = Get-Bridge $State   # StreamHub's Edge is running (and signed in)
+        $State.Activity.kind = 'busy'; $State.Activity.label = "Downloading $(Split-Path $t.rel -Leaf)"
+        $r = Invoke-EdgeDownload -Port $State.Config.cdpPort -Url (Add-DownloadParam $Step.target) -Folder $tmp -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
+        if (-not $r.error) { $r.error = Test-DownloadContent $r.path $t.rel }
+        if ($r.error) {
+            Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'failed'; summary = "download failed: $($r.error)"; output = $r.error }
+            return @{ ok = $false; why = $r.error }
+        }
+        if (-not $CheckpointBox.Value) { $CheckpointBox.Value = New-Checkpoint $root "Chain: $($Chain.title)" }
+        Save-CheckpointFile $CheckpointBox.Value $root $t.full
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path $t.full)
+        Copy-Item -LiteralPath $r.path -Destination $t.full -Force
+        $kb = [Math]::Max(1, [int]((Get-Item -LiteralPath $t.full).Length / 1KB))
+        Write-CCBLog info agent "Chain download" @{ to = $t.rel; kb = $kb }
+        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'ok'; summary = "downloaded $($t.rel) ($kb KB)"; output = "Saved $($t.rel) ($kb KB) from $($Step.target)."; changed = $true }
+        @{ ok = $true; why = '' }
+    } catch {
+        Write-CCBLogError agent 'Chain download' $_
+        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'failed'; summary = "download failed: $($_.Exception.Message)"; output = $_.Exception.Message }
+        @{ ok = $false; why = $_.Exception.Message }
+    } finally {
+        $State.Activity.label = ''
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 $script:AgentGoAhead = 'Proceed with your plan. Where the instructions above do not decide something, use your best assumptions and list them at the start. Then give the result in exactly the form the instructions ask for.'

@@ -402,7 +402,7 @@ type SidePanelProps = {
   onRunChain?: (name: string) => void;
   /** Runs one script from Scripts/ (Automation > Scripts). */
   onRunScript?: (path: string) => void;
-  onChainSteps?: (name: string, op: "add" | "remove" | "up" | "down", opts?: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number }) => Promise<void>;
+  onChainSteps?: (name: string, op: "add" | "remove" | "up" | "down", opts?: { kind?: "runbook" | "script" | "download"; target?: string; args?: string; index?: number }) => Promise<void>;
   queue: QueueEntry[];
 };
 

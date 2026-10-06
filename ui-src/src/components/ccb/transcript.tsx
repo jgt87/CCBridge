@@ -4,6 +4,7 @@ import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard, type PlanVa
 import type { ChatOptions } from "@/lib/api";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MarkdownView } from "./markdown-view";
+import { followBottom } from "@/lib/stick-to-bottom";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
 import type { Activity, AgentEvent, CheckFinding, Preview, Reference, UndoChange } from "@/lib/api";
 import { ChecksCard } from "./checks-card";
@@ -463,11 +464,31 @@ export function Transcript({
   onOpenFile?: (path: string) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const follower = useRef<ReturnType<typeof followBottom> | null>(null);
   const awaiting = items.some((i) => i.kind === "action" && i.item.status === "awaiting");
+  // A fresh chat shows the welcome view until something happens in it.
+  const showEmpty = !busy && !activity?.label && items.every((i) => i.kind === "note" && i.tone === "info");
 
+  // Stay at the newest line while anything grows (a reply streaming in, a card getting its output,
+  // code and images laying out), unless the reader scrolled up to read.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [items.length, busy, awaiting, progress.length > 0]);
+    const content = contentRef.current;
+    const scroller = content ? scrollParent(content) : null;
+    if (!content || !scroller) return;
+    const f = followBottom(scroller, content);
+    follower.current = f;
+    return () => {
+      f.stop();
+      follower.current = null;
+    };
+  }, [showEmpty]);
+  // Sending a message, or a step that waits for approval, brings the view back to the bottom.
+  const last = items.length ? items[items.length - 1] : null;
+  const lastIsUser = last?.kind === "user";
+  useEffect(() => {
+    if (lastIsUser || awaiting) follower.current?.stick();
+  }, [items.length, lastIsUser, awaiting]);
 
   // The newest PAGE items; scrolling up to the oldest one shown loads PAGE more, keeping the place.
   const [shown, setShown] = useState(PAGE);
@@ -495,11 +516,10 @@ export function Transcript({
     keepFromBottom.current = null;
   }, [shown]);
 
-  // A fresh chat shows the welcome view until something happens in it.
-  if (!busy && !activity?.label && items.every((i) => i.kind === "note" && i.tone === "info")) return <>{empty}</>;
+  if (showEmpty) return <>{empty}</>;
 
   return (
-    <div className="mx-auto flex w-full max-w-[max(48rem,80%)] flex-col gap-3 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-[max(48rem,80%)] flex-col gap-3 px-4 py-6" ref={contentRef}>
       {hidden > 0 && (
         <div className="flex justify-center" ref={topRef}>
           <button className="rounded-md px-2 py-1 text-muted-foreground text-xs hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5" onClick={loadEarlier} type="button">

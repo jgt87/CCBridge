@@ -4,25 +4,29 @@
 #       2. script: Scripts/convert-meetings.ps1 -Week current
 #       3. runbook: weekly-summary with Runbooks/Exports/meetings.json
 #       4. fetch: team-news
+#       5. download: https://TENANT.sharepoint.com/sites/SITE/Shared%20Documents/sales.csv to Downloads/sales.csv
 # A runbook step can take files from earlier steps ("with PATH, PATH"): their contents go with the
 # runbook's prompt as data. Scripts must be in the project's Scripts/ folder; the agent job
 # (Invoke-ChainJob in Agent.psm1) runs them with the same safety checks as Copilot's commands and
 # asks before a script runs for the first time or after it changed (setting chainScripts).
+# A download step saves a SharePoint or OneDrive file into the project through StreamHub's Edge
+# (Download.psm1), asked once per link and place.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Workspace', 'Executor', 'Layout', 'Runbook', 'Fetch') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Workspace', 'Executor', 'Layout', 'Runbook', 'Fetch', 'Download') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:ChainDir = Get-LayoutPath Runbooks
 $script:ScriptDir = Get-LayoutPath Scripts
 $script:ScriptTypes = @('.ps1', '.cmd', '.bat', '.py')
 
 function Read-ChainSteps {
-    <# The steps of a chain text: kind (runbook, fetch, script), target, with (files for a runbook)
-       and args (for a script), in order. Lines that are not steps are ignored. #>
+    <# The steps of a chain text: kind (runbook, fetch, script, download), target (the link for a
+       download), with (files for a runbook) and args (for a script; the place for a download), in
+       order. Lines that are not steps are ignored. #>
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Body)
     $n = 0
     foreach ($line in $Body.Replace("`r`n", "`n").Split("`n")) {
-        $m = [regex]::Match($line, '^\s*(?:\d+[.)]|[-*])\s*(runbook|fetch|script)\s*:\s*(.+?)\s*$', 'IgnoreCase')
+        $m = [regex]::Match($line, '^\s*(?:\d+[.)]|[-*])\s*(runbook|fetch|script|download)\s*:\s*(.+?)\s*$', 'IgnoreCase')
         if (-not $m.Success) { continue }
         $n++
         $kind = $m.Groups[1].Value.ToLowerInvariant()
@@ -35,6 +39,10 @@ function Read-ChainSteps {
             $s = [regex]::Match($rest, '^("([^"]+)"|(\S+))\s*(.*)$')
             $target = $(if ($s.Groups[2].Success) { $s.Groups[2].Value } else { $s.Groups[3].Value })
             $argText = $s.Groups[4].Value.Trim()
+        } elseif ($kind -eq 'download') {
+            $d = Read-DownloadStep $m.Groups[2].Value
+            [pscustomobject]@{ n = $n; kind = $kind; target = $d.url; with = @(); args = $d.to }
+            continue
         }
         if ($kind -ne 'script') { $target = $target -replace '(?i)\.(runbook|prompt)\.md$', '' -replace '^(?i)runbooks/', '' }
         [pscustomobject]@{ n = $n; kind = $kind; target = $target.Replace('\', '/'); with = @($with); args = $argText }
@@ -92,7 +100,7 @@ function Test-ChainSteps {
     param([Parameter(Mandatory)][string]$ProjectRoot, $Steps)
     $runbooks = @(Get-Runbooks $ProjectRoot | ForEach-Object { $_.name })
     $fetches = @(Get-FetchPrompts $ProjectRoot | ForEach-Object { $_.name })
-    if (-not @($Steps).Count) { 'the chain has no steps (lines like "1. runbook: NAME", "2. script: Scripts/NAME.ps1", "3. fetch: NAME")' }
+    if (-not @($Steps).Count) { 'the chain has no steps (lines like "1. runbook: NAME", "2. script: Scripts/NAME.ps1", "3. fetch: NAME", "4. download: LINK to Downloads/NAME.csv")' }
     foreach ($s in @($Steps)) {
         switch ($s.kind) {
             'runbook' {
@@ -102,6 +110,11 @@ function Test-ChainSteps {
             }
             'fetch' { if ($fetches -notcontains $s.target) { "step $($s.n): there is no fetch prompt '$($s.target)' in $($script:ChainDir)/" } }
             'script' { $r = Resolve-ChainScript $ProjectRoot $s.target $s.args; if ($r.error) { "step $($s.n): $($r.error)" } }
+            'download' {
+                $bad = Test-DownloadAddress $s.target
+                if ($bad) { "step $($s.n): $bad" }
+                else { $t = Get-DownloadTarget $ProjectRoot $s.target $s.args; if ($t.error) { "step $($s.n): $($t.error)" } }
+            }
         }
     }
 }
@@ -146,7 +159,7 @@ function Get-ChainStepLines {
         $l = $Lines[$i]
         if ($inComment) { if ($l -match '-->') { $inComment = $false }; continue }
         if ($l -match '<!--' -and $l -notmatch '-->') { $inComment = $true; continue }
-        if ($l -match '^\s*(?:\d+[.)]|[-*])\s*(runbook|fetch|script)\s*:') { $i }
+        if ($l -match '^\s*(?:\d+[.)]|[-*])\s*(runbook|fetch|script|download)\s*:') { $i }
     }
 }
 
@@ -176,7 +189,13 @@ function Set-ChainSteps {
                 $sc = Resolve-ChainScript $ProjectRoot $t $ArgText
                 if ($sc.error) { throw $sc.error }
                 $line = "1. script: $($sc.path)$(if ($ArgText.Trim()) { ' ' + $ArgText.Trim() })"
-            } else { throw 'A step is a runbook or a script.' }
+            } elseif ($Kind -eq 'download') {
+                $bad = Test-DownloadAddress $t
+                if ($bad) { throw $bad }
+                $dt = Get-DownloadTarget $ProjectRoot $t $ArgText
+                if ($dt.error) { throw $dt.error }
+                $line = "1. download: $t to $($dt.rel)"
+            } else { throw 'A step is a runbook, a script or a download.' }
             if ($steps.Count) { $lines.Insert($steps[-1] + 1, $line) }
             else {
                 # After a "## Steps" heading when there is one, else at the end.

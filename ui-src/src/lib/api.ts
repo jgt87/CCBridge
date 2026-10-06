@@ -462,11 +462,11 @@ export interface RunbookItem {
 
 /** One step of a chain. */
 export interface ChainStep {
-  kind: "runbook" | "fetch" | "script";
+  kind: "runbook" | "fetch" | "script" | "download";
   target: string;
   /** Files from earlier steps a runbook step gets as data. */
   with?: string[];
-  /** Plain arguments of a script step. */
+  /** Plain arguments of a script step; where a download step saves the file. */
   args?: string;
 }
 
@@ -660,8 +660,8 @@ export const api = {
   tools: () => call<{ tools: ToolItem[] }>("GET", "/api/tools").then((r) => (Array.isArray(r.tools) ? r.tools : r.tools ? [r.tools as unknown as ToolItem] : [])),
   ignoreCheck: (path: string, text: string, source: string) => call<{ ok: boolean }>("POST", "/api/checks/ignore", { path, text, source }),
   installTool: (name: string) => call<{ ok: boolean; started: boolean }>("POST", "/api/tools/install", { name }),
-  /** Add a runbook or script step to a chain, or remove / move one (index from 0). */
-  chainSteps: (name: string, op: "add" | "remove" | "up" | "down", opts: { kind?: "runbook" | "script"; target?: string; args?: string; index?: number } = {}) =>
+  /** Add a runbook, script or download step to a chain, or remove / move one (index from 0). */
+  chainSteps: (name: string, op: "add" | "remove" | "up" | "down", opts: { kind?: "runbook" | "script" | "download"; target?: string; args?: string; index?: number } = {}) =>
     call<{ ok: boolean }>("POST", "/api/chains/steps", { name, op, ...opts }),
   approve: (id: string, decision: "approve" | "reject", note = "") =>
     call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user" }),

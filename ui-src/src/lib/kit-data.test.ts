@@ -264,3 +264,59 @@ describe("DataTools", () => {
     expect(DataTools.percent(1, 0)).toBe("");
   });
 });
+
+describe("DataTools.load", () => {
+  const index = { "Source/Sales Q1.csv": { source: "Source/Sales Q1.csv", json: "data/sales-q1.json", js: "data/sales-q1.js", global: "salesQ1Data" } };
+  const g = globalThis as Record<string, unknown>;
+
+  it("reads the CSV itself when the page is served, and the converted JSON when that fails", async () => {
+    const asked: string[] = [];
+    g.location = { protocol: "http:" };
+    g.DataIndex = index;
+    g.fetch = (url: string) => {
+      asked.push(url);
+      if (url.endsWith(".csv") && asked.length === 1) return Promise.resolve(new Response("Date;Amount\n31-01-2024;1,5\n"));
+      if (url.endsWith(".json")) return Promise.resolve(new Response('[{"Date":"2024-01-31","Amount":9}]'));
+      return Promise.resolve(new Response("", { status: 404 }));
+    };
+    try {
+      DataTools.configure({ base: "http://x/" });
+      expect(await DataTools.load("Source/Sales Q1.csv")).toEqual([{ Date: "2024-01-31", Amount: 1.5 }]);
+      expect(asked[0]).toBe("http://x/Source/Sales Q1.csv");
+      expect(await DataTools.load("sales-q1")).toEqual([{ Date: "2024-01-31", Amount: 9 }]);   // the CSV is gone (404): the JSON
+    } finally {
+      delete g.location; delete g.DataIndex; delete g.fetch;
+    }
+  });
+
+  it("loads the converted copy with a script tag when the page is opened from disk", async () => {
+    const added: string[] = [];
+    g.location = { protocol: "file:" };
+    g.window = g;
+    g.document = {
+      head: {
+        appendChild(el: { src: string; onload: () => void }) {
+          added.push(el.src);
+          if (el.src.endsWith("data-index.js")) g.DataIndex = index;
+          if (el.src.endsWith("sales-q1.js")) g.salesQ1Data = [{ Amount: 1 }];
+          el.onload();
+        },
+      },
+      createElement: () => ({}),
+    };
+    try {
+      DataTools.configure({ base: "file:///p/" });
+      expect(await DataTools.load("data/sales-q1.json")).toEqual([{ Amount: 1 }]);
+      expect(added).toEqual(["file:///p/data/data-index.js", "file:///p/data/sales-q1.js"]);
+      await expect(DataTools.load("Source/other.csv")).rejects.toThrow(/No converted copy/);
+    } finally {
+      delete g.location; delete g.window; delete g.document; delete g.DataIndex; delete g.salesQ1Data;
+    }
+  });
+
+  it("types CSV values exactly as the page file readers do", () => {
+    for (const text of ['Datum;Bedrag;Code\n31-01-2024;1.250,50;007\n', 'a,b\n"x ""y""",1e3\n,\n', "D\n12/31/2024\n"]) {
+      expect(DataTools.parseCsv(text)).toEqual(KitData.parseCsv(text));
+    }
+  });
+});
