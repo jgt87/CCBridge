@@ -528,7 +528,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ($b.approve -and $planId) {
                 & $planNote 'Approved' "Approved on $((Get-Date).ToString('yyyy-MM-dd HH:mm')); building started." 'building'
                 $task.planBuild = $true
-                $task.text += "`n`nEvery decision for this task (questions, answers, plan versions) is in PLAN.md, in the section marked plan:$planId. Read it if you need it."
+                $task.text += "`n`nEvery decision for this task (questions, answers, plan versions) is in .streamhub/PLAN.md, in the section marked plan:$planId. Read it (read .streamhub/PLAN.md) if you need it."
             }
             if ($b.thinkDeeper) { $task.responseMode = 'deep' }
             $entry = Submit-AgentTask $State $task 'user' $title

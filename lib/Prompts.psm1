@@ -229,9 +229,20 @@ function Get-PromptPart {
             if (-not (Test-UiKitPart 'interactive' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Interactive parts*' }) }
             if (-not (Test-UiKitPart 'charts' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Charts:*' }) }
             if (-not (Test-UiKitPart 'icons' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Icons (Lucide*' }) }
+            if (-not (Test-UiKitPart 'data' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Reading files*' }) }
+            elseif (-not (Test-UiKitPart 'pdf' $AppRoot)) { $lines = @(foreach ($l in $lines) { if ($l -like '- Reading files*') { $l -replace ' PDF: .*', ' PDF files cannot be read in the page (pdf.js is switched off).' } else { $l } }) }
             $text = $lines -join "`n"
-            if ((Get-UiKitColors $AppRoot) -ne 'blue') { $text = $text -replace ' With the blue palette the named colours are[^.]*\.[^.]*\.', '' }
-            if (-not (Test-UiKitPart 'react' $AppRoot)) { $text = $text -replace ' In a React project use styles/kit/react/ instead:[^\n]*', '' -replace '; React: Chart from styles/kit/react/', '' -replace ' React: Icon from styles/kit/react/\.', '' }
+            $colors = Get-UiKitColors $AppRoot
+            if ($colors -ne 'blue') { $text = $text -replace ' With the blue palette the named colours are[^.]*\.[^.]*\.', '' }
+            if ($colors -eq 'none') {
+                # Colours: None. No palette is set: Copilot uses the colours the project or the request asks for.
+                $text = @(foreach ($l in $text.Split("`n")) {
+                    if ($l -like '- Colours:*') { '- Colours: no colours are set for this project. The tokens in styles/kit/tokens.css are neutral starting values only: use the colours the project already has or the request asks for, set them in tokens.css (--kit-accent, --kit-chart-1...) or in your own CSS. Hard-coded colours and gradients are fine.' }
+                    elseif ($l -like '- Restyle through the tokens*') { $l -replace 'do not hard-code colours, sizes or shadows', 'do not hard-code sizes or shadows' -replace 'Your own CSS uses the same tokens\. ', '' }
+                    else { $l }
+                }) -join "`n"
+            }
+            if (-not (Test-UiKitPart 'react' $AppRoot)) { $text = $text -replace ' In a React project use styles/kit/react/ instead:[^\n]*', '' -replace '; React: Chart from styles/kit/react/', '' -replace ' React: Icon from styles/kit/react/\.', '' -replace ' React: useFileData from styles/kit/react/\.', '' -replace ' and React parts come the same way', ' come the same way' -replace ', or an import from styles/kit/react/', '' }
             return $text
         }
         '^rules:(.+)$' { return Read-PromptPart $AppRoot "rules\$($Matches[1]).md" }

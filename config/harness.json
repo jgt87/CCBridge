@@ -17,6 +17,7 @@
   "startMode": "ask",
   "chatHistory": true,
   "dataCopies": true,
+  "dataImport": true,
   "saveReplyFrames": true,
   "autoUpdate": true,
   "webRead": "named-sites",
@@ -69,6 +70,8 @@
     "interactive": true,
     "charts": true,
     "icons": true,
+    "data": true,
+    "pdf": true,
     "react": true,
     "designRules": true,
     "slopChecks": true

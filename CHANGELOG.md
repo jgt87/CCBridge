@@ -6,6 +6,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.97] - 2026-10-06
+
+### Added
+- Data files ready for Copilot: StreamHub converts the project's CSV, TSV and Excel files (and JSON files in `Source/`) to `data/NAME.json` itself, before Copilot works on the project, so a dashboard no longer starts with Copilot writing its own parser. Rules: the delimiter is the most common of `,` `;` tab `|` in the header line; the encoding is UTF-8 when the bytes are valid UTF-8, else Windows-1252; a column is a number, true/false or a date only when every value in it is one; decimal commas are read in files that use `;`; dates become `yyyy-MM-dd`, and day or month first is taken only when the data shows it; codes with a leading zero (`007`) stay text; empty cells and N/A are null. Excel dates come from the cell's number format; hidden sheets are left out, and several sheets become one object with a list per sheet. Every converted file also gets a `data/NAME.js` copy that sets `window.NAMEData`, so a web app loads it with a script tag (kept up to date by the data copies). There is also `data/data-tools.js` with tested helpers for that data: rows per sheet, filter, sort, distinct values, sum/avg/min/max/count, group and summarize, by month, dates without time zone shifts, number and date formats. Copilot gets each file's place, its global, its rows and its columns with their types, and is told to use them instead of parsing. A file is made again when its source changes; one someone changed since is left alone (said once), and a `data/` file StreamHub did not make is never overwritten. Each conversion is a change set (Undo) with a Write card by StreamHub. Settings > Changes and commands > *Prepare data files for Copilot*.
+- The UI kit lives in the project's `.streamhub/ui-kit/` (copied once, so the project keeps the kit version it started with), and `styles/kit/` holds only what the pages use. `tokens.css` is copied once and is the project's own to restyle. `kit.css` is written by StreamHub after each change with only the rules of the kit classes the pages and code use; class names built in code (`"kit-badge--" + tone`) count by their prefix. Kit scripts, React parts, pdf.js and icons arrive when a page loads or imports them (`styles/kit/NAME`), each with the licence it needs. A project that only shows a few buttons and a table gets 9 KB of the 21 KB stylesheet and none of the scripts. Copilot reads the examples from the catalogue, and its edits to the generated `kit.css` are refused with where the change belongs (tokens.css or its own stylesheet). A project that already has the whole kit in `styles/kit/` keeps it as it is.
+- Copilot's glob and grep also search the UI kit catalogue (`.streamhub/ui-kit/`), so a search for a kit class finds its example; the rest of `.streamhub/` stays out, and pdf.js is not searched.
+- Settings > UI kit > Colours has a third choice, None: no colours are set for the project. The kit starts from the neutral values only so its parts show, and Copilot is told to use the colours the project has or the request asks for, in `tokens.css` or its own CSS. Hard-coded colours and other gradients are not reported then; the readability (contrast) checks still apply.
+- UI kit file readers (`kit-data.js`): a page reads a file a person picks or drops, in the browser and without uploading it: CSV, TSV and Excel as typed tables (the same rules as above), JSON, Word (headings, paragraphs, lists, tables), PowerPoint (slides in order with titles and notes) and PDF text per page. Office files are unzipped with the browser's own decompression, so no library is needed. PDF reading uses pdf.js 3.11 (Mozilla, Apache 2.0, shipped in the kit under `vendor/pdfjs/`); its worker runs on the page itself, so it also works for pages opened from disk. React projects get `react/useFileData.ts`. The examples page has a file picker that previews what was read. Settings > UI kit > *File readers* and *PDF reading (pdf.js)*.
+
+### Fixed
+- Building an approved plan told Copilot that the decisions are in `PLAN.md`, but that file has been in `.streamhub/PLAN.md` since the folder layout changed; the message now names the right path (tested against the layout).
+- Waiting for another StreamHub program: only one program sends to Copilot at a time (the MCP server's own engine, a second app window or a test launcher can hold the turn). That wait used to look like "waiting for the reply" for up to 15 minutes, with nothing in the log. The waiting line now names who holds the turn and since when (`%LOCALAPPDATA%\CCBridge\copilot-lock.json`), the log says when the wait starts and ends, and Stop ends the wait.
+
 ## [v0.1.96] - 2026-10-06
 
 ### Added
@@ -1089,7 +1102,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.96...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.97...HEAD
+[v0.1.97]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.97
 [v0.1.96]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.96
 [v0.1.95]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.95
 [v0.1.94]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.94

@@ -319,9 +319,55 @@
 </section>
 <!-- /kit-part:charts -->
 
+<!-- kit-part:data -->
+<!-- Reading a file in the page (kit-data.js): KitData.readFile(file) -> { kind, ... }.
+     Tables (CSV, TSV, Excel) come typed: numbers, true/false, dates as yyyy-MM-dd, empty = null. -->
+<section id="data">
+  <h2 class="kit-h2">Reading a file</h2>
+  <div class="kit-field">
+    <label class="kit-label" for="kit-data-file">Choose a file</label>
+    <input class="kit-input" id="kit-data-file" type="file">
+    <p class="kit-help" id="kit-data-status">CSV, Excel, JSON, Word, PowerPoint<!-- kit-part:pdf --> or PDF<!-- /kit-part:pdf -->. Nothing is uploaded.</p>
+  </div>
+  <div class="kit-table-wrap" hidden id="kit-data-preview"><table class="kit-table"><thead></thead><tbody></tbody></table></div>
+  <pre class="kit-mono kit-small" hidden id="kit-data-text"></pre>
+</section>
+<!-- /kit-part:data -->
+
 </div>
 <!-- kit-part:interactive --><script src="kit.js"></script><!-- /kit-part:interactive -->
 <!-- kit-part:charts --><script src="kit-charts.js"></script><!-- /kit-part:charts -->
 <!-- kit-part:icons --><script src="kit-icons.js"></script><!-- /kit-part:icons -->
+<!-- kit-part:pdf --><script src="vendor/pdfjs/pdf.min.js"></script><script src="vendor/pdfjs/pdf.worker.min.js"></script><!-- /kit-part:pdf -->
+<!-- kit-part:data --><script src="kit-data.js"></script>
+<script>
+  (function () {
+    var input = document.getElementById("kit-data-file"), status = document.getElementById("kit-data-status");
+    var wrap = document.getElementById("kit-data-preview"), pre = document.getElementById("kit-data-text");
+    input.accept = KitData.accept;
+    input.addEventListener("change", function () {
+      var file = input.files[0];
+      if (!file) return;
+      status.textContent = "Reading " + file.name + "...";
+      KitData.readFile(file).then(function (r) {
+        wrap.hidden = r.kind !== "table"; pre.hidden = r.kind === "table";
+        if (r.kind === "table") {
+          var sheet = r.sheets[0], head = wrap.querySelector("thead"), body = wrap.querySelector("tbody");
+          head.innerHTML = ""; body.innerHTML = "";
+          var tr = head.insertRow();
+          sheet.columns.forEach(function (c) { var th = document.createElement("th"); th.textContent = c.name + " (" + c.type + ")"; tr.appendChild(th); });
+          sheet.rows.slice(0, 10).forEach(function (row) {
+            var r2 = body.insertRow();
+            sheet.columns.forEach(function (c) { var td = r2.insertCell(); td.textContent = row[c.name] == null ? "" : String(row[c.name]); if (c.type === "number") td.className = "kit-num"; });
+          });
+          status.textContent = sheet.rows.length + " rows" + (r.sheets.length > 1 ? " in the first of " + r.sheets.length + " sheets" : "") + "; the first 10 are shown.";
+        } else {
+          pre.textContent = (r.text !== undefined ? r.text : JSON.stringify(r.data, null, 2)).slice(0, 2000);
+          status.textContent = file.name + " read (" + r.kind + ").";
+        }
+      }, function (e) { status.textContent = e.message; wrap.hidden = true; pre.hidden = true; });
+    });
+  })();
+</script><!-- /kit-part:data -->
 </body>
 </html>

@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -326,7 +326,8 @@ function Send-ToCopilot {
     $cancel = { [bool]$State.Cancel }.GetNewClosure()
     # An agent's progress lines ("Searching for release details") show in the waiting indicator.
     $who = if ($Agent) { $Agent } elseif ($State.AgentChat) { [string]$State.AgentChat } else { 'Copilot' }
-    $status = { param($t) $State.Activity.kind = $(if ($who -eq 'Copilot') { 'busy' } else { 'agent' }); $State.Activity.label = "${who}: $t" }.GetNewClosure()
+    # $null clears the line again (the wait for the send lock is over).
+    $status = { param($t) if (-not $t) { $State.Activity.label = ''; return }; $State.Activity.kind = $(if ($who -eq 'Copilot') { 'busy' } else { 'agent' }); $State.Activity.label = "${who}: $t" }.GetNewClosure()
     try {
         $stall = if ($State.Config.PSObject.Properties['stallSec']) { [int]$State.Config.stallSec } else { 90 }
         $timeout = [int]$State.Config.replyTimeoutSec
@@ -1128,11 +1129,33 @@ function Add-OwnChangeEvent {
     Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'ok'; summary = $Summary; output = (Limit-Text $out 4000); changed = $true }
 }
 
+function Sync-DataImports {
+    <# Data files (CSV, TSV, Excel; JSON in Source/) converted to data/NAME.json + data/NAME.js for
+       Copilot (setting dataImport): at task start, after each task and when a project opens.
+       Returns whether a file was written. #>
+    param($State)
+    if (-not $State.ProjectRoot -or -not (Test-DataImportOn $State.AppRoot)) { return $false }
+    try {
+        $r = Update-DataImports $State.ProjectRoot -JsCopy (Test-DataCopiesOn $State.AppRoot) -AppRoot $State.AppRoot
+        $notes = @(Format-DataImportNotes $r)
+        $items = @($r.items | Where-Object { $_.status -ne 'taken' })
+        for ($i = 0; $i -lt $items.Count; $i++) {
+            $it = $items[$i]
+            if ($it.status -in 'created', 'updated', 'tools') { Add-OwnChangeEvent $State 'write' $(if ($it.source) { "$($it.output) (from $($it.source))" } else { $it.output }) $notes[$i] @{ path = $it.output; exists = ($null -ne $it.old); old = $it.old; new = $it.new } }
+            elseif ($notes[$i]) { Add-AgentEvent $State 'status' @{ text = $notes[$i] } }
+        }
+        if ($r.checkpoint -and $r.checkpoint.Files.Count) { Add-ChangeSetEvent $State $r.checkpoint 'Data files converted for Copilot'; return $true }
+    } catch { Write-CCBLogError agent 'data import' $_ }
+    $false
+}
+
 function Sync-DataMirrors {
     <# Data copies (JS files that wrap a JSON file) follow their JSON: after each task and when a
-       project opens. What was rewritten is one change set; problems are said in the chat. #>
-    param($State)
+       project opens. What was rewritten is one change set; problems are said in the chat. Data
+       files are converted first (Sync-DataImports). #>
+    param($State, [switch]$NoImport)
     if (-not $State.ProjectRoot) { return }
+    if (-not $NoImport) { $null = Sync-DataImports $State }
     if (-not (Test-DataCopiesOn $State.AppRoot)) { return }   # setting dataCopies off
     try {
         $r = Update-DataMirrors $State.ProjectRoot
@@ -2185,6 +2208,10 @@ function Get-ProjectContext($State) {
     }
     $guarded = @(Get-ProtectedPatterns $State.AppRoot)
     if ($guarded.Count) { $full += "`n`nRead-only (the user protected these; never write, edit, move or delete them): $($guarded -join ', ')" }
+    if (Test-DataImportOn $State.AppRoot) {
+        $ready = try { Format-DataImportContext $root } catch { Write-CCBLogError agent 'data context' $_; '' }
+        if ($ready) { $full += "`n`n$ready" }
+    }
     $traits = @(Get-ProjectTraits $paths)
     if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { $traits += 'nocommands' }
     @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths }
@@ -2832,6 +2859,8 @@ function Invoke-AgentTurn {
         # Issue cycle step 1: index before the change (not for plain chat or plan mode).
         if ($kind -ne 'chat' -and $State.Mode -ne 'plan') { $baseline = Get-IssueBaseline $State }
         if ($kind -ne 'chat' -and $State.ProjectRoot) {
+            # Data files the person added since: converted before Copilot sees the project.
+            if (Sync-DataImports $State) { $ctx = Get-ProjectContext $State }
             $State.Activity.kind = 'index'; $State.Activity.label = 'Updating the import index'
             try { $null = Update-ImportIndex $State.ProjectRoot } catch { Write-CCBLogError agent 'import index' $_ } finally { $State.Activity.label = '' }
         }
@@ -2844,7 +2873,7 @@ function Invoke-AgentTurn {
         if ($State.ProjectRoot -and $State.SentParts.Contains('rules:uikit')) {
             try {
                 $kitAdded = @(Install-UiKit $State.ProjectRoot $State.AppRoot)
-                if ($kitAdded.Count) { Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub added its UI kit to the project ($($kitAdded -join ', ')): Copilot builds interfaces from it. Settings > Copilot > Use the UI kit turns this off." -Output ($kitAdded -join "`n") }
+                if ($kitAdded.Count) { Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub added its UI kit to the project: the whole kit as a catalogue in $(Get-UiKitCatalog)/, and in $(Get-UiKitFolder)/ only what the pages use ($($kitAdded -join ', ')); a kit class, script or React part a page uses is added after each change. Settings > UI kit turns this off." -Output ($kitAdded -join "`n") }
             } catch { Write-CCBLogError agent 'UI kit' $_ }
         }
         if ($State.SentParts.Count -gt $partsBefore -and $State.SentParts.Contains('actions')) { $State.FollowUps = 0 }
@@ -3040,6 +3069,23 @@ function Invoke-AgentTurn {
                 if ($autoFixed.Count -and $enf.autoFix -eq 'tell') {
                     $results.Add(@{ head = '### Fixed by the helper program'; output = "These mechanical problems in your last changes were fixed for you; write them this way from now on:`n" + (($autoFixed | ForEach-Object { "- $_" }) -join "`n") })
                 }
+                # UI kit: what the pages now use comes from the project's kit catalogue (the rules of the
+                # kit classes into styles/kit/kit.css, kit scripts and React parts a page refers to, the
+                # icons), before the file checks look for missing files.
+                $kitSync = $null
+                if ((Test-UiKitOn $State.AppRoot) -and (Test-Path -LiteralPath (Join-Path $State.ProjectRoot ((Get-UiKitCatalog).Replace('/', '\') + '\kit.css')))) {
+                    try {
+                        $kitSync = Update-UiKitProject $State.ProjectRoot $State.AppRoot
+                        $kitFiles = @(@($kitSync.added) + @($kitSync.updated))
+                        if ($kitFiles.Count) {
+                            Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub took what the pages now use from the UI kit: $($kitFiles -join ', ')." -Output ($kitFiles -join "`n")
+                            $results.Add(@{ head = '### UI kit'; output = "The helper program brought the kit up to date with what your pages use: $($kitFiles -join ', '). styles/kit/kit.css is written by it; do not edit it." })
+                        }
+                    } catch { Write-CCBLogError agent 'UI kit sync' $_ }
+                } elseif ((Test-UiKitOn $State.AppRoot) -and (Test-UiKitPart 'icons' $State.AppRoot)) {
+                    # A project with the whole kit in styles/kit (from before the catalogue): only its icons.
+                    try { $kitSync = Update-KitIcons $State.ProjectRoot $State.AppRoot } catch { Write-CCBLogError agent 'kit icons' $_ }
+                }
                 # Every finding with its source, so it gets a level (CheckPolicy.psm1): errors break the
                 # file and "done" waits for them; warnings are likely mistakes, said once per task.
                 $found = New-Object System.Collections.Generic.List[object]
@@ -3055,7 +3101,7 @@ function Invoke-AgentTurn {
                         foreach ($i in @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot)) { $found.Add((ConvertTo-CheckFinding $rel $i $(if ($i -match ' says: ') { 'tool' } else { 'file' }))) }
                         if ($quality) {
                             foreach ($i in @(Find-ChangeSmells $rel $before $now.Text)) { $found.Add((ConvertTo-CheckFinding $rel $i 'smell')) }
-                            foreach ($i in @(Find-QualityIssues $rel $before $now.Text -UseKit:((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $State.ProjectRoot)))) { $found.Add((ConvertTo-CheckFinding $rel $i 'quality')) }
+                            foreach ($i in @(Find-QualityIssues $rel $before $now.Text -UseKit:((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $State.ProjectRoot) -and (Get-UiKitColors $State.AppRoot) -ne 'none'))) { $found.Add((ConvertTo-CheckFinding $rel $i 'quality')) }
                         }
                     } catch { Write-CCBLogError agent "File check $p" $_ }
                 }
@@ -3071,14 +3117,7 @@ function Invoke-AgentTurn {
                 # A new .env file that .gitignore does not cover would end up in git.
                 try { foreach ($i in @(Find-UnignoredEnv $State.ProjectRoot $roundChanged)) { $found.Add((& $other $i 'env')) } } catch { Write-CCBLogError agent 'env check' $_ }
                 foreach ($i in @($hookIssues | Where-Object { $_ })) { $found.Add((ConvertTo-CheckFinding '' "$i" 'hook')) }
-                # UI kit icons: the icons the pages now use go into styles/kit/kit-icons.js; a name Lucide
-                # does not have is reported with close ones.
-                if ((Test-UiKitOn $State.AppRoot) -and (Test-UiKitPart 'icons' $State.AppRoot)) {
-                    try {
-                        $ic = Update-KitIcons $State.ProjectRoot $State.AppRoot
-                        foreach ($u in @($ic.unknown)) { $found.Add((ConvertTo-CheckFinding '' "there is no icon named '$($u.name)'$(if (@($u.like).Count) { "; close names: $(@($u.like) -join ', ')" }) (data-kit-icon takes a Lucide icon name)" 'quality')) }
-                    } catch { Write-CCBLogError agent 'kit icons' $_ }
-                }
+                foreach ($u in @($kitSync.unknown)) { $found.Add((ConvertTo-CheckFinding '' "there is no icon named '$($u.name)'$(if (@($u.like).Count) { "; close names: $(@($u.like) -join ', ')" }) (data-kit-icon takes a Lucide icon name)" 'quality')) }
                 # Left out: what Copilot disputed in this task, what the user ignored, and warnings
                 # already said in this task.
                 $ignoredList = try { (Read-IssueIndex $State.ProjectRoot).ignored } catch { @{} }
@@ -3469,4 +3508,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

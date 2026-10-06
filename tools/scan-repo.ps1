@@ -5,7 +5,7 @@
 .DESCRIPTION
     Test-FileContent (all fixed rules, including the generated-code checks) and, when installed,
     the tools' syntax checks (node --check, python -m py_compile) on every code file, skipping
-    build output, the built ui/, dist/, temp/ and recorded fixtures. Exit code 1 when anything is reported.
+    build output, the built ui/, dist/, temp/, recorded fixtures and third-party builds (templates/ui-kit/vendor/). Exit code 1 when anything is reported.
 #>
 param([switch]$Quiet)
 $ErrorActionPreference = 'Stop'
@@ -15,7 +15,7 @@ Import-Module (Join-Path $root 'lib\Workspace.psm1') -Force
 $reports = New-Object System.Collections.Generic.List[string]
 $files = 0
 foreach ($f in Get-ProjectFiles $root) {
-    if ($f.path -match '^(ui/|dist/|temp/|ui-src/node_modules/|tests/fixtures/)' -or [int64]$f.size -gt 600KB) { continue }
+    if ($f.path -match '^(ui/|dist/|temp/|ui-src/node_modules/|tests/fixtures/|templates/ui-kit/vendor/)' -or [int64]$f.size -gt 600KB) { continue }
     $full = Join-Path $root $f.path.Replace('/', '\')
     $text = [IO.File]::ReadAllText($full).Replace("`r`n", "`n")
     $files++

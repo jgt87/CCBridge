@@ -120,3 +120,16 @@ Describe 'Folder rules sent to Copilot' {
         $m -cmatch 'StreamHub' | Should Be $false     # only the folder name .streamhub
     }
 }
+
+Describe 'Where Copilot is told to find the plan' {
+    It 'names the plan file where the layout keeps it, and that path can be read' {
+        $server = [IO.File]::ReadAllText((Join-Path $root 'lib\Server.psm1'))
+        $server | Should Match 'is in \.streamhub/PLAN\.md, in the section marked plan:'
+        $server | Should Not Match 'is in PLAN\.md'
+        Import-Module (Join-Path $root 'lib\Executor.psm1')
+        $p = Join-Path $env:TEMP ('ccb-plan-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p '.streamhub') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $p '.streamhub\PLAN.md'), "# Plans`n<!-- plan:a -->`n## A")
+        (Invoke-ReadAction $p @('.streamhub/PLAN.md')) -join '' | Should Match '## A'
+        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}

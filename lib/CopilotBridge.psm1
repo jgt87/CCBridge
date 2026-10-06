@@ -271,15 +271,61 @@ function Format-PageSnapshot($Snap) {
 
 # The web app and the MCP server may run at the same time and drive the same Copilot tab;
 # this machine-wide lock lets only one of them type and wait for a reply at a time.
-function Use-CopilotLock([scriptblock]$Body) {
+function Get-CopilotLockFile {
+    $dir = if ($env:CCBRIDGE_STATE_ROOT) { $env:CCBRIDGE_STATE_ROOT } else { Join-Path $env:LOCALAPPDATA 'CCBridge' }
+    Join-Path $dir 'copilot-lock.json'
+}
+
+function Get-LockHolderName([string]$CommandLine) {
+    <# Which StreamHub program a command line is: the MCP server, a test tool, or the app. #>
+    if ($CommandLine -match '(?i)ccbridge-mcp\.ps1') { return 'the MCP server' }
+    if ($CommandLine -match '(?i)[\\/]tools[\\/]([\w-]+)\.ps1') { return "the test tool $($Matches[1])" }
+    if ($CommandLine -match '(?i)ccbridge\.ps1') { return 'another StreamHub window' }
+    'another StreamHub program'
+}
+
+function Get-CopilotLockHolder {
+    <# Who holds the send lock (from copilot-lock.json): @{ pid; who; since } or $null. #>
+    $f = Get-CopilotLockFile
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    try { $h = [IO.File]::ReadAllText($f) | ConvertFrom-Json } catch { return $null }
+    if (-not (Get-Process -Id ([int]$h.pid) -ErrorAction SilentlyContinue)) { return $null }
+    $h
+}
+
+function Use-CopilotLock([scriptblock]$Body, [scriptblock]$OnWait, [scriptblock]$CancelCheck) {
+    <# One program talks to Copilot at a time (a machine-wide lock). While another holds it, the
+       wait is said ($OnWait gets a line naming who holds it, and $null when the wait is over) and
+       logged, and $CancelCheck (Stop) ends it. At most 15 minutes. #>
     $mutex = New-Object Threading.Mutex($false, 'Local\CCBridgeCopilot')
     $owned = $false
     try {
-        try { $owned = $mutex.WaitOne([TimeSpan]::FromMinutes(15)) } catch [Threading.AbandonedMutexException] { $owned = $true }
-        if (-not $owned) { throw 'Copilot is busy with another StreamHub task (waited 15 minutes).' }
+        try { $owned = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
+        if (-not $owned) {
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            $h = Get-CopilotLockHolder
+            $line = if ($h) { "waiting: $($h.who) (process $($h.pid)) has been sending to Copilot since $($h.since)" } else { 'waiting: another StreamHub program is sending to Copilot' }
+            Write-CCBLog info bridge "Send lock busy, $line"
+            if ($OnWait) { & $OnWait $line }
+            while (-not $owned) {
+                if ($CancelCheck -and (& $CancelCheck)) { throw 'Stopped while waiting for another StreamHub program to finish with Copilot.' }
+                if ($sw.Elapsed.TotalMinutes -ge 15) { throw "Copilot is busy with another StreamHub program (waited 15 minutes$(if ($h) { "; $($h.who), process $($h.pid)" }))." }
+                try { $owned = $mutex.WaitOne(1000) } catch [Threading.AbandonedMutexException] { $owned = $true }
+            }
+            Write-CCBLog info bridge 'Send lock free again' @{ waitedSec = [int]$sw.Elapsed.TotalSeconds }
+            if ($OnWait) { & $OnWait $null }
+        }
+        # Who holds the lock, for a program that has to wait (and for diagnostics).
+        try {
+            $cl = [Environment]::CommandLine
+            [IO.File]::WriteAllText((Get-CopilotLockFile), (@{ pid = $PID; who = (Get-LockHolderName $cl); since = (Get-Date).ToString('HH:mm:ss') } | ConvertTo-Json -Compress))
+        } catch { }
         & $Body
     } finally {
-        if ($owned) { $mutex.ReleaseMutex() }
+        if ($owned) {
+            try { $f = Get-CopilotLockFile; if ((Test-Path -LiteralPath $f) -and ([IO.File]::ReadAllText($f) -match ('"pid":\s*' + $PID + '\b'))) { Remove-Item -LiteralPath $f -Force } } catch { }
+            $mutex.ReleaseMutex()
+        }
         $mutex.Dispose()
     }
 }
@@ -1198,7 +1244,9 @@ function Send-CopilotPrompt {
         [string[]]$Files = @(),      # local files to attach
         [switch]$OptionalFiles       # a file that cannot be attached is left out (said in $Bridge.AttachErrors)
     )
-    Use-CopilotLock {
+    $lockWait = $null
+    if ($OnStatus) { $lockWait = { param($t) & $OnStatus $t }.GetNewClosure() }
+    Use-CopilotLock -OnWait $lockWait -CancelCheck $CancelCheck -Body {
         $r = Send-CopilotPromptUnlocked -Bridge $Bridge -Text $Text -TimeoutSec $TimeoutSec -OnProgress $OnProgress -CancelCheck $CancelCheck -StallSec $StallSec -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $OnStatus -MaxTimeoutSec $MaxTimeoutSec
         if ($Bridge.PSObject.Properties['LastReplyAt']) { $Bridge.LastReplyAt = Get-Date }
         if ($r.Result -eq 'Lost') {

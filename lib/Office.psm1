@@ -350,6 +350,85 @@ function ConvertFrom-Xlsx($Zip, [int]$MaxRows = 500) {
     [pscustomobject]@{ text = $sb.ToString(); sheets = $sheets; cutRows = $cut }
 }
 
+function Get-XlsxDateStyles($Zip) {
+    <# Indexes of cellXfs whose number format shows a date or time (built-in 14-22, 45-47, or a
+       custom code with d/m/y/h/s outside quotes and brackets). #>
+    $set = New-Object 'System.Collections.Generic.HashSet[int]'
+    $x = Get-ZipXml $Zip 'xl/styles.xml'
+    if (-not $x) { return , $set }
+    $ns = New-OfficeNs $x
+    $custom = @{}
+    foreach ($f in $x.SelectNodes('//s:numFmts/s:numFmt', $ns)) {
+        $code = [regex]::Replace($f.GetAttribute('formatCode'), '"[^"]*"|\[[^\]]*\]|\\.', '')
+        $custom[[int]$f.GetAttribute('numFmtId')] = ($code -match '[dmyhs]' -and $code -notmatch '^[#0.,%\s]*$')
+    }
+    $i = 0
+    foreach ($xf in $x.SelectNodes('//s:cellXfs/s:xf', $ns)) {
+        $id = [int]$xf.GetAttribute('numFmtId')
+        if (($id -ge 14 -and $id -le 22) -or ($id -ge 45 -and $id -le 47) -or $custom[$id]) { [void]$set.Add($i) }
+        $i++
+    }
+    , $set
+}
+
+function Read-XlsxSheets {
+    <# The cell values of each sheet as rows of text (values as last calculated; dates as ISO text,
+       yyyy-MM-dd or yyyy-MM-ddTHH:mm:ss): @(@{ name; state; rows (string[] per row, empty rows left
+       out); total }). For data conversion, not display (ConvertFrom-OfficeFile is the display form). #>
+    param([Parameter(Mandatory)][string]$Path, [int]$MaxRows = 200000)
+    $zip = Open-OfficeZip $Path
+    try {
+        $wb = Get-ZipXml $zip 'xl/workbook.xml'
+        if (-not $wb) { throw 'no xl/workbook.xml: not an Excel workbook' }
+        $ns = New-OfficeNs $wb
+        $date1904 = [bool]@($wb.SelectNodes('//s:workbookPr[@date1904="1" or @date1904="true"]', $ns)).Count
+        $epoch = if ($date1904) { [datetime]'1904-01-01' } else { [datetime]'1899-12-30' }
+        $rels = Get-RelTargets $zip 'xl/_rels/workbook.xml.rels' 'xl'
+        $dates = Get-XlsxDateStyles $zip
+        $shared = New-Object System.Collections.Generic.List[string]
+        $ssx = Get-ZipXml $zip 'xl/sharedStrings.xml'
+        if ($ssx) { $sns = New-OfficeNs $ssx; foreach ($si in $ssx.SelectNodes('//s:si', $sns)) { $shared.Add((@($si.SelectNodes('.//s:t[not(ancestor::s:rPh)]', $sns) | ForEach-Object { $_.InnerText }) -join '')) } }
+        $inv = [Globalization.CultureInfo]::InvariantCulture
+        foreach ($sh in $wb.SelectNodes('//s:sheets/s:sheet', $ns)) {
+            $t = $rels[$sh.GetAttribute('id', $script:R)]
+            if (-not $t) { continue }
+            $x = Get-ZipXml $zip $t.part
+            if (-not $x) { continue }
+            $xns = New-OfficeNs $x
+            $rows = New-Object System.Collections.Generic.List[object]
+            $total = 0
+            foreach ($row in $x.SelectNodes('//s:sheetData/s:row', $xns)) {
+                $cells = @{}; $max = -1
+                foreach ($c in $row.SelectNodes('s:c', $xns)) {
+                    $v = $c.SelectSingleNode('s:v', $xns)
+                    $type = $c.GetAttribute('t')
+                    $val = switch ($type) {
+                        's' { if ($v -and [int]$v.InnerText -lt $shared.Count) { $shared[[int]$v.InnerText] } else { '' } }
+                        'inlineStr' { (@($c.SelectNodes('.//s:t', $xns) | ForEach-Object { $_.InnerText }) -join '') }
+                        'b' { if ($v -and $v.InnerText -eq '1') { 'TRUE' } else { 'FALSE' } }
+                        'e' { '' }
+                        default { if ($v) { $v.InnerText } else { '' } }
+                    }
+                    $style = $c.GetAttribute('s')
+                    $num = 0.0
+                    if ($val -ne '' -and $type -in '', 'n' -and $style -and $dates.Contains([int]$style) -and [double]::TryParse($val, [Globalization.NumberStyles]::Float, $inv, [ref]$num)) {
+                        $d = $epoch.AddDays($num)
+                        $val = if ($num -eq [Math]::Floor($num)) { $d.ToString('yyyy-MM-dd', $inv) } elseif ($num -lt 1) { $d.ToString('HH:mm:ss', $inv) } else { $d.ToString('yyyy-MM-ddTHH:mm:ss', $inv) }
+                    }
+                    if ("$val" -eq '') { continue }
+                    $i = if ($c.GetAttribute('r')) { Get-ColumnIndex $c.GetAttribute('r') } else { $max + 1 }
+                    $cells[$i] = "$val"; if ($i -gt $max) { $max = $i }
+                }
+                if ($max -lt 0) { continue }
+                $total++
+                if ($rows.Count -ge $MaxRows) { continue }
+                $rows.Add([string[]]@(for ($k = 0; $k -le $max; $k++) { "$($cells[$k])" }))
+            }
+            [pscustomobject]@{ name = $sh.GetAttribute('name'); state = $sh.GetAttribute('state'); rows = $rows.ToArray(); total = $total }
+        }
+    } finally { $zip.Dispose() }
+}
+
 function ConvertFrom-OfficeFile {
     <# A .docx/.pptx/.xlsx as Markdown text: @{ text; note } where note says what is not shown
        (images, comments, rows). Throws for other files or a damaged/protected document. #>
@@ -572,4 +651,4 @@ function Get-OfficeWriteRefusal([string]$Path, [bool]$Exists) {
     $null
 }
 
-Export-ModuleMember -Function Get-OfficeKind, Get-OfficeLabel, ConvertFrom-OfficeFile, Test-OwnDocx, ConvertTo-DocxBytes, Write-DocxFile, Get-OfficeWriteRefusal, Format-MdTable
+Export-ModuleMember -Function Get-OfficeKind, Get-OfficeLabel, ConvertFrom-OfficeFile, Read-XlsxSheets, Test-OwnDocx, ConvertTo-DocxBytes, Write-DocxFile, Get-OfficeWriteRefusal, Format-MdTable
