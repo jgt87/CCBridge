@@ -40,7 +40,8 @@
     "generated": true,
     "tools": true,
     "powershell7": true,
-    "quality": true
+    "quality": true,
+    "contrast": true
   },
   "issues": {
     "enabled": "on",
@@ -62,6 +63,16 @@
     "note": "How much of what StreamHub generates per project is kept (Settings > Retention); 0 = no limit."
   },
   "copilotTheme": true,
+  "uiKit": true,
+  "uiKitColors": "blue",
+  "uiKitParts": {
+    "interactive": true,
+    "charts": true,
+    "icons": true,
+    "react": true,
+    "designRules": true,
+    "slopChecks": true
+  },
   "pacing": {
     "newChatSettleSec": 3,
     "beforeSendSec": 1,

@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -1814,6 +1814,40 @@ function Test-WebPageCore {
                     $State.PageShotMap[$page] = ".streamhub/Screenshots/$name"
                 } catch { Write-CCBLogError agent "Screenshot of $page" $_ }
             }
+            # Readability: WCAG AA contrast of the visible text and field edges, in light and in dark.
+            if ($loaded -and (Test-CheckSwitch 'contrast')) {
+                try {
+                    $js = Get-ContrastScript
+                    # Colours that fade (CSS transitions) would be measured halfway: switch fading off in
+                    # this throwaway tab, and let the page settle after each theme switch.
+                    $null = Invoke-Cdp $s 'Runtime.evaluate' @{ expression = "(() => { const st = document.createElement('style'); st.textContent = '*, *::before, *::after { transition: none !important; animation: none !important; }'; document.head.appendChild(st); })()" }
+                    foreach ($mode in 'light', 'dark') {
+                        $null = Invoke-Cdp $s 'Emulation.setEmulatedMedia' @{ features = @(@{ name = 'prefers-color-scheme'; value = $mode }) }
+                        $until = (Get-Date).AddMilliseconds(250); while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $s 50 }
+                        $res = Invoke-Cdp $s 'Runtime.evaluate' @{ expression = $js; returnByValue = $true } -TimeoutMs 15000
+                        # ConvertFrom-Json gives a JSON list as one object in a pipeline (5.1): assign first.
+                        $list = ConvertFrom-Json "$($res.result.value)"
+                        foreach ($f in $list) {
+                            if (-not $f) { continue }
+                            $times = if ([int]$f.count -gt 1) { " ($($f.count) places)" } else { '' }
+                            if ($f.kind -eq 'target') {
+                                if ($mode -eq 'light') { $problems.Add("$page click target$(if ($f.text) { " '$($f.text)'" }) ($($f.where)) is $($f.w) x $($f.h) px; WCAG 2.2 needs at least 24 x 24 px (44 x 44 for touch)$times") }
+                                continue
+                            }
+                            if ($f.kind -eq 'align') {
+                                if ($mode -eq 'light') { $problems.Add("$page alignment: $($f.where)$(if ($f.text) { " ('$($f.text)')" }) has its $($f.side) edge at $($f.at) px, $($f.off) px from the edge most of the page uses ($($f.main) px); line it up (same page width and side padding)$times") }
+                                continue
+                            }
+                            if ($f.kind -eq 'name') {
+                                if ($mode -eq 'light') { $problems.Add("$page $($f.where)$(if ($f.text) { " ($($f.text))" }) has no name for screen readers; add visible text, aria-label or alt$times") }
+                                continue
+                            }
+                            $what = if ($f.kind -eq 'border') { "the edge of the field $(if ($f.text) { "'$($f.text)' " })($($f.where))" } else { "text '$($f.text)' ($($f.where))" }
+                            $problems.Add("$page contrast ($mode): $what is $($f.ratio):1, $($f.fg) on $($f.bg); WCAG AA needs $($f.need):1$times")
+                        }
+                    }
+                } catch { Write-CCBLogError agent "Contrast check of $page" $_ }
+            }
             foreach ($p in ($problems | Select-Object -Unique -First 20)) { $p }
             Write-CCBLog info agent "Page check $page" @{ problems = $problems.Count }
         } catch {
@@ -2806,6 +2840,13 @@ function Invoke-AgentTurn {
         $summary = $State.Summary; $State.Summary = $null
         $partsBefore = $State.SentParts.Count
         $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $Text -Sent $State.SentParts -Context $ctx -Summary $summary
+        # The UI kit rules go out: the kit must be in the project (added once, never overwritten).
+        if ($State.ProjectRoot -and $State.SentParts.Contains('rules:uikit')) {
+            try {
+                $kitAdded = @(Install-UiKit $State.ProjectRoot $State.AppRoot)
+                if ($kitAdded.Count) { Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub added its UI kit to the project ($($kitAdded -join ', ')): Copilot builds interfaces from it. Settings > Copilot > Use the UI kit turns this off." -Output ($kitAdded -join "`n") }
+            } catch { Write-CCBLogError agent 'UI kit' $_ }
+        }
         if ($State.SentParts.Count -gt $partsBefore -and $State.SentParts.Contains('actions')) { $State.FollowUps = 0 }
         if ($kind -ne 'chat') { $State.ChatKind = $kind }
         Write-CCBLog info agent "Task kind: $kind" @{ partsAdded = $State.SentParts.Count - $partsBefore; chars = $message.Length }
@@ -3014,7 +3055,7 @@ function Invoke-AgentTurn {
                         foreach ($i in @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot)) { $found.Add((ConvertTo-CheckFinding $rel $i $(if ($i -match ' says: ') { 'tool' } else { 'file' }))) }
                         if ($quality) {
                             foreach ($i in @(Find-ChangeSmells $rel $before $now.Text)) { $found.Add((ConvertTo-CheckFinding $rel $i 'smell')) }
-                            foreach ($i in @(Find-QualityIssues $rel $before $now.Text)) { $found.Add((ConvertTo-CheckFinding $rel $i 'quality')) }
+                            foreach ($i in @(Find-QualityIssues $rel $before $now.Text -UseKit:((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $State.ProjectRoot)))) { $found.Add((ConvertTo-CheckFinding $rel $i 'quality')) }
                         }
                     } catch { Write-CCBLogError agent "File check $p" $_ }
                 }
@@ -3030,6 +3071,14 @@ function Invoke-AgentTurn {
                 # A new .env file that .gitignore does not cover would end up in git.
                 try { foreach ($i in @(Find-UnignoredEnv $State.ProjectRoot $roundChanged)) { $found.Add((& $other $i 'env')) } } catch { Write-CCBLogError agent 'env check' $_ }
                 foreach ($i in @($hookIssues | Where-Object { $_ })) { $found.Add((ConvertTo-CheckFinding '' "$i" 'hook')) }
+                # UI kit icons: the icons the pages now use go into styles/kit/kit-icons.js; a name Lucide
+                # does not have is reported with close ones.
+                if ((Test-UiKitOn $State.AppRoot) -and (Test-UiKitPart 'icons' $State.AppRoot)) {
+                    try {
+                        $ic = Update-KitIcons $State.ProjectRoot $State.AppRoot
+                        foreach ($u in @($ic.unknown)) { $found.Add((ConvertTo-CheckFinding '' "there is no icon named '$($u.name)'$(if (@($u.like).Count) { "; close names: $(@($u.like) -join ', ')" }) (data-kit-icon takes a Lucide icon name)" 'quality')) }
+                    } catch { Write-CCBLogError agent 'kit icons' $_ }
+                }
                 # Left out: what Copilot disputed in this task, what the user ignored, and warnings
                 # already said in this task.
                 $ignoredList = try { (Read-IssueIndex $State.ProjectRoot).ignored } catch { @{} }

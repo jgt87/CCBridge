@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI kit examples</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="kit.css">
+</head>
+<!-- Every kit component with its markup. Copy the markup; restyle through tokens.css. -->
+<body class="kit-page">
+<!-- kit-header: its contents use kit-container, so they line up with the page content below -->
+<header class="kit-header">
+  <div class="kit-container">
+    <p class="kit-header__title">Example app</p>
+    <nav class="kit-row" aria-label="Main">
+      <a class="kit-link" href="#buttons">Components</a>
+      <a class="kit-link" href="#charts">Charts</a>
+    </nav>
+  </div>
+</header>
+<div class="kit-container kit-stack">
+
+<h1 class="kit-h1">UI kit</h1>
+<p class="kit-muted kit-prose">Each section shows one component. Class names start with kit-. Headings, labels and buttons are in sentence case.</p>
+
+<!-- kit-part:palette -->
+<!-- kit-band: the gradient, for a header band (white text, large or bold); kit-swatch -->
+<section id="palette">
+  <div class="kit-band"><p class="kit-band__title">Gradient band</p></div>
+  <h2 class="kit-h2">Palette</h2>
+  <div class="kit-row kit-small kit-muted">
+    <span class="kit-swatch" style="background: var(--kit-palette-blue)" title="Blue"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-light-blue)" title="Light blue"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-teal)" title="Teal"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-green)" title="Green"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-light-green)" title="Light green"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-yellow)" title="Yellow"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-orange)" title="Orange"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-magenta)" title="Magenta"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-violet)" title="Violet"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-light-grey)" title="Light grey"></span>
+    <span class="kit-swatch" style="background: var(--kit-palette-dark-grey)" title="Dark grey"></span>
+    <span>Each has a lighter (-1) and darker (-2) variation in tokens.css.</span>
+  </div>
+</section>
+<!-- /kit-part:palette -->
+
+<!-- kit-btn -->
+<section id="buttons">
+  <h2 class="kit-h2">Buttons</h2>
+  <div class="kit-row">
+    <button class="kit-btn kit-btn--primary" type="button">Save</button>
+    <button class="kit-btn" type="button">Cancel</button>
+    <button class="kit-btn kit-btn--ghost" type="button">More</button>
+    <button class="kit-btn kit-btn--danger" type="button">Delete</button>
+    <button class="kit-btn kit-btn--sm" type="button">Small</button>
+  </div>
+</section>
+
+<!-- kit-field, kit-input, kit-select, kit-textarea, kit-check, kit-form -->
+<section id="forms">
+  <h2 class="kit-h2">Forms</h2>
+  <form class="kit-form">
+    <div class="kit-field">
+      <label class="kit-label" for="ex-name">Name</label>
+      <input class="kit-input" id="ex-name" placeholder="Full name">
+      <span class="kit-help">As it should appear on the report.</span>
+    </div>
+    <div class="kit-field">
+      <label class="kit-label" for="ex-team">Team</label>
+      <select class="kit-select" id="ex-team"><option>Team A</option><option>Team B</option></select>
+    </div>
+    <div class="kit-field">
+      <label class="kit-label" for="ex-mail">Email</label>
+      <input class="kit-input" id="ex-mail" aria-invalid="true" value="not-an-address">
+      <span class="kit-error-text">Enter an email address.</span>
+    </div>
+    <div class="kit-field">
+      <label class="kit-label" for="ex-notes">Notes</label>
+      <textarea class="kit-textarea" id="ex-notes"></textarea>
+    </div>
+    <label class="kit-check"><input type="checkbox" checked> Send me a copy</label>
+  </form>
+</section>
+
+<!-- kit-toolbar, kit-segmented, kit-table-wrap, kit-table, kit-num, kit-badge -->
+<section id="table">
+  <h2 class="kit-h2">Toolbar and table</h2>
+  <div class="kit-toolbar">
+    <input class="kit-input" aria-label="Search" placeholder="Search">
+    <div class="kit-segmented" role="group" aria-label="Show">
+      <button type="button" aria-pressed="true">All</button>
+      <button type="button" aria-pressed="false">Open</button>
+      <button type="button" aria-pressed="false">Closed</button>
+    </div>
+    <span class="kit-toolbar__spacer"></span>
+    <button class="kit-btn kit-btn--primary" type="button">New item</button>
+  </div>
+  <div class="kit-table-wrap">
+    <table class="kit-table">
+      <thead><tr><th>Item</th><th>Status</th><th class="kit-num">Count</th></tr></thead>
+      <tbody>
+        <tr><td>First example</td><td><span class="kit-badge kit-badge--ok">Done</span></td><td class="kit-num">12</td></tr>
+        <tr><td>Second example</td><td><span class="kit-badge kit-badge--warn">Waiting</span></td><td class="kit-num">3</td></tr>
+        <tr><td>Third example</td><td><span class="kit-badge kit-badge--error">Failed</span></td><td class="kit-num">0</td></tr>
+        <tr><td>Fourth example</td><td><span class="kit-badge kit-badge--accent">New</span></td><td class="kit-num">7</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Scrollbars follow the area they are in (thin handle, see-through track); nothing to add. -->
+<section id="scroll">
+  <h2 class="kit-h2">Scrolling area</h2>
+  <div class="kit-panel" style="max-height: 8rem; overflow: auto">
+    <p>A panel with more text than fits. Its scrollbar is thin and takes the panel's colour.</p>
+    <p>Second paragraph.</p><p>Third paragraph.</p><p>Fourth paragraph.</p><p>Fifth paragraph.</p>
+  </div>
+</section>
+
+<!-- kit-tabs, kit-tab -->
+<section id="tabs">
+  <h2 class="kit-h2">Tabs</h2>
+  <div class="kit-tabs" role="tablist">
+    <button class="kit-tab" role="tab" aria-selected="true" type="button">Day</button>
+    <button class="kit-tab" role="tab" aria-selected="false" type="button">Week</button>
+    <button class="kit-tab" role="tab" aria-selected="false" type="button">Month</button>
+  </div>
+</section>
+
+<!-- kit-split, kit-nav, kit-panel -->
+<section id="layout">
+  <h2 class="kit-h2">Page with side navigation and a panel</h2>
+  <div class="kit-split">
+    <div class="kit-panel">
+      <div class="kit-panel__head"><h3 class="kit-panel__title">Overview</h3><button class="kit-btn kit-btn--sm" type="button">Export</button></div>
+      <!-- kit-figures: key numbers as compact label + value, not big hero numbers -->
+      <div class="kit-figures">
+        <div><div class="kit-figure__label">Items</div><div class="kit-figure__value">1,284</div><div class="kit-figure__note">this month</div></div>
+        <div><div class="kit-figure__label">Open</div><div class="kit-figure__value">37</div><div class="kit-figure__note">12 overdue</div></div>
+        <div><div class="kit-figure__label">Average time</div><div class="kit-figure__value">2.4 days</div></div>
+      </div>
+    </div>
+    <nav class="kit-panel kit-nav" aria-label="Sections">
+      <a class="kit-nav__item" href="#layout" aria-current="page">Overview</a>
+      <a class="kit-nav__item" href="#table">Items</a>
+      <a class="kit-nav__item" href="#forms">Settings</a>
+    </nav>
+  </div>
+</section>
+
+<!-- kit-notice -->
+<section id="notices">
+  <h2 class="kit-h2">Notices</h2>
+  <div class="kit-stack">
+    <div class="kit-notice"><div><p class="kit-notice__title">Note</p>The data was updated an hour ago.</div></div>
+    <div class="kit-notice kit-notice--ok"><div>All items were saved.</div></div>
+    <div class="kit-notice kit-notice--warn"><div>Three items have no owner.</div></div>
+    <div class="kit-notice kit-notice--error"><div><p class="kit-notice__title">Could not load the data</p>Check the file and try again.</div></div>
+  </div>
+</section>
+
+<!-- kit-empty -->
+<section id="empty">
+  <h2 class="kit-h2">Empty state</h2>
+  <div class="kit-panel kit-empty">
+    <p class="kit-empty__title">No items yet</p>
+    <p>Add the first item to see it here.</p>
+    <button class="kit-btn kit-btn--primary" type="button">New item</button>
+  </div>
+</section>
+
+<!-- kit-dialog (<dialog>), kit-kbd, kit-spinner -->
+<section id="dialog">
+  <h2 class="kit-h2">Dialog and small pieces</h2>
+  <div class="kit-row">
+    <button class="kit-btn" type="button" onclick="document.getElementById('ex-dialog').showModal()">Open dialog</button>
+    <span class="kit-small kit-muted">Press <kbd class="kit-kbd">Esc</kbd> to close.</span>
+    <span class="kit-spinner" role="status" aria-label="Loading"></span>
+  </div>
+  <dialog class="kit-dialog" id="ex-dialog">
+    <h3 class="kit-h3">Delete this item?</h3>
+    <p class="kit-muted">This cannot be undone.</p>
+    <div class="kit-dialog__actions">
+      <button class="kit-btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      <button class="kit-btn kit-btn--danger" type="button" onclick="this.closest('dialog').close()">Delete</button>
+    </div>
+  </dialog>
+</section>
+
+<!-- kit-part:interactive -->
+<!-- Adapted from kokonutui (MIT, see LICENSE-kokonutui.txt): the parts below need kit.js. -->
+
+<!-- kit-btn--hold with data-kit-hold (ms); listens: kit:hold -->
+<section id="hold">
+  <h2 class="kit-h2">Hold to confirm</h2>
+  <div class="kit-row">
+    <button class="kit-btn kit-btn--hold" data-kit-hold="1500" type="button">Hold to delete</button>
+    <!-- command button: a kit-btn with its shortcut in a kit-kbd -->
+    <button class="kit-btn" type="button">Search <kbd class="kit-kbd">Ctrl+K</kbd></button>
+  </div>
+</section>
+
+<!-- kit-search with data-kit-search; kit-search__list, kit-search__item, kit-search__meta; listens: kit:pick -->
+<section id="search">
+  <h2 class="kit-h2">Search with suggestions</h2>
+  <div class="kit-search" data-kit-search>
+    <input class="kit-input" aria-label="Find a page" placeholder="Find a page">
+    <ul class="kit-search__list">
+      <li class="kit-search__item">Overview <span class="kit-search__meta">page</span></li>
+      <li class="kit-search__item">Items <span class="kit-search__meta">page</span></li>
+      <li class="kit-search__item">Settings <span class="kit-search__meta">page</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- kit-drop with data-kit-drop; kit-drop__title, kit-drop__files, kit-progress, kit-progress__bar; listens: kit:files -->
+<section id="drop">
+  <h2 class="kit-h2">File drop zone</h2>
+  <label class="kit-drop" data-kit-drop>
+    <input type="file" multiple>
+    <span class="kit-drop__title">Drop files here</span>
+    <span>or click to choose</span>
+    <ul class="kit-drop__files"></ul>
+    <div class="kit-progress" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="40"><div class="kit-progress__bar" style="width: 40%"></div></div>
+  </label>
+</section>
+
+<!-- kit-tabs--animated and kit-segmented--animated: a sliding indicator; listens: kit:select -->
+<section id="animated-tabs">
+  <h2 class="kit-h2">Animated tabs and choice</h2>
+  <div class="kit-stack">
+    <div class="kit-tabs kit-tabs--animated" role="tablist">
+      <button class="kit-tab" role="tab" aria-selected="true" type="button">Day</button>
+      <button class="kit-tab" role="tab" aria-selected="false" type="button">Week</button>
+      <button class="kit-tab" role="tab" aria-selected="false" type="button">Month</button>
+    </div>
+    <div class="kit-segmented kit-segmented--animated" role="group" aria-label="Show">
+      <button type="button" aria-pressed="true">All</button>
+      <button type="button" aria-pressed="false">Open</button>
+      <button type="button" aria-pressed="false">Closed</button>
+    </div>
+  </div>
+</section>
+
+<!-- kit-loading with kit-loading__text -->
+<section id="loading">
+  <h2 class="kit-h2">Loading text</h2>
+  <span class="kit-loading" role="status"><span class="kit-spinner" aria-hidden="true"></span><span class="kit-loading__text">Loading the data...</span></span>
+</section>
+
+<!-- kit-composer with kit-composer__actions -->
+<section id="composer">
+  <h2 class="kit-h2">Composer</h2>
+  <div class="kit-composer">
+    <textarea aria-label="Message" placeholder="Write a message"></textarea>
+    <div class="kit-composer__actions">
+      <button class="kit-btn kit-btn--ghost kit-btn--sm" type="button">Attach</button>
+      <span class="kit-toolbar__spacer"></span>
+      <button class="kit-btn kit-btn--primary kit-btn--sm" type="button">Send</button>
+    </div>
+  </div>
+</section>
+
+<!-- /kit-part:interactive -->
+
+<!-- kit-part:icons -->
+<!-- Icons (kit-icons.js, Lucide, ISC: see LICENSE-lucide.txt): data-kit-icon="NAME"; any Lucide name works,
+     the helper program adds the icons a project uses. Icon-only buttons need aria-label. -->
+<section id="icons">
+  <h2 class="kit-h2">Icons</h2>
+  <div class="kit-row">
+    <span data-kit-icon="calendar" aria-hidden="true"></span>
+    <span data-kit-icon="users" aria-hidden="true"></span>
+    <span data-kit-icon="chart-column" aria-hidden="true"></span>
+    <span data-kit-icon="circle-check" aria-hidden="true"></span>
+    <span data-kit-icon="triangle-alert" aria-hidden="true"></span>
+    <button class="kit-btn kit-btn--primary" type="button"><span data-kit-icon="plus" aria-hidden="true"></span>New item</button>
+    <button class="kit-btn" type="button"><span data-kit-icon="download" aria-hidden="true"></span>Export</button>
+    <button class="kit-btn kit-btn--icon" type="button" aria-label="Settings"><span data-kit-icon="settings" aria-hidden="true"></span></button>
+  </div>
+</section>
+<!-- /kit-part:icons -->
+
+<!-- kit-part:charts -->
+<!-- Charts (kit-charts.js; design adapted from bklit-ui, MIT, see LICENSE-bklit-ui.txt).
+     <div class="kit-chart" data-kit-chart="KIND" data-kit-data='JSON' aria-label="WHAT IT SHOWS"></div>
+     KIND: bar, line, area, ring, gauge, heatmap, sparkline. From code: KitCharts.bar(element, data). -->
+<section id="charts">
+  <h2 class="kit-h2">Charts</h2>
+  <div class="kit-grid">
+    <div class="kit-panel">
+      <div class="kit-panel__head"><h3 class="kit-panel__title">Items per month</h3></div>
+      <div class="kit-chart" data-kit-chart="bar" aria-label="Items per month, this year and last year"
+        data-kit-data='{"labels":["Jan","Feb","Mar","Apr","May","Jun"],"series":[{"name":"This year","values":[42,51,38,64,58,71]},{"name":"Last year","values":[35,44,40,49,52,55]}]}'></div>
+    </div>
+    <div class="kit-panel">
+      <div class="kit-panel__head"><h3 class="kit-panel__title">Open items</h3></div>
+      <div class="kit-chart" data-kit-chart="area" aria-label="Open items over twelve weeks"
+        data-kit-data='{"labels":["W1","W2","W3","W4","W5","W6","W7","W8","W9","W10","W11","W12"],"series":[{"name":"Open","values":[18,22,19,27,31,26,24,29,35,33,30,28]}]}'></div>
+    </div>
+    <div class="kit-panel">
+      <div class="kit-panel__head"><h3 class="kit-panel__title">By type</h3></div>
+      <div class="kit-chart" data-kit-chart="ring" aria-label="Items by type" data-kit-height="200"
+        data-kit-data='{"items":[{"label":"Type A","value":48},{"label":"Type B","value":27},{"label":"Type C","value":15},{"label":"Other","value":10}],"center":"100"}'></div>
+    </div>
+    <div class="kit-panel">
+      <div class="kit-panel__head"><h3 class="kit-panel__title">Target reached</h3></div>
+      <div class="kit-chart" data-kit-chart="gauge" aria-label="Target reached: 72 percent"
+        data-kit-data='{"value":72,"max":100,"unit":"%","label":"of the target"}'></div>
+    </div>
+  </div>
+  <div class="kit-panel" style="margin-top: var(--kit-space-4)">
+    <div class="kit-panel__head"><h3 class="kit-panel__title">Busy hours</h3><span class="kit-chart" data-kit-chart="sparkline" data-kit-data='{"values":[3,5,4,8,6,9,7,11]}'></span></div>
+    <div class="kit-chart" data-kit-chart="heatmap" aria-label="Busy hours per weekday"
+      data-kit-data='{"rows":["Mon","Tue","Wed","Thu","Fri"],"cols":["8","9","10","11","12","13","14","15","16","17"],"values":[[1,4,6,3,2,1,5,6,3,1],[2,5,7,4,1,2,6,5,2,0],[0,3,5,6,3,2,4,7,4,1],[1,4,6,5,2,1,5,6,2,1],[0,2,3,2,1,0,2,3,1,0]]}'></div>
+  </div>
+</section>
+<!-- /kit-part:charts -->
+
+</div>
+<!-- kit-part:interactive --><script src="kit.js"></script><!-- /kit-part:interactive -->
+<!-- kit-part:charts --><script src="kit-charts.js"></script><!-- /kit-part:charts -->
+<!-- kit-part:icons --><script src="kit-icons.js"></script><!-- /kit-part:icons -->
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { Monitor, Moon, RotateCcw, Sun, X } from "lucide-react";
+import { AppWindow, Bot, Cpu, Lock, LogIn, Monitor, Moon, Palette, RotateCcw, ShieldCheck, Settings2, SquareTerminal, Sun, Timer, X } from "lucide-react";
 import { getThemeChoice, setThemeChoice, type ThemeChoice } from "@/lib/theme";
 import { type CardView, getCardView, setCardView } from "@/lib/card-view";
 import { readStored, writeStored } from "@/lib/stored";
@@ -399,7 +399,10 @@ function SettingsBody({
             onClick={() => choose(name)}
             type="button"
           >
-            {name}
+            <span className="inline-flex items-center gap-2">
+              <SectionIcon name={name} />
+              {name}
+            </span>
           </button>
         ))}
       </nav>
@@ -442,6 +445,25 @@ function SettingsBody({
 
 /** The group shown at the top of the list, and the first time Settings opens. */
 const FIRST_SECTION = "App";
+/** A Lucide icon per settings section (a plain one for groups added later). */
+const SECTION_ICONS: Record<string, typeof Monitor> = {
+  App: AppWindow,
+  "This browser": Monitor,
+  "This computer": Cpu,
+  "Sign-in": LogIn,
+  Copilot: Bot,
+  Timing: Timer,
+  "Changes and commands": SquareTerminal,
+  "Checks and issues": ShieldCheck,
+  "Privacy and retention": Lock,
+  "UI kit": Palette,
+};
+
+function SectionIcon({ name }: { name: string }) {
+  const Icon = SECTION_ICONS[name] ?? Settings2;
+  return <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />;
+}
+
 /** Sections that are not app settings groups, right after it. */
 const FIXED_SECTIONS = ["This browser", "This computer", "Sign-in"];
 /** The section shown last time (this browser). */

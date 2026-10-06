@@ -76,6 +76,14 @@ $script:SettingDefs = @(
     @{ key = 'copilotTheme'; group = 'Copilot'; label = 'Copilot follows the app''s theme'; help = 'The Copilot window shows light or dark like StreamHub (Settings > This browser > Theme). Only the Copilot tab is told the theme; nothing changes in Edge or your Microsoft 365 account, and Copilot must be set to follow the system theme (its default). Off: Copilot follows Windows.'; type = 'toggle' }
     @{ key = 'responseMode'; group = 'Copilot'; label = 'Response mode'; help = 'Sets Copilot''s Auto / Quick response / Think deeper picker before each message. As set in Copilot: StreamHub does not touch the picker, so whatever you chose in the Copilot window is used. The menu next to New chat changes it per chat.'; type = 'select'; options = @('leave', 'auto', 'quick', 'deep') }
     @{ key = 'webRead'; group = 'Copilot'; label = 'Read web pages'; help = 'When Copilot asks to read a web page (the web action): named-sites reads pages on websites your message names at once and asks for others; always-ask asks every time; off never reads pages (Copilot still uses its own web search).'; type = 'select'; options = @('named-sites', 'always-ask', 'off') }
+    @{ key = 'uiKit'; group = 'UI kit'; label = 'Use the UI kit'; help = 'When Copilot builds an interface: StreamHub adds its UI kit to the project (styles/kit/: colour and size tokens, ready-made components, an examples page) and tells Copilot to build from it and restyle through the tokens, instead of inventing new styles each time. The files are then part of the project; nothing in them is overwritten later. Off: Copilot styles pages its own way. The parts below choose what the kit holds.'; type = 'toggle' }
+    @{ key = 'uiKitColors'; group = 'UI kit'; label = 'Colours'; help = 'blue: the blue palette (blue and light blue accents, teal, green, light green, yellow, orange, magenta and violet with their variations, white, greys and black), with the light-blue-to-blue gradient. neutral: greys with a near-black accent and chart colours that stay apart for colour-blind readers. Both meet WCAG AA in light and dark. A project keeps the colours it got; change its styles/kit/tokens.css to switch it.'; type = 'select'; options = @('blue', 'neutral') }
+    @{ key = 'uiKitParts.interactive'; group = 'UI kit'; label = 'Interactive parts'; help = 'Hold to confirm, search with suggestions, a file drop zone, animated tabs, loading text, a composer and a command button (kit.js; adapted from kokonutui).'; type = 'toggle' }
+    @{ key = 'uiKitParts.charts'; group = 'UI kit'; label = 'Charts'; help = 'Bar, line, area, ring, gauge, heatmap and sparkline charts drawn on the kit''s colours (kit-charts.js; design adapted from bklit-ui).'; type = 'toggle' }
+    @{ key = 'uiKitParts.icons'; group = 'UI kit'; label = 'Icons'; help = 'Lucide icons (2,000+, ISC licence): data-kit-icon="NAME" on a page draws the icon in the text colour. A project gets the common ones, and any other icon it uses is added to styles/kit/kit-icons.js after each change; a name that does not exist is reported with close ones.'; type = 'toggle' }
+    @{ key = 'uiKitParts.react'; group = 'UI kit'; label = 'React versions'; help = 'In a React project: the interactive parts and charts as React components (styles/kit/react/).'; type = 'toggle' }
+    @{ key = 'uiKitParts.designRules'; group = 'UI kit'; label = 'Design rules for Copilot'; help = 'Short rules on hierarchy, feedback, states, dialogs, forms, tables and charts, motion and accessibility, sent with interface work (also without the kit). A request to review the design also gets the review steps.'; type = 'toggle' }
+    @{ key = 'uiKitParts.slopChecks'; group = 'UI kit'; label = 'Checks for generated-looking interfaces'; help = 'Warnings when a change adds gradient text, thick coloured side stripes, decorative blur or (with the kit) hard-coded colours instead of tokens.'; type = 'toggle' }
     @{ key = 'pacing.newChatSettleSec'; group = 'Timing'; label = 'Pause after a new chat (s)'; help = 'Wait after a new Copilot chat is ready, before typing.'; type = 'number'; min = 0; max = 30 }
     @{ key = 'pacing.beforeSendSec'; group = 'Timing'; label = 'Pause before Send (s)'; help = 'Wait between typing the prompt and pressing Send.'; type = 'number'; min = 0; max = 10 }
     @{ key = 'pacing.betweenPromptsSec'; group = 'Timing'; label = 'Gap after a reply (s)'; help = 'Minimum time between Copilot''s last reply and the next prompt.'; type = 'number'; min = 0; max = 60 }
@@ -102,6 +110,7 @@ $script:SettingDefs = @(
     @{ key = 'checks.tools'; group = 'Checks and issues'; label = 'Syntax check with installed tools'; help = 'When the file checks find nothing: node --check for JavaScript and python -m py_compile for Python, when they are installed.'; type = 'toggle' }
     @{ key = 'checks.powershell7'; group = 'Checks and issues'; label = 'Warn about PowerShell 7 features'; help = 'Commands and parameters a PowerShell 5.1 script cannot use (ConvertFrom-Json -AsHashtable, ForEach-Object -Parallel...). Off when your scripts run in PowerShell 7.'; type = 'toggle' }
     @{ key = 'checks.quality'; group = 'Checks and issues'; label = 'Quality notes'; help = 'Debug leftovers, swallowed errors, personal paths, very long files and similar notes. Never block a task: Copilot is told once.'; type = 'toggle' }
+    @{ key = 'checks.contrast'; group = 'UI kit'; label = 'Readability and accessibility'; help = 'WCAG checks with the page check: the contrast of the visible text of a changed page against its background, in light and in dark (4.5:1 for normal text, 3:1 for large text and the edges of fields), click targets of at least 24 x 24 px, and images and buttons without a name; plus the UI kit''s colour pairs when tokens.css changes. Failures go to Copilot with what to change.'; type = 'toggle' }
     @{ key = 'evidence'; group = 'Checks and issues'; label = 'Task report (evidence)'; help = 'After a task that changed files, a short report of what was asked, what changed and which checks passed, in .streamhub/Evidence/ of the project; the chat links to it.'; type = 'select'; options = @('on', 'off') }
     @{ key = 'issues.enabled'; group = 'Checks and issues'; label = 'Issue detection'; help = 'Keep an index of problems in every project file (file checks, secrets, code health) and scan the changed files after each task.'; type = 'select'; options = @('on', 'off') }
     @{ key = 'issues.autoFix'; group = 'Checks and issues'; label = 'Fix automatically'; help = 'Problems a task adds that StreamHub sends back to Copilot to fix, one file at a time: error (broken syntax, missing files, typos), secret (keys and passwords in code), health (functions that are too complex). The rest is only reported.'; type = 'select'; options = @('error', 'error,secret', 'error,secret,health', 'none') }
@@ -215,6 +224,19 @@ function Test-DataCopiesOn([string]$AppRoot) {
     try { $v = (Get-CCBridgeConfig harness $AppRoot).dataCopies; ($null -eq $v) -or [bool]$v } catch { $true }
 }
 
+function Test-UiKitPart([string]$Name, [string]$AppRoot) {
+    <# Setting uiKitParts.NAME (interactive, charts, react, designRules, slopChecks): on unless turned
+       off. Read from disk, so every runspace sees a change at once. #>
+    if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
+    try { $p = (Get-CCBridgeConfig harness $AppRoot).uiKitParts; $v = if ($p) { $p.$Name } else { $null }; ($null -eq $v) -or [bool]$v } catch { $true }
+}
+
+function Test-UiKitOn([string]$AppRoot) {
+    <# Setting uiKit (on unless turned off): interface work uses the UI kit (templates/ui-kit). Read
+       from disk, so every runspace sees a change at once. #>
+    try { $v = (Get-CCBridgeConfig harness $AppRoot).uiKit; ($null -eq $v) -or [bool]$v } catch { $true }
+}
+
 function Test-CheckSwitch([string]$Name, [string]$AppRoot) {
     <# Setting checks.NAME (generated, tools, powershell7, quality): on unless turned off. Read from
        disk, kept until the settings files change, so every runspace (and Lint) sees a change. #>
@@ -263,4 +285,4 @@ function Get-CCBridgeEnvironment {
     }
 }
 
-Export-ModuleMember -Function Test-CheckSwitch, Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings
+Export-ModuleMember -Function Test-UiKitPart, Test-UiKitOn, Test-CheckSwitch, Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings

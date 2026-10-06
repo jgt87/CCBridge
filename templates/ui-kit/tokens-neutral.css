@@ -1,0 +1,134 @@
+/*
+  UI kit tokens, neutral colours (Settings > UI kit > Colours: Neutral): monochrome greys with a
+  near-black accent, and chart colours that stay apart for colour-blind readers (after the Okabe-Ito
+  set). Every pair meets WCAG AA in light and dark. Restyle a project by changing these values only.
+*/
+:root {
+  color-scheme: light;   /* the browser draws its own parts (scrollbars, pickers) to match */
+  --kit-gradient: linear-gradient(45deg, #5a5f66 0%, #1f2328 100%);
+  --kit-on-gradient: #ffffff;
+
+  --kit-accent: #1f2328;
+  --kit-accent-hover: #3a3f45;
+  --kit-accent-soft: #ececee;
+  --kit-on-accent: #ffffff;
+  --kit-accent-2: #5a5f66;
+
+  --kit-bg: #f6f6f7;
+  --kit-surface: #ffffff;
+  --kit-surface-2: #eeeef0;
+  --kit-border: #dcdde0;
+  --kit-border-strong: #6e737a;
+  --kit-text: #1f2328;
+  --kit-text-muted: #5a5f66;
+
+  --kit-ok: #1f7a4a;
+  --kit-ok-soft: #e7f4ed;
+  --kit-warn: #8a5a00;
+  --kit-warn-soft: #fbf1dc;
+  --kit-error: #b42318;
+  --kit-error-soft: #fbe9e7;
+
+  --kit-chart-1: #0072b2;
+  --kit-chart-2: #007a5a;
+  --kit-chart-3: #b85000;
+  --kit-chart-4: #a8578a;
+  --kit-chart-5: #5a5f66;
+  --kit-chart-6: #8a6a00;
+
+  /* Type: Arial first (on every computer, nothing to download). Headings and labels in sentence
+     case ("Totals", not "TOTALS"). */
+  --kit-font: Arial, "Helvetica Neue", Helvetica, "Segoe UI", system-ui, sans-serif;
+  --kit-font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  --kit-text-xs: 0.75rem;
+  --kit-text-sm: 0.875rem;
+  --kit-text-md: 1rem;
+  --kit-text-lg: 1.25rem;
+  --kit-text-xl: 1.625rem;
+  --kit-line: 1.5;
+
+  /* Space, on a 4px scale. */
+  --kit-space-1: 0.25rem;
+  --kit-space-2: 0.5rem;
+  --kit-space-3: 0.75rem;
+  --kit-space-4: 1rem;
+  --kit-space-5: 1.5rem;
+  --kit-space-6: 2rem;
+  --kit-space-7: 3rem;
+
+  /* Scrollbars: a thin handle on a see-through track (the area behind shows), the accent on hover. */
+  --kit-scroll-thumb: var(--kit-border-strong);
+  --kit-scroll-thumb-hover: var(--kit-accent);
+
+  /* One page grid: the header, the content and the footer share these edges. */
+  --kit-page-width: 1200px;
+  --kit-page-pad: 1.5rem;
+
+  --kit-radius: 6px;
+  --kit-radius-lg: 10px;
+  --kit-shadow: 0 1px 2px rgba(20, 20, 30, 0.06), 0 2px 8px rgba(20, 20, 30, 0.06);
+  --kit-focus: 0 0 0 3px rgba(31, 35, 40, 0.3);
+  --kit-speed: 140ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --kit-gradient: linear-gradient(45deg, #5a5f66 0%, #2b2f34 100%);
+    --kit-accent: #e6e6e6;
+    --kit-accent-hover: #ffffff;
+    --kit-accent-soft: #2e3034;
+    --kit-on-accent: #1f2328;
+    --kit-bg: #141517;
+    --kit-surface: #1c1d1f;
+    --kit-surface-2: #26282b;
+    --kit-border: #36383c;
+    --kit-border-strong: #8a8f96;
+    --kit-text: #ededee;
+    --kit-text-muted: #a8acb2;
+    --kit-ok: #5cc28c;
+    --kit-ok-soft: #17291f;
+    --kit-warn: #e0b04f;
+    --kit-warn-soft: #2e2512;
+    --kit-error: #f07a6e;
+    --kit-error-soft: #321a18;
+    --kit-chart-1: #56b4e9;
+    --kit-chart-2: #2bb68a;
+    --kit-chart-3: #e69f00;
+    --kit-chart-4: #f07a3a;
+    --kit-chart-5: #d48ab8;
+    --kit-chart-6: #b8bec6;
+    --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
+    --kit-focus: 0 0 0 3px rgba(230, 230, 230, 0.35);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --kit-gradient: linear-gradient(45deg, #5a5f66 0%, #2b2f34 100%);
+  --kit-accent: #e6e6e6;
+  --kit-accent-hover: #ffffff;
+  --kit-accent-soft: #2e3034;
+  --kit-on-accent: #1f2328;
+  --kit-bg: #141517;
+  --kit-surface: #1c1d1f;
+  --kit-surface-2: #26282b;
+  --kit-border: #36383c;
+  --kit-border-strong: #8a8f96;
+  --kit-text: #ededee;
+  --kit-text-muted: #a8acb2;
+  --kit-ok: #5cc28c;
+  --kit-ok-soft: #17291f;
+  --kit-warn: #e0b04f;
+  --kit-warn-soft: #2e2512;
+  --kit-error: #f07a6e;
+  --kit-error-soft: #321a18;
+  --kit-chart-1: #56b4e9;
+  --kit-chart-2: #2bb68a;
+  --kit-chart-3: #e69f00;
+  --kit-chart-4: #f07a3a;
+  --kit-chart-5: #d48ab8;
+  --kit-chart-6: #b8bec6;
+  --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --kit-focus: 0 0 0 3px rgba(230, 230, 230, 0.35);
+}

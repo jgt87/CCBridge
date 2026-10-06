@@ -6,6 +6,23 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.96] - 2026-10-06
+
+### Added
+- UI kit: when Copilot builds an interface, StreamHub adds its UI kit to the project (`styles/kit/`: `tokens.css` with colours, type, space and shadows for light and dark, `kit.css` with buttons, forms, toolbar, tabs, navigation, tables, badges, notices, key figures, empty states and dialogs, and `kit-examples.html` with the markup of each) and tells Copilot to build from it and restyle through the tokens. The default accent is a deep blue (#10069F). The kit is copied once and never overwritten, so a project can restyle it. Settings > Copilot > Use the UI kit turns it off. The kit also has interactive parts adapted from kokonutui (MIT, with its licence in the kit): hold to confirm, search with suggestions, a file drop zone with progress, animated tabs and segmented choice, loading text, a composer and a command button. Plain pages get them through `kit.js` (no build step, works from disk); React projects also get `styles/kit/react/` with the same parts as React components that need nothing but React.
+- UI kit icons: the Lucide icon set (all 2,000+ icons, ISC licence, in the kit) through `data-kit-icon="NAME"` on any element, drawn as inline SVG in the text colour (works from disk). A project gets the common icons in `styles/kit/kit-icons.js`, and every other icon its pages use is added after each change; a name Lucide does not have is reported with close names (also typos). React projects get `react/Icon.tsx`. Settings > UI kit > Icons. `tools/update-lucide.ps1` rebuilds the set from the `lucide-static` package.
+- UI kit scrollbars: thin, on a see-through track so they take the colour of the panel or page they are in, with a handle that meets 3:1 and turns the accent on hover, in light and dark (the kit also sets `color-scheme`, so the browser's own parts follow dark mode).
+- Settings sections have Lucide icons in their list.
+- UI kit colours: Settings > UI kit > Colours chooses the palette a project gets. Blue (the default): blue and light blue accents with teal, green, light green, yellow, orange, magenta and violet, each with a lighter and darker variation, plus white, greys and black (`--kit-palette-*`), and the light-blue-to-blue gradient from bottom left to top right as the only gradient. Neutral: greys with a near-black accent and chart colours that stay apart for colour-blind readers. The working tokens pick readable shades for light and dark (darker variations where a colour is too light on white, light blue as the accent on dark pages), and every pair passes WCAG AA in both palettes. Other gradients are reported.
+- UI kit typography: Arial first; headings, table headers, labels and buttons in sentence case (the kit's own capital table headers are gone), and a change that adds capital headings or `text-transform: uppercase` is reported.
+- Alignment: one page grid (`--kit-page-width`, `--kit-page-pad`, a `kit-header` whose contents share the page edges), a design rule for Copilot, and a page check that reports blocks (header contents, sections, headings, panels, tables) whose left or right edge is a few pixels off the edge the rest of the page uses.
+- Settings > UI kit: the kit is its own section with a switch per part: the kit itself, interactive parts, charts, React versions, design rules for Copilot, checks for generated-looking interfaces, and readability and accessibility. A part that is off is not copied into projects (its sections are left out of the examples page) and not mentioned to Copilot; switching it on later adds its files at the next interface task.
+- Design rules for Copilot, written for StreamHub: one main action per screen, feedback and empty/loading/error states, dialogs only for blocking decisions, forms, tables and charts, light and dark, motion, accessibility. A request to review the design (also in Dutch) gets fixed review steps: screenshots of each view, then layout, interaction, accessibility, consistency and craft, reported as Critical / Improvements / What works.
+- More accessibility checks: click targets under 24 x 24 px that crowd other targets (WCAG 2.5.8, with its spacing and in-sentence link exceptions), buttons, links and images without a name, a removed focus outline without a :focus-visible replacement, and animations without a reduced-motion version.
+- UI kit charts: `kit-charts.js` draws bar (grouped or horizontal), line, area, ring, gauge, heatmap and sparkline charts as plain SVG on the kit's colours, with no library and no build step (a `data-kit-chart` element or `KitCharts.bar(element, data)`); the design (dashed grid, rounded bars, fading area fill, hover highlight with tooltip, legend, grow-in) is adapted from bklit-ui (MIT, with its licence in the kit). Each chart has a summary and a hidden data table for screen readers; axis labels thin out to fit, and the chart colours (`--kit-chart-1` to `-6`) stand out 3:1 in light and dark. React projects get `react/Chart.tsx`.
+- Readability (WCAG AA contrast): the page check measures the visible text of a changed page against the background it sits on, in light and in dark (4.5:1 for normal text, 3:1 for large text and for the edges of form fields), and reports what falls short with the colours and the ratio needed; text over images or gradients is left out. A change to the UI kit's `tokens.css` that makes a colour pair unreadable is reported too. The kit's own field and button borders were darkened to meet 3:1. Settings > Checks and issues > Readability (contrast) turns it off.
+- Checks for interfaces that look generated, on what a change adds: gradient text, thick coloured side stripes, decorative blur, and (with the kit in the project) hard-coded colours instead of the kit's tokens.
+
 ## [v0.1.95] - 2026-10-06
 
 ### Fixed
@@ -1072,7 +1089,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.95...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.96...HEAD
+[v0.1.96]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.96
 [v0.1.95]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.95
 [v0.1.94]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.94
 [v0.1.93]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.93

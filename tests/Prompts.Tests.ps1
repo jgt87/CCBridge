@@ -231,7 +231,7 @@ Describe 'Case-specific prompt modules' {
         @(Get-ProjectTraits @('notes.md')).Count | Should Be 0
     }
     It 'picks modules from the request when the project does not show it yet' {
-        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:web,rules:moving,rules:quality,rules:security,rules:javascript,rules:ui,rules:react'
+        (Get-PromptModules 'Build a React dashboard' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:web,rules:moving,rules:quality,rules:security,rules:javascript,rules:ui,rules:design,rules:uikit,rules:react'
         (Get-PromptModules 'Split the parser into two modules' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:moving'
         (Get-PromptModules 'Write a pytest for the parser' @{ Traits = @() }) -join ',' | Should Be 'actions:run,rules:folders,rules:environment,rules:python,rules:quality,rules:testing'
         (Get-PromptModules 'Fix the bug' @{ Traits = @('nocommands') }) -join ',' | Should Be 'rules:folders,rules:environment,rules:debugging'

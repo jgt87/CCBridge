@@ -18,6 +18,9 @@ $script:BuildDirs = '(?i)(^|/)(build|out|bin|obj|target)(/|$)'
 $script:LockFiles = '(?i)(^|/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Pipfile\.lock|composer\.lock|Cargo\.lock|packages\.lock\.json|Gemfile\.lock|bun\.lockb?)$'
 $script:BuildMarkers = 'package.json', 'tsconfig.json', 'pyproject.toml', 'setup.py', 'Cargo.toml', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'Makefile'
 
+Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Contrast.psm1')
+
 function Test-GeneratedPath {
     <# Why a project path must not be written by hand, or $null. build/, out/, bin/, obj/ and
        target/ count only in a project with a build tool (package.json, *.csproj, ...), since a
@@ -311,11 +314,45 @@ function Find-ScriptBasics {
     if ($Rel -match '(?i)\.(sh|bash)$' -and "$New" -notmatch '(?m)^\s*set\s+-[a-z]*e') { 'the script does not stop on errors: add set -e (or set -euo pipefail) near the top' }
 }
 
+function Find-UiSlop {
+    <# Interface patterns that make a page look generated, on the lines a change adds to a style or
+       page file: gradient text, thick coloured side stripes, decorative blur. With the UI kit in the
+       project (-UseKit): hard-coded colours in CSS other than the kit's own tokens. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit)
+    if ($Rel -notmatch '(?i)\.(css|scss|less|html?|jsx|tsx|vue|svelte)$') { return }
+    # The UI kit's tokens: colour pairs this change pushed below their WCAG contrast minimum.
+    if ($Rel -match '(?i)(^|/)tokens\.css$' -and (Test-CheckSwitch 'contrast')) {
+        $before = @(Test-TokenContrast $Old)
+        foreach ($c in @(Test-TokenContrast $New)) { if ($before -notcontains $c) { $c } }
+    }
+    $had = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($l in "$Old".Replace("`r`n", "`n").Split("`n")) { [void]$had.Add($l.Trim()) }
+    $lines = "$New".Replace("`r`n", "`n").Split("`n")
+    $found = @{}
+    $tokensFile = $Rel -match '(?i)(^|/)tokens\.css$'
+    $slop = Test-UiKitPart 'slopChecks'      # Settings > UI kit
+    $a11y = Test-CheckSwitch 'contrast'      # readability and accessibility
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        $t = $lines[$i].Trim()
+        if (-not $t -or $had.Contains($t)) { continue }
+        $n = $i + 1
+        if ($slop -and -not $found.grad -and $t -match '(?i)background-clip\s*:\s*text') { $found.grad = "line ${n}: gradient text (background-clip: text) looks generated; use one solid colour and show emphasis with weight or size" }
+        if ($slop -and -not $found.stripe -and $t -match '(?i)border-(left|right)(-width)?\s*:\s*([3-9]|\d{2,})px') { $found.stripe = "line ${n}: a thick side stripe on a box looks generated; use a full 1px border, a background tint or an icon" }
+        if ($a11y -and -not $found.focus -and $t -match '(?i)outline\s*:\s*(none|0)\b' -and "$New" -notmatch '(?i)focus-visible[^{]*\{[^}]*(outline|box-shadow|border)') { $found.focus = "line ${n}: the focus outline is removed without a replacement; keyboard users can no longer see where they are (add a :focus-visible style)" }
+        if ($a11y -and -not $found.motion -and $t -match '(?i)(^|[\s;{])animation\s*:(?!\s*none)' -and "$New" -notmatch 'prefers-reduced-motion') { $found.motion = "line ${n}: an animation without a reduced-motion version; add @media (prefers-reduced-motion: reduce) to stop or shorten it" }
+        if ($slop -and $UseKit -and -not $tokensFile -and -not $found.gradient -and $t -match '(?i)\b(linear|radial|conic)-gradient\(' -and $t -notmatch '(?i)background-clip\s*:\s*text') { $found.gradient = "line ${n}: a gradient other than the kit's own; use var(--kit-gradient) or a plain colour" }
+        if ($slop -and -not $found.caps -and ($t -match '(?i)text-transform\s*:\s*uppercase' -or $t -cmatch '<(h[1-6]|th|label|button|legend|summary)\b[^>]*>\s*[A-Z][A-Z0-9&/ .-]{3,}\s*</')) { $found.caps = "line ${n}: a heading or label in capitals; write it in sentence case (Totals, not TOTALS) and leave out text-transform: uppercase" }
+        if ($slop -and -not $found.blur -and $t -match '(?i)backdrop-filter\s*:\s*blur') { $found.blur = "line ${n}: a decorative blur (glass effect) looks generated; use a plain surface" }
+        if ($slop -and $UseKit -and -not $tokensFile -and -not $found.color -and $Rel -match '(?i)\.(css|scss|less)$' -and $t -match '(?i)(#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\()' -and $t -notmatch 'var\(--kit-') { $found.color = "line ${n}: a hard-coded colour; use a token from styles/kit/tokens.css (var(--kit-...)) so the page follows the kit" }
+    }
+    @($found.Values)
+}
+
 function Find-QualityIssues {
     <# The second batch, for the round's file check: what a change adds, as "line N: ..." or a
        whole-file note. #>
-    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
-    @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) | Where-Object { $_ }
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit)
+    @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-UiSlop $Rel $Old $New -UseKit:$UseKit) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {
@@ -342,4 +379,4 @@ function Get-DoneReminders {
     "Before finishing, one check:`n- " + ($notes -join "`n- ") + "`nThen send done again."
 }
 
-Export-ModuleMember -Function Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders
+Export-ModuleMember -Function Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders

@@ -1,0 +1,176 @@
+/*
+  UI kit tokens: every colour, size and shadow the kit uses. Restyle a project by changing these
+  values only; the components in kit.css follow. Light by default, dark when the computer prefers it
+  (or with data-theme="dark" on <html>; data-theme="light" keeps it light).
+
+  Colours come from the blue palette below (--kit-palette-*). The working tokens point at it; where a
+  palette colour is too light for readable text or lines (WCAG AA), a darker variant is used, and
+  the few derived shades are marked. The only gradient is --kit-gradient.
+*/
+:root {
+  color-scheme: light;   /* the browser draws its own parts (scrollbars, pickers) to match */
+  /* The palette. Accent */
+  --kit-palette-blue: #10069f;
+  --kit-palette-light-blue: #00a3e0;
+  /* Basics */
+  --kit-palette-white: #ffffff;
+  --kit-palette-light-grey: #aeb0b3;
+  --kit-palette-dark-grey: #5a5b5e;
+  --kit-palette-black: #000000;
+  /* Colours */
+  --kit-palette-teal: #00bfb3;
+  --kit-palette-green: #43b02a;
+  --kit-palette-light-green: #c4d600;
+  --kit-palette-yellow: #ffd100;
+  --kit-palette-orange: #ff6a13;
+  --kit-palette-magenta: #df1995;
+  --kit-palette-violet: #8021a7;
+  /* Variations (1 lighter, 2 darker) */
+  --kit-palette-light-blue-1: #50c0e6;
+  --kit-palette-light-blue-2: #0089b7;
+  --kit-palette-teal-1: #55d1c9;
+  --kit-palette-teal-2: #119d97;
+  --kit-palette-green-1: #80c572;
+  --kit-palette-green-2: #1d8e29;
+  --kit-palette-light-green-1: #d8df60;
+  --kit-palette-light-green-2: #9fae38;
+  --kit-palette-yellow-1: #fedc61;
+  --kit-palette-yellow-2: #d0ad23;
+  --kit-palette-orange-1: #fd8b57;
+  --kit-palette-orange-2: #d04a1e;
+  --kit-palette-red-1: #f25052;
+  --kit-palette-red-2: #c50e16;
+  --kit-palette-magenta-1: #e565b3;
+  --kit-palette-magenta-2: #ba1b7b;
+  --kit-palette-violet-1: #a473be;
+  --kit-palette-violet-2: #6b2c89;
+  /* The one allowed gradient: light blue to blue, from bottom left to top right. */
+  --kit-gradient: linear-gradient(45deg, #00a3e0 0%, #10069f 100%);
+  --kit-on-gradient: #ffffff;
+
+  /* Accent: primary blue for main buttons, links, focus and the selected tab. */
+  --kit-accent: #10069f;
+  --kit-accent-hover: #0e0587;          /* derived: the blue, a little darker */
+  --kit-accent-soft: #e5f6fc;           /* derived: light blue, very light */
+  --kit-on-accent: #ffffff;
+  --kit-accent-2: #00a3e0;              /* secondary: decoration, the gradient, highlights */
+
+  /* Neutrals */
+  --kit-bg: #f5f5f6;                    /* derived: light grey, very light */
+  --kit-surface: #ffffff;
+  --kit-surface-2: #edeeee;             /* derived: light grey, light */
+  --kit-border: #d6d7d9;                /* derived: light grey, lighter (dividers only) */
+  --kit-border-strong: #5a5b5e;         /* dark grey: edges of fields and buttons */
+  --kit-text: #000000;
+  --kit-text-muted: #5a5b5e;
+
+  /* Status colours: for status only, never decoration. */
+  --kit-ok: #187623;                    /* derived: green var2, darker for text */
+  --kit-ok-soft: #e8f5e5;
+  --kit-warn: #a63b17;                  /* derived: orange var2, darker for text */
+  --kit-warn-soft: #fff4cc;
+  --kit-error: #c50e16;
+  --kit-error-soft: #fde8e8;
+
+  /* Chart series colours, in this order (kit-charts.js); each stands out 3:1 from the panels. */
+  --kit-chart-1: #10069f;
+  --kit-chart-2: #0089b7;
+  --kit-chart-3: #119d97;
+  --kit-chart-4: #d04a1e;
+  --kit-chart-5: #df1995;
+  --kit-chart-6: #8021a7;
+
+  /* Type: Arial first (on every computer, nothing to download). Headings and labels in sentence
+     case ("Totals", not "TOTALS"). */
+  --kit-font: Arial, "Helvetica Neue", Helvetica, "Segoe UI", system-ui, sans-serif;
+  --kit-font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  --kit-text-xs: 0.75rem;
+  --kit-text-sm: 0.875rem;
+  --kit-text-md: 1rem;
+  --kit-text-lg: 1.25rem;
+  --kit-text-xl: 1.625rem;
+  --kit-line: 1.5;
+
+  /* Space, on a 4px scale. */
+  --kit-space-1: 0.25rem;
+  --kit-space-2: 0.5rem;
+  --kit-space-3: 0.75rem;
+  --kit-space-4: 1rem;
+  --kit-space-5: 1.5rem;
+  --kit-space-6: 2rem;
+  --kit-space-7: 3rem;
+
+  /* Scrollbars: a thin handle on a see-through track (the area behind shows), the accent on hover. */
+  --kit-scroll-thumb: var(--kit-border-strong);
+  --kit-scroll-thumb-hover: var(--kit-accent);
+
+  /* One page grid: the header, the content and the footer share these edges. */
+  --kit-page-width: 1200px;
+  --kit-page-pad: 1.5rem;
+
+  --kit-radius: 6px;
+  --kit-radius-lg: 10px;
+  --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --kit-focus: 0 0 0 3px rgba(0, 163, 224, 0.45);
+  --kit-speed: 140ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --kit-accent: #00a3e0;               /* light blue: the blue is too dark on a dark page */
+    --kit-accent-hover: #50c0e6;
+    --kit-accent-soft: #18163d;          /* derived: blue over the dark surface */
+    --kit-on-accent: #000000;
+    --kit-bg: #000000;
+    --kit-surface: #1b1b1c;              /* derived: dark grey over black */
+    --kit-surface-2: #28292a;            /* derived */
+    --kit-border: #3d3e40;               /* derived (dividers only) */
+    --kit-border-strong: #aeb0b3;        /* light grey: edges of fields and buttons */
+    --kit-text: #ffffff;
+    --kit-text-muted: #aeb0b3;
+    --kit-ok: #43b02a;
+    --kit-ok-soft: #1e2e1a;
+    --kit-warn: #ffd100;
+    --kit-warn-soft: #3a3313;
+    --kit-error: #f25052;
+    --kit-error-soft: #2e1a1b;
+    --kit-chart-1: #00a3e0;
+    --kit-chart-2: #00bfb3;
+    --kit-chart-3: #43b02a;
+    --kit-chart-4: #ff6a13;
+    --kit-chart-5: #e565b3;
+    --kit-chart-6: #a473be;
+    --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
+    --kit-focus: 0 0 0 3px rgba(0, 163, 224, 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --kit-accent: #00a3e0;
+  --kit-accent-hover: #50c0e6;
+  --kit-accent-soft: #18163d;
+  --kit-on-accent: #000000;
+  --kit-bg: #000000;
+  --kit-surface: #1b1b1c;
+  --kit-surface-2: #28292a;
+  --kit-border: #3d3e40;
+  --kit-border-strong: #aeb0b3;
+  --kit-text: #ffffff;
+  --kit-text-muted: #aeb0b3;
+  --kit-ok: #43b02a;
+  --kit-ok-soft: #1e2e1a;
+  --kit-warn: #ffd100;
+  --kit-warn-soft: #3a3313;
+  --kit-error: #f25052;
+  --kit-error-soft: #2e1a1b;
+  --kit-chart-1: #00a3e0;
+  --kit-chart-2: #00bfb3;
+  --kit-chart-3: #43b02a;
+  --kit-chart-4: #ff6a13;
+  --kit-chart-5: #e565b3;
+  --kit-chart-6: #a473be;
+  --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --kit-focus: 0 0 0 3px rgba(0, 163, 224, 0.5);
+}

@@ -10,6 +10,7 @@
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'WebFetch.psm1')
+Import-Module (Join-Path $PSScriptRoot 'UiKit.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 
 # Signals for the kind of task (English and common Dutch words).
@@ -32,6 +33,8 @@ $script:DataPattern = '(?i)\b(csv|tsv|excel|xlsx|xls|spreadsheets?|data ?files?|
 $script:BigTaskPattern = '(?i)\b(build|create|make|develop)\s+(an?|the|my|me an?|me the)?\s*(new\s+)?(app|application|website|web ?site|tool|dashboard|portal|system|game)\b|\b(multiple|several|all the) (pages|screens|features|parts)\b|\bfrom scratch\b'
 $script:ScriptPattern = '(?i)\b(scripts?|automat\w*|schedul\w*|chains?|cron|task scheduler|batch job)\b|scripts/'
 $script:UiPattern = '(?i)\b(ui|ux|user interface|layout|screens?|responsive|accessib\w*|a11y|loading state|empty state|design)\b'
+# A request to review the design of the interface (prompts/rules/designreview.md).
+$script:DesignReviewPattern = '(?i)\b(design ?review|review (the |my |this |our )?(design|ui|interface|layout|pages?|screens?|dashboard)|(ontwerp|design) ?(review|beoordel\w*)|beoordeel (het |de )?(ontwerp|interface|pagina\w*))\b'
 $script:HttpPattern = '(?i)\b(apis?|rest|endpoints?|http|https|fetch|invoke-restmethod|invoke-webrequest|webhooks?|requests?|rate limit)\b'
 $script:CSharpPattern = '(?i)c#|\b(csharp|dotnet|\.net|asp\.net|blazor|wpf|winforms)\b|\.(cs|csproj|sln)\b'
 $script:ReactPattern = '(?i)\b(react|jsx|tsx|use(State|Effect|Memo|Callback|Ref|Context)|next\.?js)\b'
@@ -140,7 +143,14 @@ function Get-PromptModules {
     if (($traits -contains 'office') -or ($Text -match $script:OfficePattern)) { $ids.Add('rules:office') }
     if (($Text -match $script:BigTaskPattern) -or $Text.Length -gt 600) { $ids.Add('rules:bigtask') }
     if ($Text -match $script:ScriptPattern) { $ids.Add('rules:scripts') }
-    if (($web -and ($Text -match $script:AppPartPattern -or $Text -match $script:BuildPattern)) -or ($Text -match $script:UiPattern)) { $ids.Add('rules:ui') }
+    $designReview = $Text -match $script:DesignReviewPattern
+    if (($web -and ($Text -match $script:AppPartPattern -or $Text -match $script:BuildPattern)) -or ($Text -match $script:UiPattern) -or $designReview) {
+        $ids.Add('rules:ui')
+        if (Test-UiKitPart 'designRules' (Split-Path -Parent $PSScriptRoot)) { $ids.Add('rules:design') }   # how a good interface behaves (our own short rules)
+        if ($designReview) { $ids.Add('rules:designreview') }
+        # Build from the UI kit (setting uiKit; the agent adds the kit to the project when this goes out).
+        if (Test-UiKitOn (Split-Path -Parent $PSScriptRoot)) { $ids.Add('rules:uikit') }
+    }
     if ($Text -match $script:HttpPattern) { $ids.Add('rules:http') }
     if (($traits -contains 'csharp') -or ($Text -match $script:CSharpPattern)) { $ids.Add('rules:csharp') }
     if (($traits -contains 'react') -or ($Text -match $script:ReactPattern)) { $ids.Add('rules:react') }
@@ -212,6 +222,17 @@ function Get-PromptPart {
             $fence = '````'
             if (Test-Path -LiteralPath $tpl) { $part += "`n`nRUNBOOK TEMPLATE`n$fence`n" + ([IO.File]::ReadAllText($tpl).Replace("`r`n", "`n").Trim()) + "`n$fence" }
             return $part
+        }
+        '^rules:uikit$' {
+            # Only the kit parts that are switched on (Settings > UI kit).
+            $lines = @((Read-PromptPart $AppRoot 'rules\uikit.md').Split("`n"))
+            if (-not (Test-UiKitPart 'interactive' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Interactive parts*' }) }
+            if (-not (Test-UiKitPart 'charts' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Charts:*' }) }
+            if (-not (Test-UiKitPart 'icons' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Icons (Lucide*' }) }
+            $text = $lines -join "`n"
+            if ((Get-UiKitColors $AppRoot) -ne 'blue') { $text = $text -replace ' With the blue palette the named colours are[^.]*\.[^.]*\.', '' }
+            if (-not (Test-UiKitPart 'react' $AppRoot)) { $text = $text -replace ' In a React project use styles/kit/react/ instead:[^\n]*', '' -replace '; React: Chart from styles/kit/react/', '' -replace ' React: Icon from styles/kit/react/\.', '' }
+            return $text
         }
         '^rules:(.+)$' { return Read-PromptPart $AppRoot "rules\$($Matches[1]).md" }
         '^actions:run$' { return Read-PromptPart $AppRoot 'actions-run.md' }
