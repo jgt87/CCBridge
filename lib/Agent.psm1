@@ -2845,7 +2845,7 @@ function Get-IssueSettings($State) {
     $c = $State.Config.issues
     @{ enabled = "$($c.enabled)" -ne 'off'
        autoFix = @(if ($c -and $null -ne $c.autoFix) { @("$(@($c.autoFix) -join ',')".Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -ne 'none' }) } else { 'error' })
-       maxAttempts = $(if ($c -and [int]$c.maxAttempts -gt 0) { [int]$c.maxAttempts } else { 2 }) }
+       maxAttempts = $(if ($c -and [int]$c.maxAttempts -gt 0) { [int]$c.maxAttempts } else { 3 }) }
 }
 
 function Get-IssueBaseline($State) {
@@ -2867,18 +2867,109 @@ function Get-QueuedIssueFix($State, [string]$ProjectRoot, [string]$Path) {
         "$($_.task.issueFix.path)" -eq $Path -and "$($_.projectRoot)".TrimEnd('\') -eq $ProjectRoot.TrimEnd('\') } | Select-Object -First 1
 }
 
+$script:BracketProblem = "closes nothing|does not match the|is never closed|never closed|half open|half closed"
+
+function Get-FixEvidence {
+    <# What StreamHub can show Copilot about problems in a file, instead of letting it work from
+       memory: the file as it is now around each problem (whole blocks), the bracket map for bracket
+       problems, and the lines in other files that use it. Text, or "". #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Path, $Issues, [int]$MaxChars = 12000)
+    $parts = New-Object System.Collections.Generic.List[string]
+    $full = try { Resolve-ProjectPath $ProjectRoot $Path } catch { $null }
+    if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf)) { return '' }
+    $text = (Read-TextFile $full).Text.Replace("`r`n", "`n")
+    $lines = @($Issues | ForEach-Object { [int]$_.line } | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+    foreach ($l in $lines) {
+        $msg = @($Issues | Where-Object { [int]$_.line -eq $l } | ForEach-Object { "$($_.message)$($_.text)" }) -join ' '
+        if ($msg -match $script:BracketProblem) { $map = Format-OpenBlocks $Path $text $l; if ($map) { $parts.Add($map) } }
+    }
+    # Ranged reads widen to whole blocks (functions, <script> blocks); without line numbers the whole file.
+    $specs = if ($lines.Count) { @($lines | ForEach-Object { "${Path}:$([Math]::Max(1, $_ - 25))-$($_ + 25)" }) } else { @($Path) }
+    $read = try { (Invoke-ReadAction $ProjectRoot $specs -MaxCharsPerFile $MaxChars) -join "`n`n" } catch { '' }
+    if ($read) { $parts.Add("The file as it is now, around the problems:`n$read") }
+    $users = try { Format-ImportUsers $ProjectRoot @($Path) } catch { '' }
+    if ($users) { $parts.Add($users) }
+    $parts -join "`n`n"
+}
+
+function Get-FixDiagnosis($State, [int]$FromSeq) {
+    <# Copilot's "Cause:" lines from a fix attempt's replies (at most 4 lines), or "". #>
+    $texts = @(Get-AgentEvents $State $FromSeq | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { "$($_.text)" })
+    foreach ($t in $texts) {
+        $m = [regex]::Match($t, '(?ms)^[\s*_#>-]{0,4}Cause[*_]{0,2}\s*:[*_]{0,2}\s*(.+?)(?=\n\s*\n|\n```|\z)')
+        if ($m.Success) {
+            $d = @($m.Groups[1].Value.Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -First 4) -join ' '
+            if ($d.Length -gt 600) { $d = $d.Substring(0, 597) + '...' }
+            return $d
+        }
+    }
+    ''
+}
+
+function New-FixAttemptMessage {
+    <# The fix task text per attempt: 1 the problems (New-FixMessage); 2 diagnose before fixing,
+       with evidence (the file now, the bracket map, what the previous attempt changed, users);
+       3 fresh eyes: the last version without the problems and how the file differs from it. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Path, $Issues, [int]$Attempt = 1, $Context = @{})
+    if ($Attempt -le 1) { return New-FixMessage $Path @($Issues) 1 }
+    $sb = New-Object Text.StringBuilder
+    $list = @(foreach ($i in @($Issues)) { "- $(if ($i.line) { "line $($i.line): " })$($i.message)" }) -join "`n"
+    if ($Attempt -eq 2) {
+        [void]$sb.AppendLine("These problems in $Path are still there after the previous attempt, so first find the real cause instead of repeating that change.")
+    } else {
+        [void]$sb.AppendLine("These problems in $Path are still there after $($Attempt - 1) attempts. Look at it with fresh eyes: do not patch the previous fix again.")
+        if ($Context.diagnosis) { [void]$sb.AppendLine("Earlier diagnosis (it did not lead to a fix, so check it): $($Context.diagnosis)") }
+    }
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("Problems now:`n$list")
+    if ($Attempt -ge 3 -and $Context.origin) {
+        $good = try { Get-ChangeSetFileDiff $ProjectRoot $Context.origin $Path } catch { $null }
+        $now = try { (Read-TextFile (Resolve-ProjectPath $ProjectRoot $Path)).Text } catch { $null }
+        if ($good -and $null -ne $now -and $good.old) {
+            $d = Format-LineChange $good.old $now 120
+            if ($d) {
+                [void]$sb.AppendLine()
+                [void]$sb.AppendLine("The last version of $Path without these problems is the one from before the change that brought them. How the file differs from it now (- that version, + now):")
+                [void]$sb.AppendLine('```diff'); [void]$sb.AppendLine($d); [void]$sb.AppendLine('```')
+                [void]$sb.AppendLine('Keep what those changes were meant to do, but rebuild the broken part from that version instead of patching the current text again.')
+            }
+        }
+    } elseif ($Context.lastChange) {
+        $prev = try { Get-ChangeSetFileDiff $ProjectRoot $Context.lastChange $Path } catch { $null }
+        if ($prev) {
+            $d = Format-LineChange $prev.old $prev.new 80
+            if ($d) {
+                [void]$sb.AppendLine()
+                [void]$sb.AppendLine("What the previous attempt changed in $Path (- before, + after); the problems above are still there after it:")
+                [void]$sb.AppendLine('```diff'); [void]$sb.AppendLine($d); [void]$sb.AppendLine('```')
+            }
+        }
+    }
+    $ev = Get-FixEvidence $ProjectRoot $Path $Issues
+    if ($ev) { [void]$sb.AppendLine(); [void]$sb.AppendLine($ev) }
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine('Start your reply with a line that begins with Cause: and, in 2 to 4 lines, what causes each problem and why the earlier change did not remove it. Then fix the cause with edit blocks and change nothing else. If a problem is not real, leave the code as it is and say why in the done summary.')
+    $sb.ToString().TrimEnd()
+}
+
 function Submit-IssueFix {
     <# Queues one fix task for one file's issues (a coding turn in the current chat). Returns $null
        when it may not: past issues.maxAttempts, or a fix for that file is already waiting (that
        task scans the whole file afterwards, so it covers these issues too). #>
-    param($State, [string]$Path, $Issues, [int]$Attempt, $Categories, [string]$ProjectRoot)
+    # $Context: origin (the change set that brought the problems), lastChange (the previous
+    # attempt's change set), diagnosis (Copilot's Cause: lines from attempt 2). Each attempt goes
+    # further (New-FixAttemptMessage): from 2 on in Think deeper, from 3 on in a new chat.
+    param($State, [string]$Path, $Issues, [int]$Attempt, $Categories, [string]$ProjectRoot, $Context = @{})
     $root = if ($ProjectRoot) { $ProjectRoot } else { $State.ProjectRoot }
     if ($Attempt -lt 1 -or $Attempt -gt (Get-IssueSettings $State).maxAttempts) { return $null }
     if (Get-QueuedIssueFix $State $root $Path) { return $null }
     $ids = @($Issues | ForEach-Object { $_.id })
     Set-IssueState $root $ids 'fixing' -Attempts $Attempt
-    $task = @{ kind = 'chat'; text = (New-FixMessage $Path @($Issues) $Attempt); forceKind = 'coding'; projectRoot = $root
-        issueFix = @{ path = $Path; ids = $ids; attempt = $Attempt; categories = @($Categories) } }
+    $text = try { New-FixAttemptMessage $root $Path @($Issues) $Attempt $Context } catch { Write-CCBLogError agent 'fix message' $_; New-FixMessage $Path @($Issues) $Attempt }
+    $task = @{ kind = 'chat'; text = $text; forceKind = 'coding'; projectRoot = $root
+        issueFix = @{ path = $Path; ids = $ids; attempt = $Attempt; categories = @($Categories); origin = "$($Context.origin)"; lastChange = "$($Context.lastChange)"; diagnosis = "$($Context.diagnosis)" } }
+    if ($Attempt -ge 2) { $task.responseMode = 'deep' }   # Copilot's own reasoning mode
+    if ($Attempt -ge 3) { $task.freshChat = $true }       # earlier attempts' context can anchor the wrong idea
     Submit-AgentTask $State $task 'issues' "Fix $(@($ids).Count) issue(s) in $Path$(if ($Attempt -gt 1) { " (attempt $Attempt)" })"
 }
 
@@ -2887,7 +2978,7 @@ function Invoke-IssueCycle {
        change added (categories in issues.autoFix); after a fix task checks that file again:
        gone = fixed, still there = another attempt (up to issues.maxAttempts), then 'gave up'.
        Returns the notes it showed. #>
-    param($State, [string[]]$Paths, $Baseline, $Fix)
+    param($State, [string[]]$Paths, $Baseline, $Fix, [string]$ChangeSet = '')
     $cfg = Get-IssueSettings $State
     if (-not $cfg.enabled -or $null -eq $Baseline) { return }
     $root = $State.ProjectRoot
@@ -2903,21 +2994,26 @@ function Invoke-IssueCycle {
         $left = @($report | Where-Object { $_.path -eq $Fix.path -and $_.category -in $cats -and $_.status -ne 'gave up' })
         $leftIds = @($left | ForEach-Object { $_.id })
         $gone = @(@($Fix.ids) | Where-Object { $_ -notin $leftIds }).Count
+        # What this attempt brought: its change set (when it changed the file) and Copilot's diagnosis.
+        $diag = if ($State.IssueFixFromSeq) { Get-FixDiagnosis $State ([int]$State.IssueFixFromSeq) } else { '' }
+        if (-not $diag) { $diag = "$($Fix.diagnosis)" }
+        $ctx = @{ origin = "$($Fix.origin)"; lastChange = $(if ($ChangeSet -and @($Paths) -contains $Fix.path) { $ChangeSet } else { "$($Fix.lastChange)" }); diagnosis = $diag }
         if (-not $left.Count) { $notes.Add("Issue fix: $($Fix.path) is clean again ($gone problem(s) fixed).") }
         elseif ([int]$Fix.attempt -lt $cfg.maxAttempts) {
-            $next = Submit-IssueFix $State $Fix.path $left ([int]$Fix.attempt + 1) $cats $root
-            if ($next) { $notes.Add("Issue fix: $($left.Count) problem(s) left in $($Fix.path); trying again (attempt $([int]$Fix.attempt + 1) of $($cfg.maxAttempts)).") }
+            $next = Submit-IssueFix $State $Fix.path $left ([int]$Fix.attempt + 1) $cats $root $ctx
+            $how = switch ([int]$Fix.attempt + 1) { 2 { ': Copilot looks for the cause first, with the file as it is now and what the last attempt changed (Think deeper)' } { $_ -ge 3 } { ': with fresh eyes in a new chat, from the last version without the problem (Think deeper)' } default { '' } }
+            if ($next) { $notes.Add("Issue fix: $($left.Count) problem(s) left in $($Fix.path); trying again (attempt $([int]$Fix.attempt + 1) of $($cfg.maxAttempts))$how.") }
             else { $notes.Add("Issue fix: $($left.Count) problem(s) left in $($Fix.path); a fix for that file is already waiting in the queue.") }
         } else {
-            Set-IssueState $root $leftIds 'gave up' -Attempts ([int]$Fix.attempt) -Note "still there after $($Fix.attempt) attempt(s)"
-            $notes.Add("Issue fix: $($left.Count) problem(s) in $($Fix.path) are still there after $($Fix.attempt) attempt(s); marked 'gave up'. They are listed under Code health > Issues.")
+            Set-IssueState $root $leftIds 'gave up' -Attempts ([int]$Fix.attempt) -Note "still there after $($Fix.attempt) attempt(s)$(if ($diag) { ". Copilot's diagnosis: $diag" })"
+            $notes.Add("Issue fix: $($left.Count) problem(s) in $($Fix.path) are still there after $($Fix.attempt) attempt(s); marked 'gave up'. They are listed under Code health > Issues$(if ($diag) { ", with Copilot's diagnosis: $diag" } else { '.' })")
         }
     }
     $new = @($report | Where-Object { -not $Baseline.ContainsKey($_.id) -and $_.status -eq 'open' -and (-not $Fix -or $_.path -ne $Fix.path) })
     # No chains: problems a fix task causes in other files are only reported. Otherwise fixing A
     # could break B, fixing B break A, and so on, each starting again at attempt 1.
     $auto = if ($Fix) { @() } else { @($new | Where-Object { $_.category -in $cfg.autoFix }) }
-    $groups = @($auto | Group-Object path | Where-Object { Submit-IssueFix $State $_.Name @($_.Group) 1 $cfg.autoFix $root })
+    $groups = @($auto | Group-Object path | Where-Object { Submit-IssueFix $State $_.Name @($_.Group) 1 $cfg.autoFix $root @{ origin = $ChangeSet } })
     if ($new.Count) {
         $files = @($new | Group-Object path).Count
         $reported = $new.Count - @($groups | ForEach-Object { $_.Group }).Count
@@ -3018,6 +3114,7 @@ function Invoke-AgentTurn {
 
         $nudges = 0   # times this message was sent again because Copilot explained instead of acting
         $failSeen = @{}; $stopLoop = $false   # the same step failing the same way: warn at 2, stop at 3
+        $errorRounds = @{}   # file-check errors per key: still there a round later = evidence and a diagnosis first
         $syntaxNudges = 0   # times "done" was refused because a changed file has a syntax error
         $verifyNudges = 0   # times "done" was refused because the project's verify command failed
         $doneReminded = $false   # the one reminder at "done" (tests, README) was sent
@@ -3275,6 +3372,18 @@ function Invoke-AgentTurn {
                     # Light: only what breaks a file goes to Copilot; the chat card shows the rest.
                     $toSend = @(if ($enf.sendWarnings) { $keep } else { $keep | Where-Object level -eq 'error' })
                     if ($toSend.Count) { $results.Add(@{ head = '### File check of the files changed in this reply'; output = (Format-CheckResults $toSend) }) }
+                    # An error still there after Copilot's next change: once per problem, the evidence it
+                    # needs (the file now, the bracket map, users) and a diagnosis before another fix.
+                    $again = New-Object System.Collections.Generic.List[object]
+                    foreach ($f in @($keep | Where-Object { $_.level -eq 'error' -and $_.path })) {
+                        $errorRounds[$f.key] = 1 + [int]$errorRounds[$f.key]
+                        if ($errorRounds[$f.key] -eq 2) { $again.Add($f) }
+                    }
+                    foreach ($g in @($again | Group-Object path | Select-Object -First 2)) {
+                        $iss = @($g.Group | ForEach-Object { @{ line = [int]$_.line; message = $_.text } })
+                        $evd = try { Get-FixEvidence $State.ProjectRoot $g.Name $iss } catch { Write-CCBLogError agent 'fix evidence' $_; '' }
+                        $results.Add(@{ head = "### Still there after your last change: $($g.Name)"; output = "Your last change did not remove $(if ($iss.Count -gt 1) { 'these problems' } else { 'this problem' }), so look for the real cause before changing it again. Start your reply with a line that begins with Cause: and, in 2 to 4 lines, what causes it and why the last change did not remove it; then fix that cause.$(if ($evd) { "`n`n$evd" })" })
+                    }
                     # What holds up "done": errors (1, 2 or 3 times by enforcement); under strict also
                     # likely mistakes, once.
                     if ($syntax.Count -and $isDone -and $syntaxNudges -lt $enf.errorTries) { $isDone = $false; $syntaxNudges++ }
@@ -3466,7 +3575,7 @@ function Invoke-AgentTurn {
         # Issue cycle steps 3-6: scan what changed, queue fixes, check a fix task's file again.
         if (($checkpoint.Files.Count -or $State.IssueFix) -and $null -ne $baseline -and -not $State.Cancel) {
             $scan = @($checkpoint.Files.Keys) + @(if ($State.IssueFix) { "$($State.IssueFix.path)" })
-            try { $null = Invoke-IssueCycle $State $scan $baseline $State.IssueFix } catch { Write-CCBLogError agent 'issue cycle' $_ }
+            try { $null = Invoke-IssueCycle $State $scan $baseline $State.IssueFix $(if ($checkpoint.Files.Count) { $checkpoint.Id } else { '' }) } catch { Write-CCBLogError agent 'issue cycle' $_ }
         }
         $State.Busy = $false; $State.Cancel = $false
     }
@@ -3555,7 +3664,8 @@ function Start-AgentWorker {
                     } elseif ($task.clarify) {
                         Invoke-ClarifyStep $State $task
                     } else {
-                        $State.IssueFix = $task.issueFix; $State.IssueFixHandled = $false
+                        $State.IssueFix = $task.issueFix; $State.IssueFixHandled = $false; $State.IssueFixFromSeq = $fromSeq
+                        if ($task.freshChat) { $State.NeedNewChat = $true }
                         try { Invoke-AgentTurn $State $task.text $force }
                         finally {
                             $State.IssueFix = $null
@@ -3645,4 +3755,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

@@ -740,6 +740,26 @@ function Test-ProjectConsistency {
     }
 }
 
+function Format-LineChange {
+    <# How a text changed, compactly: the lines that differ between the first and the last line
+       both versions share, with 2 lines around them; "- " old, "+ " new, and the new line number.
+       At most $MaxLines lines (the rest is counted). "" when the texts are the same. #>
+    param([AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [int]$MaxLines = 80)
+    $a = "$Old".Replace("`r`n", "`n").Split("`n"); $b = "$New".Replace("`r`n", "`n").Split("`n")
+    if ("$Old" -ceq "$New") { return '' }
+    $pre = 0; while ($pre -lt $a.Length -and $pre -lt $b.Length -and $a[$pre] -ceq $b[$pre]) { $pre++ }
+    $suf = 0; while ($suf -lt ($a.Length - $pre) -and $suf -lt ($b.Length - $pre) -and $a[$a.Length - 1 - $suf] -ceq $b[$b.Length - 1 - $suf]) { $suf++ }
+    $out = New-Object System.Collections.Generic.List[string]
+    $ctx = [Math]::Max(0, $pre - 2)
+    $out.Add("(from line $($pre + 1) of the new version)")
+    for ($i = $ctx; $i -lt $pre; $i++) { $out.Add("  $($b[$i])") }
+    for ($i = $pre; $i -lt $a.Length - $suf; $i++) { $out.Add("- $($a[$i])") }
+    for ($i = $pre; $i -lt $b.Length - $suf; $i++) { $out.Add("+ $($b[$i])") }
+    for ($i = $b.Length - $suf; $i -lt [Math]::Min($b.Length, $b.Length - $suf + 2); $i++) { $out.Add("  $($b[$i])") }
+    if ($out.Count -gt $MaxLines + 1) { $more = $out.Count - $MaxLines - 1; $out = [System.Collections.Generic.List[string]]@($out | Select-Object -First ($MaxLines + 1)); $out.Add("($more more changed line(s) not shown)") }
+    $out -join "`n"
+}
+
 function Get-LastChangeSetId {
     <# The id of the newest change set (checkpoint with a manifest) of a project, or '' when there
        is none. Line counts "per change" start there. #>
@@ -1957,5 +1977,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

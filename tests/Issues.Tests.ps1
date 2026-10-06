@@ -133,7 +133,7 @@ Describe 'The fix cycle after a task' {
         (Get-IssueSettings $s2).autoFix -join ',' | Should Be 'error,secret,health'
         $s3 = New-AgentState -Config ([pscustomobject]@{ issues = [pscustomobject]@{ autoFix = 'none' } }) -AppRoot $root
         @((Get-IssueSettings $s3).autoFix).Count | Should Be 0
-        (Get-IssueSettings $s3).maxAttempts | Should Be 2
+        (Get-IssueSettings $s3).maxAttempts | Should Be 3
     }
     It 'queues a fix only for problems the change added, one task per file' {
         $baseline = Get-IssueBaseline $state

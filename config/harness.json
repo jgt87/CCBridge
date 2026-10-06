@@ -47,7 +47,7 @@
   "issues": {
     "enabled": "on",
     "autoFix": "error",
-    "maxAttempts": 2
+    "maxAttempts": 3
   },
   "retention": {
     "historyCount": 20,

@@ -953,6 +953,49 @@ function Test-FileContent {
     $issues.ToArray()
 }
 
+function Get-BracketMask([string]$Path, [string]$Text) {
+    # The text with strings and comments blanked for bracket counting, by file type; $null for types
+    # where brackets are not counted this way.
+    switch -Regex ($Path) {
+        '(?i)\.(m?js|cjs|jsx|ts|mts|cts|tsx)$' { return (Get-JsMask $Text).masked }
+        '(?i)\.(cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp|vue|svelte)$' { return Hide $Text $script:MaskCLike }
+        '(?i)\.(css|scss|less)$' { return Hide $Text $script:MaskCss }
+        '(?i)\.pyw?$' { return Hide $Text $script:MaskPython }
+        '(?i)\.jsonc?$' { return Hide $Text '"(?:[^"\\\n]|\\.)*"|//[^\n]*|/\*[\s\S]*?\*/' }
+        '(?i)\.prisma$' { return Hide $Text '"(?:[^"\\\n]|\\.)*"|//[^\n]*' }
+    }
+    $null
+}
+
+function Get-OpenBlocks {
+    <# The brackets still open at the end of line $Line (outermost first): @(@{ ch; line; text }),
+       where text is the line that opened it. A bracket that closes the wrong kind still closes the
+       innermost one, as a reader would assume. Empty for file types without bracket counting. #>
+    param([string]$Path, [AllowEmptyString()][string]$Text, [int]$Line)
+    $t = "$Text".Replace("`r`n", "`n")
+    $masked = Get-BracketMask $Path $t
+    if ($null -eq $masked) { return @() }
+    $raw = $t.Split("`n")
+    $stack = New-Object System.Collections.Generic.List[object]
+    $n = 1
+    foreach ($ch in $masked.ToCharArray()) {
+        if ($ch -eq "`n") { $n++; if ($n -gt $Line) { break }; continue }
+        if ($ch -eq '(' -or $ch -eq '[' -or $ch -eq '{') { $stack.Add(@{ ch = [string]$ch; line = $n; text = $raw[$n - 1].Trim() }); continue }
+        if (($ch -eq ')' -or $ch -eq ']' -or $ch -eq '}') -and $stack.Count) { $stack.RemoveAt($stack.Count - 1) }
+    }
+    $stack.ToArray()
+}
+
+function Format-OpenBlocks {
+    <# The bracket map for Copilot: which blocks are still open at a line and where they start
+       ("" when none or for file types without bracket counting). #>
+    param([string]$Path, [AllowEmptyString()][string]$Text, [int]$Line)
+    $open = @(Get-OpenBlocks $Path $Text $Line)
+    if (-not $open.Count) { return '' }
+    $rows = foreach ($o in $open) { $s = $o.text; if ($s.Length -gt 90) { $s = $s.Substring(0, 87) + '...' }; "- line $($o.line) '$($o.ch)': $s" }
+    "Brackets still open at the end of line $Line in $Path (outermost first; each must be closed after it, in reverse order):`n" + ($rows -join "`n")
+}
+
 function Get-NewFileIssues {
     <# Problems a change added: those in the new text that the old text did not have (compared
        without line numbers, so an existing problem that only moved is not reported again). #>
@@ -981,4 +1024,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences

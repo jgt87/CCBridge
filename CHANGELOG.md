@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.101] - 2026-10-07
+
+### Changed
+- Fix attempts for detected issues go further each time instead of repeating the same request. Attempt 1 lists the problems as before. Attempt 2 asks Copilot to find the cause before changing anything, in Think deeper, with evidence StreamHub gathers: the file as it is now around each problem (whole blocks), a map of the brackets still open at the problem line and where each one started, what the previous attempt changed (a short diff), and the lines in other files that use the file; Copilot starts its reply with a Cause: line. Attempt 3 starts a new chat (earlier attempts' context can anchor the wrong idea), in Think deeper, with the earlier diagnosis and how the file differs from the last version without the problem, and asks to rebuild the broken part from that version instead of patching it again. A problem still there after that is marked "gave up" with Copilot's diagnosis in its note (Code health > Issues). The default number of attempts is now 3 (Settings > Checks and issues > Fix attempts per file).
+- Within one task, a file-check error that is still there after Copilot's next change gets the same evidence (the file now, the bracket map, its users) and a request to state the cause before changing it again.
+
 ## [v0.1.100] - 2026-10-07
 
 ### Added
@@ -1127,7 +1133,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.100...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.101...HEAD
+[v0.1.101]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.101
 [v0.1.100]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.100
 [v0.1.99]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.99
 [v0.1.98]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.98
