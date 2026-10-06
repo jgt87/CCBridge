@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.99] - 2026-10-06
+
+### Added
+- npm install on a click: when a project's `package.json` (the root, or a folder up to two levels down) lists packages that `node_modules` does not have, the chat shows a card "This project needs its packages" with which ones and a *Run npm install* button (or *Not now*); it comes once per set of missing packages, after a task and when the project opens. Settings > This computer > *Project packages (npm install)* shows the same for the open project and runs it from there. StreamHub never runs npm install by itself, since it downloads code and runs its install steps; only the StreamHub page can start it. The output shows on a run card, `package-lock.json` changes are a change set (Undo), a blocked registry or proxy gets a hint, and without npm the card points to Settings > This computer > Node.js.
+
 ## [v0.1.98] - 2026-10-06
 
 ### Added
@@ -1111,7 +1116,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.98...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.99...HEAD
+[v0.1.99]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.99
 [v0.1.98]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.98
 [v0.1.97]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.97
 [v0.1.96]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.96

@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -1316,6 +1316,80 @@ function Invoke-ChainJob {
         } catch { Write-CCBLogError agent 'source data' $_ }
         $State.InChain = $false; $State.NeedNewChat = $true
         $State.Busy = $false; $State.Cancel = $false
+    }
+}
+
+function Publish-PackagesNeeded {
+    <# A "packages needed" card when a package.json lists packages node_modules does not have: once
+       per folder and set of missing packages in this session (after a task and at project open). #>
+    param($State)
+    if (-not $State.ProjectRoot) { return }
+    try {
+        if (-not $State.PackagesShown) { $State.PackagesShown = @{} }
+        $npm = [bool](Get-RealCommand 'npm')
+        foreach ($it in @(Get-PackageState $State.ProjectRoot | Where-Object { @($_.missing).Count })) {
+            $key = "$($State.ProjectRoot)|$(Get-PackagesKey $it)"
+            if ($State.PackagesShown.ContainsKey($key)) { continue }
+            $State.PackagesShown[$key] = $true
+            Add-AgentEvent $State 'packages-needed' @{ folder = $it.folder; text = (Format-PackageNeed $it); npm = $npm }
+        }
+    } catch { Write-CCBLogError agent 'packages check' $_ }
+}
+
+function Invoke-PackagesJob {
+    <# npm install for one package.json folder ('' = the project root), or for every one with
+       missing packages when $Folder is $null: started by a person (the card, or Settings), never by
+       StreamHub itself. A run card per folder with npm's output; package-lock.json changes are a
+       change set. Network failures get a hint (proxy, registry). #>
+    param($State, $Folder = $null)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
+    $root = $State.ProjectRoot
+    if (-not (Get-RealCommand 'npm')) {
+        Add-AgentEvent $State 'error' @{ text = 'npm is not installed on this computer, so the packages cannot be installed.'; code = 'NPM'; hint = 'Settings > This computer > Node.js > Install for me (it brings npm), then run npm install again.' }
+        return
+    }
+    $all = @(Get-PackageState $root)
+    # One folder when given ('' is the root); $null (the API without a folder): every folder with missing packages.
+    $todo = @(if ($null -ne $Folder) { $all | Where-Object { $_.folder -eq $Folder } } else { $all | Where-Object { @($_.missing).Count } })
+    if (-not $todo.Count) { Add-AgentEvent $State 'status' @{ text = $(if ($all.Count) { 'All packages are installed already.' } else { 'This project has no package.json.' }) }; return }
+    $State.Busy = $true; $State.Cancel = $false
+    $cp = $null
+    try {
+        foreach ($it in $todo) {
+            if ($State.Cancel -or $State.Stop) { break }
+            $cmd = Get-NpmInstallCommand $it.folder
+            $id = 'npm-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+            Add-AgentEvent $State 'action' @{ id = $id; action = 'run'; target = $cmd; status = 'running'; by = 'streamhub' }
+            $State.Activity.kind = 'busy'; $State.Activity.label = "Installing packages$(if ($it.folder) { " in $($it.folder)" })"
+            $lockRel = ($(if ($it.folder) { "$($it.folder)/" } else { '' }) + 'package-lock.json')
+            $lockFull = Join-Path $root $lockRel.Replace('/', '\')
+            $lockBefore = if (Test-Path -LiteralPath $lockFull) { [IO.File]::ReadAllText($lockFull) } else { $null }
+            if (-not $cp) { $cp = New-Checkpoint $root 'npm install' }
+            Save-CheckpointFile $cp $root $lockFull
+            $timeout = [Math]::Max(900, [int]$State.Config.commandTimeoutSec)
+            $r = Invoke-RunAction $root $cmd -TimeoutSec $timeout -MaxChars 6000 -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
+            $ok = (-not $r.timedOut) -and (-not $r.cancelled) -and ($r.exitCode -eq 0)
+            $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $timeout s" } else { "exit code $($r.exitCode)" }
+            $out = "$status`n$($r.output)"
+            if (-not $ok -and "$($r.output)" -match '(?i)ETIMEDOUT|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|proxy|SELF_SIGNED|UNABLE_TO_GET_ISSUER|certificate|E403|E401') {
+                $out += "`nnpm could not reach its package registry. On a company network this is usually a proxy or a blocked registry: ask IT for the npm registry address to use (npm config set registry ADDRESS), or build the app without npm."
+            }
+            $after = if (Test-Path -LiteralPath $lockFull) { [IO.File]::ReadAllText($lockFull) } else { $null }
+            if ($after -eq $lockBefore) { $cp.Files.Remove($lockRel) }
+            Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = "npm install$(if ($it.folder) { " in $($it.folder)" }): $status"; output = (Limit-Text $out 4000); changed = $true }
+        }
+        $left = @(Get-PackageState $root | Where-Object { @($_.missing).Count -and (@($todo | ForEach-Object { $_.folder }) -contains $_.folder) })
+        if ($left.Count) { Add-AgentEvent $State 'error' @{ text = "Packages are still missing after npm install: $(@($left | ForEach-Object { Format-PackageNeed $_ }) -join '; ')."; code = 'NPM'; hint = 'The card above shows npm''s output.' } }
+        else { Add-AgentEvent $State 'status' @{ text = "Packages installed: every package in $(@($todo | ForEach-Object { if ($_.folder) { "$($_.folder)/package.json" } else { 'package.json' } }) -join ', ') is there now." } }
+    } catch {
+        Write-CCBLogError agent 'npm install' $_
+        Add-AgentEvent $State 'error' @{ text = "npm install failed: $($_.Exception.Message)"; record = $_ }
+    } finally {
+        $State.Activity.label = ''
+        if ($cp) {
+            if (-not $cp.Files.Count) { Remove-Item $cp.Dir -Recurse -Force -ErrorAction SilentlyContinue }
+            else { Add-ChangeSetEvent $State $cp 'npm install' }
+        }
     }
 }
 
@@ -3495,6 +3569,7 @@ function Start-AgentWorker {
                 'agent' { Invoke-AgentRun $State ([string]$task.agent) ([string]$task.text) -FollowUp:([bool]$task.followUp) -AutoWhy ([string]$task.autoWhy) }
                 'chain' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ChainJob $State $task.name }
                 'script' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ScriptJob $State $task.name }
+                'packages' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-PackagesJob $State $task.folder }
                 'review' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ReviewJob $State $task }
                 'ask' {
                     # A plain question to Copilot, without project context or actions.
@@ -3552,6 +3627,8 @@ function Start-AgentWorker {
             if ($State.ProjectRoot -and $task.kind -ne 'connect') { try { $null = Invoke-ProjectRetention $State.ProjectRoot $State.Config } catch { Write-CCBLogError agent 'retention' $_ } }
             # Data copies follow their JSON (a runbook, chain or change may have written the JSON).
             if ($State.ProjectRoot -and $task.kind -ne 'connect') { Sync-DataMirrors $State }
+            # Packages a package.json lists that are not installed yet: a card to install them.
+            if ($State.ProjectRoot -and $task.kind -notin 'connect', 'packages', 'newchat') { Publish-PackagesNeeded $State }
             # The project's afterTask hooks, after work that can change files.
             if ($State.ProjectRoot -and $task.kind -in 'chat', 'fetch', 'runbook', 'chain', 'script', 'agent') { try { $null = Invoke-ProjectHooks $State 'afterTask' } catch { Write-CCBLogError agent 'hooks' $_ } }
             $State.CurrentQueueId = $null
@@ -3565,4 +3642,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

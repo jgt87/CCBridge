@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -457,6 +457,22 @@ function Invoke-ApiRequest($Ctx, $State) {
             $p = New-HooksFile $State.ProjectRoot
             return Send-Json $Ctx @{ ok = $true; path = $p }
         }
+        '^GET /api/packages$' {
+            # The project's package.json files and the packages node_modules does not have yet.
+            if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ items = @(); npm = $false } }
+            $items = @(Get-PackageState $State.ProjectRoot | ForEach-Object { @{ folder = $_.folder; total = $_.total; missing = @($_.missing); error = $_.error } })
+            return Send-Json $Ctx @{ items = $items; npm = [bool](Get-RealCommand 'npm') }
+        }
+        '^POST /api/packages/install$' {
+            # npm install downloads code and runs it: only the StreamHub page itself starts it.
+            if ($Ctx.Request.Headers['Origin'] -ne "http://localhost:$($State.Config.port)") { return Send-Json $Ctx @{ error = 'Only the StreamHub page can start npm install.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            $task = @{ kind = 'packages' }
+            if ($null -ne $b.folder) { $task.folder = [string]$b.folder }
+            $null = Submit-AgentTask $State $task 'user' $(if ($b.folder) { "npm install in $($b.folder)" } else { 'npm install' })
+            return Send-Json $Ctx @{ ok = $true }
+        }
         '^POST /api/scripts/run$' {
             # One script from Scripts/ (Automation > Scripts); checked again when it runs.
             if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
@@ -741,6 +757,7 @@ function Set-Project($State, [string]$Path) {
         Add-OwnChangeEvent $State 'edit' $f.path "$($f.count) link(s) or reference(s) now point at the new folders. The earlier version is kept in $($re.backup)." @{ path = $f.path; exists = $true; old = $old; new = $new }
     }
     Sync-DataMirrors $State   # data copies (JS wrapping a JSON file) follow their JSON
+    Publish-PackagesNeeded $State   # a card when package.json lists packages that are not installed
     # Line counts and "new" marks in the Files tab cover the change sets in the restored chat too.
     try { $State.SessionSince = Get-ChangeCountStart $State $mark ([string]$State.SessionSince) } catch { Write-CCBLogError server 'change counts' $_ }
     try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue fix reset' $_ }

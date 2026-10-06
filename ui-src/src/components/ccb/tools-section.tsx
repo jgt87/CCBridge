@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type ToolItem } from "@/lib/api";
+import { api, type PackageItem, type ToolItem } from "@/lib/api";
 import { cachedTools, loadTools } from "@/lib/settings-cache";
 import { SettingLine, smallButtonClass } from "./settings-ui";
 
@@ -58,7 +58,47 @@ export function ToolsSection() {
           />
         );
       })}
+      <ProjectPackages />
       {error && <p className="text-rose-500 dark:text-rose-400 text-xs">{error}</p>}
     </>
+  );
+}
+
+/** The open project's npm packages: what package.json lists and node_modules does not have, and npm install. */
+function ProjectPackages() {
+  const [state, setState] = useState<{ items: PackageItem[]; npm: boolean } | null>(null);
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    api.packages().then(setState, () => setState({ items: [], npm: false }));
+  }, []);
+  const missing = (state?.items ?? []).filter((p) => p.missing.length);
+  const run = async () => {
+    setNote("");
+    try {
+      await api.installPackages();
+      setNote("npm install started: the chat shows its progress and output.");
+    } catch (e) {
+      setNote((e as Error).message);
+    }
+  };
+  const where = (p: PackageItem) => (p.folder ? `${p.folder}/` : "the project root");
+  const help = !state
+    ? "Checking the open project..."
+    : !state.items.length
+      ? "The open project has no package.json (plain pages need no packages)."
+      : missing.length
+        ? missing.map((p) => `${p.missing.length} of ${p.total} not installed in ${where(p)}`).join("; ")
+        : `All packages are installed (${state.items.map(where).join(", ")}).`;
+  return (
+    <SettingLine
+      control={
+        <button className={smallButtonClass} disabled={!state?.items.length || !state.npm} onClick={run} title={state && !state.npm ? "npm is not installed: install Node.js above first." : "Downloads the packages from npm's registry and runs their install steps."} type="button">
+          Run npm install
+        </button>
+      }
+      help={`${help}${state && state.items.length && !state.npm ? ". npm is not installed: install Node.js above first" : ""}`}
+      notes={note ? <div className="text-muted-foreground text-xs">{note}</div> : null}
+      title="Project packages (npm install)"
+    />
   );
 }

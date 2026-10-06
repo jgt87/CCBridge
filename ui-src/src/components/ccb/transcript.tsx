@@ -21,6 +21,7 @@ export type TranscriptItem =
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[]; agent?: string }
   | { kind: "agentPlan"; seq: number; agent: string }
   | { kind: "runbookChoice"; seq: number; name: string; title: string; request: string; restored: boolean }
+  | { kind: "packages"; seq: number; folder: string; text: string; npm: boolean; restored: boolean }
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string; path?: string }
   | { kind: "undo"; seq: number; text: string; changes: UndoChange[] }
@@ -109,6 +110,8 @@ function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
 const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildContext) => void>> = {
   user: (e, ctx) => ctx.items.push({ kind: "user", seq: e.seq, text: e.text ?? "", ...(e.agent ? { agent: e.agent } : {}) }),
   "agent-plan": (e, ctx) => ctx.items.push({ kind: "agentPlan", seq: e.seq, agent: e.agent || "Researcher" }),
+  "packages-needed": (e, ctx) =>
+    ctx.items.push({ kind: "packages", seq: e.seq, folder: e.folder ?? "", text: e.text ?? "", npm: e.npm !== false, restored: Boolean(e.restored) }),
   "runbook-choice": (e, ctx) =>
     ctx.items.push({ kind: "runbookChoice", seq: e.seq, name: e.name ?? "", title: e.title ?? "", request: e.request ?? "", restored: Boolean(e.restored) }),
   // How the last message was sent (chat, project, coding, ...): shown under it.
@@ -271,6 +274,39 @@ function RunbookChoiceCard({ item, onSend }: { item: Extract<TranscriptItem, { k
   );
 }
 
+/** A package.json lists packages that are not installed: npm install on a click (never by itself). */
+function PackagesCard({ item }: { item: Extract<TranscriptItem, { kind: "packages" }> }) {
+  const [state, setState] = useState<"" | "started" | "later" | "failed">("");
+  if (item.restored || state === "later" || state === "started") {
+    return (
+      <div className="flex items-start gap-2 px-1 text-muted-foreground text-sm">
+        <Info className="mt-0.5 h-4 w-4" />
+        <span>{state === "started" ? "npm install started." : `This project needs its packages: ${item.text}. Settings > This computer > Project packages runs npm install.`}</span>
+      </div>
+    );
+  }
+  const install = () => {
+    setState("started");
+    import("@/lib/api").then(({ api }) => api.installPackages(item.folder)).catch(() => setState("failed"));
+  };
+  const btn = "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs hover:bg-black/10 disabled:opacity-40 dark:hover:bg-white/15";
+  return (
+    <div className="space-y-2 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
+      <div>This project needs its packages: {item.text}. Install them with npm now? It downloads them from npm's registry and runs their install steps.</div>
+      {!item.npm && <div className="text-muted-foreground text-xs">npm is not installed: Settings &gt; This computer &gt; Node.js &gt; Install for me brings it.</div>}
+      {state === "failed" && <div className="text-rose-600 text-xs dark:text-rose-400">npm install could not be started.</div>}
+      <div className="flex gap-1.5">
+        <button className={cn(btn, "bg-black/5 dark:bg-white/10")} disabled={!item.npm} onClick={install} type="button">
+          Run npm install
+        </button>
+        <button className={btn} onClick={() => setState("later")} type="button">
+          Not now
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NoteLine({ tone, text, path, onOpenFile }: { tone: NoteTone; text: string; path?: string; onOpenFile?: (path: string) => void }) {
   const style = NOTE_STYLE[tone];
   return (
@@ -369,6 +405,8 @@ function TranscriptRow({
       return onSend ? <AgentPlanCard agent={item.agent} onSend={onSend} /> : null;
     case "runbookChoice":
       return <RunbookChoiceCard item={item} onSend={onSend} />;
+    case "packages":
+      return <PackagesCard item={item} />;
     case "action":
       return <ActionCard item={item.item} />;
     case "note":

@@ -80,10 +80,21 @@ export interface UndoChange {
   preview?: Preview | null;
 }
 
+/** One package.json of the project: how many packages it lists and which are not installed. */
+export interface PackageItem {
+  folder: string;
+  total: number;
+  missing: string[];
+  error?: string;
+}
+
 export interface AgentEvent {
   seq: number;
   /** runbook-choice: the message the person sent, to send on to Copilot. */
   request?: string;
+  /** packages-needed: the folder of the package.json ('' = the project root) and whether npm is installed. */
+  folder?: string;
+  npm?: boolean;
   /** Restored from the chat history after a restart (not live). */
   restored?: boolean;
   type:
@@ -114,6 +125,8 @@ export interface AgentEvent {
     | "agent-plan"
     /** A message named a runbook: run it, or send the message to Copilot (the person chooses). */
     | "runbook-choice"
+    /** A package.json lists packages node_modules does not have: run npm install (the person chooses). */
+    | "packages-needed"
     /** Settings > Privacy > Clear chat history: the chat shows nothing from before it. */
     | "history-cleared";
   time: string;
@@ -646,6 +659,11 @@ export const api = {
     })),
   createRunbook: (template: string, name: string) => call<{ ok: boolean; item: RunbookItem }>("POST", "/api/runbooks", { template, name }),
   runRunbook: (name: string) => call<{ ok: boolean }>("POST", "/api/runbooks/run", { name }),
+  /** The project's package.json files and the packages not installed yet. */
+  packages: () =>
+    call<{ items: PackageItem[] | PackageItem; npm: boolean }>("GET", "/api/packages").then((r) => ({ npm: r.npm, items: Array.isArray(r.items) ? r.items : r.items ? [r.items] : [] })),
+  /** npm install for one folder ('' = the project root), or every folder with missing packages. */
+  installPackages: (folder?: string) => call<{ ok: boolean }>("POST", "/api/packages/install", folder === undefined ? {} : { folder }),
   chains: () =>
     call<{ chains: ChainItem[]; scripts: string[] }>("GET", "/api/chains").then((r) => ({
       chains: asList(r.chains).map((c) => ({ ...c, steps: asList(c.steps), problems: asList(c.problems) })),
