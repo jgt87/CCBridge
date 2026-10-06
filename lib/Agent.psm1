@@ -1858,6 +1858,7 @@ function Get-StepFailureInfo {
         'needs a person|refused' { @{ code = 'RUN-NEEDS-PERSON'; reasons = @('The command would act on Microsoft 365 or delete data; that always needs a person.'); next = 'Run it yourself if you really want it; Copilot is told not to work around it.' }; break }
         'stopped by the user' { @{ code = 'STOPPED'; reasons = @('You pressed Stop.'); next = 'Changes made so far in this message can be undone (Changes > Undo last change set).' }; break }
         'timed out after' { @{ code = 'RUN-TIMEOUT'; reasons = @('The command ran longer than commandTimeoutSec (it may wait for input, or just be slow).'); next = 'Copilot sees the output so far. Raise commandTimeoutSec in config\harness.local.json for slow builds.' }; break }
+        'needs an interactive terminal to ask questions' { @{ code = 'RUN-INTERACTIVE'; reasons = @('The command wants to ask questions in a terminal (it is interactive). StreamHub runs commands without a terminal, so nobody can answer them.'); next = "Copilot is told to use the command's form for scripts (flags that answer the questions, or the tool's command for scripts and CI), or to give you the exact command to run in your own terminal. $copilotRetries" }; break }
         'exit code [1-9]|exit code -' { @{ code = 'RUN-FAILED'; reasons = @('The command reported an error (see its output on this card).', 'A tool or module the command needs is not installed on this computer.', 'The command ran in the project folder with cmd.exe; it may have expected another folder or shell.'); next = $copilotRetries }; break }
         'is not valid|invalid' { @{ code = 'STEP-INVALID'; reasons = @('The step''s input was not valid (see the reason above).'); next = $copilotRetries }; break }
         default { @{ code = "$($Type.ToUpperInvariant())-FAILED"; reasons = @('See the reason above; this case has no specific explanation yet.'); next = 'Copilot gets the reason in the next message. If it keeps failing, use Copy details and send them.' }; break }
@@ -2810,6 +2811,8 @@ function Invoke-AgentAction {
                 $r = Invoke-RunAction $root $evt.target -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
                 $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
                 $out = "$status`n~~~~`n$($r.output)`n~~~~"
+                # A command that wanted a terminal to ask questions (StreamHub runs them without one).
+                if ($r.exitCode -ne 0 -and -not $r.cancelled) { $tty = Get-InteractiveNote "$($r.output)"; if ($tty) { $out += "`n$tty" } }
                 $runChanged = @()
                 if ($snap) {
                     try {

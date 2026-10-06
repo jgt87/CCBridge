@@ -38,6 +38,7 @@ $script:DesignReviewPattern = '(?i)\b(design ?review|review (the |my |this |our 
 $script:HttpPattern = '(?i)\b(apis?|rest|endpoints?|http|https|fetch|invoke-restmethod|invoke-webrequest|webhooks?|requests?|rate limit)\b'
 $script:CSharpPattern = '(?i)c#|\b(csharp|dotnet|\.net|asp\.net|blazor|wpf|winforms)\b|\.(cs|csproj|sln)\b'
 $script:ReactPattern = '(?i)\b(react|jsx|tsx|use(State|Effect|Memo|Callback|Ref|Context)|next\.?js)\b'
+$script:PrismaPattern = '(?i)\bprisma\b|schema\.prisma'
 $script:PrivacyPattern = '(?i)\b(personal data|pii|privacy|gdpr|avg|customer data|employee data|e-?mail addresses|phone numbers|persoonsgegevens)\b'
 $script:BatchPattern = '(?i)\b(batch ?(file|script)s?|cmd ?files?)\b|\.(cmd|bat)\b'
 # Requests that build or change code get the code quality rules (rules/quality.md), once per chat.
@@ -85,6 +86,7 @@ function Get-ProjectTraits {
     if (@($Paths | Where-Object { $_ -match '(?i)\.(cs|csproj|sln)$' }).Count) { $t.Add('csharp') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.(docx?|pptx?|xlsx?|docm|pptm|xlsm|pdf)$' }).Count) { $t.Add('office') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.(jsx|tsx)$' -and $_ -notmatch '(?i)(^|/)node_modules/' }).Count) { $t.Add('react') }
+    if (@($Paths | Where-Object { $_ -match '(?i)\.prisma$' -and $_ -notmatch '(?i)(^|/)node_modules/' }).Count) { $t.Add('prisma') }
     if (@($Paths | Where-Object { $_ -match '(?i)\.Tests\.ps1$|(^|/)test_[^/]+\.py$|_test\.py$|\.(test|spec)\.[cm]?[jt]sx?$|(^|/)(tests?|__tests__)/' }).Count) { $t.Add('tests') }
     $t.ToArray()
 }
@@ -154,6 +156,7 @@ function Get-PromptModules {
     if ($Text -match $script:HttpPattern) { $ids.Add('rules:http') }
     if (($traits -contains 'csharp') -or ($Text -match $script:CSharpPattern)) { $ids.Add('rules:csharp') }
     if (($traits -contains 'react') -or ($Text -match $script:ReactPattern)) { $ids.Add('rules:react') }
+    if (($traits -contains 'prisma') -or ($Text -match $script:PrismaPattern)) { $ids.Add('rules:prisma') }
     if (($traits -contains 'source') -or ($Text -match $script:PrivacyPattern)) { $ids.Add('rules:privacy') }
     # Runbook rules: for requests about runbooks, and for messages that name one of the project's runbooks.
     $namesRunbook = @($Context.Paths | Where-Object { "$_" -match '(?i)^Runbooks/([^/]+)\.runbook\.md$' -and $Text -match ('(?i)(^|[^\w-])' + [regex]::Escape($Matches[1]) + '($|[^\w-])') }).Count

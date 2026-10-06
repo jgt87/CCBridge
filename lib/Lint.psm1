@@ -337,6 +337,221 @@ function Test-Toml([string]$Text) {
     }
 }
 
+# Prisma schema (schema.prisma): blocks, fields, types, attributes and relations, by fixed rules.
+# Prisma's own check (prisma validate) runs as well when the project has Prisma installed
+# (Test-PrismaValidate); these rules need nothing installed.
+$script:PrismaScalars = @('String', 'Boolean', 'Int', 'BigInt', 'Float', 'Decimal', 'DateTime', 'Json', 'Bytes', 'Unsupported')
+$script:PrismaFieldAttrs = @('id', 'default', 'unique', 'relation', 'map', 'updatedAt', 'ignore', 'db', 'shardKey')
+$script:PrismaBlockAttrs = @('id', 'unique', 'index', 'map', 'ignore', 'schema', 'fulltext', 'shardKey')
+$script:PrismaProviders = @('postgresql', 'postgres', 'mysql', 'sqlite', 'sqlserver', 'mongodb', 'cockroachdb')
+
+function Get-PrismaBlocks([string]$Text) {
+    <# The top-level blocks of a schema: @{ kind; name; line; body = @(@{ n; text }) }, plus the
+       lines outside any block that are not empty ("stray"). Comments and strings are blanked. #>
+    $masked = Hide $Text '"(?:[^"\\\n]|\\.)*"|//[^\n]*'
+    $lines = $masked.Split("`n"); $raw = $Text.Split("`n")
+    $blocks = New-Object System.Collections.Generic.List[object]
+    $stray = New-Object System.Collections.Generic.List[object]
+    $cur = $null
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        $t = $lines[$i].Trim(); $n = $i + 1
+        if (-not $cur) {
+            if (-not $t) { continue }
+            $h = [regex]::Match($t, '^(datasource|generator|model|enum|view|type)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{\s*(\})?$')
+            if ($h.Success) {
+                $cur = @{ kind = $h.Groups[1].Value; name = $h.Groups[2].Value; line = $n; body = (New-Object System.Collections.Generic.List[object]); closed = $false }
+                $blocks.Add($cur)
+                if ($h.Groups[3].Success) { $cur.closed = $true; $cur = $null }
+            } else { $stray.Add(@{ n = $n; text = $raw[$i].Trim() }) }
+            continue
+        }
+        if ($t -eq '}') { $cur.closed = $true; $cur = $null; continue }
+        if ($t) { $cur.body.Add(@{ n = $n; text = $t; raw = $raw[$i].Trim() }) }
+    }
+    @{ blocks = $blocks.ToArray(); stray = $stray.ToArray() }
+}
+
+function New-OrdinalMap { New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal) }
+
+function Test-Prisma([string]$Text) {
+    <# Problems in a Prisma schema: "line N: problem". Names are case-sensitive in Prisma, so they
+       are compared exactly. #>
+    $masked = Hide $Text '"(?:[^"\\\n]|\\.)*"|//[^\n]*'
+    $b = Test-Brackets $masked
+    if ($b) { return $b }   # the rest needs whole blocks
+    $q = Find-Leftover (Hide $Text '"(?:[^"\\\n]|\\.)*"|//[^\n]*') '"' 'a string is never closed'
+    if ($q) { return $q }
+    $p = Get-PrismaBlocks $Text
+    foreach ($s in $p.stray) { "line $($s.n): '$($s.text)' is not part of a block (blocks are datasource, generator, model, enum, view and type, written as KIND NAME { ... })" }
+    $names = New-OrdinalMap
+    foreach ($blk in $p.blocks) {
+        if (-not $blk.closed) { "line $($blk.line): $($blk.kind) $($blk.name) is never closed with } on its own line"; continue }
+        if ($blk.kind -in 'model', 'enum', 'view', 'type') {
+            if ($names.ContainsKey($blk.name)) { "line $($blk.line): $($blk.name) is defined twice (also at line $($names[$blk.name]))" } else { $names[$blk.name] = $blk.line }
+        }
+    }
+    $models = New-OrdinalMap; $enums = New-OrdinalMap
+    foreach ($blk in $p.blocks) {
+        # The first definition counts (a second one is reported above).
+        if ($blk.kind -in 'model', 'view', 'type') { if (-not $models.ContainsKey($blk.name)) { $models[$blk.name] = $blk } }
+        elseif ($blk.kind -eq 'enum') { if (-not $enums.ContainsKey($blk.name)) { $enums[$blk.name] = $blk } }
+    }
+    foreach ($blk in $p.blocks) {
+        switch ($blk.kind) {
+            { $_ -in 'datasource', 'generator' } {
+                $keys = @{}
+                foreach ($l in $blk.body) {
+                    $kv = [regex]::Match($l.raw, '^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\S')   # the line as written: its string value is blanked in .text
+                    if (-not $kv.Success) { "line $($l.n): '$($l.raw)' is not 'key = value' in $($blk.kind) $($blk.name)"; continue }
+                    $keys[$kv.Groups[1].Value] = $l
+                }
+                if ($blk.kind -eq 'datasource') {
+                    if (-not $keys.ContainsKey('provider')) { "line $($blk.line): datasource $($blk.name) has no provider" }
+                    else {
+                        $pv = [regex]::Match($keys['provider'].raw, '=\s*"([^"]*)"')
+                        if ($pv.Success -and $script:PrismaProviders -cnotcontains $pv.Groups[1].Value) { "line $($keys['provider'].n): '$($pv.Groups[1].Value)' is not a database Prisma knows ($($script:PrismaProviders -join ', '))" }
+                    }
+                } elseif (-not $keys.ContainsKey('provider')) { "line $($blk.line): generator $($blk.name) has no provider" }
+            }
+            'enum' {
+                $vals = New-OrdinalMap
+                foreach ($l in $blk.body) {
+                    if ($l.text -match '^@@') { continue }
+                    $v = [regex]::Match($l.text, '^([A-Za-z][A-Za-z0-9_]*)(\s+@.*)?$')
+                    if (-not $v.Success) { "line $($l.n): '$($l.raw)' is not an enum value"; continue }
+                    if ($vals.ContainsKey($v.Groups[1].Value)) { "line $($l.n): enum $($blk.name) has $($v.Groups[1].Value) twice" } else { $vals[$v.Groups[1].Value] = 1 }
+                }
+            }
+            { $_ -in 'model', 'view', 'type' } {
+                $fields = New-OrdinalMap; $unique = $false
+                $relations = New-Object System.Collections.Generic.List[object]
+                foreach ($l in $blk.body) {
+                    if ($l.text -match '^@@') {
+                        $ba = [regex]::Match($l.text, '^@@([A-Za-z]+)')
+                        if ($script:PrismaBlockAttrs -cnotcontains $ba.Groups[1].Value) { "line $($l.n): @@$($ba.Groups[1].Value) is not a Prisma block attribute ($(@($script:PrismaBlockAttrs | ForEach-Object { "@@$_" }) -join ', '))" }
+                        if ($ba.Groups[1].Value -in 'id', 'unique') { $unique = $true }
+                        continue
+                    }
+                    $f = [regex]::Match($l.text, '^([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)(\([^)]*\))?(\[\])?(\?)?(\s+.*)?$')
+                    if (-not $f.Success) { "line $($l.n): '$($l.raw)' is not a field (name Type, then attributes such as @id or @default(...))"; continue }
+                    $fname = $f.Groups[1].Value; $ftype = $f.Groups[2].Value; $attrs = $f.Groups[6].Value
+                    if ($fields.ContainsKey($fname)) { "line $($l.n): $($blk.name) has the field $fname twice (also at line $($fields[$fname]))" } else { $fields[$fname] = $l.n }
+                    if ($f.Groups[4].Success -and $f.Groups[5].Success) { "line $($l.n): $fname is an optional list ($ftype[]?); Prisma has no optional lists, use $ftype[]" }
+                    if ($script:PrismaScalars -cnotcontains $ftype -and -not $models.ContainsKey($ftype) -and -not $enums.ContainsKey($ftype)) {
+                        $close = @(@($script:PrismaScalars) + @($models.Keys) + @($enums.Keys) | Where-Object { $_.Length -ge 3 -and $_.Substring(0, 3) -ieq $ftype.Substring(0, [Math]::Min(3, $ftype.Length)) } | Select-Object -First 2)
+                        "line $($l.n): $fname has the type $ftype, which is not a Prisma type, model or enum in this schema$(if ($close.Count) { " (did you mean $($close -join ' or ')?)" })"
+                    }
+                    foreach ($am in [regex]::Matches($attrs, '(?<![@\w])@([A-Za-z]+)')) {
+                        if ($script:PrismaFieldAttrs -cnotcontains $am.Groups[1].Value) { "line $($l.n): @$($am.Groups[1].Value) is not a Prisma field attribute" }
+                    }
+                    if ($attrs -match '(?<![@\w])@(id|unique)\b') { $unique = $true }
+                    if ($models.ContainsKey($ftype) -and $blk.kind -eq 'model') { $relations.Add(@{ n = $l.n; field = $fname; target = $ftype; attrs = $attrs }) }
+                }
+                if ($blk.kind -eq 'model' -and -not $unique -and $blk.body.Count) { "line $($blk.line): model $($blk.name) has no @id, @@id, @unique or @@unique; Prisma needs one to tell its rows apart" }
+                foreach ($r in $relations) {
+                    $target = $models[$r.target]
+                    $rel = [regex]::Match($r.attrs, '@relation\(([^)]*\[[^\]]*\][^)]*|[^)]*)\)')
+                    if ($rel.Success) {
+                        $fm = [regex]::Match($rel.Groups[1].Value, 'fields\s*:\s*\[([^\]]*)\]')
+                        $rm = [regex]::Match($rel.Groups[1].Value, 'references\s*:\s*\[([^\]]*)\]')
+                        $own = @(if ($fm.Success) { $fm.Groups[1].Value.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ } })
+                        $refs = @(if ($rm.Success) { $rm.Groups[1].Value.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ } })
+                        foreach ($x in $own) { if (-not $fields.ContainsKey($x)) { "line $($r.n): @relation fields: [$x] names a field that $($blk.name) does not have" } }
+                        $targetFields = @($target.body | ForEach-Object { ([regex]::Match($_.text, '^([A-Za-z_][A-Za-z0-9_]*)\s')).Groups[1].Value })
+                        foreach ($x in $refs) { if ($targetFields -cnotcontains $x) { "line $($r.n): @relation references: [$x] names a field that $($r.target) does not have" } }
+                        if ($fm.Success -xor $rm.Success) { "line $($r.n): @relation needs both fields: [...] and references: [...]" }
+                        elseif ($own.Count -ne $refs.Count) { "line $($r.n): @relation has $($own.Count) field(s) but $($refs.Count) reference(s)" }
+                    }
+                    if ($r.target -ne $blk.name) {
+                        $back = @($target.body | Where-Object { $_.text -cmatch ('^[A-Za-z_][A-Za-z0-9_]*\s+' + [regex]::Escape($blk.name) + '(\[\])?\??(\s|$)') })
+                        if (-not $back.Count) { "line $($r.n): the relation $($r.field) to $($r.target) has no field pointing back in $($r.target) (add a field of type $($blk.name) or $($blk.name)[] there)" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+function Test-PrismaEnv([string]$Text, [string]$Path, [string]$ProjectRoot) {
+    <# A schema's datasource against the project: env("NAME") must be set in a .env file (next to the
+       schema or at the project root) or in Windows' environment, and a datasource needs a url unless
+       a prisma.config file holds it. Only names are read from .env, never the values. #>
+    if (-not $ProjectRoot) { return }
+    $schemaDir = Split-Path (Join-Path $ProjectRoot $Path.Replace('/', '\'))
+    $names = @{}
+    foreach ($dir in @($schemaDir, (Split-Path $schemaDir), $ProjectRoot) | Select-Object -Unique) {
+        $f = Join-Path $dir '.env'
+        if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { continue }
+        foreach ($l in [IO.File]::ReadAllLines($f)) { $m = [regex]::Match($l, '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*='); if ($m.Success) { $names[$m.Groups[1].Value] = $true } }
+    }
+    $hasConfig = @(Get-ChildItem -LiteralPath $ProjectRoot -Filter 'prisma.config.*' -File -ErrorAction SilentlyContinue).Count -gt 0
+    $p = Get-PrismaBlocks $Text
+    foreach ($blk in @($p.blocks | Where-Object { $_.kind -eq 'datasource' })) {
+        $url = @($blk.body | Where-Object { $_.raw -match '^url\s*=' })
+        if (-not $url.Count -and -not $hasConfig) { "line $($blk.line): datasource $($blk.name) has no url (url = env(`"DATABASE_URL`") with DATABASE_URL in .env)" }
+        foreach ($l in $blk.body) {
+            foreach ($m in [regex]::Matches($l.raw, 'env\(\s*"([^"]+)"\s*\)')) {
+                $n = $m.Groups[1].Value
+                if (-not $names.ContainsKey($n) -and -not [Environment]::GetEnvironmentVariable($n)) {
+                    "line $($l.n): env(`"$n`") is not set: add $n=... to the project's .env file (Prisma reads it from there)"
+                }
+            }
+        }
+    }
+}
+
+function Find-PrismaCli([string]$ProjectRoot, [string]$Path) {
+    # The project's own Prisma (node_modules\.bin\prisma.cmd), from the schema's folder up to the
+    # project root; never npx, which could download it.
+    $dir = Split-Path (Join-Path $ProjectRoot $Path.Replace('/', '\'))
+    $root = $ProjectRoot.TrimEnd('\')
+    while ($dir -and $dir.Length -ge $root.Length) {
+        $exe = Join-Path $dir 'node_modules\.bin\prisma.cmd'
+        if (Test-Path -LiteralPath $exe -PathType Leaf) { return @{ exe = $exe; dir = $dir } }
+        $dir = Split-Path -Parent $dir
+    }
+    $null
+}
+
+function ConvertFrom-PrismaValidate([string]$Output, [string]$Path) {
+    <# "line N: prisma says: ..." from prisma validate's output: each "error: ..." with the line of
+       its "-->  FILE:LINE". Messages about Prisma itself (its engines missing) are not schema problems. #>
+    if ($Output -match '(?i)Failed to fetch|engine|ENOENT|Cannot find module|not recognized') { if ($Output -notmatch '(?m)^error: ') { return } }
+    $lines = $Output.Replace("`r`n", "`n").Split("`n")
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        $m = [regex]::Match($lines[$i], '^error:\s*(.+)$')
+        if (-not $m.Success) { continue }
+        $at = ''
+        for ($k = $i + 1; $k -lt [Math]::Min($lines.Length, $i + 4); $k++) { $lm = [regex]::Match($lines[$k], '-->\s+.*?:(\d+)\s*$'); if ($lm.Success) { $at = $lm.Groups[1].Value; break } }
+        "$(if ($at) { "line ${at}: " })prisma says: $($m.Groups[1].Value.Trim())"
+    }
+}
+
+function Test-PrismaValidate([string]$ProjectRoot, [string]$Path) {
+    <# prisma validate on the schema as it is on disk, when the project has Prisma installed
+       (setting checks.tools). Offline, asks nothing; at most 60 seconds. #>
+    if (-not $ProjectRoot -or -not (Test-CheckSwitch 'tools')) { return }
+    $cli = Find-PrismaCli $ProjectRoot $Path
+    if (-not $cli) { return }
+    $full = Join-Path $ProjectRoot $Path.Replace('/', '\')
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return }
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = "$env:ComSpec"
+    $psi.Arguments = '/d /s /c ""' + $cli.exe + '" validate --schema "' + $full + '" 2>&1"'
+    $psi.WorkingDirectory = $cli.dir
+    $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardInput = $true; $psi.CreateNoWindow = $true
+    $psi.EnvironmentVariables['NO_COLOR'] = '1'
+    try {
+        $proc = [Diagnostics.Process]::Start($psi)
+        $proc.StandardInput.Close()
+        $read = $proc.StandardOutput.ReadToEndAsync()
+        if (-not $proc.WaitForExit(60000)) { try { $proc.Kill() } catch { }; return }
+        $out = $read.Result
+        if ($proc.ExitCode -eq 0) { return }
+        ConvertFrom-PrismaValidate $out $Path
+    } catch { }
+}
+
 function Test-Csv([string]$Text, [string]$Path) {
     $lines = @($Text.TrimEnd("`n").Split("`n"))
     if ($lines.Count -lt 2) { return }
@@ -351,7 +566,7 @@ function Test-Csv([string]$Text, [string]$Path) {
     }
 }
 
-$script:CodeExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|psd1|css|scss|less|json|ya?ml|toml|ini|sh|bash|cmd|bat|sql|html?|xml|csproj|config|xaml|svg)$'
+$script:CodeExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|psd1|css|scss|less|json|ya?ml|toml|ini|sh|bash|cmd|bat|sql|html?|xml|csproj|config|xaml|svg|prisma)$'
 # Program code where a repeated block or a second definition is a mistake (not data or markup).
 $script:ProgramExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|cs|java|kt|go|rs|php|swift|dart|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|sh|bash)$'
 
@@ -729,6 +944,7 @@ function Test-FileContent {
         '(?i)\.(cmd|bat)$' { & $add (Test-Batch $t (-not $hasCrlf -and $t.Contains("`n"))); break }
         '(?i)\.sql$' { & $add (Test-Sql $t); break }
         '(?i)\.toml$' { & $add (Test-Toml $t); break }
+        '(?i)\.prisma$' { & $add (Test-Prisma $t); break }
         '(?i)\.(csv|tsv)$' { & $add (Test-Csv $t $Path); break }
     }
     & $add (Test-Duplicates $t $Path)
@@ -744,12 +960,15 @@ function Get-NewFileIssues {
     $all = {
         param($text)
         @(Test-FileContent $Path $text $Crlf) + @(Test-LocalReferences $text.Replace("`r`n", "`n") $Path $ProjectRoot) +
-            @(if ($Path -match '(?i)\.ps[md]?1$') { Test-PsCommands $text $ProjectRoot }) | Where-Object { $_ }
+            @(if ($Path -match '(?i)\.ps[md]?1$') { Test-PsCommands $text $ProjectRoot }) +
+            @(if ($Path -match '(?i)\.prisma$') { Test-PrismaEnv $text.Replace("`r`n", "`n") $Path $ProjectRoot }) | Where-Object { $_ }
     }
     # The fixed rules; when they find nothing, the language's own syntax check (node, python, when
     # installed) for what they cannot see (one problem is not reported twice).
     $after = @(& $all $New)
     $tool = @(if (-not $after.Count) { Test-ToolSyntax $Path "$New".Replace("`r`n", "`n") })
+    # A Prisma schema: prisma validate on the file as saved (the new text), when the project has Prisma.
+    if (-not $after.Count -and $Path -match '(?i)\.prisma$') { $tool += @(Test-PrismaValidate $ProjectRoot $Path) }
     $after = @(@($after) + $tool | Where-Object { $_ })
     if (-not $after.Count) { return }
     $before = @{}
@@ -762,4 +981,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences

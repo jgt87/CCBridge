@@ -161,6 +161,13 @@ function Get-UselessCheckCommand([AllowEmptyString()][string]$Command) {
     if ($nc.Success -and $nc.Groups[1].Value -notmatch '(?i)\.(m?js|cjs)$') {
         return "node --check only reads JavaScript files (.js, .mjs, .cjs), not $($nc.Groups[1].Value). The helper program itself compiles the scripts in changed .js files and in the <script> blocks of changed HTML pages after every round and sends you any syntax error, so no command is needed for that"
     }
+    # Prisma commands that need a terminal or keep running: refused before they run, with the way that works here.
+    if ($Command -match '(?i)\bprisma(\.cmd)?\s+migrate\s+dev\b' -and $Command -notmatch '(?i)\s(--help|-h)\b') {
+        return 'prisma migrate dev needs a terminal to ask questions, and commands here run without one. Instead: npx prisma db push to bring a development database in line with the schema without migration files, or for a migration file: npx prisma migrate diff with --script (from the current migrations or database to the schema) into prisma/migrations/TIMESTAMP_NAME/migration.sql, then npx prisma migrate deploy. Or give the user the prisma migrate dev command to run in their own terminal'
+    }
+    if ($Command -match '(?i)\bprisma(\.cmd)?\s+studio\b') {
+        return 'prisma studio starts a web server that keeps running until it is stopped, so the command would never finish here. The user can start it in their own terminal (npx prisma studio)'
+    }
     $plain = ($Command -replace "'[^']*'", "''")
     if ($plain -match '<<<') {
         return 'the command uses <<<, a bash here-string; commands run in cmd.exe on Windows and PowerShell has no <<< either. Write a script file with a write block and run that instead. To check the JavaScript in a page you do not need a command: the helper program compiles the <script> blocks of changed HTML pages after every round and sends you any syntax error'
@@ -1765,7 +1772,8 @@ $script:DestructiveCommandPatterns = @(
     @{ re = '\bRemove-[A-Za-z]+'; why = 'removes data' },
     @{ re = 'robocopy\b.*\s/(MIR|PURGE)\b'; why = 'mirrors with deletion' },
     @{ re = 'Format-Volume|\bformat\s+[a-z]:|diskpart|cipher\s+/w'; why = 'wipes a disk' },
-    @{ re = '\bgit\s+(clean\s+-[a-z]*f|reset\s+--hard|push\s+.*--force)'; why = 'discards data in git' }
+    @{ re = '\bgit\s+(clean\s+-[a-z]*f|reset\s+--hard|push\s+.*--force)'; why = 'discards data in git' },
+    @{ re = '(?i)\bprisma(\.cmd)?\s+(migrate\s+reset|db\s+push\b.*--(force-reset|accept-data-loss))'; why = 'deletes database data (Prisma)' }
 )
 
 # Commands that delete or move files (cmd, PowerShell and their aliases, Unix-style tools).
@@ -1890,6 +1898,15 @@ function Hide-ProjectSecrets([string]$ProjectRoot, [AllowEmptyString()][string]$
     } catch { $Text }
 }
 
+$script:InteractivePattern = '(?i)non-interactive|not interactive|is not a tty|not a tty|no tty|isatty|stdin is not|inappropriate ioctl|requires an interactive|needs an interactive|interactive (terminal|shell|prompt|session|mode)|cannot prompt|unable to prompt|EOF when reading a line|prompts? (are|is) (disabled|not supported)'
+
+function Get-InteractiveNote([AllowEmptyString()][string]$Output) {
+    <# When a failed command's output says it needed a terminal to ask questions: what to do instead.
+       StreamHub runs commands without one (cmd.exe, input closed), so prompts cannot be answered. #>
+    if ("$Output" -notmatch $script:InteractivePattern) { return $null }
+    'This command needs an interactive terminal to ask questions, and commands here run without one: nobody can answer its prompts. Use the form the tool offers for scripts instead: flags that answer its questions (for example a yes or force flag, or the values as arguments), or its command meant for scripts and CI. If the tool has no such form, give the user the exact command to run in their own terminal and continue with the rest.'
+}
+
 function Invoke-RunAction {
     <# Runs a command with cmd.exe in the project folder. Output is trimmed to head + tail. #>
     param([string]$ProjectRoot, [string]$Command, [int]$TimeoutSec = 120, [int]$MaxChars = 8000, [scriptblock]$CancelCheck)
@@ -1940,5 +1957,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

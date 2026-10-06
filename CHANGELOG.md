@@ -6,6 +6,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.100] - 2026-10-07
+
+### Added
+- Prisma support:
+  - **Schema check after every change** to a `.prisma` file, by fixed rules: brackets and unclosed strings, lines outside a `datasource`/`generator`/`model`/`enum` block, field lines that are not `name Type ...`, types that are neither Prisma's own nor a model or enum in the schema (with the close name: `Strng`, did you mean `String`; names are case-sensitive as in Prisma), a model or enum defined twice, a field or enum value twice, optional lists (`String[]?`), unknown `@` and `@@` attributes, a model without `@id`/`@@id`/`@unique`/`@@unique`, an unknown database provider, `@relation(fields: [...], references: [...])` naming fields that do not exist or that do not pair up, and a relation without a field pointing back.
+  - **Against the project:** `env("...")` names that the project's `.env` (or Windows' environment) does not set, and a datasource without a url (unless a `prisma.config` file holds it). Only the names in `.env` are read.
+  - **Prisma's own check:** when the project has Prisma installed, `prisma validate` runs on the saved schema too (the project's own Prisma, never one npx downloads; offline, asks nothing, at most 60 s). It finds what fixed rules cannot, such as a native type the database does not support. Checked against Prisma 6.19.
+  - **Commands:** `prisma migrate dev` and `prisma studio` are refused before they run, with the way that works here (`prisma db push` while prototyping, or `prisma migrate diff --script` into a migration folder and then `prisma migrate deploy`; or the command for you to run in your own terminal). `prisma migrate reset` and `db push --force-reset` / `--accept-data-loss` count as deleting data: you approve them every time, and they never run unattended or from MCP.
+  - **Prisma rules for Copilot** (`prompts/rules/prisma.md`), sent when the project has a `.prisma` file or the request names Prisma: the non-interactive workflow, `prisma generate` after a schema change, the connection in `.env`, ids and relations.
+- Commands that want to ask questions in a terminal (such as `prisma migrate dev`, or a script waiting for input) failed with the generic reasons "a tool is not installed" or "another shell". StreamHub runs commands without a terminal, so nobody can answer prompts: Copilot is now told so with every command instruction (use non-interactive forms), and when the output shows a command needed a terminal (non-interactive, not a TTY, EOF when reading a line and similar), the card says so (code RUN-INTERACTIVE) and Copilot gets what to do instead: the tool's form for scripts and CI, or the exact command for you to run in your own terminal.
+
 ## [v0.1.99] - 2026-10-06
 
 ### Added
@@ -1116,7 +1127,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.99...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.100...HEAD
+[v0.1.100]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.100
 [v0.1.99]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.99
 [v0.1.98]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.98
 [v0.1.97]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.97
