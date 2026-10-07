@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.103] - 2026-10-07
+
+### Fixed
+- An automatic update no longer fails halfway when a file it would replace or remove is open in another program (for example a test tool's window still waiting at "press any key"). StreamHub now checks for such files before copying anything. An open file with the same content as the release, or one the release no longer has, is simply left as it is. Only an open file that really changes holds the update up: then nothing is copied, the current version keeps running, and the message names the files and what to close; the update runs at the next start. If a copy still fails, the message names the files robocopy could not copy. The copy also retries a little longer.
+
 ## [v0.1.102] - 2026-10-07
 
 ### Added
@@ -1148,7 +1153,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.102...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.103...HEAD
+[v0.1.103]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.103
 [v0.1.102]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.102
 [v0.1.101]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.101
 [v0.1.100]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.100

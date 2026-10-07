@@ -86,10 +86,26 @@ try {
         Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
         $src = Get-ChildItem -Directory $tmp | Select-Object -First 1
         # Mirror the new version in; machine files and build tools stay.
-        $null = & robocopy.exe $src.FullName $root /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP `
-            /XF '*.local.json' 'version.txt' 'capture-report.json' 'probe-report.txt' `
-            /XD '.git' 'node_modules'
-        if ($LASTEXITCODE -ge 8) { throw "robocopy failed with code $LASTEXITCODE" }
+        $xf = @('*.local.json', 'version.txt', 'capture-report.json', 'probe-report.txt'); $xd = @('.git', 'node_modules')
+        # Files another program has open (a test tool's window at its pause) would fail halfway and
+        # leave two versions mixed: wait for them instead, and name them.
+        Import-Module (Join-Path $root 'lib\Update.psm1')
+        $locked = Get-LockedUpdateFiles -Source $src.FullName -Target $root -ExcludeFiles $xf -ExcludeDirs $xd
+        if (@($locked.blocking).Count) { Say (Format-LockedUpdateFiles @($locked.blocking) $latest); return }
+        # Open but unchanged, or no longer in the release: robocopy leaves these (full paths in /XF).
+        $keep = @(@($locked.same) + @($locked.removed) | Where-Object { $_ })
+        if ($keep.Count) { $xf += @($keep | ForEach-Object { Join-Path $root $_ }); Write-CCBLog verbose update "in use, left as is: $($keep -join ', ')" }
+        # A folder the release no longer has is purged whole, /XF or not: keep the topmost such folder.
+        foreach ($rel in @($locked.removed)) {
+            $top = $null; $d = Split-Path -Parent $rel
+            while ($d) { if (-not (Test-Path -LiteralPath (Join-Path $src.FullName $d))) { $top = $d }; $d = Split-Path -Parent $d }
+            if ($top) { $xd += (Join-Path $root $top) }
+        }
+        $rc = @(& robocopy.exe $src.FullName $root /MIR /R:3 /W:2 /NFL /NDL /NJH /NJS /NP /XF $xf /XD $xd)
+        if ($LASTEXITCODE -ge 8) {
+            $failed = @(Get-RobocopyFailures $rc | ForEach-Object { $_.Replace($root.TrimEnd('\') + '\', '') })
+            throw "robocopy failed with code $LASTEXITCODE$(if ($failed.Count) { ' on ' + ($failed -join ', ') + ' (in use? the update runs again at the next start)' })"
+        }
         [IO.File]::WriteAllText($verFile, $latest)
         Say "updated $(if ($current) { $current } else { '(unknown)' }) -> $latest"
     } finally {
