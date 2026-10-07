@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.109] - 2026-10-08
+
+### Fixed
+- Opening a submenu of Copilot's response picker (GPT > the models) also tries the Right arrow key on the entry, the way these menus open by keyboard, when pointing at it and clicking do not open it.
+
 ## [v0.1.108] - 2026-10-07
 
 ### Changed
@@ -1192,7 +1197,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.108...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.109...HEAD
+[v0.1.109]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.109
 [v0.1.108]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.108
 [v0.1.107]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.107
 [v0.1.106]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.106

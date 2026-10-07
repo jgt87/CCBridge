@@ -452,6 +452,8 @@ const openSub = async (e) => {
   e.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); e.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
   await wait(400);
   if (e.getAttribute('aria-expanded') !== 'true') { e.click(); await wait(500); }
+  // Fluent menus also open a submenu with the Right arrow on the focused item.
+  if (e.getAttribute('aria-expanded') !== 'true') { e.focus(); e.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, bubbles: true })); await wait(500); }
 };
 '@
 
