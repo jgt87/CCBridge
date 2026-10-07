@@ -95,6 +95,8 @@ function Get-StateSnapshot($State) {
         queue = @(Get-QueueView $State 40)
         responseMode = [string]$State.ResponseMode
         responseModeActual = $State.ResponseModeActual
+        responseOptions = @($State.ResponseOptions)   # what Copilot's picker offers here (read weekly)
+        responseOptionsRead = [string]$State.ResponseOptionsRead
         verify = $(if ($State.ProjectRoot) { Get-ProjectVerify $State.ProjectRoot } else { $null })
         schedules = @(Get-ScheduleView $State)
         pausedUntil = $State.PausedUntil
@@ -263,7 +265,8 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/response-mode$' {
             $b = Read-JsonBody $Ctx
             $v = [string]$b.value
-            if (@('leave', 'auto', 'quick', 'deep') -notcontains $v) { throw 'value must be leave, auto, quick or deep' }
+            # pick:PATH = an entry read from Copilot's picker (Advanced reasoning, GPT > a model).
+            if (@('leave', 'auto', 'quick', 'deep') -notcontains $v -and $v -notmatch '^pick:\S.{0,150}$') { throw 'value must be leave, auto, quick, deep or pick:<an option of the picker>' }
             $State.ResponseMode = $v
             $null = Set-CCBridgeSetting 'responseMode' $v $State.AppRoot
             $State.Config.responseMode = $v
@@ -751,6 +754,12 @@ function Invoke-ApiRequest($Ctx, $State) {
             $detail = @{}
             foreach ($p in $b.PSObject.Properties) { if ($p.Name -ne 'message') { $detail[$p.Name] = $p.Value } }
             Write-CCBLog info ui ([string]$b.message) $detail
+            return Send-Json $Ctx @{ ok = $true }
+        }
+        '^GET /api/response-options$' { return Send-Json $Ctx @{ read = [string]$State.ResponseOptionsRead; options = @($State.ResponseOptions); days = $State.Config.responseOptionsDays } }
+        '^POST /api/response-options/refresh$' {
+            # Settings > Copilot > Read now: the worker opens the picker when it is free.
+            $null = Submit-AgentTask $State @{ kind = 'response-options' } 'user' 'Read Copilot''s response options'
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/newchat$' {

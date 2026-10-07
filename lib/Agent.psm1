@@ -31,6 +31,7 @@ function New-AgentState {
         Held = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList))   # tasks put back after the daily limit: they run first
         PausedUntil = $null; PauseReason = $null; LastLimitAt = $null; PauseFile = $null   # the web app saves the pause (Save-QueuePause)
         ResponseMode = $(if ($Config.responseMode) { [string]$Config.responseMode } else { 'leave' }); ResponseModeActual = $null   # Auto / Quick / Think deeper
+        ResponseOptions = @((Read-ResponseOptionsFile).options); ResponseOptionsRead = (Read-ResponseOptionsFile).read   # what Copilot's picker offers (read weekly)
         ReviewByCaller = $false   # MCP tasks: the calling model checks the result, so no Copilot review round
         NextConnectAttempt = $null
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
@@ -261,6 +262,8 @@ function Get-Bridge($State) {
             $script:Bridge = Connect-Copilot -Port $State.Config.cdpPort -SaveReplyFrames $save -SignIn $signIn
         $State.Copilot = 'ready'; $State.CopilotMessage = ''
         $State.CopilotThemeApplied = $null; Update-CopilotTheme $State   # a new connection: the tab gets StreamHub's theme again
+        # What the response picker offers on this tenant (Advanced reasoning, models...), for the app's picker.
+        if (Test-ResponseOptionsDue $State) { Update-ResponseOptions $State $script:Bridge }
         # Page health check: the parts CCBridge relies on are where selectors.json says.
         try {
             $health = @(Test-CopilotPage $script:Bridge)
@@ -311,7 +314,7 @@ function Send-ToCopilot {
     param($State, [string]$Message, [string]$Agent = '', [switch]$Long, [string[]]$Files = @(), [switch]$OptionalFiles)   # -Agent mentions Researcher/Analyst; -Long: agent runs take minutes; -Files are attached (-OptionalFiles: left out when they cannot be)
     $bridge = Get-Bridge $State
     Update-CopilotTheme $State   # a theme chosen while a task ran
-    if ($State.ResponseMode -in 'auto', 'quick', 'deep') {
+    if ($State.ResponseMode -in 'auto', 'quick', 'deep' -or "$($State.ResponseMode)" -like 'pick:*') {
         try { $State.ResponseModeActual = Set-CopilotResponseMode $bridge $State.ResponseMode } catch { Write-CCBLogError agent 'Response mode' $_ }
     }
     $State.MessagesSent = [int]$State.MessagesSent + 1
@@ -388,7 +391,7 @@ function Submit-AgentTask {
     if (-not $Title) {
         $Title = switch ($Task.kind) {
             'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Runbook: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'chain' { "Chain: $($Task.name)" } 'script' { "Script: $($Task.name)" } 'agent' { "$(Get-AgentDisplayName $Task.agent): $($Task.text)" } 'review' { 'Code review' }
-            'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } default { "$($Task.kind)" }
+            'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } 'response-options' { 'Read Copilot''s response options' } default { "$($Task.kind)" }
         }
     }
     $Title = ($Title -replace '\s+', ' ').Trim(); if ($Title.Length -gt 160) { $Title = $Title.Substring(0, 157) + '...' }
@@ -3761,6 +3764,52 @@ function Invoke-AgentTurn {
     }
 }
 
+function Get-ResponseOptionsFile { Join-Path $env:LOCALAPPDATA 'CCBridge\response-options.json' }
+
+function Read-ResponseOptionsFile {
+    <# The response picker's options as last read: @{ read (ISO time or ''); options }. #>
+    $f = Get-ResponseOptionsFile
+    if (-not (Test-Path -LiteralPath $f)) { return @{ read = ''; options = @() } }
+    try {
+        $j = ConvertFrom-Json ([IO.File]::ReadAllText($f))
+        @{ read = "$($j.read)"; options = @(foreach ($o in $j.options) { if ($o.path) { @{ path = "$($o.path)"; title = "$($o.title)"; description = "$($o.description)"; parent = "$($o.parent)" } } }) }
+    } catch { @{ read = ''; options = @() } }
+}
+
+function Test-ResponseOptionsDue($State, [datetime]$Now = (Get-Date)) {
+    <# Whether the picker's options should be read again: never read, or longer ago than the setting
+       responseOptionsDays (default 7; 0 = only when asked, Settings > Copilot > Read now). Not more
+       than once an hour when reading fails. #>
+    $days = if ($null -ne $State.Config.responseOptionsDays -and "$($State.Config.responseOptionsDays)" -match '^\d+$') { [int]$State.Config.responseOptionsDays } else { 7 }
+    if ($State.ResponseOptionsTried -and ($Now - [datetime]$State.ResponseOptionsTried).TotalHours -lt 1) { return $false }
+    if (-not $State.ResponseOptionsRead) { return $true }
+    if ($days -le 0) { return $false }
+    $at = [datetime]::MinValue
+    if (-not [datetime]::TryParse("$($State.ResponseOptionsRead)", [ref]$at)) { return $true }
+    ($Now - $at).TotalDays -ge $days
+}
+
+function Update-ResponseOptions {
+    <# Reads what Copilot's response picker offers now (Get-CopilotResponseOptions) into the state and
+       response-options.json. -Report (Settings > Read now) says the result in the chat. #>
+    param($State, $Bridge, [switch]$Report)
+    $State.ResponseOptionsTried = (Get-Date).ToString('s')
+    try {
+        $list = @(Get-CopilotResponseOptions $Bridge | ForEach-Object { @{ path = "$($_.path)"; title = "$($_.title)"; description = "$($_.description)"; parent = "$($_.parent)" } })
+        if (-not $list.Count) { throw 'the response picker was not found on Copilot''s page' }
+        $State.ResponseOptions = $list
+        $State.ResponseOptionsRead = (Get-Date).ToString('s')
+        $f = Get-ResponseOptionsFile
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $f)
+        [IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject @{ read = $State.ResponseOptionsRead; options = $list } -Depth 4), (New-Object Text.UTF8Encoding($false)))
+        Write-CCBLog info agent "Response options read: $(@($list | ForEach-Object { $_.path }) -join '; ')"
+        if ($Report) { Add-AgentEvent $State 'status' @{ text = "Copilot's response picker offers: $(@($list | ForEach-Object { $_.path }) -join ', '). The Response menu next to New chat lists them." } }
+    } catch {
+        Write-CCBLogError agent 'Response options' $_
+        if ($Report) { Add-AgentEvent $State 'error' @{ text = "Could not read Copilot's response options: $($_.Exception.Message)"; record = $_ } }
+    }
+}
+
 function Reset-AfterWorkerStop {
     <# After the worker stopped unexpectedly (Server restarts it): the task that was running is marked
        failed (also its MCP job), the busy state, activity and live command view are cleared, the
@@ -3812,6 +3861,8 @@ function Start-AgentWorker {
                 $State.Tasks.Enqueue(@{ kind = 'connect' })
             }
             Update-CopilotTheme $State   # idle: a theme just chosen in the app reaches the Copilot tab at once
+            # Weekly (setting responseOptionsDays): what Copilot's response picker offers, while idle.
+            if ($State.Copilot -eq 'ready' -and $script:Bridge -and (Test-ResponseOptionsDue $State)) { Update-ResponseOptions $State $script:Bridge }
             Start-Sleep -Milliseconds 150; continue
         }
         # Jobs (MCP) track a task from queue to result.
@@ -3908,6 +3959,7 @@ function Start-AgentWorker {
                     }
                 }
                 'undo' { Invoke-UndoTask $State "$($task.upTo)" }
+                'response-options' { Update-ResponseOptions $State (Get-Bridge $State) -Report }
             }
         } catch {
             Write-CCBLogError agent "task $($task.kind) failed" $_
@@ -3958,4 +4010,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

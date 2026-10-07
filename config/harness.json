@@ -29,6 +29,7 @@
   "reviewMinLines": 40,
   "appWindow": "copilot-tab",
   "responseMode": "leave",
+  "responseOptionsDays": 7,
   "newChatOnSwitch": true,
   "repoMapChars": 4000,
   "chainScripts": "approve-once",

@@ -439,31 +439,108 @@ function Set-CopilotWorkIq {
     $state
 }
 
-function Set-CopilotResponseMode {
-    <# Picks Copilot's response mode: auto, quick (Quick response) or deep (Think deeper). Opens the
-       picker only when the mode shown differs. Items are matched by their text, else by position.
-       Returns the mode shown afterwards, or 'unavailable'. #>
-    param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)][ValidateSet('auto', 'quick', 'deep')][string]$Mode)
+# Shared by the response-mode functions: the menu's items (menuitem roles), each item's title (its
+# first line; the second is a description) and whether it opens a submenu (GPT > models).
+$script:MenuHelpersJs = @'
+const menuItems = () => [...document.querySelectorAll('[role=menuitem],[role=menuitemradio],[role=menuitemcheckbox]')].filter(e => e.offsetParent !== null);
+const titleOf = (e) => ((e.innerText || '').trim().split('\n')[0] || '').trim();
+const descOf = (e) => ((e.innerText || '').trim().split('\n').slice(1).join(' ') || '').trim();
+const hasSub = (e) => e.hasAttribute('aria-haspopup') && e.getAttribute('aria-haspopup') !== 'false';
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const openSub = async (e) => {
+  e.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })); e.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+  e.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); e.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+  await wait(400);
+  if (e.getAttribute('aria-expanded') !== 'true') { e.click(); await wait(500); }
+};
+'@
+
+function Get-ResponseModeClassic([string]$Mode) {
+    <# The menu title of the three classic modes (stable keys in the settings). #>
+    @{ auto = 'Auto'; quick = 'Quick response'; deep = 'Think deeper' }[$Mode]
+}
+
+function Get-CopilotResponseOptions {
+    <# What Copilot's response picker offers on this tenant, read from the menu (it changes: Advanced
+       reasoning, a GPT submenu with models): @{ path ('Title' or 'Parent > Title'); title; description;
+       parent }. Opens the menu, opens each submenu, closes it again. @() when there is no picker. #>
+    param([Parameter(Mandatory)]$Bridge)
     $btn = if ($Bridge.Selectors.responseMode -and $Bridge.Selectors.responseMode.button) { $Bridge.Selectors.responseMode.button } else { '#gptModeSwitcher' }
-    $idx = @{ auto = 0; quick = 1; deep = 2 }[$Mode]
-    $re = @{ auto = '^auto'; quick = '^quick'; deep = '^think' }[$Mode]
     $js = @"
 (async () => {
+  $($script:MenuHelpersJs)
   const b = document.querySelector($(ConvertTo-JsString $btn));
-  if (!b) return 'unavailable';
-  const re = new RegExp($(ConvertTo-JsString $re), 'i');
-  if (re.test((b.innerText || '').trim())) return (b.innerText || '').trim();
-  b.click();
-  await new Promise(r => setTimeout(r, 700));
-  const items = [...document.querySelectorAll('[role=menuitem],[role=menuitemradio]')];
-  const it = items.find(e => re.test((e.innerText || '').trim())) || (items.length === 3 ? items[$idx] : null);
-  if (!it) { b.click(); return 'unavailable'; }
-  it.click();
-  await new Promise(r => setTimeout(r, 400));
-  return (b.innerText || '').trim();
+  if (!b) return '[]';
+  b.click(); await wait(700);
+  const out = [];
+  const top = menuItems();
+  for (const e of top) out.push({ path: titleOf(e), title: titleOf(e), description: descOf(e), parent: '', submenu: hasSub(e) });
+  for (const e of top.filter(hasSub)) {
+    const before = new Set(menuItems());
+    await openSub(e);
+    for (const c of menuItems().filter(x => !before.has(x))) out.push({ path: titleOf(e) + ' > ' + titleOf(c), title: titleOf(c), description: descOf(c), parent: titleOf(e), submenu: false });
+  }
+  return JSON.stringify(out.filter(o => o.title));
 })()
 "@
-    $shown = Use-CopilotLock { Invoke-CdpEval $Bridge.Session $js }
+    $raw = Use-CopilotLock {
+        try { Invoke-CdpEval $Bridge.Session $js } finally { Close-CopilotMenu $Bridge }
+    }
+    # Assigned first: in 5.1 a JSON list arrives as one object inside a pipeline or @().
+    $parsed = ConvertFrom-Json "$(if ($raw) { $raw } else { '[]' })"
+    $list = @(foreach ($x in $parsed) { $x })
+    Write-CCBLog verbose bridge "Response options: $(@($list | ForEach-Object { $_.path }) -join '; ')"
+    @($list | Where-Object { $_ -and -not $_.submenu })
+}
+
+function Close-CopilotMenu($Bridge) {
+    # Escape twice: a submenu, then the menu.
+    foreach ($i in 1..2) {
+        try {
+            $null = Invoke-Cdp $Bridge.Session 'Input.dispatchKeyEvent' @{ type = 'keyDown'; key = 'Escape'; code = 'Escape'; windowsVirtualKeyCode = 27 }
+            $null = Invoke-Cdp $Bridge.Session 'Input.dispatchKeyEvent' @{ type = 'keyUp'; key = 'Escape'; code = 'Escape'; windowsVirtualKeyCode = 27 }
+        } catch { }
+    }
+}
+
+function Set-CopilotResponseMode {
+    <# Picks Copilot's response mode: auto, quick (Quick response), deep (Think deeper), or pick:PATH
+       for any entry Get-CopilotResponseOptions found ('Advanced reasoning (Experimental)',
+       'GPT > GPT-6.1 Sol'). Items are matched by their title (first line). Opens the picker only when
+       the button does not already show it. Returns the mode shown afterwards, or 'unavailable'. #>
+    param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)][string]$Mode)
+    $btn = if ($Bridge.Selectors.responseMode -and $Bridge.Selectors.responseMode.button) { $Bridge.Selectors.responseMode.button } else { '#gptModeSwitcher' }
+    $path = if ($Mode -like 'pick:*') { $Mode.Substring(5).Trim() } else { Get-ResponseModeClassic $Mode }
+    if (-not $path) { throw "Unknown response mode '$Mode'" }
+    $parts = @($path -split '\s*>\s*' | Where-Object { $_ })
+    $js = @"
+(async () => {
+  $($script:MenuHelpersJs)
+  const parts = $(ConvertTo-Json -InputObject @($parts) -Compress);
+  const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+  const b = document.querySelector($(ConvertTo-JsString $btn));
+  if (!b) return 'unavailable';
+  const shown = () => (b.innerText || '').trim();
+  const leaf = parts[parts.length - 1];
+  if (same(shown(), leaf) || shown().toLowerCase().startsWith(leaf.toLowerCase())) return shown();
+  b.click(); await wait(700);
+  let it = menuItems().find(e => same(titleOf(e), parts[0]));
+  if (it && parts.length > 1) {
+    const before = new Set(menuItems());
+    await openSub(it);
+    it = menuItems().filter(x => !before.has(x)).find(e => same(titleOf(e), leaf)) || menuItems().find(e => same(titleOf(e), leaf));
+  }
+  if (!it) return 'unavailable';
+  it.click();
+  await wait(500);
+  return shown();
+})()
+"@
+    $shown = Use-CopilotLock {
+        $r = Invoke-CdpEval $Bridge.Session $js
+        if ($r -eq 'unavailable') { Close-CopilotMenu $Bridge }
+        $r
+    }
     Write-CCBLog verbose bridge "Response mode requested $Mode, page shows $shown"
     $shown
 }
@@ -1908,4 +1985,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Test-DamagedTagText, Get-AlnumHead, Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Get-CopilotResponseOptions, Get-ResponseModeClassic, Close-CopilotMenu, Test-DamagedTagText, Get-AlnumHead, Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames

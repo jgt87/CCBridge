@@ -18,6 +18,13 @@ Describe 'Settings: switches, command lists and shown-only values' {
         (Get-CCBridgeConfig harness $app).chatHistory | Should Be $false
     }
 
+    It 'takes a response mode read from Copilot''s picker, and refuses other unknown values' {
+        $null = Set-CCBridgeSetting responseMode 'pick:GPT > GPT-6.1 Sol' $app
+        (Get-CCBridgeConfig harness $app).responseMode | Should Be 'pick:GPT > GPT-6.1 Sol'
+        { Set-CCBridgeSetting responseMode 'fastest' $app } | Should Throw 'must be one of'
+        $null = Set-CCBridgeSetting responseMode 'deep' $app
+    }
+
     It 'keeps commands as command starts and saves them as exact patterns' {
         $null = Set-CCBridgeSetting autoApproveCommands "npm test`n`ngit status`nnpm test" $app
         (& $get 'autoApproveCommands').value -join '|' | Should Be 'npm test|git status'

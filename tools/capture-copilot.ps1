@@ -51,20 +51,36 @@ $controlsJs = @'
 '@
 function Get-Controls { (Invoke-CdpEval $s $controlsJs) | ConvertFrom-Json }
 
+# The open menus (the response picker and its submenus): option names and their menu attributes only.
+$menusJs = @'
+(() => JSON.stringify([...document.querySelectorAll('[role=menu],[role=listbox]')].map((m, i) => ({
+  menu: i, id: m.id || undefined, labelledBy: m.getAttribute('aria-labelledby') || undefined,
+  items: [...m.querySelectorAll('[role=menuitem],[role=menuitemradio],[role=menuitemcheckbox],[role=option]')].map(e => ({
+    role: e.getAttribute('role'), title: ((e.innerText || '').trim().split('\n')[0] || '').slice(0, 60),
+    popup: e.getAttribute('aria-haspopup') || undefined, expanded: e.getAttribute('aria-expanded') || undefined,
+    checked: e.getAttribute('aria-checked') || undefined, controls: e.getAttribute('aria-controls') || undefined })) }))))()
+'@
+function Get-OpenMenus { (Invoke-CdpEval $s $menusJs) | ConvertFrom-Json }
+
 Write-Host 'CCBridge capture for Microsoft 365 Copilot (Work IQ toggle and sources)' -ForegroundColor White
 Write-Host 'An Edge window with Copilot Chat is open. Sign in there with your WORK account if asked.'
 
-Pause-ForUser '1/4  Turn Work IQ ON, with an empty chat.'
+Pause-ForUser '1/5  Turn Work IQ ON, with an empty chat.'
 $report.snapshots.workIqOn = @(Get-Controls)
 
-Pause-ForUser '2/4  Turn Work IQ OFF.'
+Pause-ForUser '2/5  Turn Work IQ OFF.'
 $report.snapshots.workIqOff = @(Get-Controls)
 
-Pause-ForUser '3/4  Turn Work IQ ON again. Click into the message box and type a single "/" (do not send). Leave the picker that opens visible.'
+Pause-ForUser '3/5  Turn Work IQ ON again. Click into the message box and type a single "/" (do not send). Leave the picker that opens visible.'
 $report.snapshots.slashPicker = @(Get-Controls)
 
+Pause-ForUser '4/5  Clear the message box. Open the response picker (Auto / Think deeper ...) and point at any entry with an arrow (for example GPT) so its list shows. Leave both open.'
+$report.snapshots.responseMenu = @(Get-OpenMenus)
+$report.snapshots.responseMenuControls = @(Get-Controls)
+
 Write-Host ''
-Write-Host '4/4  Now, with Work IQ ON, clear the message box and SEND this question yourself:' -ForegroundColor Cyan
+Write-Host '     (Press Escape to close the picker first.)'
+Write-Host '5/5  Now, with Work IQ ON, clear the message box and SEND this question yourself:' -ForegroundColor Cyan
 Write-Host '     What is the subject of my most recent email, and which files did I work on recently? Answer briefly.' -ForegroundColor Yellow
 Write-Host '     Waiting for Copilot''s answer (up to 4 minutes)...'
 
@@ -124,6 +140,6 @@ Disconnect-Cdp $s
 $out = Join-Path $root 'capture-report.json'
 [IO.File]::WriteAllText($out, ($report | ConvertTo-Json -Depth 12), (New-Object Text.UTF8Encoding($false)))
 Write-Host ''
-if (-not $report.reply) { Write-Host 'No Copilot answer was captured (step 4). The UI part of the report is still useful.' -ForegroundColor Yellow }
+if (-not $report.reply) { Write-Host 'No Copilot answer was captured (step 5). The UI part of the report is still useful.' -ForegroundColor Yellow }
 Write-Host "Report written to $out" -ForegroundColor Green
 Write-Host 'Please look through it before sharing: it should contain only labels, field names and option names.'

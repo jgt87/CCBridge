@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.107] - 2026-10-07
+
+### Added
+- Every option of Copilot's response picker: when StreamHub connects it reads what the picker offers on your tenant, including entries in a submenu, and the Response menu next to New chat lists them besides Auto, Quick and Think deeper (for example Advanced reasoning (Experimental) or a model such as GPT-6.1 Sol). The choice is saved by its menu path and picked by its name before each message, so new or renamed options need no StreamHub update. test-tools\capture.cmd has a step that records the open picker and its submenu, should a tenant build it differently.
+- The response options are kept and read again weekly: StreamHub saves what the picker offers and reads it again when it is older than Settings > Copilot > Re-read response options (days), default 7, when it connects or while it is idle. Settings > Copilot shows when they were last read and which options there are, with Read now to read them at once (the result also shows in the chat).
+
 ## [v0.1.106] - 2026-10-07
 
 ### Added
@@ -1180,7 +1186,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.106...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.107...HEAD
+[v0.1.107]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.107
 [v0.1.106]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.106
 [v0.1.105]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.105
 [v0.1.104]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.104

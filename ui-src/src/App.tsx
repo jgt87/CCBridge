@@ -16,6 +16,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { responseChoices } from "@/lib/response-modes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ActionSearchBar, { type Action } from "@/components/kokonutui/action-search-bar";
 import AI_Prompt, { type PromptMode } from "@/components/kokonutui/ai-prompt";
@@ -690,13 +691,14 @@ export default function App() {
                       <select
                         className="shrink-0 rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                         onChange={(e) => api.setResponseMode(e.target.value).catch((err) => setError((err as Error).message))}
-                        title={`Copilot's response mode (Auto / Quick response / Think deeper)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
+                        title={`Copilot's response mode: Auto, Quick response, Think deeper, or any other option Copilot's own picker offers here (read when StreamHub connects, such as Advanced reasoning or a model)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
                         value={state.responseMode ?? "leave"}
                       >
-                        <option value="leave">Response: as set in Copilot</option>
-                        <option value="auto">Response: Auto</option>
-                        <option value="quick">Response: Quick</option>
-                        <option value="deep">Response: Think deeper</option>
+                        {responseChoices(state.responseOptions, state.responseMode).map((c) => (
+                          <option key={c.value} title={c.hint} value={c.value}>
+                            {c.label}
+                          </option>
+                        ))}
                       </select>
                       {queuedNote && (
                         <span className="truncate font-medium" title="Waiting tasks run while StreamHub is open; if you close it, they continue at the next start.">

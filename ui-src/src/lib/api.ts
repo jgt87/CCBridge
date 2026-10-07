@@ -1,4 +1,5 @@
 import type { RunLive, RunWindowState } from "./run-live";
+import type { ResponseOption } from "./response-modes";
 
 // Client for the CCBridge PowerShell server. Every call carries the session token that
 // the server injects into index.html, so other pages cannot use the API.
@@ -206,6 +207,8 @@ export interface AppState {
   /** Copilot's response mode: leave (as set in Copilot), auto, quick or deep (Think deeper). */
   responseMode?: string;
   responseModeActual?: string | null;
+  /** What Copilot's response picker offers on this tenant (read when StreamHub connects). */
+  responseOptions?: ResponseOption[] | ResponseOption;
   /** The project's own check from "verify:" in AGENTS.md, if any. */
   verify?: string | null;
   /** Scheduled messages, fetches and runbooks. */
@@ -702,6 +705,14 @@ export const api = {
   setMode: (mode: Mode) => call<{ ok: boolean }>("POST", "/api/mode", { mode }),
   /** Edge's caches in StreamHub's own profile (never the sign-in). */
   edgeCache: () => call<EdgeCacheInfo>("GET", "/api/edge-cache"),
+  /** What Copilot's response picker offers, as last read, and when. */
+  responseOptions: () =>
+    call<{ read: string; options: ResponseOption[] | ResponseOption | null }>("GET", "/api/response-options").then((r) => ({
+      read: r.read || "",
+      options: Array.isArray(r.options) ? r.options : r.options ? [r.options] : [],
+    })),
+  /** Reads Copilot's response picker again now (a small task; the result shows in the chat). */
+  refreshResponseOptions: () => call<{ ok: boolean }>("POST", "/api/response-options/refresh"),
   clearEdgeCache: () => call<{ freedNow: number; pending: boolean; info: EdgeCacheInfo }>("POST", "/api/edge-cache/clear"),
   newChat: () => call<{ ok: boolean }>("POST", "/api/newchat"),
   undo: (to?: string) => call<{ ok: boolean }>("POST", "/api/undo", to ? { to } : {}),

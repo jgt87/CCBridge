@@ -8,6 +8,7 @@ import { ToolsSection } from "./tools-section";
 import { actionClass, fieldClass, Segmented, SettingLine, SettingsGroup } from "./settings-ui";
 import { useEffect, useMemo, useState } from "react";
 import { api, type EdgeCacheInfo, type Setting } from "@/lib/api";
+import type { ResponseOption } from "@/lib/response-modes";
 import { formatBytes } from "@/lib/project-overview";
 import { notifyEnabled, notifySupported, setNotifyEnabled } from "@/lib/notify";
 import { cn } from "@/lib/utils";
@@ -247,6 +248,59 @@ function ClearHistoryRow() {
 }
 
 /** Settings > Privacy: Edge's caches in StreamHub's own profile; the Copilot sign-in stays. */
+/** Settings > Copilot: what Copilot's response picker offers (read weekly) and Read now. */
+function ResponseOptionsRow() {
+  const [read, setRead] = useState("");
+  const [options, setOptions] = useState<ResponseOption[]>([]);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = () =>
+    api.responseOptions().then((r) => {
+      setRead(r.read);
+      setOptions(r.options);
+      return r.read;
+    });
+  useEffect(() => {
+    load().catch(() => {});
+  }, []);
+  const refresh = async () => {
+    setBusy(true);
+    setNote("");
+    try {
+      const before = read;
+      await api.refreshResponseOptions();
+      // The worker reads the picker when it is free: look again for up to a minute.
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if ((await load()) !== before) {
+          setNote("Read just now.");
+          return;
+        }
+      }
+      setNote("Queued: it is read when Copilot is free (see Actions > Runs).");
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const when = read ? new Date(read).toLocaleString() : "never";
+  return (
+    <SettingLine
+      control={
+        <button className={actionClass} disabled={busy} onClick={refresh} type="button">
+          {busy ? "Reading..." : "Read now"}
+        </button>
+      }
+      help={`Opens Copilot's response picker and reads what it offers, for the Response menu next to New chat. Last read: ${when}.${
+        options.length ? ` Offered: ${options.map((o) => (o.parent ? `${o.title} (${o.parent})` : o.title)).join(", ")}.` : ""
+      }`}
+      notes={note ? <div className="text-muted-foreground text-xs">{note}</div> : null}
+      title="Copilot's response options"
+    />
+  );
+}
+
 function ClearEdgeCacheRow() {
   const [info, setInfoState] = useState<EdgeCacheInfo | null>(cachedEdgeCache());
   const setInfo = (i: EdgeCacheInfo) => {
@@ -436,6 +490,7 @@ function SettingsBody({
             ))}
             {current === "Privacy and retention" && <ClearHistoryRow />}
             {current === "Privacy and retention" && <ClearEdgeCacheRow />}
+            {current === "Copilot" && <ResponseOptionsRow />}
           </SettingsGroup>
         )}
       </div>
