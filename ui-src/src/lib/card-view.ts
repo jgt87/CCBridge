@@ -1,19 +1,22 @@
-// How change cards (write and edit) start in the chat: expanded, showing the changed lines, or
-// collapsed to one line. A choice of this browser (Settings > This browser), kept in localStorage.
+// How the cards of the steps in the chat (read, edit, run ...) show: expanded (the default: every
+// card open), or auto-collapse (a card folds up once its step is finished; what still needs the
+// reader, waiting for approval, running or failed, stays open). A choice of this browser
+// (Settings > This browser), kept in localStorage.
 import { useEffect, useState } from "react";
 import { readStored, writeStored } from "./stored";
 
-export type CardView = "expanded" | "collapsed";
+export type CardView = "expanded" | "auto-collapse";
 
 const KEY = "ccb.cardView";
 const EVENT = "ccb-card-view";
 
-/** The cards whose view this choice sets: the ones that show a change. */
-export const CHANGE_ACTIONS = new Set(["write", "edit"]);
+/** Steps that still need the reader: their card stays open under auto-collapse. */
+const NEEDS_READER = new Set(["awaiting", "running", "failed", "ambiguous"]);
 
-/** The stored choice; expanded when there is none (or storage is blocked). */
+/** The stored choice; expanded when there is none (or storage is blocked). The old "collapsed" is auto-collapse now. */
 export function getCardView(): CardView {
-  return readStored(KEY) === "collapsed" ? "collapsed" : "expanded";
+  const v = readStored(KEY);
+  return v === "auto-collapse" || v === "collapsed" ? "auto-collapse" : "expanded";
 }
 
 /** Stores the choice and tells the cards on the page. */
@@ -22,9 +25,9 @@ export function setCardView(v: CardView): void {
   window.dispatchEvent(new Event(EVENT));
 }
 
-/** Whether a card for this action starts open under the given choice. */
-export function startsOpen(action: string, view: CardView): boolean {
-  return view === "expanded" && CHANGE_ACTIONS.has(action);
+/** Whether a card with this status is open under the given choice (until the reader opens or closes it). */
+export function cardOpen(status: string, view: CardView): boolean {
+  return view === "expanded" || NEEDS_READER.has(status);
 }
 
 /** The current choice, updated when it changes in Settings. */

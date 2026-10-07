@@ -27,7 +27,7 @@ export function formatWhen(iso: string | null): string {
 export function SchedulesList({ schedules, onEdit }: { schedules: ScheduleItem[]; onEdit?: (s: ScheduleItem) => void }) {
   return (
     <div className="space-y-1.5">
-      {schedules.length === 0 && <p className="text-muted-foreground text-sm">Nothing scheduled yet. Use New schedule, or the calendar button in the message box.</p>}
+      {schedules.length === 0 && <p className="text-muted-foreground text-xs">Nothing scheduled yet. The calendar button in the message box schedules a message too.</p>}
       {schedules.map((s) => {
         const finished = !s.enabled && s.repeat === "once" && s.lastRun;
         return (

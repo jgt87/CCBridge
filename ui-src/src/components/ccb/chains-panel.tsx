@@ -1,3 +1,4 @@
+import { InfoNote } from "./info-note";
 import { AlertTriangle, ArrowDown, ArrowUp, CalendarClock, FileCode2, Play, Plus, X } from "lucide-react";
 import { useState } from "react";
 import type { ChainItem, ChainStep } from "@/lib/api";
@@ -63,11 +64,19 @@ export function ChainsPanel({
 
   return (
     <div className="space-y-2">
-      <p className="text-muted-foreground text-xs">
-        Runbooks and scripts from <span className="font-mono">Scripts/</span> that run one after another, for example an export, then a script that
-        converts it, then a runbook that summarises the result. Each chain is a file <span className="font-mono">Runbooks/NAME.chain.md</span> with one step per line; edit it there.
-        A script is approved the first time it runs and again after it changes.
-      </p>
+      <InfoNote
+        details={
+          <>
+            <p>For example an export, then a script that converts it, then a runbook that summarises the result.</p>
+            <p>
+              Each chain is a file <span className="font-mono">Runbooks/NAME.chain.md</span> with one step per line; edit it there.
+            </p>
+            <p>A script is approved the first time it runs and again after it changes.</p>
+          </>
+        }
+      >
+        Runbooks and scripts that run one after another.
+      </InfoNote>
 
       {adding ? (
         <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
@@ -150,12 +159,7 @@ export function ChainsPanel({
           </div>
         </div>
       ))}
-      {chains.length === 0 && !adding && <p className="text-muted-foreground text-sm">No chains yet.</p>}
-      {scripts.length > 0 && (
-        <p className="text-muted-foreground text-xs" title={scripts.join("\n")}>
-          Scripts a chain can run: {scripts.length} in <span className="font-mono">Scripts/</span>.
-        </p>
-      )}
+      {chains.length === 0 && !adding && <p className="text-muted-foreground text-xs">No chains yet.</p>}
     </div>
   );
 }

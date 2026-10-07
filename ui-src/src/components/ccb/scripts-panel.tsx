@@ -1,3 +1,4 @@
+import { InfoNote } from "./info-note";
 import { CalendarClock, FileCode2, Play } from "lucide-react";
 
 const flatButton =
@@ -22,11 +23,20 @@ export function ScriptsPanel({
 }) {
   return (
     <div className="space-y-2">
-      <p className="text-muted-foreground text-xs">
-        Scripts in <span className="font-mono">Scripts/</span> (.ps1, .cmd, .bat, .py) that run in the project folder. A script is approved the first time it runs and again after it
-        changes; one that deletes data or uses Microsoft 365 asks every time. What it changes can be undone in History.
-      </p>
-      {scripts.length === 0 && <p className="text-muted-foreground text-xs">No scripts yet: put a script in Scripts/ (or ask Copilot to write one) and it shows here.</p>}
+      <InfoNote
+        details={
+          <>
+            <p>
+              .ps1, .cmd, .bat and .py files in <span className="font-mono">Scripts/</span>, run in the project folder.
+            </p>
+            <p>You approve a script the first time it runs and again after it changes; one that deletes data or uses Microsoft 365 asks every time.</p>
+            <p>What a script changes can be undone in History. To add one, put it in Scripts/ or ask Copilot to write one.</p>
+          </>
+        }
+      >
+        Your project's scripts, run with one click.
+      </InfoNote>
+      {scripts.length === 0 && <p className="text-muted-foreground text-xs">No scripts yet.</p>}
       {scripts.map((path) => (
         <div className="rounded-lg border border-black/10 p-2 dark:border-white/10" key={path}>
           <div className="truncate font-mono text-xs" title={path}>

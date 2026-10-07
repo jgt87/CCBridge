@@ -1,4 +1,5 @@
 import { AtSign, CalendarClock, FileCode2, FileText, Play, Plus } from "lucide-react";
+import { InfoNote } from "./info-note";
 import { useState } from "react";
 import type { FetchItem, FetchWeb, RunbookItem, RunbookTemplate } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -86,10 +87,21 @@ export function RunbooksPanel({
 
   return (
     <div className="space-y-2">
-      <p className="text-muted-foreground text-xs">
-        Repeatable prompts that each run in a fresh Copilot chat: a <em>text answer</em>, saved as Markdown, or <em>checked JSON</em>, checked against the shape the runbook describes.
-        Files in <span className="font-mono">Runbooks/</span>, results in <span className="font-mono">Runbooks/Exports/</span>, earlier results in <span className="font-mono">.streamhub/History/</span>.
-      </p>
+      <InfoNote
+        details={
+          <>
+            <p>
+              Each runs in a fresh Copilot chat and gives a <em>text answer</em> (saved as Markdown) or <em>checked JSON</em> (checked against the shape the runbook describes).
+            </p>
+            <p>
+              Files in <span className="font-mono">Runbooks/</span>, results in <span className="font-mono">Runbooks/Exports/</span>, earlier results in{" "}
+              <span className="font-mono">.streamhub/History/</span>.
+            </p>
+          </>
+        }
+      >
+        Saved prompts you can run again.
+      </InfoNote>
 
       {adding ? (
         <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
@@ -169,7 +181,7 @@ export function RunbooksPanel({
           </div>
         </div>
       ))}
-      {rows.length === 0 && !adding && <p className="text-muted-foreground text-sm">No runbooks yet.</p>}
+      {rows.length === 0 && !adding && <p className="text-muted-foreground text-xs">No runbooks yet.</p>}
     </div>
   );
 }

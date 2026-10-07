@@ -1,3 +1,4 @@
+import { InfoNote } from "./info-note";
 import { FileCode2, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type HookItem } from "@/lib/api";
@@ -33,11 +34,19 @@ export function HooksPanel({ onOpen, refreshKey }: { onOpen: (path: string) => v
 
   return (
     <div className="space-y-2">
-      <p className="text-muted-foreground text-xs">
-        Your own commands at fixed moments of a task, for example a formatter after each edit or a check before a task counts as done. They live in{" "}
-        <span className="font-mono">.streamhub/hooks.json</span>, which Copilot cannot change; you approve the file once, and again after it changes. Deleting or Microsoft 365 commands never
-        run. Settings &gt; Changes and commands can pause them.
-      </p>
+      <InfoNote
+        details={
+          <>
+            <p>For example a formatter after each edit, or a check before a task counts as done.</p>
+            <p>
+              They live in <span className="font-mono">.streamhub/hooks.json</span>, which Copilot cannot change. You approve the file once, and again after it changes.
+            </p>
+            <p>Deleting or Microsoft 365 commands never run. Settings &gt; Changes and commands can pause them.</p>
+          </>
+        }
+      >
+        Your commands at fixed moments of a task.
+      </InfoNote>
       {state?.error && <p className="text-rose-500 dark:text-rose-400 text-xs">{state.error}</p>}
       {state?.exists ? (
         <>

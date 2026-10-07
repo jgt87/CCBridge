@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { startsOpen } from "./card-view";
+import { cardOpen } from "./card-view";
 
-describe("startsOpen", () => {
-  it("opens change cards when the view is expanded", () => {
-    expect(startsOpen("edit", "expanded")).toBe(true);
-    expect(startsOpen("write", "expanded")).toBe(true);
+describe("cardOpen", () => {
+  it("opens every card when the view is expanded (the default)", () => {
+    for (const s of ["ok", "running", "failed", "already applied", "rejected"]) expect(cardOpen(s, "expanded")).toBe(true);
   });
-  it("keeps other cards and every card under collapsed closed", () => {
-    expect(startsOpen("read", "expanded")).toBe(false);
-    expect(startsOpen("run", "expanded")).toBe(false);
-    expect(startsOpen("edit", "collapsed")).toBe(false);
+  it("folds finished cards under auto-collapse and keeps what needs the reader open", () => {
+    expect(cardOpen("ok", "auto-collapse")).toBe(false);
+    expect(cardOpen("already applied", "auto-collapse")).toBe(false);
+    expect(cardOpen("rejected", "auto-collapse")).toBe(false);
+    expect(cardOpen("running", "auto-collapse")).toBe(true);
+    expect(cardOpen("awaiting", "auto-collapse")).toBe(true);
+    expect(cardOpen("failed", "auto-collapse")).toBe(true);
   });
 });

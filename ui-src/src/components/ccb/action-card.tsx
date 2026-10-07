@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { startsOpen, useCardView } from "@/lib/card-view";
+import { cardOpen, useCardView } from "@/lib/card-view";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import HoldButton from "@/components/kokonutui/hold-button";
 import { Input } from "@/components/ui/input";
@@ -158,7 +158,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function ActionCard({ item }: { item: ActionItem }) {
-  // null: follow the setting (Settings > This browser > Change cards) until the person opens or closes it.
+  // null: follow the setting (Settings > This browser > Cards) until the person opens or closes it.
   const [open, setOpen] = useState<boolean | null>(null);
   const view = useCardView();
   const [note, setNote] = useState("");
@@ -169,7 +169,8 @@ export function ActionCard({ item }: { item: ActionItem }) {
   const running = item.status === "running";
   const myLive = item.action === "run" && running && live?.id === item.id ? live : null;
   const myWindow = item.window && running ? windows.find((w) => w.id === item.id) : undefined;
-  const expanded = awaiting || (open ?? (item.status === "awaiting" || Boolean(myLive) || startsOpen(item.action, view)));
+  // Open by default; with auto-collapse a finished step folds up (the reader can still open or close any card).
+  const expanded = awaiting || (open ?? (Boolean(myLive) || cardOpen(sent && item.status === "awaiting" ? "running" : item.status, view)));
   const ran = item.action === "run" && item.output ? parseRunOutput(item.output) : null;
   const needsTerminal = /interactive terminal|needs a terminal|RUN-INTERACTIVE/i.test(`${item.output ?? ""} ${item.code ?? ""}`);
 

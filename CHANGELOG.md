@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.108] - 2026-10-07
+
+### Changed
+- Every step card in the chat (read, search, edit, run ...) now starts expanded, not only Write and Edit. Settings > This browser > Cards has Auto-collapse instead: a card folds up to one line once its step is finished, while cards waiting for approval, running or failed stay open. The earlier "Collapsed" choice becomes Auto-collapse.
+- The Automation tab says less: each section (Runbooks, Scripts, Hooks, Chains) has one short line, and the details (where the files are, approvals, examples) are behind an info button that shows them in a box on hover, focus or a click. The empty-state lines are shorter too.
+
 ## [v0.1.107] - 2026-10-07
 
 ### Added
@@ -1186,7 +1192,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.107...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.108...HEAD
+[v0.1.108]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.108
 [v0.1.107]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.107
 [v0.1.106]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.106
 [v0.1.105]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.105

@@ -526,10 +526,10 @@ const SECTION_KEY = "ccb.settingsSection";
 
 const CARD_VIEWS: { id: CardView; label: string }[] = [
   { id: "expanded", label: "Expanded" },
-  { id: "collapsed", label: "Collapsed" },
+  { id: "auto-collapse", label: "Auto-collapse" },
 ];
 
-/** How change cards start in the chat (this browser only). */
+/** How the step cards show in the chat (this browser only). */
 function CardViewSetting() {
   const [view, setView] = useState<CardView>(getCardView());
   const onChange = (v: CardView) => {
@@ -538,9 +538,9 @@ function CardViewSetting() {
   };
   return (
     <SettingLine
-      control={<Segmented label="Change cards" onChange={onChange} options={CARD_VIEWS} value={view} />}
-      help="How Write and Edit cards start in the chat: expanded shows the changed lines at once, collapsed shows one line you can open. Default: Expanded."
-      title="Change cards"
+      control={<Segmented label="Cards" onChange={onChange} options={CARD_VIEWS} value={view} />}
+      help="How the cards of Copilot's steps (read, edit, run ...) show in the chat. Expanded: every card open, with the changed lines or the output at once. Auto-collapse: a card folds up to one line once its step is finished; cards waiting for your approval, running or failed stay open. You can open or close any card yourself. Default: Expanded."
+      title="Cards"
     />
   );
 }
