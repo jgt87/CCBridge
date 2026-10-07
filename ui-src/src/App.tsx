@@ -604,6 +604,8 @@ export default function App() {
               >
               <Transcript
                 activity={state.activity ?? null}
+                runLive={state.runLive ?? null}
+                runWindows={Array.isArray(state.runWindows) ? state.runWindows : state.runWindows ? [state.runWindows] : []}
                 busy={state.busy}
                 stopping={stopping}
                 empty={

@@ -28,6 +28,8 @@ import { ActionOutput } from "./action-output";
 import { DiffView } from "./diff-view";
 import { CodeView } from "./code-block";
 import { languageForPath } from "@/lib/highlight";
+import { formatElapsed, liveLines, parseRunOutput, useRunLive, waitText, type RunLive } from "@/lib/run-live";
+import { ConsoleView } from "./console-view";
 
 export interface ActionItem {
   id: string;
@@ -47,6 +49,58 @@ export interface ActionItem {
   code?: string;
   reasons?: string[];
   next?: string;
+  /** A run the person opened in a console window: its output stays in that window. */
+  window?: boolean;
+}
+
+/** A running command's output as it comes, drawn like a console window. */
+export function LiveConsole({ live }: { live: RunLive }) {
+  const wait = waitText(live);
+  return (
+    <ConsoleView
+      footer={
+        <span>
+          {live.label ? `${live.label}: ` : ""}running {formatElapsed(live.elapsed)}
+          {wait && <span className="block text-neutral-200">{wait}</span>}
+        </span>
+      }
+      lines={liveLines(live.lines)}
+      live
+      title={`> ${live.command}`}
+    />
+  );
+}
+
+/** Runs the command again in a real console window, where its questions can be answered. */
+function OpenInWindow({ command, strong = false }: { command: string; strong?: boolean }) {
+  const [state, setState] = useState<"" | "busy" | "opened" | string>("");
+  const open = async () => {
+    setState("busy");
+    try {
+      await api.runInWindow(command);
+      setState("opened");
+    } catch (e) {
+      setState(e instanceof Error ? e.message : "Could not open the window");
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <button
+        className={cn(
+          "flex h-8 items-center gap-1.5 rounded-lg px-2.5 hover:bg-black/5 dark:hover:bg-white/5",
+          strong ? "border border-black/20 text-foreground dark:border-white/20" : "text-muted-foreground hover:text-foreground"
+        )}
+        disabled={state === "busy"}
+        onClick={open}
+        title="Runs this command in its own console window in the project folder. You can watch it and answer its questions there; StreamHub notes the exit code."
+        type="button"
+      >
+        <TerminalSquare className="h-3.5 w-3.5" /> Open in a window
+      </button>
+      {state === "opened" && <span className="text-muted-foreground">Opened: see the console window. Its result shows on a new card.</span>}
+      {state && state !== "busy" && state !== "opened" && <span className="text-rose-500 dark:text-rose-400">{state}</span>}
+    </div>
+  );
 }
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -110,7 +164,14 @@ export function ActionCard({ item }: { item: ActionItem }) {
   const [note, setNote] = useState("");
   const [sent, setSent] = useState(false);
   const awaiting = item.status === "awaiting" && !sent;
-  const expanded = awaiting || (open ?? (item.status === "awaiting" || startsOpen(item.action, view)));
+  // The command running now: its output as it comes (the card opens to show it).
+  const { live, windows } = useRunLive();
+  const running = item.status === "running";
+  const myLive = item.action === "run" && running && live?.id === item.id ? live : null;
+  const myWindow = item.window && running ? windows.find((w) => w.id === item.id) : undefined;
+  const expanded = awaiting || (open ?? (item.status === "awaiting" || Boolean(myLive) || startsOpen(item.action, view)));
+  const ran = item.action === "run" && item.output ? parseRunOutput(item.output) : null;
+  const needsTerminal = /interactive terminal|needs a terminal|RUN-INTERACTIVE/i.test(`${item.output ?? ""} ${item.code ?? ""}`);
 
   const decide = async (decision: "approve" | "reject") => {
     setSent(true);
@@ -200,14 +261,26 @@ export function ActionCard({ item }: { item: ActionItem }) {
           ) : (
             item.preview && <DiffView preview={item.preview} />
           )}
-          {item.action === "run" && (
-            <pre className="overflow-auto rounded-lg bg-black/5 px-3 py-2 font-mono text-foreground text-xs dark:bg-white/5">
-              <span className="select-none text-muted-foreground">&gt; </span>
-              {item.target}
-            </pre>
-          )}
-          {item.output && !awaiting && (
+          {item.action === "run" &&
+            (myLive ? (
+              <LiveConsole live={myLive} />
+            ) : item.window && running ? (
+              <ConsoleView
+                footer={`running in its own console window${myWindow ? ` for ${formatElapsed(myWindow.elapsed)}` : ""}`}
+                lines={["Answer its questions in that window. Its output stays there; StreamHub notes the exit code here."]}
+                title={`> ${item.target}`}
+              />
+            ) : ran && !awaiting ? (
+              <ConsoleView footer={ran.status || undefined} lines={ran.lines} title={`> ${item.target}`} />
+            ) : (
+              <ConsoleView lines={[]} live={running} title={`> ${item.target}`} />
+            ))}
+          {ran?.notes && !awaiting && <div className="whitespace-pre-wrap text-muted-foreground text-xs">{ran.notes}</div>}
+          {item.output && !awaiting && item.action !== "run" && (
             <ActionOutput fallbackPath={item.target} output={item.output} />
+          )}
+          {item.action === "run" && !awaiting && (!running || myLive?.state === "question" || myLive?.state === "stuck") && item.target.trim() && (
+            <OpenInWindow command={item.target} strong={needsTerminal || myLive?.state === "question"} />
           )}
 
           {awaiting && (

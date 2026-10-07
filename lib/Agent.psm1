@@ -1212,6 +1212,19 @@ function Enter-Activity($State, [string]$Kind, [string]$Label) {
     $prev
 }
 
+function New-RunWatch($State, [string]$Id, [string]$Label, [string]$Command) {
+    <# Live view of a running command for the app (Invoke-RunAction -OnProgress): the run card with
+       this id shows its elapsed time, last output lines and whether it seems to wait ($State.RunLive,
+       sent with the app state, never saved). Clear it with Stop-RunWatch. #>
+    $State.RunLive = @{ id = $Id; label = $Label; command = $Command; elapsed = 0; lines = @(); quietSec = 0; state = 'running' }
+    $st = $State
+    { param($pr) if ($st.RunLive -and $st.RunLive.id -eq $Id) { $st.RunLive = @{ id = $Id; label = $Label; command = $Command; elapsed = [int]$pr.elapsed; lines = @($pr.lines); quietSec = [int]$pr.quietSec; state = "$($pr.state)" } } }.GetNewClosure()
+}
+
+function Stop-RunWatch($State, [string]$Id) {
+    if ($State.RunLive -and $State.RunLive.id -eq $Id) { $State.RunLive = $null }
+}
+
 function Exit-Activity($State, $Prev) {
     $State.Activity.kind = "$($Prev.kind)"; $State.Activity.label = "$($Prev.label)"
 }
@@ -1371,7 +1384,8 @@ function Invoke-PackagesJob {
             if (-not $cp) { $cp = New-Checkpoint $root 'npm install' }
             Save-CheckpointFile $cp $root $lockFull
             $timeout = [Math]::Max(900, [int]$State.Config.commandTimeoutSec)
-            $r = Invoke-RunAction $root $cmd -TimeoutSec $timeout -MaxChars 6000 -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
+            $watch = New-RunWatch $State $id 'npm install' $cmd
+            try { $r = Invoke-RunAction $root $cmd -TimeoutSec $timeout -MaxChars 6000 -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure()) -OnProgress $watch } finally { Stop-RunWatch $State $id }
             $ok = (-not $r.timedOut) -and (-not $r.cancelled) -and ($r.exitCode -eq 0)
             $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $timeout s" } else { "exit code $($r.exitCode)" }
             $out = "$status`n$($r.output)"
@@ -1467,7 +1481,8 @@ function Invoke-ChainScript {
     if (-not $CheckpointBox.Value) { $CheckpointBox.Value = New-Checkpoint $root $(if ($Chain.direct) { "Script: $($sc.path)" } else { "Chain: $($Chain.title)" }) }
     $cp = $CheckpointBox.Value
     $snap = try { Start-RunSnapshot $cp $root } catch { Write-CCBLogError agent 'run snapshot' $_; $null }
-    $r = Invoke-RunAction $root $sc.command -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
+    $watch = New-RunWatch $State $id "$($sc.path)" $sc.command
+    try { $r = Invoke-RunAction $root $sc.command -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure()) -OnProgress $watch } finally { Stop-RunWatch $State $id }
     if ($snap) { try { $null = Complete-RunSnapshot $cp $root $snap } catch { Write-CCBLogError agent 'run snapshot' $_ } }
     $fixed = @(Restore-SourceData $root)
     $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
@@ -1971,6 +1986,11 @@ function Test-WebPageCore {
                     [IO.File]::WriteAllBytes((Join-Path $dir $name), [Convert]::FromBase64String($shot.data))
                     $State.PageShots = @($State.PageShots) + @(".streamhub/Screenshots/$name")
                     $State.PageShotMap[$page] = ".streamhub/Screenshots/$name"
+                    # Where the page's parts are in this screenshot, to name a changed area in words.
+                    try {
+                        $lay = Invoke-Cdp $s 'Runtime.evaluate' @{ expression = (Get-PageLayoutScript); returnByValue = $true } -TimeoutMs 10000
+                        if ("$($lay.result.value)") { [IO.File]::WriteAllText((Join-Path $dir ($name -replace '\.png$', '.layout.json')), "$($lay.result.value)", (New-Object Text.UTF8Encoding($false))) }
+                    } catch { Write-CCBLog verbose agent "Page layout of $page not recorded: $($_.Exception.Message)" }
                 } catch { Write-CCBLogError agent "Screenshot of $page" $_ }
             }
             # Readability: WCAG AA contrast of the visible text and field edges, in light and in dark.
@@ -2045,17 +2065,28 @@ function Get-BeforeAfterNotes {
     <# For each page with a screenshot before and after this task's changes: the comparison line,
        and whether it looks exactly the same. #>
     param($State, $AfterMap)
-    $notes = @(); $same = @(); $pairs = @()
+    $notes = @(); $same = @(); $pairs = @(); $crops = @()
     foreach ($page in @($AfterMap.Keys)) {
         $before = if ($State.BeforeShots) { "$($State.BeforeShots[$page])" } else { '' }
         if (-not $before) { continue }
         try {
-            $r = Compare-Screenshots (Join-Path $State.ProjectRoot $before.Replace('/', '\')) (Join-Path $State.ProjectRoot "$($AfterMap[$page])".Replace('/', '\'))
-            $notes += Format-ShotComparison $page $r
-            if ($r.same) { $same += $page; $pairs += @{ page = $page; before = $before; after = "$($AfterMap[$page])" } }
+            $beforeFull = Join-Path $State.ProjectRoot $before.Replace('/', '\')
+            $afterRel = "$($AfterMap[$page])"
+            $afterFull = Join-Path $State.ProjectRoot $afterRel.Replace('/', '\')
+            $r = Compare-Screenshots $beforeFull $afterFull
+            # The page's parts as recorded with the after screenshot (Test-WebPageCore), to name the areas.
+            $layFile = $afterFull -replace '\.png$', '.layout.json'
+            $layout = if (Test-Path -LiteralPath $layFile) { try { $l = ConvertFrom-Json ([IO.File]::ReadAllText($layFile)); @($l) } catch { $null } } else { $null }
+            $notes += Format-ShotComparison $page $r $layout
+            if ($r.same) { $same += $page; $pairs += @{ page = $page; before = $before; after = $afterRel } }
+            elseif (@($r.regions).Count -and -not $crops.Count) {
+                # The changed areas close up, before and after side by side (the first page only).
+                $cropRel = $afterRel -replace '\.png$', '-changes.png'
+                if (New-ShotCrop $beforeFull $afterFull $r.regions (Join-Path $State.ProjectRoot $cropRel.Replace('/', '\'))) { $crops += @{ page = $page; path = $cropRel; areas = [Math]::Min(2, @($r.regions).Count) } }
+            }
         } catch { Write-CCBLogError agent "Comparing screenshots of $page" $_ }
     }
-    @{ notes = $notes; same = $same; pairs = $pairs }
+    @{ notes = $notes; same = $same; pairs = $pairs; crops = $crops }
 }
 
 function Test-ScriptSyntax {
@@ -2192,7 +2223,8 @@ function Invoke-ProjectHooksCore {
             Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'failed'; summary = "$label not run"; output = "Not run: $why. Hooks never delete data or use Microsoft 365." }
             continue
         }
-        $vr = Invoke-RunAction $root $cmd ([int]$State.Config.commandTimeoutSec) 4000 { $State.Cancel }
+        $watch = New-RunWatch $State $id $label $cmd
+        try { $vr = Invoke-RunAction $root $cmd ([int]$State.Config.commandTimeoutSec) 4000 { $State.Cancel } -OnProgress $watch } finally { Stop-RunWatch $State $id }
         $ok = (-not $vr.timedOut) -and $vr.exitCode -eq 0
         $status = if ($vr.timedOut) { 'timed out' } else { "exit code $($vr.exitCode)" }
         Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = "${label}: $status"; output = "$label`n$status`n$($vr.output)"; changed = $true }
@@ -2816,7 +2848,8 @@ function Invoke-AgentAction {
             'run'   {
                 # What the command changes joins this step's change set, so Undo restores it.
                 $snap = if ($Checkpoint) { try { Start-RunSnapshot $Checkpoint $root } catch { Write-CCBLogError agent 'run snapshot' $_; $null } }
-                $r = Invoke-RunAction $root $evt.target -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
+                $watch = New-RunWatch $State "$Id" 'command' $evt.target
+                try { $r = Invoke-RunAction $root $evt.target -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure()) -OnProgress $watch } finally { Stop-RunWatch $State "$Id" }
                 $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
                 $out = "$status`n~~~~`n$($r.output)`n~~~~"
                 # A command that wanted a terminal to ask questions (StreamHub runs them without one).
@@ -3404,7 +3437,10 @@ function Invoke-AgentTurn {
                         $rel = $p.Replace('\', '/')
                         $before = ''
                         if ($checkpoint.Files[$rel] -eq 'existed') { $bk = Join-Path $checkpoint.Dir ($rel.Replace('/', '\')); if (Test-Path -LiteralPath $bk) { $before = (Read-TextFile $bk).Text } }
-                        foreach ($i in @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot)) { $found.Add((ConvertTo-CheckFinding $rel $i $(if ($i -match ' says: ') { 'tool' } else { 'file' }))) }
+                        # Shown while it runs: the checks can start a tool (node --check, python, prisma validate).
+                        $prevAct = Enter-Activity $State 'syntax' "Checking $rel$(if ($rel -match '(?i)\.prisma$') { ' (prisma validate)' })"
+                        try { $issuesNow = @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot) } finally { Exit-Activity $State $prevAct }
+                        foreach ($i in $issuesNow) { $found.Add((ConvertTo-CheckFinding $rel $i $(if ($i -match ' says: ') { 'tool' } else { 'file' }))) }
                         if ($quality) {
                             foreach ($i in @(Find-ChangeSmells $rel $before $now.Text)) { $found.Add((ConvertTo-CheckFinding $rel $i 'smell')) }
                             foreach ($i in @(Find-QualityIssues $rel $before $now.Text -UseKit:((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $State.ProjectRoot) -and (Get-UiKitColors $State.AppRoot) -ne 'none'))) { $found.Add((ConvertTo-CheckFinding $rel $i 'quality')) }
@@ -3517,7 +3553,9 @@ function Invoke-AgentTurn {
                     else {
                         Add-AgentEvent $State 'status' @{ text = "${verifyLabel}: running ``$verifyCmd``..." }
                         $prevAct = Enter-Activity $State 'tests' $(if ($isTests) { 'Running the tests' } else { "Running the project's check" })
-                        try { $vr = Invoke-RunAction $State.ProjectRoot $verifyCmd ([int]$State.Config.commandTimeoutSec) 6000 { $State.Cancel } } finally { Exit-Activity $State $prevAct }
+                        # No card for this run: the app shows the live output under the waiting indicator.
+                        $watch = New-RunWatch $State 'verify' $verifyLabel $verifyCmd
+                        try { $vr = Invoke-RunAction $State.ProjectRoot $verifyCmd ([int]$State.Config.commandTimeoutSec) 6000 { $State.Cancel } -OnProgress $watch } finally { Stop-RunWatch $State 'verify'; Exit-Activity $State $prevAct }
                         $passed = ($vr.exitCode -eq 0)
                         $tail = ("$($vr.output)".Split("`n") | Select-Object -Last 25) -join "`n"
                         $ev.verify = @{ command = $verifyCmd; passed = $passed; exit = $vr.exitCode; tail = $tail }
@@ -3603,7 +3641,15 @@ function Invoke-AgentTurn {
                                 $attach = @((Join-Path $State.ProjectRoot $p0.after.Replace('/', '\')), (Join-Path $State.ProjectRoot $p0.before.Replace('/', '\')))
                                 $shotNote += ' The first image is the page now, the second the page before your changes. If your change should show on this page as it opens, it is not working yet: check that the page loads the changed file, that the selectors match and that nothing overrides the new style, fix it and send done again. If it is in another view, use ACTION screenshot with the steps to get there.'
                                 if (-not $sameNudged) { $sameNudged = $true; $shotAgain = $true }
-                            } else { $shotNote += ' Check that this is the change that was asked for.' }
+                            } else {
+                                $shotNote += ' Check that this is the change that was asked for, and that nothing changed where it should not.'
+                                $c0 = @($ba.crops)[0]
+                                if ($c0) {
+                                    $attach = @(@($attach | Select-Object -First 1) + @(Join-Path $State.ProjectRoot $c0.path.Replace('/', '\')))
+                                    $shotNote += " The last image shows the changed area$(if ($c0.areas -gt 1) { 's' }) of $($c0.page) close up: before on the left, after on the right."
+                                    Add-AgentEvent $State 'status' @{ text = "Before/after check: the changed area$(if ($c0.areas -gt 1) { 's' }) of $($c0.page) close up: $($c0.path) (shown to Copilot)."; path = $c0.path }
+                                }
+                            }
                         }
                     }
                     if ($pageIssues.Count -or (Test-NeedsReview $State $changes)) {

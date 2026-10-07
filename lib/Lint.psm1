@@ -845,15 +845,69 @@ function Find-LanguagePitfalls {
             if ($fn.Parameters) { $params += @($fn.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath }) }
             if ($fn.Body.ParamBlock) { $params += @($fn.Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath }) }
             if (-not $params.Count) { continue }
+            # All of the function's parameter names, so the new name does not collide with another one.
+            $taken = ", not one of the parameters of $($fn.Name): " + (@($params | ForEach-Object { '$' + $_ }) -join ', ')
             foreach ($a in @($fn.Body.FindAll({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] }, $true))) {
                 if ($a.Left -isnot [Management.Automation.Language.VariableExpressionAst]) { continue }
                 $v = $a.Left.VariablePath.UserPath
                 # Reworking the parameter itself ($changed = @($Changed | ...)) is deliberate; an
                 # unrelated value that lands on it is the mistake.
                 $hit = @($params | Where-Object { $_ -ieq $v -and $_ -cne $v -and $a.Right.Extent.Text -notmatch ('(?i)\$' + [regex]::Escape($_) + '\b') })
-                if ($hit.Count) { "line $($a.Extent.StartLineNumber): `$$v overwrites the parameter `$$($hit[0]) (variable names ignore case): use another name"; break }
+                if ($hit.Count) { "line $($a.Extent.StartLineNumber): `$$v overwrites the parameter `$$($hit[0]) (variable names ignore case): use another name$taken"; break }
             }
+            # The same for a foreach loop variable: foreach ($to in ...) changes the parameter $To.
+            $loop = @($fn.Body.FindAll({ param($n) $n -is [Management.Automation.Language.ForEachStatementAst] }, $true) | Where-Object {
+                    $lv = $_.Variable.VariablePath.UserPath; @($params | Where-Object { $_ -ieq $lv -and $_ -cne $lv }).Count }) | Select-Object -First 1
+            if ($loop) { $lv = $loop.Variable.VariablePath.UserPath; "line $($loop.Extent.StartLineNumber): the loop variable `$$lv overwrites the parameter `$$(@($params | Where-Object { $_ -ieq $lv })[0]) (variable names ignore case): use another name$taken" }
         }
+        # $Matches after a -match whose result nobody checks (a statement of its own, or $null = ...):
+        # when it does not match, $Matches still holds the previous match (in a switch -Regex the
+        # switch's own), so the code goes on with old values.
+        $loose = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.BinaryExpressionAst] -and "$($n.Operator)" -match '^(I|C)?Match$' -and
+                    $n.Parent -is [Management.Automation.Language.CommandExpressionAst] -and (
+                        ($n.Parent.Parent -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Parent.Parent.Left.Extent.Text -ieq '$null') -or
+                        ($n.Parent.Parent -is [Management.Automation.Language.PipelineAst] -and @($n.Parent.Parent.PipelineElements).Count -eq 1 -and
+                         ($n.Parent.Parent.Parent -is [Management.Automation.Language.StatementBlockAst] -or $n.Parent.Parent.Parent -is [Management.Automation.Language.NamedBlockAst]))) }, $true))
+        foreach ($lm in $loose) {
+            $stmt = $lm.Parent.Parent
+            $block = $stmt.Parent
+            $read = @($block.FindAll({ param($n) $n -is [Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -ieq 'Matches' -and $n.Extent.StartOffset -gt $stmt.Extent.EndOffset }, $true)) | Select-Object -First 1
+            if ($read) { "line $($read.Extent.StartLineNumber): `$Matches after the -match on line $($lm.Extent.StartLineNumber), whose result is not checked: when it does not match, `$Matches still holds an older match. Use if (TEXT -match 'PATTERN') { ... } or ([regex]'PATTERN').Match(TEXT)"; break }
+        }
+        # return , $list keeps a list as one item; @(Name ...) around the call then makes a list inside a list.
+        $commaFns = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) | Where-Object {
+                @($_.Body.FindAll({ param($n) (($n -is [Management.Automation.Language.UnaryExpressionAst] -and "$($n.TokenKind)" -eq 'Comma') -or ($n -is [Management.Automation.Language.ArrayLiteralAst] -and $n.Extent.Text -match '^,')) -and ($n.Parent.Parent -is [Management.Automation.Language.PipelineAst]) -and (($n.Parent.Parent.Parent -is [Management.Automation.Language.ReturnStatementAst]) -or ($n.Parent.Parent.Parent -is [Management.Automation.Language.NamedBlockAst])) }, $true)).Count
+            } | ForEach-Object { $_.Name })
+        if ($commaFns.Count) {
+            $wrapped = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.ArrayExpressionAst] }, $true) | Where-Object {
+                    $st = @($_.SubExpression.Statements)
+                    $st.Count -eq 1 -and $st[0] -is [Management.Automation.Language.PipelineAst] -and $st[0].PipelineElements.Count -ge 1 -and
+                    $st[0].PipelineElements[0] -is [Management.Automation.Language.CommandAst] -and $commaFns -contains $st[0].PipelineElements[0].GetCommandName()
+                }) | Select-Object -First 1
+            if ($wrapped) { $fnName = @($wrapped.SubExpression.Statements)[0].PipelineElements[0].GetCommandName(); "line $($wrapped.Extent.StartLineNumber): $fnName returns its list with a leading comma (one item), so @($fnName ...) here gives a list inside a list: return the list plainly, or drop the @()" }
+        }
+        # .Count on what may be a single [pscustomobject] (one CSV row, one JSON object, one Select-Object
+        # result): Windows PowerShell 5.1 gives such an object no .Count.
+        $made = '(?i)\b(Import-Csv|ConvertFrom-Csv|ConvertFrom-Json|Invoke-RestMethod|Select-Object\s+(?!-(First|Last|Skip|Unique|ExpandProperty|Index)\b)[-\w])|\[pscustomobject\]'
+        $counted = $null
+        foreach ($a in @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [Management.Automation.Language.VariableExpressionAst] -and $n.Right -is [Management.Automation.Language.PipelineAst] }, $true))) {
+            $head = @($a.Right.PipelineElements)[0]
+            if ($head -is [Management.Automation.Language.CommandExpressionAst] -and $head.Expression -is [Management.Automation.Language.ArrayExpressionAst]) { continue }   # @(...) already
+            if ($a.Right.Extent.Text -notmatch $made -or $a.Right.Extent.Text -match '^\s*\[pscustomobject\]\s*@\{') { continue }   # one object made on purpose
+            $v = $a.Left.VariablePath.UserPath
+            $scope = $a.Parent; while ($scope -and $scope -isnot [Management.Automation.Language.ScriptBlockAst]) { $scope = $scope.Parent }
+            if (-not $scope) { continue }
+            $use = @($scope.FindAll({ param($n) $n -is [Management.Automation.Language.MemberExpressionAst] -and $n.Expression -is [Management.Automation.Language.VariableExpressionAst] -and $n.Expression.VariablePath.UserPath -ieq $v -and "$($n.Member)" -ieq 'Count' -and $n.Extent.StartOffset -gt $a.Extent.EndOffset }, $true)) | Select-Object -First 1
+            if ($use) { $counted = @{ line = $use.Extent.StartLineNumber; v = $v; at = $a.Extent.StartLineNumber }; break }
+        }
+        if ($counted) { "line $($counted.line): `$$($counted.v).Count is empty in Windows PowerShell 5.1 when line $($counted.at) gives one object (one row or item has no .Count): assign @(...) there" }
+        # A function named like a built-in cmdlet replaces it for the whole script (and for whoever imports it).
+        if (-not $script:BuiltinCmdlets) {
+            $script:BuiltinCmdlets = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+            try { foreach ($c in @(Get-Command -CommandType Cmdlet -Module Microsoft.PowerShell.* -ErrorAction SilentlyContinue)) { [void]$script:BuiltinCmdlets.Add($c.Name) } } catch { }
+        }
+        $shadow = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) | Where-Object { $script:BuiltinCmdlets.Contains($_.Name) }) | Select-Object -First 1
+        if ($shadow) { "line $($shadow.Extent.StartLineNumber): the function $($shadow.Name) has the same name as the built-in cmdlet and replaces it: use another name" }
         # a, b + c is (a, b) + c: the comma binds before + (an item meant as one string becomes several).
         $plus = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.BinaryExpressionAst] -and $n.Operator -eq 'Plus' -and $n.Left -is [Management.Automation.Language.ArrayLiteralAst] }, $true)) | Select-Object -First 1
         if ($plus) { "line $($plus.Extent.StartLineNumber): in a, b + c the comma binds first, so this adds to the whole list (a, b) instead of to the last item: put the last item in parentheses, a, (b + c)" }

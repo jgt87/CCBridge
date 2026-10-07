@@ -1054,6 +1054,8 @@ function Invoke-ReadAction {
             }
             $whole = ($from -eq 1 -and $last -eq $total)
             $head = if ($whole) { "### $p" } else { "### $p (lines $from-$last of $total$widened)" }
+            # Part of a PowerShell file: the parameters of the function it is in (header not shown).
+            if (-not $whole -and -not $office) { $scope = try { Get-PsScopeNote $raw $full $from $last } catch { '' }; if ($scope) { $head += "`n$scope" } }
             if ($secret) { $head += "`n(holds secrets: the values are shown as <hidden>; this file is changed by the user, not by you)" }
             if ($office) {
                 # Shown as Markdown; a .docx made here can be changed with write/edit on this text.
@@ -1496,6 +1498,39 @@ function Find-PlaceholderLine([string]$Old, [string]$New) {
     $null
 }
 
+function Get-PsParamNames($Fn) {
+    <# A PowerShell function's parameters as Copilot would write them: $Name, [switch]$Name. #>
+    $ps = @()
+    if ($Fn.Parameters) { $ps += @($Fn.Parameters) }
+    if ($Fn.Body.ParamBlock) { $ps += @($Fn.Body.ParamBlock.Parameters) }
+    @($ps | ForEach-Object { $(if ($_.StaticType -eq [Management.Automation.SwitchParameter]) { '[switch]' } else { '' }) + '$' + $_.Name.VariablePath.UserPath })
+}
+
+function Get-PsScopeNote {
+    <# For a part of a PowerShell file shown to Copilot (lines $From-$To) whose function header is
+       not in that part: one line naming the functions the lines are in, their parameters and the
+       script's parameters, so code added there does not reuse a parameter's name (names ignore
+       case). '' for other files or when every header is in view. #>
+    param([string]$Text, [string]$Path, [int]$From, [int]$To)
+    if ($Path -notmatch '(?i)\.ps[m]?1$' -or $From -lt 1) { return '' }
+    $tok = $null; $errs = $null
+    $ast = [Management.Automation.Language.Parser]::ParseInput("$Text", [ref]$tok, [ref]$errs)
+    $parts = @()
+    # Enclosing functions whose first line is above the part, innermost first.
+    $fns = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) | Where-Object {
+            $_.Extent.StartLineNumber -lt $From -and $_.Extent.EndLineNumber -ge $From } | Sort-Object { $_.Extent.StartLineNumber } -Descending | Select-Object -First 3)
+    foreach ($f in $fns) {
+        $names = @(Get-PsParamNames $f)
+        $parts += "function $($f.Name) (line $($f.Extent.StartLineNumber)): $(if ($names.Count) { 'parameters ' + ($names -join ', ') } else { 'no parameters' })"
+    }
+    $script = @()
+    if ($ast.ParamBlock -and $ast.ParamBlock.Extent.EndLineNumber -lt $From) { $script = @($ast.ParamBlock.Parameters | ForEach-Object { '$' + $_.Name.VariablePath.UserPath }) }
+    if (-not $fns.Count -and -not $script.Count) { return '' }
+    $where = if ($fns.Count) { "Lines $From-$To are inside " + ($parts -join '; inside ') + '.' } else { '' }
+    $top = if ($script.Count) { " Script parameters: $($script -join ', ')." } else { '' }
+    "($where$top Variable names ignore case: do not give other values these names, also not as a foreach variable.)".Replace('( ', '(')
+}
+
 function Get-ChangedView {
     <# After an edit: the changed lines as they are now, widened to whole blocks, so Copilot's next
        edit starts from the current text. At most $MaxLines lines. Returns the text or ''. #>
@@ -1511,7 +1546,9 @@ function Get-ChangedView {
     $from = [Math]::Max(1, $w.from - 1); $to = [Math]::Min($n.Length, $w.to + 1)   # one line of context
     if ($to - $from + 1 -gt $MaxLines) { $to = $from + $MaxLines - 1; $cut = " (first $MaxLines lines; read more if you need them)" } else { $cut = '' }
     $fence = '````'
-    "Lines $from-$to of $Shown now$cut (line numbers are not part of the file):`n$fence`n" + ($n[($from - 1)..($to - 1)] -join "`n") + "`n$fence"
+    # PowerShell: the parameters of the function these lines are in, when its header is not shown.
+    $scope = if ($from -gt 1) { try { Get-PsScopeNote ($n -join "`n") $Path $from $to } catch { '' } } else { '' }
+    "Lines $from-$to of $Shown now$cut (line numbers are not part of the file):`n$fence`n" + ($n[($from - 1)..($to - 1)] -join "`n") + "`n$fence" + $(if ($scope) { "`n$scope" } else { '' })
 }
 
 function Find-SymbolDefinition {
@@ -1927,9 +1964,44 @@ function Get-InteractiveNote([AllowEmptyString()][string]$Output) {
     'This command needs an interactive terminal to ask questions, and commands here run without one: nobody can answer its prompts. Use the form the tool offers for scripts instead: flags that answer its questions (for example a yes or force flag, or the values as arguments), or its command meant for scripts and CI. If the tool has no such form, give the user the exact command to run in their own terminal and continue with the rest.'
 }
 
+$script:QuestionPattern = '(?i)(\([yn]/[yn]\)|\[[yn]/[yn]\]|\(yes/no\)|\?\s*(\(.{0,20}\)\s*)?$|(press|hit) (any key|enter|return)|(enter|type|choose|select)\b[^\n]{0,60}:\s*$|password:\s*$|\u276F|^\s*>\s*$)'
+
+function Get-RunTail([string]$Text, [int]$Lines = 20) {
+    <# The last lines of a running command's output as a terminal shows them: a line rewritten with
+       carriage returns (a progress bar) shows its last version. #>
+    $t = if ($Text.Length -gt 6000) { $Text.Substring($Text.Length - 6000) } else { $Text }
+    $rows = @($t.Replace("`r`n", "`n").Split("`n") | ForEach-Object { $r = $_.TrimEnd("`r"); $i = $r.LastIndexOf("`r"); if ($i -ge 0) { $r.Substring($i + 1) } else { $r } })
+    while ($rows.Count -and -not $rows[-1].Trim()) { $rows = @($rows | Select-Object -First ($rows.Count - 1)) }
+    @($rows | Select-Object -Last $Lines)
+}
+
+function Get-RunWaitState {
+    <# What a running command looks like from outside (fixed rules): 'question' when its last output
+       line asks something and nothing came for 3 s (commands here run without a terminal, so nobody
+       can answer); 'stuck' after 30 s without output and without CPU use; 'quiet' after 30 s without
+       output while it still works; else 'running'. #>
+    param([string[]]$Tail, [double]$QuietSec, [bool]$CpuIdle)
+    $last = "$(@($Tail | Where-Object { "$_".Trim() }) | Select-Object -Last 1)"
+    if ($QuietSec -ge 3 -and $last -and $last -match $script:QuestionPattern) { return 'question' }
+    if ($QuietSec -ge 30) { if ($CpuIdle) { return 'stuck' } else { return 'quiet' } }
+    'running'
+}
+
+function Get-ProcessTreeCpu([int]$RootPid) {
+    <# Total CPU seconds of a process and everything it started (cmd.exe -> npx -> node ...). #>
+    $all = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId -ErrorAction SilentlyContinue)
+    $ids = New-Object 'Collections.Generic.HashSet[int]'; [void]$ids.Add($RootPid)
+    do { $grew = $false; foreach ($p in $all) { if ($ids.Contains([int]$p.ParentProcessId) -and $ids.Add([int]$p.ProcessId)) { $grew = $true } } } while ($grew)
+    $sum = 0.0
+    foreach ($id in $ids) { try { $sum += (Get-Process -Id $id -ErrorAction Stop).TotalProcessorTime.TotalSeconds } catch { } }
+    $sum
+}
+
 function Invoke-RunAction {
-    <# Runs a command with cmd.exe in the project folder. Output is trimmed to head + tail. #>
-    param([string]$ProjectRoot, [string]$Command, [int]$TimeoutSec = 120, [int]$MaxChars = 8000, [scriptblock]$CancelCheck)
+    <# Runs a command with cmd.exe in the project folder. Output is trimmed to head + tail.
+       -OnProgress gets, about twice a second while it runs: @{ elapsed; lines (the last 20, secrets
+       hidden); quietSec (since the last output); state (Get-RunWaitState) }. #>
+    param([string]$ProjectRoot, [string]$Command, [int]$TimeoutSec = 120, [int]$MaxChars = 8000, [scriptblock]$CancelCheck, [scriptblock]$OnProgress)
     # Several lines (Copilot often sends a sequence): a cmd /c command line only runs the first, so
     # they go into a temporary batch file that echoes each command and stops at the first failure.
     $lines = @($Command.Replace("`r`n", "`n").Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -1956,17 +2028,54 @@ function Invoke-RunAction {
     $psi.CreateNoWindow = $true
     $p = [Diagnostics.Process]::Start($psi)
     $p.StandardInput.Close()
-    $out = $p.StandardOutput.ReadToEndAsync()
-    $err = $p.StandardError.ReadToEndAsync()
+    # Output is read in pieces as it comes (not only at the end), so a person can watch it: also a
+    # question without a line break after it ("Continue? (y/N) ").
+    $all = New-Object Text.StringBuilder
+    $streams = @(
+        @{ r = $p.StandardOutput; buf = (New-Object char[] 4096); task = $null; eof = $false }
+        @{ r = $p.StandardError; buf = (New-Object char[] 4096); task = $null; eof = $false }
+    )
+    $pump = {
+        $got = $false
+        foreach ($st in $streams) {
+            while (-not $st.eof) {
+                if (-not $st.task) { $st.task = $st.r.ReadAsync($st.buf, 0, $st.buf.Length) }
+                if (-not $st.task.IsCompleted) { break }
+                $n = $st.task.Result; $st.task = $null
+                if ($n -le 0) { $st.eof = $true; break }
+                [void]$all.Append((New-Object string ($st.buf, 0, $n))); $got = $true
+            }
+        }
+        $got
+    }
     # Wait in short steps so a Stop from the user ends the command (and its children) at once.
-    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $started = Get-Date
+    $deadline = $started.AddSeconds($TimeoutSec)
     $timedOut = $false; $cancelled = $false
+    $lastOut = $started; $lastReport = [datetime]::MinValue; $lastCpu = -1.0; $cpuAt = $started; $cpuIdle = $false
     while (-not $p.WaitForExit(250)) {
+        if (& $pump) { $lastOut = Get-Date }
         if ($CancelCheck -and (& $CancelCheck)) { $cancelled = $true; break }
         if ((Get-Date) -gt $deadline) { $timedOut = $true; break }
+        if ($OnProgress -and ((Get-Date) - $lastReport).TotalMilliseconds -ge 500) {
+            $lastReport = Get-Date
+            $quiet = ((Get-Date) - $lastOut).TotalSeconds
+            # CPU use of the command's processes, looked at every 5 s once it has been quiet a while.
+            if ($quiet -ge 25 -and ((Get-Date) - $cpuAt).TotalSeconds -ge 5) {
+                $cpu = try { Get-ProcessTreeCpu $p.Id } catch { -1.0 }
+                $cpuIdle = ($lastCpu -ge 0 -and $cpu -ge 0 -and ($cpu - $lastCpu) -lt 0.05)
+                $lastCpu = $cpu; $cpuAt = Get-Date
+            } elseif ($quiet -lt 25) { $lastCpu = -1.0; $cpuIdle = $false }
+            $tail = @(Get-RunTail $all.ToString())
+            $shown = @(Hide-ProjectSecrets $ProjectRoot ($tail -join "`n")) -join "`n"
+            try { & $OnProgress @{ elapsed = [int]((Get-Date) - $started).TotalSeconds; lines = @($shown.Split("`n")); quietSec = [int]$quiet; state = (Get-RunWaitState $tail $quiet $cpuIdle) } } catch { }
+        }
     }
     if ($timedOut -or $cancelled) { cmd.exe /c "taskkill /PID $($p.Id) /T /F >nul 2>&1"; $p.WaitForExit(5000) | Out-Null }
-    $text = ($out.Result + $err.Result).Replace("`r`n", "`n").TrimEnd()
+    # What is still on its way (the process has ended: the pipes close).
+    $until = (Get-Date).AddSeconds(5)
+    while (@($streams | Where-Object { -not $_.eof }).Count -and (Get-Date) -lt $until) { if (-not (& $pump)) { Start-Sleep -Milliseconds 20 } }
+    $text = $all.ToString().Replace("`r`n", "`n").TrimEnd()
     Write-CCBLog verbose exec "run finished" @{ command = $Command; exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; outputChars = $text.Length }
     if ($text.Length -gt $MaxChars) {
         $head = [int]($MaxChars * 0.25)
@@ -1977,5 +2086,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

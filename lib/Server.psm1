@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -103,6 +103,8 @@ function Get-StateSnapshot($State) {
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
         workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
         activity = (Get-ActivityView $State)
+        runLive = $State.RunLive   # the command running now: its last output lines (New-RunWatch)
+        runWindows = @(Update-RunWindows $State)   # commands the person opened in a console window
         appWindow = [string]$State.Config.appWindow   # where the app opened (the Split screen hint is for copilot-tab)
         appInEdge = (Get-AppInEdge $State)   # links then open through Edge (Split screen sends them to the other pane)
         hints = (Get-UiHints $State)
@@ -132,6 +134,28 @@ function Set-UiHintShown($State, [string]$Name) {
     $h[$Name] = (Get-Date).ToString('s')
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $script:HintsFile)
     [IO.File]::WriteAllText($script:HintsFile, (ConvertTo-Json -InputObject $h -Compress), (New-Object Text.UTF8Encoding($false)))
+}
+
+function Update-RunWindows($State) {
+    <# Commands opened in a console window (Open in a window): a finished or closed one gets its
+       result on the run card (once), Source/ is put back like after any command, and the ones still
+       running are returned for the app (id, elapsed seconds). #>
+    if (-not $State.RunWindows) { return @() }
+    foreach ($id in @($State.RunWindows.Keys)) {
+        $w = $State.RunWindows[$id]
+        $st = Get-RunWindowStatus $w
+        if ($st.state -eq 'running') { continue }
+        $State.RunWindows.Remove($id)
+        $code = $st.exitCode
+        $ok = ($st.state -eq 'finished' -and $code -eq 0)
+        $summary = if ($st.state -eq 'finished') { "finished in the window: exit code $code" } else { 'the window was closed before the command finished' }
+        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = $summary
+            output = "$summary`nThe output stayed in the console window; StreamHub did not read it. To give it to Copilot, copy it from the window into a message. Changes this command made are not in Undo." }
+        if ($w.root) { try { $fixed = @(Restore-SourceData $w.root); if ($fixed.Count) { Add-AgentEvent $State 'status' @{ text = "Source/ and protected files are read-only; StreamHub put back what the command in the window changed: $($fixed -join ', ')" } } } catch { Write-CCBLogError server 'restore after window' $_ } }
+        Remove-RunWindowFiles $w
+        Write-CCBLog info server "Command window $id ended: $summary"
+    }
+    @($State.RunWindows.Values | ForEach-Object { @{ id = $_.id; elapsed = [int]((Get-Date) - $_.started).TotalSeconds } })
 }
 
 function Get-ActivityView($State) {
@@ -472,6 +496,20 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ($null -ne $b.folder) { $task.folder = [string]$b.folder }
             $null = Submit-AgentTask $State $task 'user' $(if ($b.folder) { "npm install in $($b.folder)" } else { 'npm install' })
             return Send-Json $Ctx @{ ok = $true }
+        }
+        '^POST /api/run/window$' {
+            # A command in a real console window, where the person can answer its questions: only the
+            # StreamHub page itself starts it (the person clicked Open in a window).
+            if ($Ctx.Request.Headers['Origin'] -ne "http://localhost:$($State.Config.port)") { return Send-Json $Ctx @{ error = 'Only the StreamHub page can open a command window.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open or create a project first' }
+            $b = Read-JsonBody $Ctx
+            $cmd = "$($b.command)".Trim()
+            $w = Start-RunWindow $State.ProjectRoot $cmd
+            $w.root = $State.ProjectRoot
+            if (-not $State.RunWindows) { $State.RunWindows = @{} }
+            $State.RunWindows[$w.id] = $w
+            Add-AgentEvent $State 'action' @{ id = $w.id; action = 'run'; target = $cmd; status = 'running'; by = 'user'; window = $true }
+            return Send-Json $Ctx @{ ok = $true; id = $w.id }
         }
         '^POST /api/scripts/run$' {
             # One script from Scripts/ (Automation > Scripts); checked again when it runs.

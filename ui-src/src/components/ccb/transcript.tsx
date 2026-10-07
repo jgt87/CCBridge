@@ -2,7 +2,8 @@ import { openExternal } from "@/lib/links";
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
 import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard, type PlanVariant } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { RunLiveContext, type RunLive, type RunLiveView, type RunWindowState } from "@/lib/run-live";
 import { MarkdownView } from "./markdown-view";
 import { followBottom } from "@/lib/stick-to-bottom";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
@@ -12,7 +13,7 @@ import { UndoCard } from "./undo-card";
 import { stripActionBlocks } from "@/lib/diff";
 import { activityTexts, thinkingTexts } from "@/lib/thinking-texts";
 import { cn } from "@/lib/utils";
-import { ActionCard, type ActionItem } from "./action-card";
+import { ActionCard, LiveConsole, type ActionItem } from "./action-card";
 
 type NoteTone = "info" | "error" | "done" | "undo" | "human";
 
@@ -88,6 +89,7 @@ function mergeAction(e: AgentEvent, ctx: BuildContext) {
     error: e.error ?? existing?.error,
     target: e.target ?? existing?.target ?? "",
     by: (e as AgentEvent & { by?: string }).by ?? existing?.by,
+    window: e.window ?? existing?.window,
   };
   ctx.actions.set(e.id!, next);
   if (!existing) ctx.items.push({ kind: "action", seq: e.seq, item: next });
@@ -519,6 +521,8 @@ export function Transcript({
   items,
   busy,
   activity = null,
+  runLive = null,
+  runWindows = [],
   progress,
   empty,
   stopping = false,
@@ -531,6 +535,9 @@ export function Transcript({
   busy: boolean;
   /** StreamHub's own work besides Copilot (indexing, scanning for issues). */
   activity?: Activity | null;
+  /** The command running now (live output on its card) and commands running in a console window. */
+  runLive?: RunLive | null;
+  runWindows?: RunWindowState[];
   progress: string;
   empty?: React.ReactNode;
   stopping?: boolean;
@@ -596,9 +603,14 @@ export function Transcript({
     keepFromBottom.current = null;
   }, [shown]);
 
+  const live = useMemo<RunLiveView>(() => ({ live: runLive, windows: runWindows }), [runLive, runWindows]);
+  // A run without a card of its own (the project's verify command, tests): its console goes under the indicator.
+  const liveWithoutCard = runLive && !items.some((i) => i.kind === "action" && i.item.id === runLive.id) ? runLive : null;
+
   if (showEmpty) return <>{empty}</>;
 
   return (
+    <RunLiveContext.Provider value={live}>
     <div className="mx-auto flex w-full max-w-[max(48rem,80%)] flex-col gap-3 px-4 py-6" ref={contentRef}>
       {hidden > 0 && (
         <div className="flex justify-center" ref={topRef}>
@@ -611,7 +623,9 @@ export function Transcript({
         <TranscriptRow item={it} key={rowKey(it)} onOpenFile={onOpenFile} onResendAsCoding={onResendAsCoding} onSend={onSend} onUsePrompt={onUsePrompt} />
       ))}
       {(busy || activity?.label) && !awaiting && <ThinkingIndicator activity={activity} progress={progress} stopping={stopping} />}
+      {liveWithoutCard && <LiveConsole live={liveWithoutCard} />}
       <div ref={endRef} />
     </div>
+    </RunLiveContext.Provider>
   );
 }

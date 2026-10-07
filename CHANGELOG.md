@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.105] - 2026-10-07
+
+### Added
+- Commands are visible while they run: the run card shows the output as it comes in a console view (black, Consolas), with the time it has been running. Finished runs use the same view. When a command shows no output for 30 seconds the card says so, and whether it still uses the processor or seems to wait for something; when its last line asks a question (`(y/N)`, "Enter a name:", "Press any key") it says that nobody can answer it here. This covers Copilot's commands, scripts, hooks, npm install and the project's verify command and tests (shown under the waiting indicator). StreamHub's own file checks show which file they check, and when `prisma validate` runs.
+- Open in a window: a run card has a button that runs the command again in its own console window in the project folder, where you can watch it and answer its questions (for example `prisma migrate dev`). It is offered more prominently when a command needed a terminal or seems to ask something. The card follows the window and records the exit code when the command ends; the output stays in the window. Deleting or moving outside the project is refused here too, and Source/ is put back afterwards as after any command.
+- The before/after check says where a page changed, in words and close up: each changed area separately (up to four), with its place on the page (top left, bottom right...) and the parts of the page it is in, such as "in footer, around button#export 'Export'" or a heading's text. The page check records where the page's headings, landmarks and named elements are with every screenshot. Copilot also gets one image of the changed areas with before on the left and after on the right, so it can check that it changed the right part and nothing else; the chat links the image.
+- More Windows PowerShell 5.1 traps in the code Copilot writes, reported as likely mistakes with the fix: a foreach loop variable that overwrites a parameter differing only in case (`$to` and `$To`), `$Matches` read after a `-match` whose result is not checked (it keeps an older match), a function that returns its list with a leading comma called inside `@(...)` (a list inside a list), `.Count` on what can be a single object from Import-Csv, ConvertFrom-Json or Select-Object (no `.Count` in 5.1), and a function named like a built-in cmdlet. Copilot's PowerShell rules name the same traps, so it avoids them in the first place.
+- Parameter names travel with a part of a PowerShell script: when Copilot reads only some lines of a .ps1 or .psm1, or gets the changed lines back after an edit, and the function's header is not among them, StreamHub adds one line naming the function those lines are in, its parameters and the script's own parameters, with the reminder that variable names ignore case. A variable that still overwrites a parameter is reported with all of that function's parameter names, so the new name does not collide either.
+
 ## [v0.1.104] - 2026-10-07
 
 ### Fixed
@@ -1158,7 +1167,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.104...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.105...HEAD
+[v0.1.105]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.105
 [v0.1.104]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.104
 [v0.1.103]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.103
 [v0.1.102]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.102

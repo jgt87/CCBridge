@@ -89,9 +89,10 @@ function Invoke-ProjectRetention {
     # the charts of one answer count as one item). Only files with that exact name pattern.
     $ex = Join-Path $ProjectRoot ((Get-LayoutPath Exports).Replace('/', '\'))
     if (Test-Path -LiteralPath $ex) {
-        $charts = @(Get-ChildItem -LiteralPath $ex -File -Filter '*-chart-*.png' | Where-Object { $_.Name -match '^(.+)-chart-(\d{8}-\d{6})(-\d+)?\.png$' } | ForEach-Object {
-            $null = $_.Name -match '^(.+)-chart-(\d{8}-\d{6})(-\d+)?\.png$'
-            [pscustomobject]@{ Group = $Matches[1]; Stamp = $Matches[2]; File = $_ } } |
+        $chartName = [regex]'^(.+)-chart-(\d{8}-\d{6})(-\d+)?\.png$'
+        $charts = @(Get-ChildItem -LiteralPath $ex -File -Filter '*-chart-*.png' | ForEach-Object {
+            $cm = $chartName.Match($_.Name)
+            if ($cm.Success) { [pscustomobject]@{ Group = $cm.Groups[1].Value; Stamp = $cm.Groups[2].Value; File = $_ } } } |
             Group-Object Group, Stamp | ForEach-Object {
                 [pscustomobject]@{ Group = $_.Group[0].Group; Time = ($_.Group.File | Measure-Object LastWriteTime -Maximum).Maximum; Paths = @($_.Group.File | ForEach-Object FullName) } })
         foreach ($g in ($charts | Group-Object Group)) { & $apply 'charts' (Select-Expired $g.Group $r.chartsCount $r.chartsDays -Now $Now) }

@@ -1,3 +1,5 @@
+import type { RunLive, RunWindowState } from "./run-live";
+
 // Client for the CCBridge PowerShell server. Every call carries the session token that
 // the server injects into index.html, so other pages cannot use the API.
 
@@ -152,6 +154,8 @@ export interface AgentEvent {
   changed?: boolean;
   /** Who approved or rejected an action: "user" (web app), "api" or "mcp". */
   decidedBy?: string;
+  /** A run the person opened in a console window (its output stays there). */
+  window?: boolean;
   items?: TodoItem[];
   files?: string[];
   /** Failed step: possible reasons and what happens next. */
@@ -213,6 +217,10 @@ export interface AppState {
   commit?: string;
   /** What StreamHub itself is busy with (indexing, scanning for issues); shown like "waiting for Copilot". */
   activity?: Activity | null;
+  /** The command running now: its last output lines (shown like a console on its run card). */
+  runLive?: RunLive | null;
+  /** Commands opened in a console window that still run. */
+  runWindows?: RunWindowState[] | RunWindowState;
   /** Where the project is served read-only (images in Markdown), e.g. /preview/TOKEN/. */
   previewBase?: string;
   /** Where the app opened: copilot-tab (a tab in the Copilot window), side-by-side or browser. */
@@ -667,6 +675,8 @@ export const api = {
   packages: () =>
     call<{ items: PackageItem[] | PackageItem; npm: boolean }>("GET", "/api/packages").then((r) => ({ npm: r.npm, items: Array.isArray(r.items) ? r.items : r.items ? [r.items] : [] })),
   /** npm install for one folder ('' = the project root), or every folder with missing packages. */
+  /** Runs a command in a real console window in the project (the person can answer its questions). */
+  runInWindow: (command: string) => call<{ ok: boolean; id: string }>("POST", "/api/run/window", { command }),
   installPackages: (folder?: string) => call<{ ok: boolean }>("POST", "/api/packages/install", folder === undefined ? {} : { folder }),
   chains: () =>
     call<{ chains: ChainItem[]; scripts: string[] }>("GET", "/api/chains").then((r) => ({
