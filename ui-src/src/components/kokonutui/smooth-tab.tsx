@@ -188,6 +188,25 @@ export default function SmoothTab({
 
   // Reference for the selected button
   const buttonRefs = React.useRef<Map<string, HTMLButtonElement>>(new Map());
+  // CCBridge: the icons of the tabs in the grid line up. Each tab's icon + title gets the width of
+  // the widest one (measured), centred in its button and left-aligned inside, so every icon sits as
+  // far from its button's left edge as the widest tab's icon. A tab spanning a row keeps its own.
+  const labelRefs = React.useRef<Map<string, HTMLSpanElement>>(new Map());
+  const [labelWidth, setLabelWidth] = React.useState(0);
+  React.useLayoutEffect(() => {
+    const measure = () => {
+      let max = 0;
+      labelRefs.current.forEach((el) => {
+        max = Math.max(max, Math.ceil(el.getBoundingClientRect().width));
+      });
+      setLabelWidth((w) => (w === max ? w : max));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    labelRefs.current.forEach((el) => ro.observe(el));
+    document.fonts?.ready.then(measure).catch(() => {});
+    return () => ro.disconnect();
+  }, [items]);
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   // Update dimensions whenever selected tab changes or on mount
@@ -319,9 +338,27 @@ export default function SmoothTab({
                 tabIndex={isSelected ? 0 : -1}
                 type="button"
               >
-                {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
-                <span className="truncate">{item.title}</span>
-                {item.badge && <span className="shrink-0">{item.badge}</span>}
+                {spare ? (
+                  <>
+                    {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
+                    <span className="truncate">{item.title}</span>
+                    {item.badge && <span className="shrink-0">{item.badge}</span>}
+                  </>
+                ) : (
+                  <span className="flex min-w-0 max-w-full justify-start" style={labelWidth ? { width: labelWidth } : undefined}>
+                    <span
+                      className="flex min-w-0 items-center gap-1"
+                      ref={(el) => {
+                        if (el) labelRefs.current.set(item.id, el);
+                        else labelRefs.current.delete(item.id);
+                      }}
+                    >
+                      {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
+                      <span className="truncate">{item.title}</span>
+                      {item.badge && <span className="shrink-0">{item.badge}</span>}
+                    </span>
+                  </span>
+                )}
               </motion.button>
             );
           })}

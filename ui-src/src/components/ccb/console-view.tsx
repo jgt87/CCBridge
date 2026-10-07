@@ -1,8 +1,14 @@
+import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+
+/** Within this many pixels of the bottom counts as "at the bottom" (the view keeps following). */
+const NEAR_BOTTOM = 24;
 
 /**
  * A command's output drawn like a Windows console window: black, Consolas, light grey text.
  * `title` is the bar at the top (the command), `footer` a status line under the output.
+ * Like a console it shows the end: it opens at the last line and keeps to the newest one as lines
+ * come in, unless the reader scrolled up to read.
  */
 export function ConsoleView({
   title,
@@ -18,6 +24,17 @@ export function ConsoleView({
   live?: boolean;
   className?: string;
 }) {
+  const body = useRef<HTMLPreElement>(null);
+  const follow = useRef(true);
+  const text = lines.join("\n");
+  useLayoutEffect(() => {
+    const el = body.current;
+    if (el && follow.current) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  const onScroll = () => {
+    const el = body.current;
+    if (el) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM;
+  };
   return (
     <div className={cn("overflow-hidden rounded-md border border-neutral-700 bg-[#0c0c0c] text-[#cccccc]", className)}>
       {title && (
@@ -25,8 +42,12 @@ export function ConsoleView({
           {title}
         </div>
       )}
-      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-[Consolas,'Cascadia_Mono','Courier_New',monospace] text-[12.5px] leading-[1.35]">
-        {lines.length ? lines.join("\n") : live ? "" : "(no output)"}
+      <pre
+        className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-[Consolas,'Cascadia_Mono','Courier_New',monospace] text-[12.5px] leading-[1.35]"
+        onScroll={onScroll}
+        ref={body}
+      >
+        {lines.length ? text : live ? "" : "(no output)"}
         {live && <span className="ml-px inline-block h-[1.05em] w-[0.55em] translate-y-[2px] animate-pulse bg-[#cccccc] align-text-bottom" />}
       </pre>
       {footer && <div className="border-neutral-800 border-t px-3 py-1 font-[Consolas,'Cascadia_Mono','Courier_New',monospace] text-[11px] text-neutral-400">{footer}</div>}

@@ -103,6 +103,7 @@ function Get-StateSnapshot($State) {
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
         workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
         activity = (Get-ActivityView $State)
+        installProblem = [string]$State.InstallProblem   # files missing or different from the release (ccbridge.ps1)
         runLive = $State.RunLive   # the command running now: its last output lines (New-RunWatch)
         runWindows = @(Update-RunWindows $State)   # commands the person opened in a console window
         appWindow = [string]$State.Config.appWindow   # where the app opened (the Split screen hint is for copilot-tab)
@@ -134,6 +135,16 @@ function Set-UiHintShown($State, [string]$Name) {
     $h[$Name] = (Get-Date).ToString('s')
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $script:HintsFile)
     [IO.File]::WriteAllText($script:HintsFile, (ConvertTo-Json -InputObject $h -Compress), (New-Object Text.UTF8Encoding($false)))
+}
+
+function Get-WorkerStopReason($Worker) {
+    <# Why the worker's runspace ended: its terminating error, else its last error record. #>
+    $r = $null
+    try { $r = $Worker.InvocationStateInfo.Reason } catch { }
+    if ($r) { return "$($r.Message)" }
+    $last = try { @($Worker.Streams.Error) | Select-Object -Last 1 } catch { $null }
+    if ($last) { return "$($last.Exception.Message)" }
+    'it ended without an error message'
 }
 
 function Update-RunWindows($State) {
@@ -862,14 +873,21 @@ function Start-CCBridgeServer {
     }
     $port = $State.Config.port
 
-    $rs = [runspacefactory]::CreateRunspace()
-    $rs.ApartmentState = 'STA'   # clipboard access needs STA
-    $rs.Open()
-    $rs.SessionStateProxy.SetVariable('State', $State)
-    $worker = [powershell]::Create()
-    $worker.Runspace = $rs
-    [void]$worker.AddScript("`$ErrorActionPreference = 'Stop'; Import-Module '$(Join-Path $appRoot 'lib\Agent.psm1')'; Start-AgentWorker -State `$State")
-    $handle = $worker.BeginInvoke()
+    # The task worker in its own runspace. When it stops unexpectedly it is started again (at most
+    # $maxRestarts times in 10 minutes), so one bad moment does not end StreamHub.
+    $startWorker = {
+        $rsNew = [runspacefactory]::CreateRunspace()
+        $rsNew.ApartmentState = 'STA'   # clipboard access needs STA
+        $rsNew.Open()
+        $rsNew.SessionStateProxy.SetVariable('State', $State)
+        $ps = [powershell]::Create()
+        $ps.Runspace = $rsNew
+        [void]$ps.AddScript("`$ErrorActionPreference = 'Stop'; Import-Module '$(Join-Path $appRoot 'lib\Agent.psm1')'; Start-AgentWorker -State `$State")
+        @{ ps = $ps; rs = $rsNew; handle = $ps.BeginInvoke() }
+    }
+    $w = & $startWorker
+    $worker = $w.ps; $rs = $w.rs; $handle = $w.handle
+    $restarts = New-Object Collections.Generic.List[datetime]; $maxRestarts = 5
     $State.Tasks.Enqueue(@{ kind = 'connect' })
     # Instance start: undo backups and chat history of every project get the retention limits.
     try { $null = Invoke-StateRetention $State.Config } catch { Write-CCBLogError server 'state retention' $_ }
@@ -898,10 +916,21 @@ function Start-CCBridgeServer {
     try {
         $pending = $listener.GetContextAsync()
         while ($listener.IsListening) {
-            if (-not $pending.Wait(250)) {
-                if ($handle.IsCompleted) { Write-Warning ('Agent worker stopped: ' + ($worker.Streams.Error | Select-Object -Last 1)); break }
-                continue
+            # Checked every pass (the app polls all the time, so not only when it is quiet).
+            if ($handle.IsCompleted -and -not $State.Stop) {
+                $why = Get-WorkerStopReason $worker
+                Write-CCBLog info server "Task worker stopped: $why"
+                $recent = @($restarts | Where-Object { $_ -gt (Get-Date).AddMinutes(-10) })
+                if ($recent.Count -ge $maxRestarts) { Write-Warning "Agent worker stopped $($recent.Count + 1) times in 10 minutes: $why"; break }
+                try { $worker.Dispose(); $rs.Dispose() } catch { }
+                $null = Reset-AfterWorkerStop $State $why
+                $w = & $startWorker
+                $worker = $w.ps; $rs = $w.rs; $handle = $w.handle
+                $restarts.Add((Get-Date))
+                $State.Tasks.Enqueue(@{ kind = 'connect' })
+                Write-CCBLog info server 'Task worker restarted'
             }
+            if (-not $pending.Wait(250)) { continue }
             $ctx = $pending.Result
             $pending = $listener.GetContextAsync()
             $reqWatch = [Diagnostics.Stopwatch]::StartNew()

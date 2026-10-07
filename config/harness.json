@@ -58,6 +58,8 @@
     "reviewsDays": 180,
     "chartsCount": 20,
     "chartsDays": 90,
+    "screenshotsCount": 60,
+    "screenshotsDays": 30,
     "backupsCount": 100,
     "backupsDays": 30,
     "chatEvents": 1500,

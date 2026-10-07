@@ -6,6 +6,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.106] - 2026-10-07
+
+### Added
+- The task worker restarts itself: when the part of StreamHub that runs tasks stops on an unexpected error, it is started again (at most five times in ten minutes) instead of StreamHub stopping. The task that was running is marked failed (its changes can be undone), an error card says what happened with an error id, Copilot is connected again and the queue carries on.
+- The install is checked at every start: a release now lists every file with its checksum (`manifest.json`), and StreamHub compares its folder with it. Files missing or different from the release (an update that stopped halfway) are repaired by installing the same version again, also by update.cmd when the version is already the newest. If that cannot be done, a banner in the app names the files and what to do.
+- Settings > Retention: page screenshots. The page check's screenshots in `.streamhub/Screenshots/` (each with its layout file and the close-up of the changes, which count as one) are kept to the newest 60 and 30 days by default, like task reports; other images there are never touched.
+- Updates use the newest updater: once a release is downloaded, its own updater does the install when it differs from the one installed, so a fix to the updater applies with that same update instead of one later (from the update after this one).
+- An update never leaves two versions mixed: before copying, every file it replaces or removes is backed up, and a copy that fails halfway puts the previous version back whole (and removes the files it added). The message says so; the update runs again at the next start.
+
+### Fixed
+- The side panel's tab buttons (Files, Automation, History, Actions) line their icons up: each icon sits as far from its button's left edge as the icon of the widest tab, whose icon and title stay centred.
+- The console view on run cards keeps to the newest line while a command runs, like a console window, instead of staying at the top once the output is longer than the view; scrolling up to read stops the following until you scroll back down. Finished output opens at its last lines, where errors usually are.
+
 ## [v0.1.105] - 2026-10-07
 
 ### Added
@@ -1167,7 +1180,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.105...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.106...HEAD
+[v0.1.106]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.106
 [v0.1.105]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.105
 [v0.1.104]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.104
 [v0.1.103]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.103

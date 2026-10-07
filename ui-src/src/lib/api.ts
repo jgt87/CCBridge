@@ -219,6 +219,8 @@ export interface AppState {
   activity?: Activity | null;
   /** The command running now: its last output lines (shown like a console on its run card). */
   runLive?: RunLive | null;
+  /** Set when the app folder is not the release as shipped (files missing or different): what is wrong. */
+  installProblem?: string;
   /** Commands opened in a console window that still run. */
   runWindows?: RunWindowState[] | RunWindowState;
   /** Where the project is served read-only (images in Markdown), e.g. /preview/TOKEN/. */

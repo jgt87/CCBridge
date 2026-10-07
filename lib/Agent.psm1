@@ -3761,6 +3761,29 @@ function Invoke-AgentTurn {
     }
 }
 
+function Reset-AfterWorkerStop {
+    <# After the worker stopped unexpectedly (Server restarts it): the task that was running is marked
+       failed (also its MCP job), the busy state, activity and live command view are cleared, the
+       Copilot connection is made again by the new worker, and an error card says what happened.
+       Returns the queue entries marked failed. #>
+    param($State, [string]$Reason)
+    $failed = @()
+    foreach ($e in @($State.Queue | Where-Object { $_ -and $_.status -in 'running', 'awaiting' })) {
+        $e.status = 'failed'; $e.finished = (Get-Date).ToString('s')
+        $e.error = "StreamHub's task worker stopped while this task was running ($Reason). Files it changed so far can be undone; send it again to finish it."
+        if ($e.jobId -and $State.Jobs[$e.jobId]) { $j = $State.Jobs[$e.jobId]; $j.status = 'error'; $j.error = $e.error; $j.endSeq = $State.Seq }
+        $failed += $e
+    }
+    $State.Busy = $false; $State.Cancel = $false; $State.InChain = $false; $State.Progress = ''
+    if ($State.Activity) { $State.Activity.kind = ''; $State.Activity.label = '' }
+    $State.RunLive = $null
+    $State.Copilot = 'connecting'; $State.CopilotMessage = 'Reconnecting to Copilot after a restart of the task worker.'
+    $what = if ($failed.Count) { " The task that was running ($(@($failed | ForEach-Object { "$(if ($_.title) { $_.title } else { $_.kind })" }) -join ', ')) was stopped and marked failed; the queue carries on." } else { '' }
+    Add-AgentEvent $State 'error' @{ text = "StreamHub's task worker stopped unexpectedly and was restarted: $Reason.$what"; code = 'WORKER-RESTART'; hint = 'Nothing to do unless it happens again. If it does, use Copy details or Menu > Export diagnostics and send it with the error id.' }
+    try { Save-AgentQueue $State } catch { }
+    $failed
+}
+
 function Start-AgentWorker {
     <# Worker loop: processes queued tasks until $State.Stop. #>
     param([Parameter(Mandatory)]$State)
@@ -3935,4 +3958,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

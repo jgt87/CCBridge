@@ -26,6 +26,23 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Update before anything is loaded (GitHub; skipped offline, for local edits or "autoUpdate": false).
 if (-not $NoUpdate) { & (Join-Path $root 'tools\update.ps1') }
+# Is the app folder the release as shipped (manifest.json)? An update that stopped halfway leaves
+# files missing or of another version: repair it once (the same version again), else say so in the app.
+$installProblem = ''
+try {
+    Import-Module (Join-Path $root 'lib\Update.psm1') -Force
+    $integrity = Test-InstallIntegrity $root
+    $installProblem = Format-InstallProblem $integrity
+    if ($installProblem) {
+        Write-Host $installProblem -ForegroundColor Yellow
+        if (-not $NoUpdate) {
+            Write-Host 'Repairing it: installing the same version again...'
+            & (Join-Path $root 'tools\update.ps1') -Repair
+            $installProblem = Format-InstallProblem (Test-InstallIntegrity $root)
+            if (-not $installProblem) { Write-Host 'Repaired.' }
+        }
+    }
+} catch { Write-Host "The install check did not run: $($_.Exception.Message)" }
 
 # What this computer has, every start (quick and read-only; check.cmd also tests GitHub and Copilot).
 if (-not $NoCheck) {
@@ -130,6 +147,7 @@ $state = New-AgentState -Config $config -AppRoot $root
 $state.LogLevel = Get-CCBLogLevel
 $state.Version = Get-CCBridgeVersion $root
 $state.Build = Get-CCBridgeBuild $root
+$state.InstallProblem = $installProblem   # shown as a banner in the app
 # The queue survives restarts and updates (the MCP server's own engine does not save one).
 $state.QueueFile = Join-Path $env:LOCALAPPDATA 'CCBridge\queue.json'
 $null = Restore-AgentQueue $state

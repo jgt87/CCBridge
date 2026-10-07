@@ -81,6 +81,10 @@ Get-ChildItem $app -Recurse -File | Where-Object { $_.Name -like '*.local.json' 
 # The commit the release was built from, shown next to the version in the web app.
 $commit = try { (& git -C $root rev-parse --short HEAD 2>$null | Select-Object -First 1) } catch { $null }
 if ($commit) { [IO.File]::WriteAllText((Join-Path $app 'commit.txt'), "$commit") }
+# Every file with its checksum: each start checks the app folder against it (lib/Update.psm1).
+Import-Module (Join-Path $root 'lib\Update.psm1') -Force
+$listed = New-InstallManifest -AppFolder $app -Version $Version
+Write-Host "manifest.json: $listed files"
 
 $zip = Join-Path $dist "CCBridge-$Version.zip"
 if (Test-Path $zip) { [IO.File]::Delete($zip) }

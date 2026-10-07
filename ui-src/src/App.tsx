@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   AtSign,
   ClipboardList,
   FileCode2,
@@ -596,6 +597,15 @@ export default function App() {
 
           {/* Chat column */}
           <main className="flex min-w-0 flex-1 flex-col">
+            {state.installProblem && (
+              <div className="flex items-start gap-2 border-black/10 border-b bg-black/[0.04] px-4 py-2 text-xs dark:border-white/10 dark:bg-white/[0.06]" role="alert">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {state.installProblem} Close StreamHub and run <span className="font-mono">update.cmd</span> in its folder to install the files again
+                  (or run <span className="font-mono">install.ps1</span> from a fresh download). Things may not work as expected until then.
+                </span>
+              </div>
+            )}
             <div className="min-h-0 flex-1 overflow-y-auto">
               <ErrorBoundary
                 area="chat view"

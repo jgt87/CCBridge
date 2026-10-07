@@ -90,6 +90,26 @@ Describe 'Invoke-ProjectRetention' {
             Test-Path (Join-Path $ex 'my-chart.png') | Should Be $true
         } finally { Remove-Item $p -Recurse -Force }
     }
+    It 'keeps page screenshots with their layout and close-up as one, and leaves other images alone' {
+        $p = New-RetentionProject
+        $sh = Join-Path $p '.streamhub\Screenshots'; New-Item -ItemType Directory $sh -Force | Out-Null
+        try {
+            foreach ($i in 1..3) {
+                $b = "page-2026100$i-080000-index.html"
+                Add-Aged (Join-Path $sh "$b.png") (3 - $i); Add-Aged (Join-Path $sh "$b.layout.json") (3 - $i)
+                if ($i -eq 1) { Add-Aged (Join-Path $sh "$b-changes.png") 2 }
+            }
+            Add-Aged (Join-Path $sh 'page-20260101-080000-about.html.png') 200   # older than the days limit
+            Add-Aged (Join-Path $sh 'my-mockup.png') 400                         # not StreamHub's name pattern
+            $cfg = @{ retention = @{ screenshotsCount = 2; screenshotsDays = 30; historyCount = 0; historyDays = 0; evidenceCount = 0; evidenceDays = 0; reviewsCount = 0; reviewsDays = 0; chartsCount = 0; chartsDays = 0; backupsCount = 0; backupsDays = 0 } }
+            $r = Invoke-ProjectRetention $p $cfg
+            $r.screenshots | Should Be 2
+            @(Get-ChildItem $sh -Filter 'page-20261001-080000-*').Count | Should Be 0   # png, layout and close-up together
+            @(Get-ChildItem $sh -Filter 'page-20261003-080000-*').Count | Should Be 2
+            Test-Path (Join-Path $sh 'page-20260101-080000-about.html.png') | Should Be $false
+            Test-Path (Join-Path $sh 'my-mockup.png') | Should Be $true
+        } finally { Remove-Item $p -Recurse -Force }
+    }
     It 'uses the defaults when the settings have none' {
         (Get-RetentionSettings $null).historyCount | Should Be 20
         (Get-RetentionSettings @{ retention = @{ historyCount = 5 } }).historyCount | Should Be 5

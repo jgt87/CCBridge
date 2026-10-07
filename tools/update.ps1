@@ -10,15 +10,23 @@
   Set "autoUpdate": false in config\harness.local.json to turn automatic updates off.
 #>
 param(
-    [switch]$Force,    # check even when automatic updates are turned off
-    [switch]$Report    # print the outcome (used by update.cmd)
+    [switch]$Force,        # check even when automatic updates are turned off
+    [switch]$Report,       # print the outcome (used by update.cmd)
+    [switch]$Repair,       # install the installed version again (the start found files missing or different)
+    # Handing over (the updater of the installed version starts the new release's updater, so a fix
+    # to the updater applies at once): the app folder, the unpacked release and its version.
+    [string]$AppRoot = '',
+    [string]$FromFolder = '',
+    [string]$Version = ''
 )
 
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+# This updater's own folder (its modules: the new release's when handed over) and the app folder.
+$here = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$root = if ($AppRoot) { $AppRoot } else { $here }
 $repo = 'jgt87/CCBridge'
 $branch = 'main'
-Import-Module (Join-Path $root 'lib\Log.psm1')
+Import-Module (Join-Path $here 'lib\Log.psm1')
 function Say([string]$Message) { [Console]::Error.WriteLine("[StreamHub update] $Message"); Write-CCBLog info update $Message }
 
 function Invoke-Git([string[]]$GitArgs, [int]$TimeoutSec = 30) {
@@ -34,7 +42,49 @@ function Invoke-Git([string[]]$GitArgs, [int]$TimeoutSec = 30) {
     $out.Result.Trim()
 }
 
+function Install-Release([string]$From, [string]$NewVersion) {
+    <# Mirrors the unpacked release $From into the app folder. Files another program has open hold it
+       up (nothing is copied); before copying, every file it replaces or removes is backed up, and a
+       copy that fails halfway is undone from that backup, so the app is never a mix of two versions.
+       version.txt is written last. #>
+    $verFile = Join-Path $root 'version.txt'
+    $current = if (Test-Path $verFile) { ([IO.File]::ReadAllText($verFile)).Trim() } else { '' }
+    Import-Module (Join-Path $here 'lib\Update.psm1') -Force
+    # Machine files and build tools stay.
+    $xf = @('*.local.json', 'version.txt', 'capture-report.json', 'probe-report.txt'); $xd = @('.git', 'node_modules')
+    $locked = Get-LockedUpdateFiles -Source $From -Target $root -ExcludeFiles $xf -ExcludeDirs $xd
+    if (@($locked.blocking).Count) { Say (Format-LockedUpdateFiles @($locked.blocking) $NewVersion); return }
+    # Open but unchanged, or no longer in the release: robocopy leaves these (full paths in /XF).
+    $keep = @(@($locked.same) + @($locked.removed) | Where-Object { $_ })
+    $touched = @(Get-UpdateTouchedFiles -Source $From -Target $root -ExcludeFiles $xf -ExcludeDirs $xd | Where-Object { $keep -notcontains $_ })
+    $added = @(Get-UpdateNewFiles -Source $From -Target $root -ExcludeFiles $xf -ExcludeDirs $xd)
+    $xfAll = @($xf) + @($keep | ForEach-Object { Join-Path $root $_ })
+    $xdAll = @($xd)
+    if ($keep.Count) { Write-CCBLog verbose update "in use, left as is: $($keep -join ', ')" }
+    # A folder the release no longer has is purged whole, /XF or not: keep the topmost such folder.
+    foreach ($rel in @($locked.removed)) {
+        $top = $null; $d = Split-Path -Parent $rel
+        while ($d) { if (-not (Test-Path -LiteralPath (Join-Path $From $d))) { $top = $d }; $d = Split-Path -Parent $d }
+        if ($top) { $xdAll += (Join-Path $root $top) }
+    }
+    $backup = Join-Path $env:LOCALAPPDATA 'CCBridge\update-backup'
+    Save-UpdateBackup -Target $root -Files $touched -BackupDir $backup
+    $rc = @(& robocopy.exe $From $root /MIR /R:3 /W:2 /NFL /NDL /NJH /NJS /NP /XF $xfAll /XD $xdAll)
+    if ($LASTEXITCODE -ge 8) {
+        $code = $LASTEXITCODE
+        $failed = @(Get-RobocopyFailures $rc | ForEach-Object { $_.Replace($root.TrimEnd('\') + '\', '') })
+        $notBack = @(Restore-UpdateBackup -Target $root -BackupDir $backup -NewFiles $added)
+        $back = if ($notBack.Count) { "; putting the previous version back failed for $($notBack -join ', ')" } else { "; the previous version ($(if ($current) { $current } else { 'unknown' })) was put back whole" }
+        throw "robocopy failed with code $code$(if ($failed.Count) { ' on ' + ($failed -join ', ') + ' (in use?)' })$back. The update runs again at the next start."
+    }
+    [IO.File]::WriteAllText($verFile, $NewVersion)
+    try { Remove-Item -LiteralPath $backup -Recurse -Force } catch { }
+    Say "updated $(if ($current) { $current } else { '(unknown)' }) -> $NewVersion"
+}
+
 try {
+    # Handed over by the installed version's updater: install the release it unpacked, nothing else.
+    if ($FromFolder) { Install-Release $FromFolder $Version; return }
     if (-not $Force) {
         Import-Module (Join-Path $root 'lib\Config.psm1') -Force
         $cfg = Get-CCBridgeConfig harness $root
@@ -72,9 +122,18 @@ try {
     # Release install: compare with the latest GitHub Release.
     $verFile = Join-Path $root 'version.txt'
     $current = if (Test-Path $verFile) { ([IO.File]::ReadAllText($verFile)).Trim() } else { '' }
-    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -TimeoutSec 15 -Headers @{ 'User-Agent' = 'CCBridge-updater' }
+    # -Repair: the release of the installed version (an incomplete install of the latest version
+    # would otherwise count as up to date).
+    $which = if ($Repair -and $current) { "tags/$current" } else { 'latest' }
+    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/$which" -TimeoutSec 15 -Headers @{ 'User-Agent' = 'CCBridge-updater' }
     $latest = [string]$release.tag_name
-    if (-not $latest -or $latest -eq $current) { Write-CCBLog verbose update "up to date ($current)"; if ($Report) { Say "Already up to date ($current)." }; return }
+    if (-not $Repair -and $latest -and $latest -eq $current) {
+        # Up to date by version: is the folder complete too (manifest.json)? If not, install it again.
+        $problem = try { Import-Module (Join-Path $here 'lib\Update.psm1') -Force; Format-InstallProblem (Test-InstallIntegrity $root) } catch { '' }
+        if ($problem) { Say $problem; $Repair = $true }
+    }
+    if ($Repair -and $latest) { Say "repairing ${latest}: installing its files again" }
+    elseif (-not $latest -or $latest -eq $current) { Write-CCBLog verbose update "up to date ($current)"; if ($Report) { Say "Already up to date ($current)." }; return }
     $asset = @($release.assets | Where-Object { $_.name -like 'CCBridge-*.zip' }) | Select-Object -First 1
     if (-not $asset) { Say "release $latest has no StreamHub zip"; return }
 
@@ -85,29 +144,21 @@ try {
         Invoke-WebRequest $asset.browser_download_url -OutFile $zip -UseBasicParsing -TimeoutSec 300
         Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
         $src = Get-ChildItem -Directory $tmp | Select-Object -First 1
-        # Mirror the new version in; machine files and build tools stay.
-        $xf = @('*.local.json', 'version.txt', 'capture-report.json', 'probe-report.txt'); $xd = @('.git', 'node_modules')
-        # Files another program has open (a test tool's window at its pause) would fail halfway and
-        # leave two versions mixed: wait for them instead, and name them.
-        Import-Module (Join-Path $root 'lib\Update.psm1')
-        $locked = Get-LockedUpdateFiles -Source $src.FullName -Target $root -ExcludeFiles $xf -ExcludeDirs $xd
-        if (@($locked.blocking).Count) { Say (Format-LockedUpdateFiles @($locked.blocking) $latest); return }
-        # Open but unchanged, or no longer in the release: robocopy leaves these (full paths in /XF).
-        $keep = @(@($locked.same) + @($locked.removed) | Where-Object { $_ })
-        if ($keep.Count) { $xf += @($keep | ForEach-Object { Join-Path $root $_ }); Write-CCBLog verbose update "in use, left as is: $($keep -join ', ')" }
-        # A folder the release no longer has is purged whole, /XF or not: keep the topmost such folder.
-        foreach ($rel in @($locked.removed)) {
-            $top = $null; $d = Split-Path -Parent $rel
-            while ($d) { if (-not (Test-Path -LiteralPath (Join-Path $src.FullName $d))) { $top = $d }; $d = Split-Path -Parent $d }
-            if ($top) { $xd += (Join-Path $root $top) }
+        # The new release's updater does the install when it differs from this one, so a fix to the
+        # updater itself applies with this update (not one later).
+        $newUpdater = Join-Path $src.FullName 'tools\update.ps1'
+        $handOver = (Test-Path -LiteralPath $newUpdater) -and ((Get-FileHash -LiteralPath $newUpdater).Hash -ne (Get-FileHash -LiteralPath $MyInvocation.MyCommand.Path).Hash)
+        if ($handOver) {
+            Write-CCBLog info update "handing over to the updater of $latest"
+            $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $newUpdater, '-AppRoot', $root, '-FromFolder', $src.FullName, '-Version', $latest)
+            if ($Report) { $childArgs += '-Report' }
+            # Its messages go to stderr: with Stop, a redirected stderr line would end this script.
+            $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+            try { & powershell.exe @childArgs } finally { $ErrorActionPreference = $eap }
+            if ($LASTEXITCODE -ne 0) { Say "the updater of $latest stopped (exit $LASTEXITCODE); installing with this one"; Install-Release $src.FullName $latest }
+        } else {
+            Install-Release $src.FullName $latest
         }
-        $rc = @(& robocopy.exe $src.FullName $root /MIR /R:3 /W:2 /NFL /NDL /NJH /NJS /NP /XF $xf /XD $xd)
-        if ($LASTEXITCODE -ge 8) {
-            $failed = @(Get-RobocopyFailures $rc | ForEach-Object { $_.Replace($root.TrimEnd('\') + '\', '') })
-            throw "robocopy failed with code $LASTEXITCODE$(if ($failed.Count) { ' on ' + ($failed -join ', ') + ' (in use? the update runs again at the next start)' })"
-        }
-        [IO.File]::WriteAllText($verFile, $latest)
-        Say "updated $(if ($current) { $current } else { '(unknown)' }) -> $latest"
     } finally {
         # A file still open (virus scan) must not turn a good update into "skipped"; the folder is
         # removed at a later start.
