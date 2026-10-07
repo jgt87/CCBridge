@@ -12,7 +12,11 @@ function Test-LocalPageUrl([string]$Url, [int]$Port = 0) {
     <# Whether a tab shows a local page (StreamHub itself, a page check) rather than Copilot. #>
     $m = [regex]::Match("$Url", '^(?i)https?://(localhost|127\.0\.0\.1|\[::1\])(:(\d+))?(/|$)')
     if (-not $m.Success) { return $false }
-    if ($Port -and $m.Groups[3].Success -and [int]$m.Groups[3].Value -ne $Port) { return $false }
+    if ($Port) {
+        # No port in the address = the scheme's default (80 / 443): another local app, not StreamHub's port.
+        $actual = if ($m.Groups[3].Success) { [int]$m.Groups[3].Value } elseif ("$Url" -match '^(?i)https') { 443 } else { 80 }
+        if ($actual -ne $Port) { return $false }
+    }
     $true
 }
 

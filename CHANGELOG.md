@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.104] - 2026-10-07
+
+### Fixed
+- The StreamHub tab did not open next to Copilot when another local web app was open in StreamHub's Edge on an address without a port number (`http://localhost/`): StreamHub took that tab for its own and brought it to the front instead. Only a tab on StreamHub's own port counts now.
+
 ## [v0.1.103] - 2026-10-07
 
 ### Fixed
@@ -1153,7 +1158,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.103...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.104...HEAD
+[v0.1.104]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.104
 [v0.1.103]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.103
 [v0.1.102]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.102
 [v0.1.101]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.101

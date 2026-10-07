@@ -10,6 +10,9 @@ Describe 'Test-LocalPageUrl' {
         Test-LocalPageUrl 'http://localhost:8765/' 8765 | Should Be $true
         Test-LocalPageUrl 'http://127.0.0.1:8765/preview/abc/index.html' 8765 | Should Be $true
         Test-LocalPageUrl 'http://localhost:3000/' 8765 | Should Be $false
+        Test-LocalPageUrl 'http://localhost/' 8765 | Should Be $false
+        Test-LocalPageUrl 'https://127.0.0.1/app' 8765 | Should Be $false
+        Test-LocalPageUrl 'http://localhost/' 80 | Should Be $true
         Test-LocalPageUrl 'https://m365.cloud.microsoft/chat' 8765 | Should Be $false
     }
 }
