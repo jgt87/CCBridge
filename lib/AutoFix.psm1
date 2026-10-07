@@ -20,6 +20,17 @@ function Repair-MechanicalIssues {
     param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text)
     $fixes = New-Object System.Collections.Generic.List[string]
     $t = $Text
+    # A whole tag written escaped inside JavaScript (.js, or a page's <script>): the tag itself.
+    $esc = @(Find-EscapedScriptTags $Path $t)
+    if ($esc.Count) {
+        $sb = New-Object Text.StringBuilder $t
+        foreach ($e in @($esc | Sort-Object { $_.index } -Descending)) {
+            $tag = $e.text -replace '^&lt;', '<' -replace '&gt;$', '>' -replace '&quot;', '"' -replace '&#39;', "'" -replace '&amp;', '&'
+            [void]$sb.Remove($e.index, $e.length); [void]$sb.Insert($e.index, $tag)
+        }
+        $t = $sb.ToString()
+        $fixes.Add("$($esc.Count) HTML tag(s) that were written escaped in a script written as tags")
+    }
     $mask = Get-CodeMask $Path $t
     if ($null -ne $mask -and $mask.Length -eq $t.Length) {
         # Typographic quotes in code (not in strings or comments): straight quotes.

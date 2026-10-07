@@ -50,7 +50,7 @@ if ($Ping) {
     Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
     Import-Module (Join-Path $root 'lib\Config.psm1')
     Import-Module (Join-Path $root 'lib\Log.psm1')
-    Initialize-CCBLog -Level $LogLevel -Config (Get-CCBridgeConfig harness $root)
+    Initialize-CCBLog -Level $LogLevel -Config (Get-CCBridgeConfig harness $root) -Build (Format-CCBBuild (Get-CCBridgeBuild $root)) -Role 'ping'
     $bridge = Connect-Copilot
     try {
         if ($NewChat) { New-CopilotChat $bridge }
@@ -125,7 +125,7 @@ try {
     if ($_.Exception.Response) { throw "Port $($config.port) is used by another program. Start StreamHub on another port: ccbridge.ps1 -Port 8766" }
 }
 Import-Module (Join-Path $root 'lib\Log.psm1')
-Initialize-CCBLog -Level $LogLevel -Config $config
+Initialize-CCBLog -Level $LogLevel -Config $config -Build (Format-CCBBuild (Get-CCBridgeBuild $root)) -Role 'web app'
 $state = New-AgentState -Config $config -AppRoot $root
 $state.LogLevel = Get-CCBLogLevel
 $state.Version = Get-CCBridgeVersion $root

@@ -6,6 +6,21 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.102] - 2026-10-07
+
+### Added
+- Checks when a task ends without "done": when Copilot stops before reporting a task that changed files as done (the round limit, a reply without actions, Copilot stopping), StreamHub runs the done step's checks anyway: problems the task added to its files, the page check and the script check of changed pages, and new files that nothing loads. A card says Copilot did not finish, lists what was found and has Continue, which sends the findings back; the task report records it.
+- Page errors hold up "done": JavaScript errors the page check still finds after Copilot's fix are sent back within the same number of tries as other errors (enforcement). If they are still there when the tries are used up, the chat shows them as an error and the task report says Copilot said done anyway.
+- New files that nothing loads: a script or stylesheet written in a task that no page, script or stylesheet loads (by the import index, or named anywhere in the project) is sent back once at "done": add it where it is needed, or delete it. Tests, configs, tools, build output, data copies and the UI kit are left out.
+- The UI kit's tokens used without loading them: a page that uses `var(--kit-...)` (itself or through a stylesheet it links) but loads no `tokens.css` is reported with the exact `<link>` to add; a project that imports `tokens.css` from its code counts as loading it. And `var(--name)` without a fallback where nothing in the project defines `--name` is reported as a likely mistake, with a close name when there is one (common library prefixes such as `--tw-` and `--bs-`, and pages that load stylesheets from the web, are left out).
+- Edits to the UI kit's own files (`styles/kit/` other than `tokens.css`) get a note to Copilot to restyle through the tokens, its own stylesheet or the component's options instead, and are listed in the task report.
+- HTML tags written escaped in scripts (`'&lt;span&gt;Join&lt;/span&gt;'` in a `.js` file or a page's `<script>`): the page shows them as text instead of making them. They are reported, and the fix-up step writes them as tags; escape functions (`'&lt;'` on its own) and template blocks are left alone.
+- A helper script in `Work/` or `Scripts/` that writes a whole copy of a page gets a warning: running it again later undoes every change made to the page since.
+- Disputing a check needs a one-line reason, and size and complexity findings (a measurement) cannot be disputed: split the code, or say why in the done summary.
+- The task report says "the page check passed" instead of only "Verify: not configured" when there is no verify command.
+- Fix case logs: every problem that needed more than one try, fixed or not, gets its own file in `.streamhub/FixCases/`: the problem, the request and the change that brought it (a diff), every try with Copilot's diagnosis and what was still there after it, the outcome and the StreamHub version. This covers fix tasks (tries 1 to 3) and file-check errors still there after Copilot's next change within a task. The chat links each case, the main log notes it, and Export diagnostics collects them (they contain code lines), so the checks and rules can be improved to catch or prevent such problems.
+- The log says which build wrote it: every process (web app, MCP server, a ping) starts each log file it writes to with a line naming StreamHub's version and commit, its role and PowerShell's version (`StreamHub v0.1.102 (commit abc1234) (web app), PowerShell 5.1...: lines with process 1234 come from this build`). That holds after midnight (a new day's file) and when several processes write to the same file, so a log shows which version a problem came from.
+
 ## [v0.1.101] - 2026-10-07
 
 ### Changed
@@ -1133,7 +1148,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.101...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.102...HEAD
+[v0.1.102]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.102
 [v0.1.101]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.101
 [v0.1.100]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.100
 [v0.1.99]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.99

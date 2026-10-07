@@ -240,6 +240,38 @@ function Get-ImportUsers {
     @($out | Select-Object -First $Max)
 }
 
+$script:NotLoadedSkip = '(?i)(^|/)(node_modules|dist|build|out|coverage|styles/kit|data|Scripts|Work|tests?|__tests__|e2e|\.streamhub|Runbooks|Source|Logs|public|static|assets)/|\.(test|spec|stories|config|d)\.[cm]?[jt]sx?$|(^|/)(vite|webpack|rollup|eslint|tailwind|postcss|babel|jest|vitest|playwright|prettier|svelte|next|nuxt|astro)\.config\.|(^|/)(server|sw|service-worker|worker|setupTests)\.[cm]?[jt]s$'
+
+function Find-UnloadedFiles {
+    <# Script and style files in $Paths (new in this task) that no page, script or stylesheet loads:
+       nothing in the import index uses them and no other project file names them. Only in projects
+       with a web page; tests, configs, tools, build output, data copies and the UI kit are left out.
+       Returns the paths. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths)
+    $cands = @($Paths | ForEach-Object { "$_".Replace('\', '/') } | Where-Object { $_ -match '(?i)\.(m?js|cjs|jsx|tsx?|css|scss|less)$' -and $_ -notmatch $script:NotLoadedSkip } | Select-Object -Unique)
+    if (-not $cands.Count) { return }
+    $root = $ProjectRoot.TrimEnd('\')
+    $texts = @{}
+    foreach ($f in @(Get-ChildItem -LiteralPath $root -Recurse -File -Include *.html, *.htm, *.js, *.mjs, *.cjs, *.jsx, *.ts, *.tsx, *.css, *.scss, *.less, *.vue, *.svelte, *.json -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '\\(node_modules|dist|build|\.git|\.streamhub)\\' -and $_.Length -lt 2MB } | Select-Object -First 3000)) {
+        $texts[$f.FullName.Substring($root.Length + 1).Replace('\', '/')] = try { [IO.File]::ReadAllText($f.FullName) } catch { '' }
+    }
+    if (-not @($texts.Keys | Where-Object { $_ -match '(?i)\.html?$' }).Count) { return }   # no page: nothing to load it
+    $ix = Read-ImportIndex $ProjectRoot
+    foreach ($p in $cands) {
+        if (-not $texts.ContainsKey($p)) { continue }   # gone again
+        if (@(Get-ImportUsers $ProjectRoot $p $ix 1).Count) { continue }
+        $leaf = [IO.Path]::GetFileName($p); $stem = [IO.Path]::GetFileNameWithoutExtension($p)
+        $named = $false
+        foreach ($k in $texts.Keys) {
+            if ($k -eq $p) { continue }
+            $t = $texts[$k]
+            if ($t.Contains($leaf) -or ($p -match '(?i)\.(jsx|tsx?)$' -and $t -match ('[/''"]' + [regex]::Escape($stem) + '[''"]'))) { $named = $true; break }
+        }
+        if (-not $named) { $p }
+    }
+}
+
 function Format-ImportUsers([string]$ProjectRoot, [string[]]$Paths) {
     <# A short "Used by" note per read file, so Copilot sees what depends on it (with lines). #>
     try { $ix = Read-ImportIndex $ProjectRoot } catch { return '' }
@@ -278,4 +310,4 @@ function Update-ImportsAfterRound {
     }
 }
 
-Export-ModuleMember -Function Get-FileLinks, Read-ImportIndex, Update-ImportIndex, Get-ImportUsers, Format-ImportUsers, Update-ImportsAfterRound
+Export-ModuleMember -Function Find-UnloadedFiles, Get-FileLinks, Read-ImportIndex, Update-ImportIndex, Get-ImportUsers, Format-ImportUsers, Update-ImportsAfterRound

@@ -947,10 +947,71 @@ function Test-FileContent {
         '(?i)\.prisma$' { & $add (Test-Prisma $t); break }
         '(?i)\.(csv|tsv)$' { & $add (Test-Csv $t $Path); break }
     }
+    # A whole tag written escaped inside JavaScript (a .js file or a page's <script>): the page shows it as text.
+    $esc = @(Find-EscapedScriptTags $Path $t)
+    if ($esc.Count) { & $add "line $(LineAt $t $esc[0].index): $($esc.Count) HTML tag(s) written escaped in a script ($($esc[0].text.Substring(0, [Math]::Min(40, $esc[0].text.Length)))): in JavaScript that stays text, so the page shows the tag instead of making it; write < and >" }
     & $add (Test-Duplicates $t $Path)
     & $add (Find-GeneratedCodeIssues $Path $t)
     & $add (Find-LanguagePitfalls $Path $t ($Text.Contains("`r`n") -and [regex]::IsMatch($Text, '(?<!\r)\n')))
     $issues.ToArray()
+}
+
+$script:LibVarPrefix = '^(tw|bs|chakra|mantine|radix|ion|mdc|md|fa|swiper|plyr|toastify|rdp|rt|ag|mui|joy|spectrum|sl|fui|p|pf|amplify)-'
+$script:CssDefsCache = @{ root = ''; at = [datetime]::MinValue; names = $null }
+
+function Get-ProjectCssVarNames([string]$ProjectRoot) {
+    <# Every custom property the project defines (--name: in stylesheets and pages, setProperty and
+       style objects in code); cached for 15 seconds. #>
+    $c = $script:CssDefsCache
+    if ($c.root -eq $ProjectRoot -and $c.names -and ((Get-Date) - $c.at).TotalSeconds -lt 15) { return $c.names }
+    $names = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($f in @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include *.css, *.scss, *.less, *.html, *.htm, *.js, *.mjs, *.jsx, *.ts, *.tsx, *.vue, *.svelte -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '\\(node_modules|dist|build|\.git|\.streamhub)\\' -and $_.Length -lt 2MB } | Select-Object -First 3000)) {
+        $t = try { [IO.File]::ReadAllText($f.FullName) } catch { '' }
+        if ($t -notmatch '--') { continue }
+        foreach ($m in [regex]::Matches($t, '(?<![\w-])--([A-Za-z0-9_-]+)\s*:|setProperty\(\s*[''"`]--([A-Za-z0-9_-]+)|[''"`]--([A-Za-z0-9_-]+)[''"`]\s*[:\]]')) {
+            foreach ($g in 1..3) { if ($m.Groups[$g].Success) { [void]$names.Add($m.Groups[$g].Value) } }
+        }
+    }
+    $script:CssDefsCache = @{ root = $ProjectRoot; at = (Get-Date); names = $names }
+    , $names
+}
+
+function Find-UndefinedCssVars([string]$Text, [string]$Path, [string]$ProjectRoot) {
+    <# var(--name) without a fallback where nothing in the project defines --name: it has no value.
+       Names of common libraries (--tw-, --bs-, ...) and pages that load stylesheets from the web are
+       left out (those define their own). "line N: ..." texts. #>
+    if (-not $ProjectRoot -or $Path -notmatch '(?i)\.(css|scss|less|html?)$') { return }
+    if ($Path -match '(?i)\.html?$' -and $Text -match '(?i)<link\b[^>]*href\s*=\s*["''](https?:)?//') { return }
+    $uses = [regex]::Matches($Text, 'var\(\s*--([A-Za-z0-9_-]+)\s*\)')
+    if (-not $uses.Count) { return }
+    $defs = Get-ProjectCssVarNames $ProjectRoot
+    $local = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($m in [regex]::Matches($Text, '(?<![\w-])--([A-Za-z0-9_-]+)\s*:')) { [void]$local.Add($m.Groups[1].Value) }
+    $said = @{}
+    foreach ($u in $uses) {
+        $n = $u.Groups[1].Value
+        if ($said.ContainsKey($n) -or $defs.Contains($n) -or $local.Contains($n) -or $n -match $script:LibVarPrefix) { continue }
+        $said[$n] = $true
+        $like = @($defs | Where-Object { $_ -ne $n -and ($_.Replace('-', '') -eq $n.Replace('-', '') -or ($n.Length -ge 6 -and $_.StartsWith($n.Substring(0, [Math]::Min($n.Length, $n.Length - 2))))) } | Select-Object -First 2)
+        "line $(LineAt $Text $u.Index): var(--$n) is not defined anywhere in the project (no --${n}: in a stylesheet), so it has no value$(if ($like.Count) { "; did you mean --$($like -join ' or --')?" } else { ': define it, or fix the name' })"
+    }
+}
+
+$script:EscapedTag = '&lt;(/?[A-Za-z][\w-]*(?:\s(?:[^&<>\n]|&quot;|&#39;|&amp;)*?)?/?)&gt;'
+
+function Find-EscapedScriptTags([string]$Path, [string]$Text) {
+    <# A whole HTML tag written escaped (&lt;span class=&quot;x&quot;&gt;) in JavaScript: in a script
+       it stays text, so the page shows the tag instead of making it (seen when markup is damaged on
+       the way). In .js files and in the <script> blocks of pages. @(@{ index; length; text }). #>
+    $spans = @()
+    if ($Path -match '(?i)\.(m?js|cjs)$') { $spans = @(@{ start = 0; text = $Text }) }
+    elseif ($Path -match '(?i)\.html?$') {
+        $spans = @(foreach ($m in [regex]::Matches($Text, '(?is)<script\b(?![^>]*\btype\s*=\s*["'']?(text/(template|html|x-template)|application/json))[^>]*>(.*?)</script>')) { @{ start = $m.Groups[3].Index; text = $m.Groups[3].Value } })
+    } else { return }
+    foreach ($s in $spans) {
+        foreach ($m in [regex]::Matches($s.text, $script:EscapedTag)) { @{ index = $s.start + $m.Index; length = $m.Length; text = $m.Value } }
+    }
 }
 
 function Get-BracketMask([string]$Path, [string]$Text) {
@@ -1004,7 +1065,8 @@ function Get-NewFileIssues {
         param($text)
         @(Test-FileContent $Path $text $Crlf) + @(Test-LocalReferences $text.Replace("`r`n", "`n") $Path $ProjectRoot) +
             @(if ($Path -match '(?i)\.ps[md]?1$') { Test-PsCommands $text $ProjectRoot }) +
-            @(if ($Path -match '(?i)\.prisma$') { Test-PrismaEnv $text.Replace("`r`n", "`n") $Path $ProjectRoot }) | Where-Object { $_ }
+            @(if ($Path -match '(?i)\.prisma$') { Test-PrismaEnv $text.Replace("`r`n", "`n") $Path $ProjectRoot }) +
+            @(Find-UndefinedCssVars $text.Replace("`r`n", "`n") $Path $ProjectRoot) | Where-Object { $_ }
     }
     # The fixed rules; when they find nothing, the language's own syntax check (node, python, when
     # installed) for what they cannot see (one problem is not reported twice).
@@ -1024,4 +1086,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences

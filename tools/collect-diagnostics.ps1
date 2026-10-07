@@ -71,6 +71,12 @@ if ($od -and (Test-Path -LiteralPath (Join-Path $od 'CCBridge'))) {
             $dir = Join-Path $stage 'check-disputes'; $null = New-Item -ItemType Directory -Force -Path $dir
             Copy-Item -LiteralPath $f -Destination (Join-Path $dir "$($proj.Name).json")
         }
+        # Fix cases: problems that needed more than one try (FixCases.psm1), to improve the checks and rules.
+        $fc = Join-Path $proj.FullName '.streamhub\FixCases'
+        if (Test-Path -LiteralPath $fc) {
+            $dir = Join-Path $stage "fix-cases\$($proj.Name)"; $null = New-Item -ItemType Directory -Force -Path $dir
+            Get-ChildItem -LiteralPath $fc -Filter 'case-*.md' -File | Where-Object { $_.LastWriteTime -ge (Get-Date).Date.AddDays(1 - $Days) } | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $dir }
+        }
     }
 }
 
@@ -86,6 +92,7 @@ environment.json  versions, PowerShell, Edge, settings (no personal data)
 config-*.json     settings files, including your *.local.json overrides
 page-check.json   whether CCBridge's selectors still find Copilot's controls (only if Edge with Copilot was open)
 check-disputes\   file-check findings Copilot disputed or you ignored, per project (file, finding, code line)
+fix-cases\        problems that needed more than one try, per project: the change that brought them, each try and Copilot's diagnosis (contains code lines)
 logs\             diagnostic logs; user name, profile/OneDrive paths and email addresses are masked
 $(if ($IncludeReplies) { 'replies\          RAW COPILOT REPLIES - full answer text, may contain Microsoft 365 data' })
 Log level when collected: $($envInfo.logLevel). For detailed logs, turn on verbose logging, reproduce the problem, then collect again.

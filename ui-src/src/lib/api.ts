@@ -92,6 +92,8 @@ export interface AgentEvent {
   seq: number;
   /** runbook-choice: the message the person sent, to send on to Copilot. */
   request?: string;
+  /** task-unfinished: what the final checks found, and the message Continue sends to Copilot. */
+  continueText?: string;
   /** packages-needed: the folder of the package.json ('' = the project root) and whether npm is installed. */
   folder?: string;
   npm?: boolean;
@@ -127,6 +129,8 @@ export interface AgentEvent {
     | "runbook-choice"
     /** A package.json lists packages node_modules does not have: run npm install (the person chooses). */
     | "packages-needed"
+    /** Copilot ended a task that changed files without reporting it done; StreamHub checked the files anyway. */
+    | "task-unfinished"
     /** Settings > Privacy > Clear chat history: the chat shows nothing from before it. */
     | "history-cleared";
   time: string;

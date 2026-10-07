@@ -100,6 +100,52 @@ function Install-UiKit {
     @($added) + @($sync.added)
 }
 
+function Get-RelativeHref([string]$FromDir, [string]$To) {
+    # How a page in $FromDir refers to $To (both project-relative, / separated).
+    # Not $to: PowerShell names ignore case, so that would be the [string] parameter $To.
+    $fromParts = @("$FromDir".Split('/') | Where-Object { $_ }); $toParts = @($To.Split('/'))
+    $i = 0
+    while ($i -lt $fromParts.Count -and $i -lt ($toParts.Count - 1) -and $fromParts[$i] -eq $toParts[$i]) { $i++ }
+    (@(for ($k = $i; $k -lt $fromParts.Count; $k++) { '..' }) + @($toParts[$i..($toParts.Count - 1)])) -join '/'
+}
+
+function Find-UnlinkedKitTokens {
+    <# Pages that use the UI kit's tokens (var(--kit-...) in the page or in a stylesheet it links)
+       without loading styles/kit/tokens.css: the colours and sizes then have no value. For the pages
+       among $Paths and the pages that link a stylesheet among $Paths. A project that imports
+       tokens.css from its code (a bundler) counts as loading it. "PAGE: ..." texts. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths)
+    $root = $ProjectRoot.TrimEnd('\')
+    $rels = @($Paths | ForEach-Object { "$_".Replace('\', '/') })
+    if (-not @($rels | Where-Object { $_ -match '(?i)\.(html?|css|scss|less)$' }).Count) { return }
+    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Include *.html, *.htm, *.css, *.scss, *.less, *.js, *.mjs, *.jsx, *.ts, *.tsx -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\(node_modules|dist|build|\.git|\.streamhub)\\' -and $_.Length -lt 2MB } | Select-Object -First 3000)
+    $text = @{}
+    foreach ($f in $files) { $text[$f.FullName.Substring($root.Length + 1).Replace('\', '/')] = try { [IO.File]::ReadAllText($f.FullName) } catch { '' } }
+    # Imported from code or another stylesheet (a bundler loads it): counts for every page.
+    foreach ($k in $text.Keys) { if ($k -match '(?i)\.(m?js|jsx|tsx?|css|scss|less)$' -and $text[$k] -match '(?i)(import\s*\(?\s*|@import\s+(url\()?)\s*[''"][^''"]*tokens\.css') { return } }
+    $tokens = "$(Get-UiKitFolder)/tokens.css"
+    $pages = @($text.Keys | Where-Object { $_ -match '(?i)\.html?$' -and $_ -notmatch '(?i)^styles/kit/' })
+    foreach ($pg in $pages) {
+        $html = $text[$pg]
+        $dir = if ($pg.Contains('/')) { $pg.Substring(0, $pg.LastIndexOf('/')) } else { '' }
+        $links = @([regex]::Matches($html, '(?i)<link\b[^>]*\bhref\s*=\s*["'']([^"''#?]+)') | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notmatch '^(https?:)?//' })
+        $linked = @($links | ForEach-Object {
+            $parts = New-Object System.Collections.Generic.List[string]
+            foreach ($s in (($(if ($_.StartsWith('/')) { '' } else { $dir }) + '/' + $_.TrimStart('/')) -split '/')) { if ($s -eq '..') { if ($parts.Count) { $parts.RemoveAt($parts.Count - 1) } } elseif ($s -and $s -ne '.') { $parts.Add($s) } }
+            $parts -join '/'
+        })
+        $relevant = ($rels -contains $pg) -or @($linked | Where-Object { $rels -contains $_ }).Count
+        if (-not $relevant) { continue }
+        if (@($linked | Where-Object { $_ -match '(?i)(^|/)tokens\.css$' }).Count) { continue }
+        $uses = $html -match 'var\(\s*--kit-'
+        if (-not $uses) { foreach ($l in $linked) { if ($text.ContainsKey($l) -and $text[$l] -match 'var\(\s*--kit-') { $uses = $true; break } } }
+        if (-not $uses) { continue }
+        $href = Get-RelativeHref $dir $tokens
+        "${pg}: uses the UI kit's colours and sizes (var(--kit-...)) but does not load $tokens, so they have no value: add <link rel=`"stylesheet`" href=`"$href`"> (and kit.css after it) before the page's own stylesheets"
+    }
+}
+
 function Get-KitUsage([string]$ProjectRoot) {
     <# What the project's pages and code use of the kit: classes (kit-NAME; a name that ends in - or _
        is a prefix, as in "kit-btn--" + variant), and kit files they refer to (styles/kit/FILE). Kit
@@ -424,4 +470,4 @@ function Test-UiKitInProject([string]$ProjectRoot) {
     Test-Path -LiteralPath (Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css'))
 }
 
-Export-ModuleMember -Function Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder
+Export-ModuleMember -Function Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder

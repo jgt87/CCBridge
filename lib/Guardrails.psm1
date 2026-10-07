@@ -348,11 +348,23 @@ function Find-UiSlop {
     @($found.Values)
 }
 
+function Find-PageCopyScript {
+    <# A helper script (Work/, Scripts/) that writes a whole page from a copy inside itself: running
+       it again later undoes every change made to the page since (seen in the session review). #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)^(Work|Scripts)/.+\.(ps1|py|m?js|cjs|cmd|bat|sh)$') { return }
+    $tagLines = @(("$New").Split("`n") | Where-Object { $_ -match '^\s*</?(html|head|body|div|section|header|main|nav|table|script|style|span|button|ul|li|h[1-6]|p|footer|form|label|input)\b' }).Count
+    if ($tagLines -lt 25) { return }
+    $target = [regex]::Match("$New", '(?i)(Set-Content|Out-File|WriteAllText|writeFileSync|writeFile|open\()[^\n]{0,160}?([\w./\\-]+\.html?)')
+    if (-not $target.Success) { return }
+    "this script writes a whole copy of $($target.Groups[2].Value) ($tagLines lines of markup inside it): running it again later undoes every change made to that page since. Change the page with edit blocks instead, and delete this script once it has done its job"
+}
+
 function Find-QualityIssues {
     <# The second batch, for the round's file check: what a change adds, as "line N: ..." or a
        whole-file note. #>
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit)
-    @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-UiSlop $Rel $Old $New -UseKit:$UseKit) | Where-Object { $_ }
+    @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UiSlop $Rel $Old $New -UseKit:$UseKit) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {
@@ -379,4 +391,4 @@ function Get-DoneReminders {
     "Before finishing, one check:`n- " + ($notes -join "`n- ") + "`nThen send done again."
 }
 
-Export-ModuleMember -Function Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders
+Export-ModuleMember -Function Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders

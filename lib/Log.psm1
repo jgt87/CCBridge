@@ -2,6 +2,8 @@
 # Levels: off < info (default) < verbose < trace. Only 'trace' records prompt/reply text; every
 # line is masked for user name, profile/OneDrive paths, email addresses and GUIDs, so logs can be shared.
 # Several processes (web app, MCP server) and runspaces append to the same file under a mutex.
+# Each process starts every log file it writes to with a line naming its version and commit, so
+# every file shows which build wrote its lines (also after midnight, and with several processes).
 
 $script:Levels = @{ off = 0; info = 1; verbose = 2; trace = 3 }
 $script:Level = 1
@@ -18,8 +20,13 @@ function Set-CCBLogLevel([string]$Level) {
 }
 
 function Initialize-CCBLog {
-    <# Level precedence: explicit -Level, then $env:CCBRIDGE_LOG, then the config value, then info. #>
-    param([string]$Level, $Config)
+    <# Level precedence: explicit -Level, then $env:CCBRIDGE_LOG, then the config value, then info.
+       -Build (version and commit) and -Role (web app, MCP server, ping) go into the line that
+       starts each log file per process; kept in the process environment, so the worker runspaces
+       write the same. #>
+    param([string]$Level, $Config, [string]$Build, [string]$Role)
+    if ($Build) { $env:CCBRIDGE_LOG_BUILD = $Build }
+    if ($Role) { $env:CCBRIDGE_LOG_ROLE = $Role }
     $chosen = if ($Level) { $Level } elseif ($env:CCBRIDGE_LOG) { $env:CCBRIDGE_LOG } elseif ($Config -and $Config.PSObject.Properties['logLevel']) { [string]$Config.logLevel } else { 'info' }
     Set-CCBLogLevel $chosen
     if ($script:Level -gt 0 -and -not (Test-Path $script:Dir)) { $null = New-Item -ItemType Directory -Force -Path $script:Dir }
@@ -45,6 +52,27 @@ function Protect-LogText([string]$Text) {
     [regex]::Replace($Text, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', '<id>')
 }
 
+function Get-LogHeader {
+    <# The line that starts a log file for this process: StreamHub's version and commit, what runs,
+       and PowerShell's version. #>
+    $build = $env:CCBRIDGE_LOG_BUILD
+    if (-not $build) {
+        # Started without -Build (a tool, a test run): the release files of the app folder, else dev.
+        $app = Split-Path -Parent $PSScriptRoot
+        $v = Join-Path $app 'version.txt'; $c = Join-Path $app 'commit.txt'
+        $build = if (Test-Path -LiteralPath $v) { ([IO.File]::ReadAllText($v)).Trim() } else { 'dev' }
+        if (Test-Path -LiteralPath $c) { $build += " (commit $(([IO.File]::ReadAllText($c)).Trim()))" }
+    }
+    $role = if ($env:CCBRIDGE_LOG_ROLE) { " ($($env:CCBRIDGE_LOG_ROLE))" } else { '' }
+    '{0} [{1,5}] {2,-7} {3,-8} {4}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff'), $PID, 'INFO', 'log', "StreamHub $build$role, PowerShell $($PSVersionTable.PSVersion): lines with process $PID come from this build"
+}
+
+function Format-CCBBuild($Build) {
+    # "v0.1.101 (commit 9528564)" from Get-CCBridgeBuild.
+    if (-not $Build) { return '' }
+    "$($Build.version)$(if ($Build.commit) { " (commit $($Build.commit))" })"
+}
+
 function Write-CCBLog {
     <# Write-CCBLog verbose bridge 'Sent prompt' @{ chars = 123 } #>
     param(
@@ -59,6 +87,11 @@ function Write-CCBLog {
         if ($null -ne $Data) { $line += ' ' + (ConvertTo-Json -InputObject $Data -Depth 6 -Compress) }
         $line = Protect-LogText $line
         $file = Join-Path $script:Dir ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
+        # The first line this process writes to a file says which build it is.
+        if ($env:CCBRIDGE_LOG_HEADER -ne $file) {
+            $env:CCBRIDGE_LOG_HEADER = $file
+            $line = (Get-LogHeader) + "`r`n" + $line
+        }
         $mutex = New-Object Threading.Mutex($false, 'Local\CCBridgeLog')
         $owned = $false
         try {
@@ -122,4 +155,4 @@ function Get-CCBErrorDetail($ErrorRecord) {
     Protect-LogText $msg
 }
 
-Export-ModuleMember -Function New-CCBErrorId, Get-CCBErrorHelp, Get-CCBErrorDetail, Initialize-CCBLog, Set-CCBLogLevel, Get-CCBLogLevel, Get-CCBLogDir, Test-CCBLog, Write-CCBLog, Write-CCBLogError, Protect-LogText
+Export-ModuleMember -Function Get-LogHeader, Format-CCBBuild, New-CCBErrorId, Get-CCBErrorHelp, Get-CCBErrorDetail, Initialize-CCBLog, Set-CCBLogLevel, Get-CCBLogLevel, Get-CCBLogDir, Test-CCBLog, Write-CCBLog, Write-CCBLogError, Protect-LogText

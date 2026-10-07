@@ -22,6 +22,7 @@ export type TranscriptItem =
   | { kind: "agentPlan"; seq: number; agent: string }
   | { kind: "runbookChoice"; seq: number; name: string; title: string; request: string; restored: boolean }
   | { kind: "packages"; seq: number; folder: string; text: string; npm: boolean; restored: boolean }
+  | { kind: "unfinished"; seq: number; text: string; findings: string[]; continueText: string; restored: boolean }
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string; path?: string }
   | { kind: "undo"; seq: number; text: string; changes: UndoChange[] }
@@ -110,6 +111,15 @@ function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
 const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildContext) => void>> = {
   user: (e, ctx) => ctx.items.push({ kind: "user", seq: e.seq, text: e.text ?? "", ...(e.agent ? { agent: e.agent } : {}) }),
   "agent-plan": (e, ctx) => ctx.items.push({ kind: "agentPlan", seq: e.seq, agent: e.agent || "Researcher" }),
+  "task-unfinished": (e, ctx) =>
+    ctx.items.push({
+      kind: "unfinished",
+      seq: e.seq,
+      text: e.text ?? "",
+      findings: Array.isArray((e as { findings?: unknown }).findings) ? ((e as { findings?: string[] }).findings ?? []) : [],
+      continueText: e.continueText ?? "",
+      restored: Boolean(e.restored),
+    }),
   "packages-needed": (e, ctx) =>
     ctx.items.push({ kind: "packages", seq: e.seq, folder: e.folder ?? "", text: e.text ?? "", npm: e.npm !== false, restored: Boolean(e.restored) }),
   "runbook-choice": (e, ctx) =>
@@ -274,6 +284,36 @@ function RunbookChoiceCard({ item, onSend }: { item: Extract<TranscriptItem, { k
   );
 }
 
+/** A task that changed files ended without "done": what StreamHub's checks found, and Continue. */
+function UnfinishedCard({ item, onSend }: { item: Extract<TranscriptItem, { kind: "unfinished" }>; onSend?: (text: string, opts: ChatOptions) => void }) {
+  const [sent, setSent] = useState(false);
+  const btn = "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs hover:bg-black/10 disabled:opacity-40 dark:hover:bg-white/15";
+  return (
+    <div className="space-y-2 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
+      <div className="flex items-start gap-2">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{item.text}</span>
+      </div>
+      {item.findings.length > 0 && (
+        <ul className="ml-6 list-disc space-y-0.5 text-muted-foreground text-xs">
+          {item.findings.map((f, i) => (
+            <li className="break-words" key={i}>
+              {f}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!item.restored && (
+        <div className="flex gap-1.5">
+          <button className={cn(btn, "bg-black/5 dark:bg-white/10")} disabled={sent || !onSend || !item.continueText} onClick={() => { setSent(true); onSend?.(item.continueText, {}); }} type="button">
+            {sent ? "Sent to Copilot" : "Continue"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** A package.json lists packages that are not installed: npm install on a click (never by itself). */
 function PackagesCard({ item }: { item: Extract<TranscriptItem, { kind: "packages" }> }) {
   const [state, setState] = useState<"" | "started" | "later" | "failed">("");
@@ -407,6 +447,8 @@ function TranscriptRow({
       return <RunbookChoiceCard item={item} onSend={onSend} />;
     case "packages":
       return <PackagesCard item={item} />;
+    case "unfinished":
+      return <UnfinishedCard item={item} onSend={onSend} />;
     case "action":
       return <ActionCard item={item.item} />;
     case "note":

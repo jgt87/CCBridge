@@ -29,7 +29,7 @@ Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 $config = Get-CCBridgeConfig harness $root
 # Log level: $env:CCBRIDGE_LOG (set it in the MCP client's server config) or logLevel in harness.local.json.
 Import-Module (Join-Path $root 'lib\Log.psm1')
-Initialize-CCBLog -Config $config
+Initialize-CCBLog -Config $config -Build (Format-CCBBuild (Get-CCBridgeBuild $root)) -Role 'MCP server'
 $State = New-AgentState -Config $config -AppRoot $root
 $State.LogLevel = Get-CCBLogLevel
 $State.Headless = $true

@@ -7,6 +7,26 @@ Describe 'CCBridge log' {
     $marker = 'pester-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     function Get-MarkerLines { if (Test-Path $today) { @(Get-Content $today | Where-Object { $_ -match $marker }) } else { @() } }
 
+    It 'starts each log file a process writes to with its version, commit and role' {
+        $dir = Join-Path $env:TEMP ('ccb-log-' + [guid]::NewGuid().ToString('N'))
+        $was = Get-CCBLogDir; $wasHeader = $env:CCBRIDGE_LOG_HEADER; $wasBuild = $env:CCBRIDGE_LOG_BUILD; $wasRole = $env:CCBRIDGE_LOG_ROLE
+        & (Get-Module Log) { param($d) $script:Dir = $d } $dir
+        try {
+            Initialize-CCBLog -Level info -Build (Format-CCBBuild ([pscustomobject]@{ version = 'v9.9.9'; commit = 'abc1234' })) -Role 'web app'
+            Write-CCBLog info test "$marker first"
+            Write-CCBLog info test "$marker second"
+            $lines = @(Get-Content (Join-Path $dir ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')))
+            $lines.Count | Should Be 3
+            $lines[0] | Should Match "INFO\s+log\s+StreamHub v9\.9\.9 \(commit abc1234\) \(web app\), PowerShell [\d.]+: lines with process $PID come from this build"
+            $lines[1] | Should Match "$marker first"
+            Format-CCBBuild ([pscustomobject]@{ version = 'dev'; commit = '' }) | Should Be 'dev'
+        } finally {
+            & (Get-Module Log) { param($d) $script:Dir = $d } $was
+            $env:CCBRIDGE_LOG_HEADER = $wasHeader; $env:CCBRIDGE_LOG_BUILD = $wasBuild; $env:CCBRIDGE_LOG_ROLE = $wasRole
+            Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'writes info, skips verbose at the default level' {
         Initialize-CCBLog -Level info
         Write-CCBLog info test "$marker info line"
