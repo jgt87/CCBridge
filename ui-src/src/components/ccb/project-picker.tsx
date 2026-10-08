@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import { Input } from "@/components/ui/input";
 import { api, type ProjectInfo } from "@/lib/api";
-import { overviewText } from "@/lib/project-overview";
+import { overviewText, projectsSignature } from "@/lib/project-overview";
 
 export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
   const [root, setRoot] = useState("");
@@ -12,10 +12,43 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.projects().then((r) => {
-      setRoot(r.root);
-      setProjects(r.projects);
-    }, (e) => setError(String(e.message ?? e)));
+    let shown = "";
+    let busy = false;
+    let stopped = false;
+    const load = () =>
+      api.projects().then((r) => {
+        if (stopped) return;
+        shown = projectsSignature(r.projects);
+        setRoot(r.root);
+        setProjects(r.projects);
+      }, (e) => setError(String(e.message ?? e)));
+    // A folder pasted into the projects folder (or one still being copied) shows without reopening the picker:
+    // a quick look at names and times, the full list only when they changed.
+    const check = async () => {
+      if (busy || stopped || document.hidden) return;
+      busy = true;
+      try {
+        const r = await api.projectsQuick();
+        if (!stopped && projectsSignature(r.projects) !== shown) await load();
+      } catch {
+        // the next check tries again
+      } finally {
+        busy = false;
+      }
+    };
+    busy = true;
+    load().finally(() => {
+      busy = false;
+    });
+    const timer = window.setInterval(check, 4000);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
   }, []);
 
   const open = async (path: string) => {

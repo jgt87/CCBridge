@@ -194,7 +194,11 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ events = @(Get-AgentEvents $State $after); state = (Get-StateSnapshot $State) }
         }
         '^GET /api/projects$' {
-            # Each project with its size and type (file names and sizes only).
+            # Each project with its size and type (file names and sizes only); ?quick=1 only names and
+            # times, so the picker can look for folders added outside the app without walking every project.
+            if ($req.QueryString['quick'] -eq '1') {
+                return Send-Json $Ctx @{ root = (Get-ProjectsRoot $State.Config.projectsFolder); projects = @(Get-CCBridgeProjects $State.Config.projectsFolder) }
+            }
             $list = @(Get-CCBridgeProjects $State.Config.projectsFolder | ForEach-Object {
                 $pr = $_; $o = $null
                 try { $o = Get-ProjectOverview $pr.path } catch { Write-CCBLogError server "project overview $($pr.name)" $_ }

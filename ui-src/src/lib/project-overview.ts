@@ -23,3 +23,11 @@ export function overviewText(o: ProjectOverview | null | undefined): string {
   if (o.sourceFiles) parts.push("source data");
   return parts.join(" · ");
 }
+
+/** What the picker compares to notice a folder added, removed, renamed or still being filled outside the app. */
+export function projectsSignature(list: { path: string; modified: string }[] | null | undefined): string {
+  return (Array.isArray(list) ? list : [])
+    .map((p) => `${p.path}|${p.modified}`)
+    .sort()
+    .join("\n");
+}

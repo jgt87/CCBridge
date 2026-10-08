@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, overviewText } from "./project-overview";
+import { formatBytes, overviewText, projectsSignature } from "./project-overview";
 
 describe("project overview", () => {
   it("formats sizes", () => {
@@ -14,5 +14,16 @@ describe("project overview", () => {
     expect(overviewText({ files: 1, bytes: 10, languages: [], sourceFiles: 0, capped: false })).toBe("1 file · 10 B");
     expect(overviewText({ files: 0, bytes: 0, languages: [], sourceFiles: 0, capped: false })).toBe("empty");
     expect(overviewText(null)).toBe("");
+  });
+});
+
+describe("projectsSignature", () => {
+  it("changes when a folder is added or changed, not when only the order differs", () => {
+    const a = { path: "C:\OD\P\one", modified: "2026-10-08T10:00:00" };
+    const b = { path: "C:\OD\P\two", modified: "2026-10-08T11:00:00" };
+    expect(projectsSignature([a, b])).toBe(projectsSignature([b, a]));
+    expect(projectsSignature([a])).not.toBe(projectsSignature([a, b]));
+    expect(projectsSignature([a, b])).not.toBe(projectsSignature([a, { ...b, modified: "2026-10-08T11:05:00" }]));
+    expect(projectsSignature(null)).toBe("");
   });
 });

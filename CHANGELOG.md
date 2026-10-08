@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.111] - 2026-10-08
+
+### Changed
+- Choose a project shows a folder pasted into the projects folder without reopening it: while it is open it looks for new, removed or changed folders every few seconds and when the window gets focus (names and times only, `/api/projects?quick=1`; the full list with sizes and types only when something changed).
+
 ## [v0.1.110] - 2026-10-08
 
 ### Added
@@ -1220,7 +1225,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.110...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.111...HEAD
+[v0.1.111]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.111
 [v0.1.110]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.110
 [v0.1.109]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.109
 [v0.1.108]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.108

@@ -654,6 +654,7 @@ export const api = {
       events: (Array.isArray(r.events) ? r.events : []).map(normalizeEvent),
     })),
   projects: () => call<{ root: string; projects: ProjectInfo[] }>("GET", "/api/projects"),
+  projectsQuick: () => call<{ root: string; projects: ProjectInfo[] }>("GET", "/api/projects?quick=1"),
   createProject: (name: string) => call<{ ok: boolean; path: string }>("POST", "/api/projects", { name }),
   openProject: (path: string) => call<{ ok: boolean }>("POST", "/api/project/open", { path }),
   files: () => call<{ files: FileInfo[] }>("GET", "/api/files"),
