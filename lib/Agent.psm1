@@ -2383,6 +2383,11 @@ function Get-ProjectContext($State) {
         $ready = try { Format-DataImportContext $root } catch { Write-CCBLogError agent 'data context' $_; '' }
         if ($ready) { $full += "`n`n$ready" }
     }
+    # What the UI kit offers (where each part is), so every task can use it, not only interface requests.
+    if ((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $root)) {
+        $kitText = try { Format-UiKitContext $root $State.AppRoot } catch { Write-CCBLogError agent 'UI kit context' $_; '' }
+        if ($kitText) { $full += "`n`n$kitText" }
+    }
     $traits = @(Get-ProjectTraits $paths)
     if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { $traits += 'nocommands' }
     @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths }
@@ -3209,6 +3214,9 @@ function Invoke-AgentTurn {
         # The UI kit rules go out: the kit must be in the project (added once, never overwritten).
         if ($State.ProjectRoot -and $State.SentParts.Contains('rules:uikit')) {
             try {
+                # A catalogue from an older kit revision first, so the rules and the kit files match.
+                $kitNewer = @(Update-UiKitCatalog $State.ProjectRoot $State.AppRoot)
+                if ($kitNewer.Count) { Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub updated the project's UI kit to its newer version: the catalogue in $(Get-UiKitCatalog)/ and the kit files the pages use that the project had not changed ($($kitNewer -join ', ')). Kit files the project changed stay as they are." -Output ($kitNewer -join "`n") }
                 $kitAdded = @(Install-UiKit $State.ProjectRoot $State.AppRoot)
                 if ($kitAdded.Count) { Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub added its UI kit to the project: the whole kit as a catalogue in $(Get-UiKitCatalog)/, and in $(Get-UiKitFolder)/ only what the pages use ($($kitAdded -join ', ')); a kit class, script or React part a page uses is added after each change. Settings > UI kit turns this off." -Output ($kitAdded -join "`n") }
             } catch { Write-CCBLogError agent 'UI kit' $_ }

@@ -4,6 +4,7 @@
   and reports through a DOM event, so page code listens instead of editing this file.
   Behaviour adapted from kokonutui (MIT licence, see LICENSE-kokonutui.txt; https://kokonutui.com):
   hold-button, action-search-bar, file-upload, smooth-tab.
+  The sortable table with pages (data-kit-sort, data-kit-pages) is the kit's own.
 */
 (function () {
   "use strict";
@@ -119,10 +120,95 @@
     move();
   }
 
+  // Sortable table with pages (the kit's own part, not from kokonutui):
+  // <table class="kit-table" data-kit-sort data-kit-pages="25">. data-kit-sort makes every header
+  // a sort button (a th with data-kit-nosort stays plain; th.kit-num sorts as numbers; a cell's
+  // data-sort="VALUE" sorts by that value, for dates or formatted numbers); data-kit-pages="N"
+  // shows N rows at a time with a kit-pager under the table. An empty-state row
+  // (<tr data-kit-empty>) is never sorted or paged. When the page writes the rows again, they are
+  // sorted again and paging starts at the first page. Fires "kit:sort" { column, ascending } and
+  // "kit:page" { page, pages } on the table.
+  function setupTable(table) {
+    var body = table.tBodies[0], headRow = table.tHead && table.tHead.rows[0];
+    if (!body) return;
+    var size = parseInt(table.getAttribute("data-kit-pages"), 10) || 0;
+    var heads = headRow ? Array.prototype.slice.call(headRow.cells) : [];
+    var col = -1, asc = true, page = 0, pager = null, info = null, prev = null, next = null, obs = null;
+    function rows() { return Array.prototype.filter.call(body.rows, function (r) { return !r.hasAttribute("data-kit-empty"); }); }
+    function value(row, i) {
+      var c = row.cells[i];
+      if (!c) return "";
+      var v = c.getAttribute("data-sort");
+      return v === null ? c.textContent.trim() : v;
+    }
+    function compare(a, b) {
+      var x = value(a, col), y = value(b, col), c;
+      if (heads[col] && heads[col].classList.contains("kit-num")) c = (Number(String(x).replace(/[^\d.eE-]/g, "")) || 0) - (Number(String(y).replace(/[^\d.eE-]/g, "")) || 0);
+      else c = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+      return asc ? c : -c;
+    }
+    function apply() {
+      var list = rows();
+      if (col >= 0) list.sort(compare).forEach(function (r) { body.appendChild(r); });
+      var pages = size ? Math.max(1, Math.ceil(list.length / size)) : 1;
+      page = Math.max(0, Math.min(page, pages - 1));
+      list.forEach(function (r, i) { r.hidden = !!size && (i < page * size || i >= (page + 1) * size); });
+      if (pager) {
+        pager.hidden = pages < 2;
+        info.textContent = "Page " + (page + 1) + " of " + pages + ", " + list.length + " rows";
+        prev.disabled = page === 0;
+        next.disabled = page >= pages - 1;
+      }
+      if (obs) obs.takeRecords();   // our own moves are not a new set of rows
+      return pages;
+    }
+    if (table.hasAttribute("data-kit-sort")) {
+      heads.forEach(function (th, i) {
+        if (th.hasAttribute("data-kit-nosort")) return;
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "kit-table__sort";
+        while (th.firstChild) b.appendChild(th.firstChild);
+        th.appendChild(b);
+        th.setAttribute("aria-sort", "none");
+        b.addEventListener("click", function () {
+          asc = col === i ? !asc : true;
+          col = i;
+          heads.forEach(function (h) { if (h.hasAttribute("aria-sort")) h.setAttribute("aria-sort", "none"); });
+          th.setAttribute("aria-sort", asc ? "ascending" : "descending");
+          page = 0;
+          apply();
+          table.dispatchEvent(new CustomEvent("kit:sort", { bubbles: true, detail: { column: i, ascending: asc } }));
+        });
+      });
+    }
+    if (size) {
+      pager = document.createElement("div");
+      pager.className = "kit-pager";
+      pager.innerHTML = '<button class="kit-btn kit-btn--sm" type="button">Previous</button><span class="kit-pager__info" aria-live="polite"></span><button class="kit-btn kit-btn--sm" type="button">Next</button>';
+      prev = pager.firstChild; info = prev.nextSibling; next = info.nextSibling;
+      var wrap = table.closest(".kit-table-wrap") || table;
+      wrap.parentNode.insertBefore(pager, wrap.nextSibling);
+      var go = function (d) {
+        page += d;
+        var pages = apply();
+        table.dispatchEvent(new CustomEvent("kit:page", { bubbles: true, detail: { page: page + 1, pages: pages } }));
+      };
+      prev.addEventListener("click", function () { go(-1); });
+      next.addEventListener("click", function () { go(1); });
+    }
+    if (window.MutationObserver) {
+      obs = new MutationObserver(function () { page = 0; apply(); });
+      obs.observe(body, { childList: true });
+    }
+    apply();
+  }
+
   function startKit() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-kit-hold]"), setupHold);
     Array.prototype.forEach.call(document.querySelectorAll("[data-kit-search]"), setupSearch);
     Array.prototype.forEach.call(document.querySelectorAll("[data-kit-drop]"), setupDrop);
+    Array.prototype.forEach.call(document.querySelectorAll("table[data-kit-sort], table[data-kit-pages]"), setupTable);
     Array.prototype.forEach.call(document.querySelectorAll(".kit-tabs--animated"), function (g) { setupSlider(g, ".kit-tab", "aria-selected", "kit-tabs__indicator"); });
     Array.prototype.forEach.call(document.querySelectorAll(".kit-segmented--animated"), function (g) { setupSlider(g, "button", "aria-pressed", "kit-segmented__indicator"); });
   }

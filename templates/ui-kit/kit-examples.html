@@ -9,13 +9,16 @@
 </head>
 <!-- Every kit component with its markup. Copy the markup; restyle through tokens.css. -->
 <body class="kit-page">
-<!-- kit-header: its contents use kit-container, so they line up with the page content below -->
-<header class="kit-header">
+<!-- kit-header kit-header--band: the gradient bar at the top of every app and dashboard page; its
+     contents use kit-container, so they line up with the page content below. A plain kit-header
+     (no band) only for a page that sits inside another page. -->
+<header class="kit-header kit-header--band">
   <div class="kit-container">
     <p class="kit-header__title">Example app</p>
     <nav class="kit-row" aria-label="Main">
       <a class="kit-link" href="#buttons">Components</a>
       <a class="kit-link" href="#charts">Charts</a>
+      <a class="kit-link" href="#dashboard">Dashboard</a>
     </nav>
   </div>
 </header>
@@ -84,8 +87,11 @@
   </form>
 </section>
 
-<!-- kit-toolbar, kit-segmented, kit-table-wrap, kit-table, kit-num, kit-badge -->
-<section id="table">
+<!-- kit-toolbar, kit-segmented, kit-table-wrap, kit-table, kit-num, kit-badge. With kit.js: data-kit-sort (every header
+     sorts; th.kit-num as numbers; data-sort="VALUE" on a cell for dates or formatted numbers) and data-kit-pages="N"
+     (a kit-pager under the table); events kit:sort and kit:page. Every table has an empty state: a
+     <tr data-kit-empty> row with a kit-empty block when there are no rows. -->
+<section id="table" class="kit-stack">
   <h2 class="kit-h2">Toolbar and table</h2>
   <div class="kit-toolbar">
     <input class="kit-input" aria-label="Search" placeholder="Search">
@@ -98,13 +104,22 @@
     <button class="kit-btn kit-btn--primary" type="button">New item</button>
   </div>
   <div class="kit-table-wrap">
+    <table class="kit-table" data-kit-sort data-kit-pages="3">
+      <thead><tr><th>Item</th><th>Status</th><th class="kit-num">Count</th><th>Changed</th></tr></thead>
+      <tbody>
+        <tr><td>First example</td><td><span class="kit-badge kit-badge--ok">Done</span></td><td class="kit-num">12</td><td data-sort="2026-03-02">2 Mar</td></tr>
+        <tr><td>Second example</td><td><span class="kit-badge kit-badge--warn">Waiting</span></td><td class="kit-num">3</td><td data-sort="2026-01-15">15 Jan</td></tr>
+        <tr><td>Third example</td><td><span class="kit-badge kit-badge--error">Failed</span></td><td class="kit-num">0</td><td data-sort="2026-02-20">20 Feb</td></tr>
+        <tr><td>Fourth example</td><td><span class="kit-badge kit-badge--accent">New</span></td><td class="kit-num">7</td><td data-sort="2026-03-09">9 Mar</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <!-- The same table with no rows: the empty state says what is missing and the one next step. -->
+  <div class="kit-table-wrap">
     <table class="kit-table">
       <thead><tr><th>Item</th><th>Status</th><th class="kit-num">Count</th></tr></thead>
       <tbody>
-        <tr><td>First example</td><td><span class="kit-badge kit-badge--ok">Done</span></td><td class="kit-num">12</td></tr>
-        <tr><td>Second example</td><td><span class="kit-badge kit-badge--warn">Waiting</span></td><td class="kit-num">3</td></tr>
-        <tr><td>Third example</td><td><span class="kit-badge kit-badge--error">Failed</span></td><td class="kit-num">0</td></tr>
-        <tr><td>Fourth example</td><td><span class="kit-badge kit-badge--accent">New</span></td><td class="kit-num">7</td></tr>
+        <tr data-kit-empty><td colspan="3"><div class="kit-empty"><p class="kit-empty__title">No items yet</p>Add the first item with New item.</div></td></tr>
       </tbody>
     </table>
   </div>
@@ -286,7 +301,10 @@
 <!-- kit-part:charts -->
 <!-- Charts (kit-charts.js; design adapted from bklit-ui, MIT, see LICENSE-bklit-ui.txt).
      <div class="kit-chart" data-kit-chart="KIND" data-kit-data='JSON' aria-label="WHAT IT SHOWS"></div>
-     KIND: bar, line, area, ring, gauge, heatmap, sparkline. From code: KitCharts.bar(element, data). -->
+     KIND: bar, line, area, ring, gauge, heatmap, sparkline, barlist. From code: KitCharts.bar(element, data).
+     Series take --kit-chart-1, -2 ... in order. Options: bar "stacked": true; ring "legend": "values";
+     barlist "limit": N; "selectable": true with "selected" / "selectedSeries" for filtering (event
+     kit:select, see the dashboard below). -->
 <section id="charts">
   <h2 class="kit-h2">Charts</h2>
   <div class="kit-grid">
@@ -317,6 +335,52 @@
       data-kit-data='{"rows":["Mon","Tue","Wed","Thu","Fri"],"cols":["8","9","10","11","12","13","14","15","16","17"],"values":[[1,4,6,3,2,1,5,6,3,1],[2,5,7,4,1,2,6,5,2,0],[0,3,5,6,3,2,4,7,4,1],[1,4,6,5,2,1,5,6,2,1],[0,2,3,2,1,0,2,3,1,0]]}'></div>
   </div>
 </section>
+<!-- Dashboard: the page starts with the band header (kit-header kit-header--band, as on this page),
+     then a filter bar (kit-panel kit-panel--sticky, kit-toolbar, kit-chips with a kit-chip per
+     filter), key figures (kit-figures) and a grid of chart panels (kit-grid kit-grid--charts,
+     kit-grid__wide for a chart across the row), each with a title that says what to see.
+     Every chart is selectable: a click on a bar, ring part, list row or legend item sends kit:select;
+     the page keeps the filters and draws every chart again with data.selected, each chart counting
+     the rows that pass every filter but its own. Example data (invented city bike rentals). -->
+<section id="dashboard">
+  <h2 class="kit-h2">Dashboard</h2>
+  <div class="kit-stack" id="kit-dash">
+    <div class="kit-panel kit-panel--sticky">
+      <div class="kit-toolbar">
+        <label class="kit-check">Months
+          <select class="kit-select" id="kit-dash-period" aria-label="Months shown">
+            <option value="12">Whole year</option>
+            <option value="6">Last 6 months</option>
+            <option value="3">Last 3 months</option>
+          </select>
+        </label>
+        <span class="kit-toolbar__spacer"></span>
+        <button class="kit-btn" type="button" id="kit-dash-reset">Reset filters</button>
+      </div>
+      <p class="kit-help">Click a bar, a ring part or a row to filter every chart; click it again, or its chip, to remove the filter.</p>
+      <div class="kit-chips" id="kit-dash-chips"></div>
+    </div>
+    <div class="kit-panel"><div class="kit-figures" id="kit-dash-figures"></div></div>
+    <div class="kit-grid kit-grid--charts">
+      <div class="kit-panel kit-grid__wide">
+        <div class="kit-panel__head"><h3 class="kit-panel__title">Rentals per month</h3><span class="kit-help">stacked by bike type</span></div>
+        <div data-dim="type" id="kit-dash-months" aria-label="Rentals per month, stacked by bike type" data-kit-height="240"></div>
+      </div>
+      <div class="kit-panel">
+        <div class="kit-panel__head"><h3 class="kit-panel__title">Bike type</h3></div>
+        <div data-dim="type" id="kit-dash-types" aria-label="Rentals by bike type" data-kit-height="180"></div>
+      </div>
+      <div class="kit-panel">
+        <div class="kit-panel__head"><h3 class="kit-panel__title">Busiest stations</h3><span class="kit-help">where the trip started</span></div>
+        <div data-dim="station" id="kit-dash-stations" aria-label="Rentals per start station"></div>
+      </div>
+      <div class="kit-panel">
+        <div class="kit-panel__head"><h3 class="kit-panel__title">Trip length</h3></div>
+        <div data-dim="length" id="kit-dash-lengths" aria-label="Rentals by trip length"></div>
+      </div>
+    </div>
+  </div>
+</section>
 <!-- /kit-part:charts -->
 
 <!-- kit-part:data -->
@@ -336,7 +400,69 @@
 
 </div>
 <!-- kit-part:interactive --><script src="kit.js"></script><!-- /kit-part:interactive -->
-<!-- kit-part:charts --><script src="kit-charts.js"></script><!-- /kit-part:charts -->
+<!-- kit-part:charts --><script src="kit-charts.js"></script>
+<script>
+  // The dashboard example: invented rentals, filtered by clicks on the charts (kit:select).
+  (function () {
+    var root = document.getElementById("kit-dash");
+    if (!root || !window.KitCharts) return;
+    var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    var DIMS = {
+      type: { label: "Bike type", names: ["City bike", "E-bike", "Cargo bike"] },
+      station: { label: "Station", names: ["Harbour", "Central station", "Market square", "University", "Old town", "Riverside", "Park gate", "Museum quarter", "Ferry terminal"] },
+      length: { label: "Trip length", names: ["Under 15 min", "15 to 30 min", "30 to 60 min", "Over an hour"] }
+    };
+    var seed = 11;
+    var rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    var pick = function (n, skew) { return Math.min(n - 1, Math.floor(Math.pow(rnd(), skew) * n)); };
+    var rows = [];
+    for (var i = 0; i < 1500; i++) rows.push({ month: pick(12, 0.7), type: rnd() < 0.55 ? 0 : rnd() < 0.8 ? 1 : 2, station: pick(9, 1.6), length: pick(4, 1.8) });
+    var filters = { type: [], station: [], length: [] }, months = 12;
+    var name = function (dim, r) { return DIMS[dim].names[r[dim]]; };
+    // A row passes every filter but the one of the chart that counts it (skip).
+    var passes = function (r, skip) {
+      if (r.month < 12 - months) return false;
+      return Object.keys(filters).every(function (d) { return d === skip || !filters[d].length || filters[d].indexOf(name(d, r)) >= 0; });
+    };
+    var counts = function (dim) {
+      var n = DIMS[dim].names.map(function () { return 0; });
+      rows.forEach(function (r) { if (passes(r, dim)) n[r[dim]]++; });
+      return DIMS[dim].names.map(function (l, i) { return { label: l, value: n[i] }; });
+    };
+    var el = function (id) { return document.getElementById(id); };
+    function draw() {
+      var shown = rows.filter(function (r) { return passes(r, null); });
+      var types = counts("type"), first = 12 - months;
+      KitCharts.bar(el("kit-dash-months"), {
+        stacked: true, selectable: true, selectedSeries: filters.type,
+        labels: MONTHS.slice(first),
+        series: DIMS.type.names.map(function (t, ti) {
+          return { name: t, values: MONTHS.slice(first).map(function (m, mi) { return rows.filter(function (r) { return r.month === first + mi && r.type === ti && passes(r, "type"); }).length; }) };
+        })
+      });
+      KitCharts.ring(el("kit-dash-types"), { items: types, legend: "values", selectable: true, selected: filters.type, center: shown.length.toLocaleString() });
+      KitCharts.barlist(el("kit-dash-stations"), { items: counts("station").sort(function (a, b) { return b.value - a.value; }), limit: 5, selectable: true, selected: filters.station });
+      KitCharts.barlist(el("kit-dash-lengths"), { items: counts("length"), selectable: true, selected: filters.length, color: "var(--kit-chart-2)" });
+      var short = shown.filter(function (r) { return r.length === 0; }).length, ebike = shown.filter(function (r) { return r.type === 1; }).length;
+      var pct = function (a) { return shown.length ? Math.round((100 * a) / shown.length) + "%" : "-"; };
+      el("kit-dash-figures").innerHTML = [["Rentals", shown.length.toLocaleString(), "of " + rows.length.toLocaleString() + " this year"],
+        ["E-bike share", pct(ebike), ebike.toLocaleString() + " rentals"], ["Short trips", pct(short), "under 15 minutes"], ["Months shown", String(months), MONTHS[first] + " to Dec"]]
+        .map(function (f) { return '<div><div class="kit-figure__label">' + f[0] + '</div><div class="kit-figure__value">' + f[1] + '</div><div class="kit-figure__note">' + f[2] + "</div></div>"; }).join("");
+      el("kit-dash-chips").innerHTML = Object.keys(filters).map(function (d) {
+        return filters[d].map(function (v) { return '<button class="kit-chip" type="button" data-dim="' + d + '" data-value="' + v + '" aria-label="Remove filter ' + DIMS[d].label + ": " + v + '">' + DIMS[d].label + ": " + v + ' <span aria-hidden="true">&times;</span></button>'; }).join("");
+      }).join("");
+    }
+    var toggle = function (dim, v) { var f = filters[dim], i = f.indexOf(v); if (i >= 0) f.splice(i, 1); else f.push(v); draw(); };
+    root.addEventListener("kit:select", function (e) {
+      var dim = e.target.getAttribute("data-dim"), d = e.detail;
+      if (dim) toggle(dim, d.chart === "bar" ? d.series : d.value);
+    });
+    el("kit-dash-chips").addEventListener("click", function (e) { var c = e.target.closest(".kit-chip"); if (c) toggle(c.getAttribute("data-dim"), c.getAttribute("data-value")); });
+    el("kit-dash-period").addEventListener("change", function (e) { months = Number(e.target.value); draw(); });
+    el("kit-dash-reset").addEventListener("click", function () { Object.keys(filters).forEach(function (d) { filters[d] = []; }); months = 12; el("kit-dash-period").value = "12"; draw(); });
+    draw();
+  })();
+</script><!-- /kit-part:charts -->
 <!-- kit-part:icons --><script src="kit-icons.js"></script><!-- /kit-part:icons -->
 <!-- kit-part:pdf --><script src="vendor/pdfjs/pdf.min.js"></script><script src="vendor/pdfjs/pdf.worker.min.js"></script><!-- /kit-part:pdf -->
 <!-- kit-part:data --><script src="kit-data.js"></script>

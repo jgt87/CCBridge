@@ -78,4 +78,20 @@ Describe 'Get-DoneReminders' {
         Get-DoneReminders 'C:\p' @{ 'Scripts/export.ps1' = 'new'; 'README.md' = 'existed' } @('README.md', 'Scripts/export.ps1') | Should BeNullOrEmpty
         Get-DoneReminders 'C:\p' @{ 'notes.md' = 'new' } @('README.md') | Should BeNullOrEmpty
     }
+    It 'reminds about an empty state for a page that shows a table or draws a chart without one' {
+        $p = Join-Path $env:TEMP ('ccb-empty-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'styles\kit') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $p 'index.html'), '<table class="kit-table"><tbody id="rows"></tbody></table>')
+        $r = Get-DoneReminders $p @{ 'index.html' = 'new' } @('index.html')
+        $r | Should Match 'index\.html shows a table or chart but has no empty state'
+        $r | Should Match 'a kit-empty block|a short message'
+        [IO.File]::WriteAllText((Join-Path $p 'styles\kit\tokens.css'), ':root {}')
+        Get-DoneReminders $p @{ 'index.html' = 'new' } @('index.html') | Should Match 'data-kit-empty'
+        # An empty state in the page or in its script (changed in the same task) is enough.
+        [IO.File]::WriteAllText((Join-Path $p 'app.js'), 'rows.innerHTML = "<tr data-kit-empty><td>No items yet</td></tr>";')
+        Get-DoneReminders $p @{ 'index.html' = 'new'; 'app.js' = 'new' } @('index.html', 'app.js') | Should BeNullOrEmpty
+        # No table and no chart: nothing to say.
+        [IO.File]::WriteAllText((Join-Path $p 'about.html'), '<p>About</p>')
+        Get-DoneReminders $p @{ 'about.html' = 'new' } @('about.html') | Should BeNullOrEmpty
+        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }

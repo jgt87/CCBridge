@@ -6,6 +6,29 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.110] - 2026-10-08
+
+### Added
+- UI kit charts: stacked bars (`"stacked": true`), a bar list for long category lists (`data-kit-chart="barlist"`: label, bar and value per row, with Show all past a limit), and a ring legend with each value and its share (`"legend": "values"`). With `"selectable": true` a click on a bar, ring part, list row or legend item filters the page: the chart sends `kit:select` and the page draws every chart again with what is picked; the rest fades. The React Chart part has `onSelect`.
+- UI kit pieces for dashboards: filter chips (`kit-chips`, `kit-chip`), a filter bar that stays at the top (`kit-panel--sticky`) and a chart grid (`kit-grid--charts`, `kit-grid__wide` for a chart across the row).
+- The kit's examples page starts with the gradient header band and has a dashboard example (invented city bike rentals): filter bar, key figures and a grid of charts that filter each other on a click.
+- Sortable tables with pages in the UI kit: `data-kit-sort` on a kit-table makes every header a sort button (numbers in a kit-num column sort as numbers, `data-sort` on a cell sorts dates or formatted numbers by their value), and `data-kit-pages="N"` shows N rows at a time with Previous and Next under the table. Rows the page writes again are sorted again. The examples page shows both, and a table's empty state.
+
+### Changed
+- The UI kit rule for Copilot names the gradient header band (`kit-header--band`) as the header of every app and dashboard page, asks that anything a page draws itself takes its colours from `--kit-chart-1` to `--kit-chart-6` in order with the kit's legend and tooltip classes, points to the dashboard example, and lists every kit class (also section, title and spacer classes it left out).
+- The file check after each change, in a project with the UI kit, also reports colours written into markup (style attributes, colour attributes, style blocks) and into scripts (colour strings, for example in chart settings or canvas code), and a chart library added to a page, script or package.json (it brings its own colours; the kit has charts). The kit's own files are left alone.
+- In a project with the UI kit, the file check also reports a table, button, field, list box, text area or dialog a change adds without its kit class, and fonts, font sizes, shadows and rounded corners written into styles instead of the kit's tokens. In any project it reports an emoji used as an icon in a button, heading, label or link (with the kit: use a kit icon).
+- When Copilot reports a task as done and a page it changed shows a table or draws a chart without an empty state, StreamHub reminds it once to add one (with a loading and an error message for data that loads).
+- Copilot always knows what the UI kit offers in a project that uses it: every task's project context lists the kit's parts with the lines of their example in the catalogue (`.streamhub/ui-kit/kit-examples.html`) and the classes each uses, the kit's scripts with what each does (tables with sorting and pages, charts, icons, file readers), the React parts in a React project, and the kit files the project already uses. The kit's rule says the kit comes first for every piece of interface, in a fixed order, that Copilot never builds its own version of a kit part and names any part that was missing, and it also goes with any change or fix to a web project that has the kit, not only with interface requests.
+- The UI kit rule names the kit's type sizes, corners and shadows, asks for an empty state for every table, list and chart, and says never to use an emoji as an icon.
+- Bars in the kit's charts are rounded only at their outer end, so they stand on the axis; in stacked bars only the top part.
+- A project's UI kit catalogue is updated to a newer kit when StreamHub brings one: the catalogue's files (not the project's colours) and the kit files the pages use that the project did not change; a change card in the chat says which.
+
+### Fixed
+- A project with the UI kit no longer counts as a React project because of the React parts in the kit's catalogue.
+- Links and buttons in the gradient header band take the band's text colour, instead of the link colour on the gradient.
+- A ring chart sits centred above its legend, draws nothing for an item at 0 (keeping the colours of the items after it), and shows a full ring for a single item.
+
 ## [v0.1.109] - 2026-10-08
 
 ### Fixed
@@ -1197,7 +1220,8 @@ Nothing yet.
 - Microsoft 365 data with cited sources, with a person always in the loop: Copilot actions are never confirmed and risky commands need a person.
 - Diagnostic logging with masking and a diagnostics bundle; local config overrides, self-update from GitHub Releases, an installer and a release builder.
 
-[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.109...HEAD
+[Unreleased]: https://github.com/jgt87/CCBridge/compare/v0.1.110...HEAD
+[v0.1.110]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.110
 [v0.1.109]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.109
 [v0.1.108]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.108
 [v0.1.107]: https://github.com/jgt87/CCBridge/releases/tag/v0.1.107

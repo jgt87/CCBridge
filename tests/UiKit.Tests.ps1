@@ -156,6 +156,64 @@ Describe 'Find-UiSlop' {
         $old = '.note { border-left: 4px solid #c00; }'
         @(Find-UiSlop 'styles/app.css' $old "$old`n.x { margin: 0; }").Count | Should Be 0
     }
+    It 'reports hard-coded colours in markup and scripts with the kit, and leaves kit tokens and selectors alone' {
+        foreach ($c in @(
+            @('index.html', '<div style="color: #ff0000">Total</div>'),
+            @('index.html', '<rect fill="#204060" width="4" height="4"/>'),
+            @('index.html', '  .total { background: rgba(0, 0, 0, 0.2); }'),
+            @('src/app.js', "ctx.fillStyle = 'rgb(10, 20, 30)';"),
+            @('src/Card.tsx', '<div style={{ color: "#336699" }}>Total</div>'))) {
+            @(Find-UiSlop $c[0] '' $c[1] -UseKit) -join ' ' | Should Match 'hard-coded colour'
+            @(Find-UiSlop $c[0] '' $c[1]).Count | Should Be 0
+        }
+        foreach ($c in @(
+            @('src/app.js', "document.querySelector('#main').hidden = true;"),
+            @('src/app.js', "el.style.background = 'var(--kit-chart-1)';"),
+            @('index.html', '<div style="color: var(--kit-text)">Total</div>'),
+            @('styles/kit/kit-charts.js', "var x = '#ffffff';"),
+            @('README.md', 'Colour #ffffff'))) {
+            @(Find-UiSlop $c[0] '' $c[1] -UseKit).Count | Should Be 0
+        }
+    }
+    It 'reports plain tables, buttons, fields and dialogs a change adds without a kit class, once per kind' {
+        $new = "<table><tr><td>1</td></tr></table>`n<button type=`"button`">Go</button>`n<button>Again</button>`n<input id=`"q`">`n<select id=`"s`"></select>`n<textarea id=`"t`"></textarea>`n<dialog open>Hi</dialog>"
+        $r = @(Find-KitBypass 'index.html' '' $new)
+        $r.Count | Should Be 6
+        ($r -join ' ') | Should Match 'kit-table.*kit-btn.*kit-input.*kit-select.*kit-textarea.*kit-dialog'
+        @(Find-KitBypass 'index.html' '' '<button class="kit-btn kit-btn--primary">Go</button><input class="kit-input"><input type="checkbox"><table class="kit-table"></table>').Count | Should Be 0
+        @(Find-KitBypass 'src/App.tsx' '' '<button className="kit-tab" onClick={() => go()}>Go</button><Button>Library part</Button>').Count | Should Be 0
+        @(Find-KitBypass 'index.html' '<button>Old</button>' "<button>Old</button>`n<p>New text</p>").Count | Should Be 0   # already there
+        @(Find-QualityIssues 'index.html' '' '<button>Go</button>').Count | Should Be 0   # only with the kit
+        @(Find-QualityIssues 'index.html' '' '<button>Go</button>' -UseKit) -join ' ' | Should Match 'kit-btn'
+    }
+    It 'reports fonts, font sizes, shadows and corners written into styles instead of the kit''s tokens' {
+        $r = @(Find-UiSlop 'styles/app.css' '' '.title { font-family: "Segoe UI", sans-serif; font-size: 14px; box-shadow: 0 2px 8px var(--x); border-radius: 6px; }' -UseKit) -join ' '
+        foreach ($w in 'a font of your own', 'hard-coded font size', 'shadow of your own', 'rounded corners') { $r | Should Match $w }
+        @(Find-UiSlop 'styles/app.css' '' '.t { font-family: var(--kit-font); font-size: var(--kit-text-sm); box-shadow: var(--kit-shadow); border-radius: 999px; }' -UseKit).Count | Should Be 0
+        @(Find-UiSlop 'styles/app.css' '' '.t { border-radius: 50%; box-shadow: none; border-radius: 0; }' -UseKit).Count | Should Be 0
+        @(Find-UiSlop 'styles/app.css' '' '.title { font-family: Georgia; }').Count | Should Be 0   # only with the kit
+    }
+    It 'reports an emoji used as an icon in a button, heading, label or link' {
+        $rocket = [char]::ConvertFromUtf32(0x1F680); $check = [string][char]0x2705
+        @(Find-UiSlop 'index.html' '' "<button class=`"kit-btn`">$rocket Launch</button>" -UseKit) -join ' ' | Should Match 'data-kit-icon'
+        @(Find-UiSlop 'index.html' '' "<h2>$check Done</h2>") -join ' ' | Should Match 'SVG icon'
+        @(Find-UiSlop 'index.html' '' "<p>Today $rocket in the text</p>" -UseKit).Count | Should Be 0
+        @(Find-UiSlop 'index.html' '' '<button class="kit-btn">Launch</button>' -UseKit).Count | Should Be 0
+    }
+    It 'reports a chart library added to a project with the kit''s charts' {
+        foreach ($c in @(
+            @('index.html', '<script src="https://cdn.example.test/npm/chart.js"></script>'),
+            @('src/app.js', 'const c = new Chart(ctx, config);'),
+            @('src/App.tsx', 'import { BarChart } from "recharts";'),
+            @('src/main.js', "const chart = echarts.init(el);"),
+            @('package.json', '    "chart.js": "^4.4.0",'))) {
+            @(Find-UiSlop $c[0] '' $c[1] -UseKit) -join ' ' | Should Match 'chart library'
+            @(Find-UiSlop $c[0] '' $c[1]).Count | Should Be 0
+        }
+        @(Find-UiSlop 'src/app.js' '' 'KitCharts.bar(el, data);' -UseKit).Count | Should Be 0
+        Mock -ModuleName Guardrails Test-UiKitPart { $Name -ne 'charts' }
+        @(Find-UiSlop 'src/app.js' '' 'const c = new Chart(ctx, config);' -UseKit).Count | Should Be 0
+    }
 }
 
 Describe 'The kit charts' {
@@ -164,7 +222,124 @@ Describe 'The kit charts' {
         foreach ($k in 'bar', 'line', 'area', 'ring', 'gauge', 'heatmap', 'sparkline') { $js | Should Match ("\b" + $k + "\b") }
         $js | Should Match 'kit-chart__table'
         $js | Should Match 'role: "img"'
-        [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md')) | Should Match 'data-kit-chart="bar\|line\|area\|ring\|gauge\|heatmap\|sparkline"'
+        [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md')) | Should Match 'data-kit-chart="bar\|line\|area\|ring\|gauge\|heatmap\|sparkline\|barlist"'
+    }
+    It 'stack bars, list categories, show ring values and filter on a click, with the CSS for each' {
+        $js = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-charts.js'))
+        foreach ($w in 'data.stacked', 'function barlist', 'data.legend === "values"', '"kit:select"', 'data.selectedSeries', 'function barPath') { $js.Contains($w) | Should Be $true }
+        $css = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
+        foreach ($c in '.kit-barlist__row', '.kit-barlist__fill', '.kit-chart__legend--values', '.kit-chart__bar.is-off', '.kit-chart--ring', '.kit-chips', '.kit-chip', '.kit-panel--sticky', '.kit-grid--charts', '.kit-grid__wide', '.kit-header--band a') { $css.Contains($c) | Should Be $true }
+        [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\react\Chart.tsx')) | Should Match 'onSelect'
+    }
+    It 'sort and page a table with kit.js, shown in the examples with an empty state' {
+        $js = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.js'))
+        foreach ($w in 'function setupTable', 'data-kit-sort', 'data-kit-pages', '"kit:sort"', '"kit:page"', 'data-kit-empty', 'kit-table__sort', 'kit-pager') { $js.Contains($w) | Should Be $true }
+        $css = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
+        foreach ($c in '.kit-table__sort', '.kit-pager', '.kit-pager__info', 'th[aria-sort="ascending"]') { $css.Contains($c) | Should Be $true }
+        $ex = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-examples.html'))
+        $ex | Should Match '<table class="kit-table" data-kit-sort data-kit-pages="\d+">'
+        $ex | Should Match '<tr data-kit-empty><td colspan="\d+"><div class="kit-empty">'
+        $rule = [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md'))
+        foreach ($w in 'data-kit-sort', 'data-kit-pages', 'Never an emoji as an icon', 'var\(--kit-radius\)', 'empty state') { $rule | Should Match $w }
+    }
+    It 'have a dashboard example with invented data that uses the selectable charts' {
+        $ex = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-examples.html'))
+        $ex | Should Match '<header class="kit-header kit-header--band">'
+        $ex | Should Match '(?s)<!-- kit-part:charts -->.*<section id="dashboard">.*<!-- /kit-part:charts -->'
+        foreach ($w in 'KitCharts.barlist', 'stacked: true', 'legend: "values"', 'kit:select', 'kit-chips', 'kit-panel--sticky', 'kit-grid--charts') { $ex.Contains($w) | Should Be $true }
+    }
+    It 'keep the classes a page gets from kit-charts.js (bar lists, ring values) in the project''s kit.css' {
+        $p = Join-Path $env:TEMP ('ccb-kitc-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        $null = Install-UiKit $p $root
+        [IO.File]::WriteAllText((Join-Path $p 'index.html'), '<div class="kit-chart" data-kit-chart="barlist" data-kit-data=''{"items":[]}'' aria-label="Example"></div><script src="styles/kit/kit-charts.js"></script>')
+        $u = Update-UiKitProject $p $root
+        $u.added -contains 'styles/kit/kit-charts.js' | Should Be $true
+        $css = [IO.File]::ReadAllText((Join-Path $p 'styles\kit\kit.css'))
+        $css | Should Match '\.kit-barlist__row \{'
+        $css | Should Match '\.kit-chart__legend--values'
+        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Describe 'What the kit offers, for every task (Format-UiKitContext)' {
+    It 'indexes every part of the examples page with its lines, from the comment above it' {
+        $ex = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-examples.html'))
+        $idx = @(Get-KitExamplesIndex $ex)
+        $idx.Count | Should Be (@([regex]::Matches($ex, '<section\b')).Count + 1)   # every section and the page header
+        $lines = $ex.Replace("`r`n", "`n").Split("`n")
+        foreach ($s in $idx) {
+            $s.end | Should BeGreaterThan $s.start
+            ($lines[($s.start - 1)..($s.end - 1)] -join "`n") | Should Match '(<section|<header)'
+            $lines[$s.end - 1] | Should Match '</(section|header)>'
+        }
+        $t = @($idx | Where-Object { $_.id -eq 'table' })[0]
+        $lines[$t.start - 1] | Should Match '^<!--'
+        foreach ($c in 'kit-table', 'kit-badge', 'kit-pager', 'kit-empty') { @($t.classes) -contains $c | Should Be $true }
+        @($idx | Where-Object { $_.title -eq 'Dashboard' }).Count | Should Be 1
+        @($idx | ForEach-Object { $_.classes } | Where-Object { $_ -match '^kit-(h2|row|charts|icons|data)$' }).Count | Should Be 0
+    }
+    It 'tells where the kit is, what each part and script offers, and what the project uses' {
+        $p = Join-Path $env:TEMP ('ccb-kitx-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        Format-UiKitContext $p $root | Should BeNullOrEmpty   # no kit yet
+        $null = Install-UiKit $p $root
+        Test-ReactProject $p | Should Be $false   # the catalogue's own React parts do not count
+        $c = Format-UiKitContext $p $root
+        $c | Should Match 'build every interface from it first'
+        $c | Should Match '\.streamhub/ui-kit/kit-examples\.html has the markup of every part'
+        $c | Should Match '(?m)^  Buttons: lines \d+-\d+ \(kit-btn'
+        $c | Should Match '(?m)^  Dashboard: lines \d+-\d+'
+        $c | Should Match 'kit-charts\.js \(charts on the kit colours: bar \(grouped or stacked\).*barlist'
+        $c | Should Match 'kit\.js \(behaviour by data-kit-\* attributes: sortable tables with pages'
+        $c | Should Match 'In use: styles/kit/ kit\.css, tokens\.css'
+        $c | Should Not Match 'React parts'
+        [IO.File]::WriteAllText((Join-Path $p 'package.json'), '{ "dependencies": { "react": "^19.0.0" } }')
+        Format-UiKitContext $p $root | Should Match 'React parts \(import from styles/kit/react/NAME\): Chart, .*HoldButton'
+        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    It 'sends the kit rule with any change to a web project that has the kit, not only interface requests' {
+        $ctx = @{ Paths = @('index.html', 'app.js', 'styles/kit/tokens.css', 'styles/kit/kit.css'); Traits = @('web', 'code') }
+        $ids = @(& (Get-Module Prompts) { param($c) Get-PromptModules -Text 'Fix the wrong totals per region' -Context $c } $ctx)
+        $ids -contains 'rules:uikit' | Should Be $true
+        $ctx.Paths = @('index.html', 'app.js')
+        $ids = @(& (Get-Module Prompts) { param($c) Get-PromptModules -Text 'Fix the wrong totals per region' -Context $c } $ctx)
+        $ids -contains 'rules:uikit' | Should Be $false
+    }
+    It 'puts the kit first in the rule and says where everything is' {
+        $rule = [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md'))
+        $rule | Should Match 'The kit comes first, for every piece of interface'
+        $rule | Should Match 'Never build your own version of something the kit has'
+        $rule | Should Match 'The project context lists its parts with their lines'
+    }
+}
+
+Describe 'Update-UiKitCatalog' {
+    It 'brings a catalogue from an older kit revision up to date, with the unchanged kit files the pages use' {
+        $p = Join-Path $env:TEMP ('ccb-kitv-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        $null = Install-UiKit $p $root
+        $cat = Join-Path $p '.streamhub\ui-kit'
+        Get-KitCatalogRevision $cat | Should BeGreaterThan 1
+        @(Update-UiKitCatalog $p $root).Count | Should Be 0   # current: nothing to do
+        # An older catalogue: VERSION.txt without a revision, older files, one copy the project changed.
+        [IO.File]::WriteAllText((Join-Path $cat 'VERSION.txt'), 'UI kit from StreamHub v0.1.90, copied 2026-01-01.')
+        foreach ($f in 'kit-charts.js', 'kit.js') { [IO.File]::WriteAllText((Join-Path $cat $f), "/* old $f */") }
+        [IO.File]::WriteAllText((Join-Path $cat 'tokens.css'), ':root { --kit-accent: #224466; }')
+        [IO.File]::WriteAllText((Join-Path $p 'styles\kit\kit-charts.js'), '/* old kit-charts.js */')
+        [IO.File]::WriteAllText((Join-Path $p 'styles\kit\kit.js'), '/* the project''s own change */')
+        Get-KitCatalogRevision $cat | Should Be 1
+        @(Update-UiKitCatalog $p $root) -join ',' | Should Be 'styles/kit/kit-charts.js'
+        [IO.File]::ReadAllText((Join-Path $cat 'kit-charts.js')) | Should Match 'function barlist'
+        [IO.File]::ReadAllText((Join-Path $p 'styles\kit\kit-charts.js')) | Should Match 'function barlist'
+        [IO.File]::ReadAllText((Join-Path $p 'styles\kit\kit.js')) | Should Be '/* the project''s own change */'
+        [IO.File]::ReadAllText((Join-Path $cat 'tokens.css')) | Should Match '#224466'
+        Get-KitCatalogRevision $cat | Should BeGreaterThan 1
+        @(Update-UiKitCatalog $p $root).Count | Should Be 0
+        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    It 'does nothing for a project without a catalogue' {
+        $p = Join-Path $env:TEMP ('ccb-kitn-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        @(Update-UiKitCatalog $p $root).Count | Should Be 0
+        Test-Path (Join-Path $p '.streamhub') | Should Be $false
+        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -240,6 +415,13 @@ Describe 'UI kit parts switched off (Settings > UI kit)' {
         Test-Path (Join-Path $p '.streamhub\ui-kit\react') | Should Be $false
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
     }
+    It 'leaves out the dashboard line without the charts, and lets a chart library take the kit''s colours' {
+        Mock -ModuleName Prompts Test-UiKitPart { $Name -ne 'charts' }
+        $t = & (Get-Module Prompts) { param($r) Get-PromptPart $r 'rules:uikit' } $root
+        $t | Should Not Match 'Charts:|Dashboards:'
+        $t | Should Match 'A chart library gets these colours too'
+        $t | Should Match 'kit-header--band'
+    }
     It 'tells Copilot only about the parts that are on' {
         Mock -ModuleName Prompts Test-UiKitPart { $Name -notin 'interactive', 'react' }
         $t = & (Get-Module Prompts) { param($r) Get-PromptPart $r 'rules:uikit' } $root
@@ -284,7 +466,7 @@ Describe 'UI kit colours (Settings > UI kit > Colours)' {
         $r = & (Get-Module Prompts) { param($a) Get-PromptPart $a 'rules:uikit' } $root
         $r | Should Match 'no colours are set for this project'
         $r | Should Match 'Hard-coded colours and gradients are fine'
-        $r | Should Not Match 'do not hard-code colours|--kit-palette|The only gradient'
+        $r | Should Not Match 'do not hard-code colours|--kit-palette|The only gradient|Anything a page draws itself'
         $r | Should Match 'do not hard-code sizes or shadows'
         $r | Should Match 'WCAG AA'
     }

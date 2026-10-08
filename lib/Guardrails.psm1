@@ -314,12 +314,31 @@ function Find-ScriptBasics {
     if ($Rel -match '(?i)\.(sh|bash)$' -and "$New" -notmatch '(?m)^\s*set\s+-[a-z]*e') { 'the script does not stop on errors: add set -e (or set -euo pipefail) near the top' }
 }
 
+# Chart libraries a page or package adds (a script tag, an import or require, a constructor, a package.json entry).
+$script:ChartLibraryPattern = '(?i)(<script[^>]+src=["''][^"'']*(\bchart(\.umd)?(\.min)?\.js|apexcharts|echarts|plotly|highcharts|amcharts|billboard|\bc3(\.min)?\.js)|\bfrom\s+["''](chart\.js(/auto)?|apexcharts|react-apexcharts|echarts|echarts-for-react|recharts|plotly\.js[\w./-]*|react-plotly\.js|highcharts[\w./-]*|@nivo/[\w-]+|victory|@visx/[\w-]+|react-chartjs-2)["'']|\brequire\(\s*["''](chart\.js|apexcharts|echarts|recharts|plotly\.js[\w./-]*|highcharts)["'']\s*\)|\bnew\s+(Chart|ApexCharts)\s*\(|\becharts\.init\s*\(|\bPlotly\.(newPlot|react)\s*\(|\bHighcharts\.chart\s*\(|^\s*"(chart\.js|apexcharts|react-apexcharts|echarts|echarts-for-react|recharts|plotly\.js[\w-]*|react-plotly\.js|highcharts|@nivo/[\w-]+|victory|react-chartjs-2)"\s*:)'
+# Colours written into markup: a style attribute, a colour attribute, or a CSS declaration in a <style> block or style object.
+$script:MarkupColorPattern = '(?i)(\bstyle\s*=\s*["''{][^>]*?(#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\()|\b(fill|stroke|color|bgcolor|background|stop-color)\s*=\s*["''{]\s*["'']?\s*(#[0-9a-f]{3,8}\b|rgba?\(|hsla?\()|\b(color|background(-color)?|fill|stroke|border(-[a-z]+)*|outline(-color)?|box-shadow|stop-color)\s*:\s*[^;{}]*?(#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\())'
+# Type, corners and shadows written into styles instead of the kit's tokens (font-family, font-size in px/rem/pt,
+# box-shadow with sizes, border-radius other than 0, a circle or a pill).
+$script:FontFamilyPattern = '(?i)\bfont-?family\s*:\s*(?!\s*["'']?\s*(var\(|inherit\b|initial\b|unset\b))\S'
+$script:FontSizePattern = '(?i)\bfont-?size\s*:\s*["'']?\s*\d*\.?\d+\s*(px|rem|pt)\b'
+$script:ShadowPattern = '(?i)\bbox-?shadow\s*:\s*(?!\s*["'']?\s*(var\(|none\b|inherit\b|initial\b|unset\b))[^;]*?\d+(px|rem)'
+$script:RadiusPattern = '(?i)\bborder-?(top-?|bottom-?)?(left-?|right-?)?radius\s*:\s*(?!\s*["'']?\s*(var\(|0(px)?\s*($|[;"''}])|50%|100%|9{3,}px|inherit\b|initial\b|unset\b))[^;]*?\d*\.?\d+(px|rem|em)\b'
+# An emoji (pictographs, symbols, dingbats, arrows) as the first content of a button, heading, label, link or option.
+$script:EmojiIconPattern = '(?i)<(button|h[1-6]|label|th|a|summary|legend|option)\b[^>]*>[^<]*?([\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2B05-\u2B07\u2B50\u2B55])'
+# Colours in scripts: a string that is only a colour (chart settings, canvas fills, inline styles).
+$script:ScriptColorPattern = '(?i)["''`]\s*(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]*\)|hsla?\([^)]*\))\s*["''`]'
+
 function Find-UiSlop {
-    <# Interface patterns that make a page look generated, on the lines a change adds to a style or
-       page file: gradient text, thick coloured side stripes, decorative blur. With the UI kit in the
-       project (-UseKit): hard-coded colours in CSS other than the kit's own tokens. #>
+    <# Interface patterns that make a page look generated, on the lines a change adds to a style,
+       page or script file: gradient text, thick coloured side stripes, decorative blur. With the UI
+       kit in the project (-UseKit): hard-coded colours other than the kit's own tokens (CSS, inline
+       styles and colour attributes in markup, colour strings in scripts) and a chart library (it
+       brings its own colours; the kit has charts). The kit's own files are left alone. #>
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit)
-    if ($Rel -notmatch '(?i)\.(css|scss|less|html?|jsx|tsx|vue|svelte)$') { return }
+    $isPackage = $Rel -match '(?i)(^|/)package\.json$'
+    if ($Rel -notmatch '(?i)\.(css|scss|less|html?|jsx|tsx|vue|svelte|m?js|cjs|ts)$' -and -not $isPackage) { return }
+    if ($Rel -match '(?i)(^|/)(styles/kit/(?!tokens\.css$)|\.streamhub/|node_modules/)') { return }
     # The UI kit's tokens: colour pairs this change pushed below their WCAG contrast minimum.
     if ($Rel -match '(?i)(^|/)tokens\.css$' -and (Test-CheckSwitch 'contrast')) {
         $before = @(Test-TokenContrast $Old)
@@ -332,18 +351,35 @@ function Find-UiSlop {
     $tokensFile = $Rel -match '(?i)(^|/)tokens\.css$'
     $slop = Test-UiKitPart 'slopChecks'      # Settings > UI kit
     $a11y = Test-CheckSwitch 'contrast'      # readability and accessibility
+    $kitCharts = $slop -and $UseKit -and (Test-UiKitPart 'charts')
+    $isStyle = $Rel -match '(?i)\.(css|scss|less)$'
+    $isMarkup = $Rel -match '(?i)\.(html?|jsx|tsx|vue|svelte)$'
+    $isScript = $Rel -match '(?i)\.(m?js|cjs|ts|jsx|tsx|vue|svelte)$'
     for ($i = 0; $i -lt $lines.Length; $i++) {
         $t = $lines[$i].Trim()
         if (-not $t -or $had.Contains($t)) { continue }
         $n = $i + 1
+        if ($kitCharts -and -not $found.chartlib -and $t -match $script:ChartLibraryPattern) { $found.chartlib = "line ${n}: a chart library brings its own colours and look; draw the chart with the kit's charts (styles/kit/kit-charts.js: KitCharts.bar (also stacked), line, area, ring, gauge, heatmap, sparkline, barlist; in React the Chart part from styles/kit/react/), which use the kit's colours and can filter the page on a click" }
+        if ($isPackage) { continue }
         if ($slop -and -not $found.grad -and $t -match '(?i)background-clip\s*:\s*text') { $found.grad = "line ${n}: gradient text (background-clip: text) looks generated; use one solid colour and show emphasis with weight or size" }
         if ($slop -and -not $found.stripe -and $t -match '(?i)border-(left|right)(-width)?\s*:\s*([3-9]|\d{2,})px') { $found.stripe = "line ${n}: a thick side stripe on a box looks generated; use a full 1px border, a background tint or an icon" }
         if ($a11y -and -not $found.focus -and $t -match '(?i)outline\s*:\s*(none|0)\b' -and "$New" -notmatch '(?i)focus-visible[^{]*\{[^}]*(outline|box-shadow|border)') { $found.focus = "line ${n}: the focus outline is removed without a replacement; keyboard users can no longer see where they are (add a :focus-visible style)" }
         if ($a11y -and -not $found.motion -and $t -match '(?i)(^|[\s;{])animation\s*:(?!\s*none)' -and "$New" -notmatch 'prefers-reduced-motion') { $found.motion = "line ${n}: an animation without a reduced-motion version; add @media (prefers-reduced-motion: reduce) to stop or shorten it" }
         if ($slop -and $UseKit -and -not $tokensFile -and -not $found.gradient -and $t -match '(?i)\b(linear|radial|conic)-gradient\(' -and $t -notmatch '(?i)background-clip\s*:\s*text') { $found.gradient = "line ${n}: a gradient other than the kit's own; use var(--kit-gradient) or a plain colour" }
         if ($slop -and -not $found.caps -and ($t -match '(?i)text-transform\s*:\s*uppercase' -or $t -cmatch '<(h[1-6]|th|label|button|legend|summary)\b[^>]*>\s*[A-Z][A-Z0-9&/ .-]{3,}\s*</')) { $found.caps = "line ${n}: a heading or label in capitals; write it in sentence case (Totals, not TOTALS) and leave out text-transform: uppercase" }
+        if ($slop -and $UseKit -and -not $tokensFile -and ($isStyle -or $isMarkup)) {
+            if (-not $found.font -and $t -match $script:FontFamilyPattern) { $found.font = "line ${n}: a font of your own; the kit's type is var(--kit-font) (var(--kit-font-mono) for code), already set on kit-page: leave font-family out or use the token" }
+            if (-not $found.fontsize -and $t -match $script:FontSizePattern) { $found.fontsize = "line ${n}: a hard-coded font size; use the kit's steps var(--kit-text-xs), -sm, -md, -lg, -xl (or the classes kit-h1, kit-h2, kit-h3, kit-small)" }
+            if (-not $found.shadow -and $t -notmatch 'var\(--kit-' -and $t -match $script:ShadowPattern) { $found.shadow = "line ${n}: a shadow of your own; use var(--kit-shadow), or none (the kit's surfaces have a 1px border instead)" }
+            if (-not $found.radius -and $t -match $script:RadiusPattern) { $found.radius = "line ${n}: hard-coded rounded corners; use var(--kit-radius) or var(--kit-radius-lg) (999px for a pill)" }
+        }
+        if ($slop -and $isMarkup -and -not $found.emoji -and $t -match $script:EmojiIconPattern) {
+            $found.emoji = if ($UseKit -and (Test-UiKitPart 'icons')) { "line ${n}: an emoji used as an icon (in a button, heading, label or link); use a kit icon, <span data-kit-icon=`"NAME`" aria-hidden=`"true`"></span> with a Lucide name, or leave it out" }
+                else { "line ${n}: an emoji used as an icon (in a button, heading, label or link); emoji look different on every system and screen readers read out their names: use an SVG icon with aria-hidden=`"true`", or leave it out" }
+        }
         if ($slop -and -not $found.blur -and $t -match '(?i)backdrop-filter\s*:\s*blur') { $found.blur = "line ${n}: a decorative blur (glass effect) looks generated; use a plain surface" }
-        if ($slop -and $UseKit -and -not $tokensFile -and -not $found.color -and $Rel -match '(?i)\.(css|scss|less)$' -and $t -match '(?i)(#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\()' -and $t -notmatch 'var\(--kit-') { $found.color = "line ${n}: a hard-coded colour; use a token from styles/kit/tokens.css (var(--kit-...)) so the page follows the kit" }
+        if ($slop -and $UseKit -and -not $tokensFile -and -not $found.color -and $isStyle -and $t -match '(?i)(#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\()' -and $t -notmatch 'var\(--kit-') { $found.color = "line ${n}: a hard-coded colour; use a token from styles/kit/tokens.css (var(--kit-...)) so the page follows the kit" }
+        if ($slop -and $UseKit -and -not $found.color -and -not $isStyle -and $t -notmatch 'var\(--kit-' -and (($isMarkup -and $t -match $script:MarkupColorPattern) -or ($isScript -and $t -match $script:ScriptColorPattern))) { $found.color = "line ${n}: a hard-coded colour; use a kit token instead: var(--kit-...) in styles, var(--kit-chart-1) to var(--kit-chart-6) in order for chart series (in canvas code read them with getComputedStyle(document.documentElement).getPropertyValue(`"--kit-chart-1`")), so the page follows the kit in light and dark" }
     }
     @($found.Values)
 }
@@ -360,11 +396,42 @@ function Find-PageCopyScript {
     "this script writes a whole copy of $($target.Groups[2].Value) ($tagLines lines of markup inside it): running it again later undoes every change made to that page since. Change the page with edit blocks instead, and delete this script once it has done its job"
 }
 
+function Find-KitBypass {
+    <# With the UI kit in the project: plain elements a change adds to markup without a kit class (a
+       table, button, field, list box, text area or dialog), which drop out of the kit's look. One
+       finding per kind of element; any kit- class counts (kit-btn, kit-tab, kit-chip ...). #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(html?|jsx|tsx|vue|svelte)$' -or $Rel -match '(?i)(^|/)(styles/kit/|\.streamhub/|node_modules/)') { return }
+    if (-not (Test-UiKitPart 'slopChecks')) { return }
+    $hits = {
+        param($t)
+        foreach ($m in [regex]::Matches("$t", '(?s)<(table|button|input|select|textarea|dialog)\b((?:\{(?:[^{}]|\{[^{}]*\})*\}|=>|[^>{])*)>')) {
+            $tag = $m.Groups[1].Value.ToLowerInvariant(); $attrs = $m.Groups[2].Value
+            if ($attrs -match '\{\s*\.\.\.' -or $attrs -match '(?i)\bclass(Name)?\s*=[^>]*?\bkit-') { continue }
+            if ($tag -eq 'input' -and $attrs -match '(?i)\btype\s*=\s*\{?\s*["'']?(hidden|checkbox|radio|range|color|file|submit|button|reset|image)\b') { continue }
+            @{ key = $tag; line = (Get-LineIndex "$t" $m.Index); msg = $script:KitBypassHints[$tag] }
+        }
+    }
+    $seen = @{}
+    foreach ($f in @(Find-AddedKeyed $hits $Old $New)) {
+        $k = $f -replace '^line \d+: ', ''
+        if (-not $seen.ContainsKey($k)) { $seen[$k] = $true; $f }
+    }
+}
+$script:KitBypassHints = @{
+    table    = 'a table without the kit''s class: <table class="kit-table"> inside <div class="kit-table-wrap">, with data-kit-sort and data-kit-pages="N" (kit.js) for sorting and pages, and an empty-state row'
+    button   = 'a button without a kit class: class="kit-btn" (kit-btn--primary for the one main action, kit-btn--ghost, kit-btn--danger, kit-btn--sm)'
+    input    = 'a field without the kit''s class: class="kit-input", with a kit-label above it in a kit-field'
+    select   = 'a list box without the kit''s class: class="kit-select", with a kit-label above it in a kit-field'
+    textarea = 'a text area without the kit''s class: class="kit-textarea", with a kit-label above it in a kit-field'
+    dialog   = 'a dialog without the kit''s class: <dialog class="kit-dialog"> with its buttons in kit-dialog__actions'
+}
+
 function Find-QualityIssues {
     <# The second batch, for the round's file check: what a change adds, as "line N: ..." or a
        whole-file note. #>
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit)
-    @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UiSlop $Rel $Old $New -UseKit:$UseKit) | Where-Object { $_ }
+    @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UiSlop $Rel $Old $New -UseKit:$UseKit) + @(if ($UseKit) { Find-KitBypass $Rel $Old $New }) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {
@@ -387,8 +454,20 @@ function Get-DoneReminders {
     if ($readme -and $newParts.Count -and -not @($changed | Where-Object { $_ -match '(?i)^README\.md$' }).Count) {
         $notes.Add("You added $(($newParts | Select-Object -First 4) -join ', '), and README.md does not mention the change. Add a short line to README.md if users or developers need to know about it; if not, say so in your done block.")
     }
+    # Every table and chart a page shows needs an empty state (design rules): the changed page files
+    # show a table or draw a chart, and none of them has one. The kit's charts bring their own.
+    $views = @($changed | Where-Object { $_ -match '(?i)\.(html?|jsx|tsx|vue|svelte|m?js)$' -and $_ -notmatch $script:TestPathPattern -and $_ -notmatch '(?i)(^|/)(styles/kit|node_modules|dist|build|\.streamhub)/' } | Select-Object -First 20)
+    $texts = @(foreach ($v in $views) {
+        $f = Join-Path $ProjectRoot $v.Replace('/', '\')
+        if ((Test-Path -LiteralPath $f -PathType Leaf) -and (Get-Item -LiteralPath $f).Length -lt 1MB) { [pscustomobject]@{ rel = $v; text = [IO.File]::ReadAllText($f) } }
+    })
+    $shows = @($texts | Where-Object { $_.text -match '(?i)<table\b|\bkit-table\b|<canvas\b|createElement\(\s*["'']table|\.insertRow\(' })
+    if ($shows.Count -and -not @($texts | Where-Object { $_.text -match '(?i)kit-empty|data-kit-empty|\bno (items|rows|results|data|records|matches|entries)\b|\bnothing (to show|here|found|yet)\b|\bempty[ -]?state\b' }).Count) {
+        $how = if (Test-Path -LiteralPath (Join-Path $ProjectRoot 'styles\kit\tokens.css')) { 'a <tr data-kit-empty> row with a kit-empty block (what is missing and the one next step; see the table section of .streamhub/ui-kit/kit-examples.html)' } else { 'a short message in its place that says what is missing and the one next step' }
+        $notes.Add("$(($shows | Select-Object -First 3 | ForEach-Object { $_.rel }) -join ', ') shows a table or chart but has no empty state. Add $how for when there is nothing to show, and a loading and an error message if the data is loaded; if it can never be empty, say why in your done block.")
+    }
     if (-not $notes.Count) { return '' }
     "Before finishing, one check:`n- " + ($notes -join "`n- ") + "`nThen send done again."
 }
 
-Export-ModuleMember -Function Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders
+Export-ModuleMember -Function Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders

@@ -153,6 +153,10 @@ function Get-PromptModules {
         # Build from the UI kit (setting uiKit; the agent adds the kit to the project when this goes out).
         if (Test-UiKitOn (Split-Path -Parent $PSScriptRoot)) { $ids.Add('rules:uikit') }
     }
+    elseif ($web -and @($Context.Paths) -contains 'styles/kit/tokens.css' -and ($Text -match $script:ChangePattern -or $Text -match $script:FixPattern -or $Text -match $script:BuildPattern) -and (Test-UiKitOn (Split-Path -Parent $PSScriptRoot))) {
+        # A project with the UI kit: any change to it may add interface, so the kit's rule goes too.
+        $ids.Add('rules:uikit')
+    }
     if ($Text -match $script:HttpPattern) { $ids.Add('rules:http') }
     if (($traits -contains 'csharp') -or ($Text -match $script:CSharpPattern)) { $ids.Add('rules:csharp') }
     if (($traits -contains 'react') -or ($Text -match $script:ReactPattern)) { $ids.Add('rules:react') }
@@ -230,7 +234,11 @@ function Get-PromptPart {
             # Only the kit parts that are switched on (Settings > UI kit).
             $lines = @((Read-PromptPart $AppRoot 'rules\uikit.md').Split("`n"))
             if (-not (Test-UiKitPart 'interactive' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Interactive parts*' }) }
-            if (-not (Test-UiKitPart 'charts' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Charts:*' }) }
+            if (-not (Test-UiKitPart 'charts' $AppRoot)) {
+                # No kit charts: no dashboard example either, and a chart library gets the kit's colours.
+                $lines = @($lines | Where-Object { $_ -notlike '- Charts:*' -and $_ -notlike '- Dashboards:*' })
+                $lines = @(foreach ($l in $lines) { if ($l -like '- Anything a page draws itself*') { $l -replace 'No chart library \(they bring their own colours\) and no colours of your own\.', 'A chart library gets these colours too, never its own palette.' } else { $l } })
+            }
             if (-not (Test-UiKitPart 'icons' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Icons (Lucide*' }) }
             if (-not (Test-UiKitPart 'data' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Reading files*' }) }
             elseif (-not (Test-UiKitPart 'pdf' $AppRoot)) { $lines = @(foreach ($l in $lines) { if ($l -like '- Reading files*') { $l -replace ' PDF: .*', ' PDF files cannot be read in the page (pdf.js is switched off).' } else { $l } }) }
@@ -240,6 +248,7 @@ function Get-PromptPart {
             if ($colors -eq 'none') {
                 # Colours: None. No palette is set: Copilot uses the colours the project or the request asks for.
                 $text = @(foreach ($l in $text.Split("`n")) {
+                    if ($l -like '- Anything a page draws itself*') { continue }
                     if ($l -like '- Colours:*') { '- Colours: no colours are set for this project. The tokens in styles/kit/tokens.css are neutral starting values only: use the colours the project already has or the request asks for, set them in tokens.css (--kit-accent, --kit-chart-1...) or in your own CSS. Hard-coded colours and gradients are fine.' }
                     elseif ($l -like '- Restyle through the tokens*') { $l -replace 'do not hard-code colours, sizes or shadows', 'do not hard-code sizes or shadows' -replace 'Your own CSS uses the same tokens\. ', '' }
                     else { $l }
