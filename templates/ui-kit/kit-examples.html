@@ -18,9 +18,9 @@
   <div class="kit-container">
     <p class="kit-header__title">Example app</p>
     <nav class="kit-row" aria-label="Main">
-      <a class="kit-link" href="#buttons">Components</a>
-      <a class="kit-link" href="#charts">Charts</a>
-      <a class="kit-link" href="#dashboard">Dashboard</a>
+      <a class="kit-btn kit-btn--ghost kit-btn--sm" href="#buttons">Components</a>
+      <a class="kit-btn kit-btn--ghost kit-btn--sm" href="#charts">Charts</a>
+      <a class="kit-btn kit-btn--ghost kit-btn--sm" href="#dashboard">Dashboard</a>
       <!-- kit-part:themeswitch --><button class="kit-btn kit-btn--ghost kit-btn--icon" type="button" data-kit-theme aria-label="Switch the theme"><span data-kit-icon="moon" aria-hidden="true"></span></button><!-- /kit-part:themeswitch -->
     </nav>
   </div>
@@ -61,6 +61,9 @@
     <button class="kit-btn kit-btn--ghost" type="button">More</button>
     <button class="kit-btn kit-btn--danger" type="button">Delete</button>
     <button class="kit-btn kit-btn--sm" type="button">Small</button>
+    <!-- While an action runs: aria-busy="true" on the button (a spinner takes the place of its text, no
+         clicks); a form that saves gets <fieldset disabled> around its fields. -->
+    <button class="kit-btn kit-btn--primary" type="button" aria-busy="true">Saving</button>
   </div>
 </section>
 
@@ -97,14 +100,14 @@
 <section id="table" class="kit-stack">
   <h2 class="kit-h2">Toolbar and table</h2>
   <div class="kit-toolbar">
-    <input class="kit-input" aria-label="Search" placeholder="Search">
+    <div class="kit-field kit-field--inline"><label class="kit-label" for="ex-toolbar-search">Search</label><input class="kit-input" id="ex-toolbar-search" type="search" placeholder="Name or city"></div>
     <div class="kit-segmented" role="group" aria-label="Show">
       <button type="button" aria-pressed="true">All</button>
       <button type="button" aria-pressed="false">Open</button>
       <button type="button" aria-pressed="false">Closed</button>
     </div>
     <span class="kit-toolbar__spacer"></span>
-    <button class="kit-btn kit-btn--primary" type="button">New item</button>
+    <button class="kit-btn kit-btn--primary" type="button"><span data-kit-icon="plus" aria-hidden="true"></span>New item</button>
   </div>
   <div class="kit-table-wrap">
     <table class="kit-table" data-kit-sort data-kit-pages="3">
@@ -114,6 +117,25 @@
         <tr><td>Second example</td><td><span class="kit-badge kit-badge--warn">Waiting</span></td><td class="kit-num">3</td><td data-sort="2026-01-15">15 Jan</td></tr>
         <tr><td>Third example</td><td><span class="kit-badge kit-badge--error">Failed</span></td><td class="kit-num">0</td><td data-sort="2026-02-20">20 Feb</td></tr>
         <tr><td>Fourth example</td><td><span class="kit-badge kit-badge--accent">New</span></td><td class="kit-num">7</td><td data-sort="2026-03-09">9 Mar</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <!-- Row selection: data-kit-select on the table (the kit adds the checkbox column and "select all"),
+       data-id on each row, and a kit-bulk bar with data-kit-bulk="TABLE-ID" that shows while rows are
+       picked (kit:selection, detail.ids); its buttons act on those rows. -->
+  <div class="kit-bulk" data-kit-bulk="ex-pick" hidden>
+    <span class="kit-bulk__count"></span>
+    <button class="kit-btn kit-btn--sm" type="button"><span data-kit-icon="download" aria-hidden="true"></span>Export</button>
+    <button class="kit-btn kit-btn--sm kit-btn--danger" type="button"><span data-kit-icon="archive" aria-hidden="true"></span>Archive</button>
+  </div>
+  <div class="kit-table-wrap">
+    <table class="kit-table" id="ex-pick" data-kit-sort data-kit-select>
+      <thead><tr><th>Item</th><th>Owner</th><th class="kit-num">Count</th></tr></thead>
+      <tbody>
+        <tr data-id="1"><td>First example</td><td>Ann</td><td class="kit-num">12</td></tr>
+        <tr data-id="2"><td>Second example</td><td>Ben</td><td class="kit-num">3</td></tr>
+        <tr data-id="3"><td>Third example</td><td>Cem</td><td class="kit-num">7</td></tr>
+        <tr data-kit-empty hidden><td colspan="3"><div class="kit-empty"><p class="kit-empty__title">No items</p></div></td></tr>
       </tbody>
     </table>
   </div>
@@ -168,6 +190,31 @@
       <a class="kit-nav__item" href="#table">Items</a>
       <a class="kit-nav__item" href="#forms">Settings</a>
     </nav>
+  </div>
+</section>
+
+<!-- kit-shell, kit-shell__nav, kit-shell__main, kit-shell__menu: the layout of an app with sections.
+     The band header across the top, the navigation at the left and the content; under 860px the
+     navigation folds away behind the menu button in the header (data-kit-shell-menu, kit.js).
+     The whole page is the shell: <body class="kit-page"><div class="kit-shell">... -->
+<section id="shell">
+  <h2 class="kit-h2">App shell</h2>
+  <div class="kit-shell">
+    <header class="kit-header kit-header--band">
+      <div class="kit-container">
+        <p class="kit-header__title">Example app</p>
+        <button class="kit-btn kit-btn--ghost kit-btn--icon kit-shell__menu" type="button" data-kit-shell-menu aria-controls="ex-shell-nav" aria-expanded="false" aria-label="Menu"><span data-kit-icon="menu" aria-hidden="true"></span></button>
+      </div>
+    </header>
+    <nav class="kit-shell__nav kit-nav" id="ex-shell-nav" aria-label="Sections">
+      <a class="kit-nav__item" href="#shell" aria-current="page">Overview</a>
+      <a class="kit-nav__item" href="#table">Items</a>
+      <a class="kit-nav__item" href="#forms">Settings</a>
+    </nav>
+    <main class="kit-shell__main kit-container">
+      <h1 class="kit-h1">Overview</h1>
+      <p class="kit-prose">The content of the section, in the same page grid as the header.</p>
+    </main>
   </div>
 </section>
 
@@ -292,7 +339,7 @@
 <section id="long-table">
   <h2 class="kit-h2">A long table</h2>
   <div class="kit-toolbar">
-    <input class="kit-input" id="kit-long-search" type="search" aria-label="Search the people" placeholder="Search">
+    <div class="kit-field kit-field--inline"><label class="kit-label" for="kit-long-search">Search</label><input class="kit-input" id="kit-long-search" type="search" placeholder="Name or city"></div>
     <span class="kit-toolbar__spacer"></span>
     <!-- kit-part:data --><button class="kit-btn kit-btn--sm" type="button" id="kit-long-export"><span data-kit-icon="download" aria-hidden="true"></span>Export as CSV</button><!-- /kit-part:data -->
   </div>
@@ -373,6 +420,12 @@
   <h2 class="kit-h2">More charts</h2>
   <div class="kit-grid">
     <div class="kit-panel">
+      <!-- Scatter: is A related to B. Points with x and y (r for a bubble, label for the tooltip), xLabel and yLabel for the axes. -->
+      <div class="kit-panel__head"><h3 class="kit-panel__title">Rentals against temperature</h3></div>
+      <div class="kit-chart" data-kit-chart="scatter" aria-label="Rentals per day against the temperature"
+        data-kit-data='{"xLabel":"Temperature (C)","yLabel":"Rentals","series":[{"name":"Weekdays","points":[{"x":4,"y":210,"label":"3 Mar"},{"x":9,"y":340,"label":"12 Mar"},{"x":14,"y":520,"label":"2 Apr"},{"x":19,"y":690,"label":"20 Apr"},{"x":24,"y":740,"label":"9 May"}]},{"name":"Weekends","points":[{"x":6,"y":380,"label":"7 Mar"},{"x":12,"y":560,"label":"21 Mar"},{"x":18,"y":810,"label":"18 Apr"},{"x":25,"y":960,"label":"16 May"}]}]}'></div>
+    </div>
+    <div class="kit-panel">
       <div class="kit-panel__head"><h3 class="kit-panel__title">Items per month</h3></div>
       <div class="kit-chart" data-kit-chart="bar" aria-label="Items per month, this year and last year"
         data-kit-data='{"labels":["Jan","Feb","Mar","Apr","May","Jun"],"series":[{"name":"This year","values":[42,51,38,64,58,71]},{"name":"Last year","values":[35,44,40,49,52,55]}]}'></div>
@@ -413,13 +466,14 @@
   <div class="kit-stack" id="kit-dash">
     <div class="kit-panel kit-panel--sticky">
       <div class="kit-toolbar">
-        <label class="kit-check">Months
-          <select class="kit-select" id="kit-dash-period" aria-label="Months shown">
+        <div class="kit-field kit-field--inline">
+          <label class="kit-label" for="kit-dash-period">Months</label>
+          <select class="kit-select" id="kit-dash-period">
             <option value="12">Whole year</option>
             <option value="6">Last 6 months</option>
             <option value="3">Last 3 months</option>
           </select>
-        </label>
+        </div>
         <span class="kit-toolbar__spacer"></span>
         <button class="kit-btn" type="button" id="kit-dash-reset">Reset filters</button>
       </div>
@@ -486,7 +540,7 @@
   </div>
   <div class="kit-panel">
     <div class="kit-panel__head"><h3 class="kit-panel__title">Stations</h3>
-      <input class="kit-input kit-table-search" type="search" data-kit-filter="kit-stations" aria-label="Search the stations" placeholder="Search"></div>
+      <div class="kit-field kit-field--inline"><label class="kit-label" for="kit-stations-search">Search</label><input class="kit-input kit-table-search" id="kit-stations-search" type="search" data-kit-filter="kit-stations" placeholder="Station"></div></div>
     <div class="kit-table-wrap">
       <table class="kit-table kit-table--sticky-first" id="kit-stations" data-kit-sort>
         <thead><tr><th>Station</th><th class="kit-num">Rentals</th><th class="kit-num">Share</th><th data-kit-nosort>Details</th></tr></thead>

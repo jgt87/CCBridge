@@ -6,6 +6,130 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.118] - 2026-10-10
+
+### Added
+- UI kit: an app shell (band header, side navigation that folds behind a menu button on a narrow screen, content), format helpers (`KitUI.format.number`, `percent`, `date`, `relative`, following the page's language, dates always as "9 Oct 2026"), row selection on tables (`data-kit-select`: a checkbox column, select all, a bar with the count and the actions for the picked rows), a busy state for buttons (`aria-busy="true"`) and forms, and a scatter chart (`data-kit-chart="scatter"`).
+- Blue shades in the kit's tokens: `--kit-palette-blue-1` to `-3`, the vivid blues `--kit-palette-light-blue-3` to `-5`, and `--kit-accent-tint-1` to `-3` (the accent over the surface at 8, 16 and 32 %); in the light theme titles (kit-h1 to h3, panel titles) and icons are the blue (`--kit-title`, `--kit-icon`), bars and other first-series chart parts the light blue `#019adc` (`--kit-chart-1`), and text on any blue (a primary button, the band, a band block) is white, titles and icons included; the contrast check measures the new pairs.
+- Tests of the kit's behaviour in a browser-like document (`ui-src/src/lib/kit-ui.test.ts`), and a check that neighbouring chart colours tell apart.
+- The release build refuses a version that is not in CHANGELOG.md; the changelog has the entries of v0.1.112 to v0.1.117 again.
+
+### Changed
+- UI kit accessibility: a solid focus ring visible on any background (the old halo was 1.6:1), white text on the header band at 4.5:1 (the band starts in a darker light blue, and the check measures it), placeholder text readable, invalid, disabled and read-only fields, a pressed state on buttons, focus on tabs, segmented buttons, navigation and menu items and the drop zone, legend entries big enough to click, screen-reader roles for named groups, the search box as a combo box, tabs with the arrow keys, charts with buttons announced as groups and keeping focus across a redraw, the calendar as a group of day buttons.
+- UI kit tables: the header row is one piece (titles left, numeric columns right with the sort arrow after the title, the same fill in every header cell, also the sticky first column); the search box splits on spaces (it split on the letter "s"); numeric columns sort numbers as people write them (1,234.56, 1.234,56, 41,7 %, (1,234), empty cells last); the empty-state row shows by itself when a search leaves nothing; paging no longer moves every row; a paged table prints all its rows.
+- UI kit charts: a value that is not a number leaves a gap in a line instead of blanking the chart, a chart with values below zero gets an axis below zero, a chart that cannot be drawn says so and leaves the next chart alone, rings, gauges, heat maps and sparklines have empty states, a colour by meaning works on gauges and sparklines, horizontal bars give long labels room and shorten them with the whole name on hover, resizes are drawn once per frame without the grow animation.
+- UI kit layout on a phone: tabs scroll sideways instead of widening the page, the tip bubble and the multi-select panel stay on the screen; `hidden` always hides a kit block; print styles keep buttons, tabs and toolbars off paper and boards whole.
+- The kit keeps to its own tokens (sizes, corners, speeds, backdrops) and chart colours are ordered so neighbours differ in hue; the neutral preset's dark chart colours too.
+- The icon rule says where icons belong (toolbar and row actions, the menu button, navigation items, notices, empty states; the same icon for the same action everywhere); the one-file and light-only rules no longer contradict the kit rule; the kit's scripts are safe to load twice and one broken part no longer stops the rest.
+- Kit delivery: one pruned file walk per update (never into node_modules), classes the kit's scripts write at run time copied only for the parts a page has, icons chosen in code found, template file types scanned, keyframes kept by prefix.
+- The data reader guesses the CSV delimiter from the first ten lines, strips a byte order mark, reads ISO dates with a zone, and `KitData.toCsv` takes a delimiter (`;` for Excel on a Dutch or German computer).
+- React kit parts: a board card drops where it was dragged, a chart redraws only when its data changed, tabs take the arrow keys.
+
+### Fixed
+- The colour guardrail no longer reports ids that look like colours (`#add`, `querySelector("#fab")`), and does report colours set from code in a page's own script and in CSS-in-JS.
+- A table search box filtered on the letter "s" instead of spaces.
+
+## [v0.1.117] - 2026-10-09
+
+### Added
+- Helpers for Copilot: every project with a window app gets `styles/kit/wpf/KitWpf.ps1`, with functions for the window, tables with search, bar lists, file pickers, CSV/TSV/JSON import and CSV export, background work that keeps the window responsive, shortcuts, timers, saved settings and one copy of the app at a time. Copilot's instructions list what a window app can have and which helper does it.
+- UI kit look, when the kit is on: the WPF theme covers more controls (tabs, menus, lists, tree views, date pickers, sliders and more), and a Windows Forms app gets a matching theme. With the kit off, the app keeps the Windows look and still gets the helpers.
+- Alignment and uniform sizes, written into the app: Copilot marks panels as a row, an action bar or a form, and StreamHub writes the matching layout into the window's XAML. Buttons and fields get one height, field widths come from one scale (120, 240, 360), and fields above each other are the same width.
+- More tests of the window: after a change, StreamHub opens the app and:
+  - runs the steps of its `.guitest` file (click, type, select, expect);
+  - catches error messages the app shows;
+  - checks that controls have names for screen readers, are big enough to click and are not cut off;
+  - measures what does not line up.
+
+  Checks of the XAML catch centred fields, controls placed by coordinates, controls with their own heights and odd widths.
+- A missing or wrong launcher (`.cmd`) is reported. On computers where a company policy runs scripts in Constrained Language Mode, Copilot is told a window app cannot run there.
+
+### Fixed
+- What the window test reports no longer contains your user folder, account or computer name; paths inside the project are shown relative.
+- The probe test tool's report is masked the same way.
+- A new repository test keeps personal paths and names out of everything the repository publishes.
+
+## [v0.1.116] - 2026-10-09
+
+### Added
+- Built-in builder for React and TypeScript (Settings > Checks and issues > Built-in builder): on a computer without Node.js or npm, StreamHub builds the app itself in a hidden Edge tab (esbuild and TypeScript ship with StreamHub), after every change to `src/`. The app runs from `dist/app.js`, also when the page is opened from disk; build errors and TypeScript type errors go back to Copilot with file and line. `Scripts/Build-App.ps1` builds the app while StreamHub is closed. React, ReactDOM and the JSX runtime are included; other npm packages are not available this way.
+- SQL in the page (UI kit, on): `KitSql` turns the page's data into tables to query with SQL (SQLite through sql.js); works from disk too.
+- Python in the page (UI kit, off by default, 13 MB): `KitPython` runs Python with its standard library on the page's data (Pyodide); works when the page is served (Open app).
+- PowerShell apps with a window (WPF): rules for Copilot, the UI kit's look as a WPF theme made from the project's colours (buttons, fields, sortable tables, progress bars, titles, panels), checks for what stops a window from opening or breaks its look, and a start test at the end of a task that opens the window, takes a picture of it for Copilot and closes it.
+- Cards while StreamHub runs something itself: the build, the type check, each tool check and the window test show as running, then their result.
+- The page check also reports a chart that draws nothing, a table with no rows and no empty-state message, an error message the page shows, and (as a warning) a page that scrolls sideways at phone width, naming what causes it.
+- A page or script that uses a data name no data file defines is reported, with the names that exist.
+- The project's own build and check tools at the end of a task, when they are installed: TypeScript (tsc), C# (dotnet build), Go (go vet), Java (javac) and PowerShell (PSScriptAnalyzer). Their errors go back to Copilot.
+
+### Fixed
+- The UI kit's period filter and icon toolbar wrap on narrow screens instead of making the page scroll sideways.
+
+## [v0.1.115] - 2026-10-09
+
+### Fixed
+- A page Copilot writes in one go is no longer refused when a script tag arrives damaged on the way (only `data/file.jsscript>` left of `<script src="data/file.js"></script>`): StreamHub puts the tag back and writes the page. Before, the refusal could send Copilot into workarounds.
+- A command that ends with exit code 0 but printed PowerShell errors now counts as failed, and the card and Copilot are told which error it was. Before, a script that broke halfway looked successful.
+- `DataTools.min` and `DataTools.max` work on date columns (the earliest and latest date, as stored) and on very long lists. Before, `max` of a date column gave nothing, which could stop a dashboard from loading. Projects get the new data tools by themselves.
+- Bars in a track are round at both ends again: bar lists, progress bars and status bars. Only bars drawn against a chart axis stay flat at the axis. Projects get it with the next kit update.
+
+### Added
+- Pages whose tags are written with stand-ins (such as `[[LT]]div>`) or escaped as a whole are reported and repaired into real tags; a script that generates a page with stand-ins is reported, and Copilot is told to write the page itself.
+- PowerShell code that calls `.Replace('text', [char]60)` (which Windows PowerShell rejects) is reported before it runs.
+- While StreamHub converts a data file for Copilot at the start of a request, the chat says which file and the waiting indicator shows it.
+
+## [v0.1.114] - 2026-10-09
+
+### Added
+- UI kit dashboard parts (Settings > UI kit > Dashboard parts): a side panel for row details, short confirmations (toasts), info tips, loading placeholders, trends on key figures ("+4.2% vs last month", coloured by whether it is good or bad), a filter for several values with search, a period filter (last 7 or 30 days, this week, month, quarter or year, custom dates), a search box over a table, a totals row, a fixed first column and a "Data as of" line (filled in by StreamHub for one-file pages).
+- More components (Settings > UI kit > More components): switch, dropdown menu, icon toolbar, avatars and avatar groups, breadcrumbs, stepper, collapsible sections, key and value list, timeline, sliders (also for a range), tag input, kanban board, calendar month, bento grid, changing loading text and a success check. The switch, menu, toolbar, avatars, bento grid and success check are adapted from kokonutui, on the kit's colours and with calm motion. On a phone the side panel opens from the bottom.
+- React versions of all of these for React projects.
+- Tailwind CSS (Settings > UI kit > Tailwind CSS): in a project that uses Tailwind, the kit's colours, sizes, corners and shadows become Tailwind names (bg-kit-accent, text-kit-muted, rounded-kit, p-kit-4 ...) that follow the colour preset; Copilot builds components from the kit and uses Tailwind only with those names, and Tailwind's own colours, made-up values, gradient text and blur are reported.
+- Charts: dashed target lines on bar, line and area charts, 100% stacked bars, and KitCharts.palette for code that draws its own charts. Every chart with more than one colour uses the preset's chart colours.
+- Print styles (Settings > UI kit > Print styles, Print page orientation): pages print cleanly, without buttons and filters, with panels and charts kept whole, in the light theme; a print button needs only data-kit-print.
+- Settings for the first day of the week (period filter, calendar) and for dark mode.
+- Guards for what a page shows: text with broken characters (such as "14-27 days") is found and repaired, a page without `<meta charset="utf-8">` gets it, and PowerShell scripts that read or write files without -Encoding are warned about. The page check in Edge also reports broken characters, a bar next to a percentage that does not fill to it, and a table whose columns cannot be sorted.
+- A look you ask for wins: when a follow-up asks to change how something looks (colour, size, corners, font, dark mode ...), Copilot does exactly that even where it differs from the kit, marks it, and keeps it in later work; the kit's look checks rest for that change.
+
+### Changed
+- Apps and dashboards are light only by default: no dark mode and no light/dark switch unless you ask for one, or choose it in Settings > UI kit > Dark mode in apps.
+- Every table can be sorted by its columns, also tables a script writes after the page loaded; a kit progress bar fills itself from aria-valuenow.
+- Chart bars are flat where they meet the axis (also in bar lists and in charts Copilot draws itself); progress and status bars are round at both ends.
+- Opening a project no longer converts its CSV and Excel files: that happens when a request needs them, and the open answers at once. Choose a project shows which project is opening.
+
+### Fixed
+- The kit's hidden chart data tables could make a page a little wider than the screen.
+
+## [v0.1.113] - 2026-10-09
+
+### Added
+- Project setup: when a new project's first request builds a page, dashboard, report or app without saying how, StreamHub first asks how to build it: one HTML file, separate files (styles, scripts, data), or let Copilot decide. A request that already says it ("in one file", "separate files") is followed without asking. The choice is kept for the project, goes with every task, and can be changed under Files > Project setup.
+- Live data: a project with data can follow a file outside the project, for example a CSV in a SharePoint folder synced by OneDrive. StreamHub only reads that file. It copies it into `Source/Live/` whenever it changes: when the project opens, when a task starts, once a minute while idle, and every time a page opened with Open app loads or reloads it. `Scripts/Refresh-Data.ps1` does the same while StreamHub is closed.
+- One-file pages: StreamHub fills the kit styles, kit scripts, icons and data into marked blocks of the page (`data-streamhub="kit"` and `data-streamhub="data"`), so the page works opened straight from disk. Copilot never sees or edits those blocks; the rest of the page is edited as usual.
+- Choose a project has a Refresh button that reads the projects folder again (names, sizes and file types).
+
+### Changed
+- File reads, search, file checks and code review leave out the blocks StreamHub fills in one-file pages; an edit that would change such a block is refused with an explanation.
+
+## [v0.1.112] - 2026-10-09
+
+### Added
+- UI kit bar lists and rings take colours by meaning on their items: `"color": "ok"`, `"warn"`, `"error"`, `"muted"`, `"accent"` or `"chart-1"` to `"chart-6"` (always kit colours; a colour of a page's own is not used). The legend follows the same colours.
+- Bar lists show each value with its share (`"share": true`, `"total"` for the share of something other than the sum) and draw a funnel with `"base": "first"` (every step against the first).
+- A bar chart can draw a series as a line over the bars (`"type": "line"`), on its own scale at the right with `"axis": "right"`: for example a running total next to the counts per date.
+- Key figures can carry their share as a bar under them (`kit-progress kit-figure__bar`, with `kit-progress--ok`, `--warn` or `--error`), and a list box that holds an active filter can show it (`kit-select is-active`).
+- Tables with thousands of rows: `data-kit-rows="external"` lets the kit draw the sort buttons and the pager while the page writes only the rows shown; `kit-table-wrap--scroll` keeps the header row in view while the table scrolls.
+- A light/dark switch in the UI kit: a button with `data-kit-theme` follows the computer's setting until clicked and remembers the choice.
+- Export the rows shown as CSV with `KitData.toCsv` and `KitData.download` (opens correctly in Excel).
+- The kit's examples page shows all of these: coloured bar lists with shares, a funnel, a ring with colours by meaning, a bar chart with a running total, key figures with bars, a 5,000-row table and the theme switch.
+
+### Changed
+- Copilot decides which data to show and in which form (any kind of chart, table or list, vertical bars included); with the UI kit on, the kit's rule only makes sure the chosen element looks like the kit, with the kit part for that form. The design rules no longer limit when a chart may be used either.
+- The UI kit check also reports a table, button, field, list box, text area or dialog written as markup inside a script (for example for innerHTML) without its kit class.
+
+### Fixed
+- Panel titles in the UI kit have their own size, instead of the browser's large heading size.
+- A project that has a whole copy of an older kit.css in `styles/kit/` gets the current one (with only the rules its pages use) when the kit is updated; a kit.css the project changed itself stays.
+
 ## [v0.1.111] - 2026-10-08
 
 ### Changed

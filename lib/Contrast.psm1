@@ -64,6 +64,11 @@ $script:TokenPairs = @(
     @('--kit-border-strong', '--kit-bg', 3.0, 'borders of fields and buttons on the page'),
     @('--kit-accent', '--kit-bg', 3.0, 'scrollbar handles on hover'),
     @('--kit-accent', '--kit-surface', 3.0, 'the focus and selected-tab marks'),
+    @('--kit-title', '--kit-surface', 4.5, 'titles on panels'),
+    @('--kit-title', '--kit-bg', 4.5, 'titles on the page'),
+    @('--kit-icon', '--kit-surface', 3.0, 'icons on panels'),
+    @('--kit-on-gradient', '--kit-gradient-from', 4.5, 'text on the band header (its light end)'),
+    @('--kit-on-gradient', '--kit-gradient-to', 4.5, 'text on the band header (its dark end)'),
     @('--kit-chart-1', '--kit-surface', 3.0, 'chart colour 1 on panels'),
     @('--kit-chart-2', '--kit-surface', 3.0, 'chart colour 2 on panels'),
     @('--kit-chart-3', '--kit-surface', 3.0, 'chart colour 3 on panels'),
@@ -105,7 +110,30 @@ function Test-TokenContrast([AllowEmptyString()][string]$Css) {
             $r = Get-ContrastRatio $t[$p[0]] $t[$p[1]]
             if ($null -ne $r -and $r -lt $p[2]) { "contrast ($mode): $($p[3]) is $($r):1 ($($p[0]) $($t[$p[0]]) on $($p[1]) $($t[$p[1]])); WCAG AA needs $($p[2]):1" }
         }
+        # Chart colours next to each other (a stacked bar, ring slices, a legend) must tell apart:
+        # clearly lighter or darker (1.4:1), or a different hue (60 degrees or more).
+        for ($i = 1; $i -lt 6; $i++) {
+            $a = $t["--kit-chart-$i"]; $b = $t["--kit-chart-$($i + 1)"]
+            if (-not $a -or -not $b) { continue }
+            $r = Get-ContrastRatio $a $b
+            $ha = Get-ColorHue $a; $hb = Get-ColorHue $b
+            if ($null -eq $r -or $null -eq $ha -or $null -eq $hb) { continue }
+            $dh = [Math]::Abs($ha - $hb); if ($dh -gt 180) { $dh = 360 - $dh }
+            if ($r -lt 1.4 -and $dh -lt 60) { "chart colours ($mode): --kit-chart-$i $a and --kit-chart-$($i + 1) $b look alike ($($r):1, $([int]$dh) degrees of hue apart); neighbouring series need 1.4:1 or 60 degrees" }
+        }
     }
+}
+
+function Get-ColorHue([string]$Css) {
+    <# The hue (0-360) of a CSS colour, or $null for a grey (no hue) or a value that is not a colour. #>
+    $c = ConvertFrom-CssColor $Css
+    if ($null -eq $c) { return $null }
+    $r = $c.r / 255; $g = $c.g / 255; $b = $c.b / 255
+    $max = [Math]::Max($r, [Math]::Max($g, $b)); $min = [Math]::Min($r, [Math]::Min($g, $b)); $d = $max - $min
+    if ($d -lt 0.08) { return $null }
+    $h = if ($max -eq $r) { (($g - $b) / $d) % 6 } elseif ($max -eq $g) { ($b - $r) / $d + 2 } else { ($r - $g) / $d + 4 }
+    $h = $h * 60; if ($h -lt 0) { $h += 360 }
+    $h
 }
 
 function Get-ContrastScript {

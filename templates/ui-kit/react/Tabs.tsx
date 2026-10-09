@@ -20,13 +20,21 @@ function useIndicator(index: number) {
   return { group, style: { width: box.width, transform: `translateX(${box.left}px)` } };
 }
 
-/** Tabs with a sliding underline. */
+/** Tabs with a sliding underline. The arrow keys, Home and End move between them (one tab stop). */
 export function Tabs({ tabs, value, onChange, label }: { tabs: string[]; value: number; onChange: (i: number) => void; label: string }) {
   const { group, style } = useIndicator(value);
+  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    const next = step ? (value + step + tabs.length) % tabs.length : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    onChange(next);
+    group.current?.querySelectorAll<HTMLButtonElement>("button")[next]?.focus();
+  };
   return (
-    <div aria-label={label} className="kit-tabs kit-tabs--animated" ref={group} role="tablist">
+    <div aria-label={label} className="kit-tabs kit-tabs--animated" onKeyDown={onKey} ref={group} role="tablist">
       {tabs.map((t, i) => (
-        <button aria-selected={i === value} className="kit-tab" key={t} onClick={() => onChange(i)} role="tab" type="button">
+        <button aria-selected={i === value} className="kit-tab" key={t} onClick={() => onChange(i)} role="tab" tabIndex={i === value ? 0 : -1} type="button">
           {t}
         </button>
       ))}

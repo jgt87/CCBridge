@@ -300,6 +300,19 @@ function Get-PromptPart {
             }
             # One-file project: the kit comes in through the page's own blocks, not through styles/kit/ files.
             if ("$($Context.Build)" -eq 'single') { $text += "`n- One-file page: the kit reaches the page through its data-streamhub=`"kit`" blocks (see the one-file rules), never through link or script tags to styles/kit/. Use the kit's classes, scripts, charts and icons the same way; the helper program puts what the page uses in the blocks. Change colours and sizes in styles/kit/tokens.css." }
+            if ("$($Context.Build)" -eq 'single') {
+                # The kit's files are not linked from a one-file page: every line that says so is reworded.
+                $text = $text.Replace(' Link tokens.css, then kit.css, before your own styles.', ' The kit block the helper program fills (data-streamhub="kit") brings tokens.css and kit.css into the page.')
+                $text = $text -replace ' \(styles/kit/kit\.js after the markup\)', '' -replace 'need styles/kit/kit\.js after the markup; ', '' -replace '\(styles/kit/kit\.js after the markup; see', '(see'
+                $text = $text.Replace('loaded by styles/kit/kit-icons.js (include it after the markup)', 'drawn by the kit block').Replace('styles/kit/kit-charts.js draws them', 'the kit block draws them')
+                $text = $text.Replace('load <script src="styles/kit/vendor/sqljs/sql-asm.js"></script> and <script src="styles/kit/kit-sql.js"></script> (in that order), then', 'the kit block brings the engine when the page calls KitSql; then')
+                $text = $text -replace '- Python in the page: <script src="styles/kit/kit-python\.js"></script>, then', '- Python in the page: not in a one-file page (it is opened from disk, and Python needs a served page); only on a served page,'
+                $text = $text.Replace('uses styles/kit/kit-data.js:', 'uses KitData (the kit block brings it):').Replace('styles/kit/kit-data.js (include it before your script). KitData.readFile', 'KitData (the kit block brings it). KitData.readFile')
+            }
+            if ($dark -eq 'light-only') {
+                # No dark values in this project's tokens: nothing is asked for dark.
+                $text = $text.Replace('they already pick readable colours for light and dark', 'they already pick readable colours').Replace('Keep text readable in light and dark (WCAG AA', 'Keep text readable (WCAG AA').Replace('; read them again on kit:theme', '')
+            }
             if (-not (Test-UiKitPart 'react' $AppRoot)) { $text = $text -replace ' In a React project use styles/kit/react/ instead:[^\n]*', '' -replace '; React: Chart from styles/kit/react/', '' -replace ' React: Icon from styles/kit/react/\.', '' -replace ' React: useFileData from styles/kit/react/\.', '' -replace ' and React parts come the same way', ' come the same way' -replace ', or an import from styles/kit/react/', '' }
             return $text
         }

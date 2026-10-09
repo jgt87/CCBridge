@@ -12,7 +12,7 @@ foreach ($m in 'Workspace') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") 
 $script:WarningPatterns = @(
     'only work from Python 3\.12', 'PowerShell 7 only', 'is not a comment in CSS', 'SCSS syntax', 'needs setlocal enabledelayedexpansion',
     'is not a command on this computer', 'duplicate (function|block|code)', 'appears twice', 'is defined twice',
-    'is not defined anywhere in the project', 'mixes CRLF and LF', 'overwrites the parameter', 'is an automatic variable', 'holds double quotes', 'stops the script here', 'arrives as one object', 'scrolls sideways by', 'without -Encoding', 'the comma binds first', 'loop variable .* overwrites the parameter', 'whose result is not checked', 'a list inside a list', 'is empty in Windows PowerShell 5.1', 'same name as the built-in cmdlet', 'ends up centred while the rest', 'is placed by coordinates', 'has its own Height', 'are off the width scale', 'so nothing lines them up', 'storage is not available where'
+    'is not defined anywhere in the project', 'mixes CRLF and LF', 'overwrites the parameter', 'is an automatic variable', 'holds double quotes', 'stops the script here', 'arrives as one object', 'scrolls sideways by', 'without -Encoding', 'the comma binds first', 'loop variable .* overwrites the parameter', 'whose result is not checked', 'a list inside a list', 'is empty in Windows PowerShell 5.1', 'same name as the built-in cmdlet', 'ends up centred while the rest', 'is placed by coordinates', 'has its own Height', 'are off the width scale', 'so nothing lines them up', 'storage is not available where', 'do not align the same way', 'a header cell of this table has a style'
 )
 
 function Get-Enforcement {

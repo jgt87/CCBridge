@@ -60,6 +60,11 @@ if (-not $NoPublish) {
     }
     if (-not (Invoke-Native 'gh' @('release', 'view', $Version, '--json', 'tagName')).code) { throw "Release $Version already exists on GitHub. Choose the next version." }
     if ($NotesFile -and -not (Test-Path -LiteralPath $NotesFile)) { throw "Notes file not found: $NotesFile" }
+    # Every version is in the changelog before it is released (the same notes, newest first).
+    $changelog = Join-Path $root 'CHANGELOG.md'
+    if (-not (Test-Path -LiteralPath $changelog) -or ([IO.File]::ReadAllText($changelog) -notmatch ('(?m)^## \[' + [regex]::Escape($Version) + '\]'))) {
+        throw "CHANGELOG.md has no entry for ${Version}: add '## [$Version] - $(Get-Date -Format yyyy-MM-dd)' with its Added / Changed / Fixed lines (the release notes), commit and push, then release."
+    }
 }
 
 $dist = Join-Path $root 'dist'

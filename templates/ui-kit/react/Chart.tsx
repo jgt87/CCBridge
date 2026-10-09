@@ -2,15 +2,15 @@
  * UI kit charts for React projects: draws with ../kit-charts.js (plain SVG on the kit's tokens),
  * needs only React. Design adapted from bklit-ui (MIT licence, see ../LICENSE-bklit-ui.txt).
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import "../kit-charts.js";
 
-type Kind = "bar" | "line" | "area" | "ring" | "gauge" | "heatmap" | "sparkline" | "barlist";
+type Kind = "bar" | "line" | "area" | "ring" | "gauge" | "heatmap" | "sparkline" | "barlist" | "scatter";
 
 /** What a click on a chart part picked (data.selectable): see kit-charts.js. */
 export type ChartPick = {
   chart: string;
-  part: "bar" | "arc" | "row" | "legend";
+  part: "bar" | "arc" | "row" | "legend" | "point";
   value: string;
   index: number;
   series?: string;
@@ -30,7 +30,8 @@ declare global {
  * barlist { items: [{ label, value, color }], limit, share, total, base: "first" (a funnel) },
  * where color is a meaning (ok, warn, error, muted, accent) or chart-1 ... chart-6,
  * gauge { value, max, label },
- * heatmap { rows, cols, values }, sparkline { values }. For filtering: data.selectable,
+ * heatmap { rows, cols, values }, sparkline { values },
+ * scatter { series: [{ name, points: [{ x, y, r, label }] }], xLabel, yLabel }. For filtering: data.selectable,
  * data.selected (labels), data.selectedSeries (series names) and onSelect.
  * label describes the chart for screen readers.
  */
@@ -48,9 +49,13 @@ export function Chart({
   onSelect?: (pick: ChartPick) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  // Drawn again only when the data itself changed, not when the parent rendered with an equal
+  // object literal (typing in a search box must not redraw every chart on the page).
+  const key = useMemo(() => JSON.stringify(data), [data]);
   useEffect(() => {
     if (host.current) window.KitCharts[kind](host.current, data);
-  }, [kind, data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, key]);
   useEffect(() => {
     const el = host.current;
     if (!el || !onSelect) return;

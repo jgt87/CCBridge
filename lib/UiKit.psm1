@@ -66,8 +66,8 @@ function Get-TailwindInfo([string]$ProjectRoot) {
     if ($c.root -eq $ProjectRoot -and ((Get-Date) - $c.at).TotalSeconds -lt 15) { return @{ on = $c.on; version = $c.version } }
     $on = $false; $v4 = $false
     $skip = '\\(node_modules|\.git|\.streamhub|dist|build|out|Source)\\'
-    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -ErrorAction SilentlyContinue -Include 'package.json', 'tailwind.config.*', '*.css', '*.html', '*.htm' |
-        Where-Object { $_.FullName -notmatch $skip -and $_.FullName -notmatch '\\styles\\kit\\' -and $_.Length -lt 1MB } | Select-Object -First 400)
+    $files = @(Get-KitScanFiles $ProjectRoot @('.json', '.js', '.cjs', '.mjs', '.ts', '.css', '.html', '.htm') -Max 100000 |
+        Where-Object { ($_.Name -eq 'package.json' -or $_.Name -like 'tailwind.config.*' -or $_.Extension -match '(?i)^\.(css|html?)$') -and $_.FullName -notmatch '\\styles\\kit\\' -and $_.Length -lt 1MB } | Select-Object -First 400)
     foreach ($f in $files) {
         $n = $f.Name.ToLowerInvariant()
         if ($n -like 'tailwind.config.*') { $on = $true; continue }
@@ -150,8 +150,8 @@ function Get-WpfThemeText {
 function Test-PsGuiProject([string]$ProjectRoot, [switch]$Forms) {
     <# The project has a PowerShell window app: a script that loads WPF or Windows Forms, or a .xaml file
        (-Forms: a script that uses Windows Forms). #>
-    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include *.ps1, *.psm1, *.xaml, *.csproj, *.xaml.cs -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch '\\(node_modules|\.git|\.streamhub|Source|styles\\kit)\\' -and $_.Name -notmatch '(?i)\.Tests\.ps1$' -and $_.Length -lt 1MB } | Select-Object -First 200)
+    $files = @(Get-KitScanFiles $ProjectRoot @('.ps1', '.psm1', '.xaml', '.csproj', '.cs') -Max 100000 |
+        Where-Object { $_.FullName -notmatch '\\styles\\kit\\' -and $_.Name -notmatch '(?i)\.Tests\.ps1$' -and ($_.Extension -ne '.cs' -or $_.Name -match '(?i)\.xaml\.cs$') -and $_.Length -lt 1MB } | Select-Object -First 200)
     # A .xaml next to a C# project (a .csproj or code-behind .xaml.cs) is a C#, Avalonia or MAUI
     # window, not a PowerShell one: only its scripts count.
     $csharp = @($files | Where-Object { $_.Name -match '(?i)\.(csproj|xaml\.cs)$' }).Count -gt 0
@@ -228,7 +228,49 @@ $script:Companions = @{
 }
 # The kit's revision: raise it when the kit changes in a way projects should get (new classes, chart
 # options the rules name). Update-UiKitCatalog brings an older project catalogue up to date.
-$script:KitRevision = 9
+$script:KitRevision = 10
+
+$script:ScanCache = @{ root = ''; at = [datetime]::MinValue; files = @() }
+$script:ScanSkip = '^(node_modules|dist|build|out|\.git|\.streamhub|Source)$'
+
+function Get-KitScanFiles {
+    <# The project's files of the given types (extensions with the dot, lower case) as FileInfo, from
+       one walk that never enters node_modules, build output, .git, .streamhub or Source/ (and skips
+       junctions). The list is kept for 5 seconds: a round asks for it several times, and a project
+       with a large node_modules folder took a second per walk. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Extensions = @(), [int]$Max = 3000)
+    $root = $ProjectRoot.TrimEnd('\')
+    $c = $script:ScanCache
+    # The list is kept only within one update of the kit (Update-UiKitProject holds it: nothing writes
+    # pages meanwhile); elsewhere every call walks, since a file written a moment ago must count.
+    if ($script:ScanHold -and $c.root -eq $root -and ((Get-Date) - $c.at).TotalSeconds -lt 30) { $all = $c.files }
+    else {
+        $list = New-Object System.Collections.Generic.List[object]
+        $stack = New-Object System.Collections.Generic.Stack[string]
+        if (Test-Path -LiteralPath $root -PathType Container) { $stack.Push($root) }
+        while ($stack.Count -and $list.Count -lt 20000) {
+            $d = $stack.Pop()
+            try { $files = [IO.Directory]::GetFiles($d); $dirs = [IO.Directory]::GetDirectories($d) } catch { continue }
+            foreach ($p in $files) { $list.Add((New-Object IO.FileInfo $p)) }
+            foreach ($sub in $dirs) {
+                if ((Split-Path $sub -Leaf) -match $script:ScanSkip) { continue }
+                try { if (([IO.File]::GetAttributes($sub) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue } } catch { continue }
+                $stack.Push($sub)
+            }
+        }
+        $all = $list.ToArray()
+        $script:ScanCache = @{ root = $root; at = (Get-Date); files = $all }
+    }
+    $exts = @($Extensions | ForEach-Object { $_.ToLowerInvariant() })
+    @($all | Where-Object { -not $exts.Count -or $exts -contains $_.Extension.ToLowerInvariant() } | Select-Object -First $Max)
+}
+
+function Clear-KitScanCache { $script:ScanCache = @{ root = ''; at = [datetime]::MinValue; files = @() }; $script:ScanHold = $false }
+function Set-KitScanHold([bool]$On) {
+    <# While on, the scans share one walk (an update of the kit asks several times); off again after it. #>
+    Clear-KitScanCache
+    $script:ScanHold = $On
+}
 $script:KitCssHeader = '/* Generated by the helper program from the UI kit (.streamhub/ui-kit/kit.css): the rules of the kit classes this project uses, nothing else.'
 
 function Get-UiKitFiles([string]$AppRoot) {
@@ -378,6 +420,7 @@ function Install-UiKit {
        styles/kit/tokens.css as the project's own colours and sizes, and from then on only what the
        pages use (Update-UiKitProject). Returns the styles/kit paths added. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$AppRoot)
+    Clear-KitScanCache   # files written since the last look count
     $src = Join-Path $AppRoot 'templates\ui-kit'
     $cat = Join-Path $ProjectRoot (Get-UiKitCatalog).Replace('/', '\')
     $parts = @(Get-UiKitParts $AppRoot)
@@ -434,8 +477,7 @@ function Find-UnlinkedKitTokens {
     $root = $ProjectRoot.TrimEnd('\')
     $rels = @($Paths | ForEach-Object { "$_".Replace('\', '/') })
     if (-not @($rels | Where-Object { $_ -match '(?i)\.(html?|css|scss|less)$' }).Count) { return }
-    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Include *.html, *.htm, *.css, *.scss, *.less, *.js, *.mjs, *.jsx, *.ts, *.tsx -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch '\\(node_modules|dist|build|\.git|\.streamhub)\\' -and $_.Length -lt 2MB } | Select-Object -First 3000)
+    $files = @(Get-KitScanFiles $root @('.html', '.htm', '.css', '.scss', '.less', '.js', '.mjs', '.jsx', '.ts', '.tsx') | Where-Object { $_.Length -lt 2MB })
     $text = @{}
     foreach ($f in $files) { $text[$f.FullName.Substring($root.Length + 1).Replace('\', '/')] = try { [IO.File]::ReadAllText($f.FullName) } catch { '' } }
     # Imported from code or another stylesheet (a bundler loads it): counts for every page.
@@ -471,8 +513,15 @@ function Get-KitUsage([string]$ProjectRoot) {
     $classes = New-Object 'System.Collections.Generic.HashSet[string]'
     $prefixes = New-Object 'System.Collections.Generic.HashSet[string]'
     $refs = New-Object 'System.Collections.Generic.HashSet[string]'
-    $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Include *.html, *.htm, *.js, *.mjs, *.cjs, *.jsx, *.ts, *.tsx, *.vue, *.svelte, *.css, *.scss -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch '\\(node_modules|dist|build|\.git|\.streamhub)\\' -and $_.Length -lt 2MB } | Select-Object -First 3000)
+    $files = @(Get-KitScanFiles $root @('.html', '.htm', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.vue', '.svelte', '.css', '.scss', '.less', '.cshtml', '.razor', '.astro', '.php', '.ejs', '.hbs', '.njk', '.pug', '.ps1', '.py') | Where-Object { $_.Length -lt 2MB })
+    # Classes the kit's own scripts write at run time (a pager, a toast, a tip bubble) count only when
+    # a page has the part that makes them: kit-FAMILY classes from a kit script need the page to use
+    # kit-FAMILY itself, or its hook (data-kit-HOOK, KitUI.HOOK, KitCharts).
+    $hooks = New-Object 'System.Collections.Generic.HashSet[string]'
+    $fromKit = New-Object System.Collections.Generic.List[object]
+    $kitHooks = @{ pager = @('pages'); toasts = @('toast'); toast = @('toast'); tip = @('tip'); multi = @('multi'); range = @('range'); segmented = @('range'); search = @('search'); drop = @('drop');
+        tags = @('tags'); board = @('board'); calendar = @('calendar'); avatar = @('avatar'); avatars = @('avatar'); 'slider-range' = @('slider-range'); slider = @('slider-range'); iconbar = @('iconbar');
+        menu = @('menu'); chart = @('chart'); barlist = @('chart'); empty = @('chart'); icon = @('icon'); table = @('sort', 'pages', 'filter'); btn = @('multi', 'calendar', 'chart', 'range', 'pages'); input = @('multi', 'range', 'tags'); tabs = @('tabs'); progress = @('progress') }
     foreach ($f in $files) {
         $rel = $f.FullName.Substring($root.Length + 1).Replace('\', '/')
         $inKit = $rel.StartsWith("$kitDir/", [StringComparison]::OrdinalIgnoreCase)
@@ -481,10 +530,46 @@ function Get-KitUsage([string]$ProjectRoot) {
         if ($t -notmatch 'kit') { continue }
         foreach ($m in [regex]::Matches($t, '(?<![\w-])kit-[A-Za-z0-9_-]+')) {
             $v = $m.Value
+            if ($inKit) { $fromKit.Add(@{ token = $v; file = $rel }); continue }
             if ($v -match '[-_]$') { [void]$prefixes.Add($v) } else { [void]$classes.Add($v) }
         }
-        if ($inKit) { continue }
+        if ($inKit) {
+            # A React part brings hooks of its own (Chart.tsx draws with KitCharts): counted once a page imports it.
+            if ($rel -match '(?i)^styles/kit/react/([\w-]+)\.') {
+                $partHooks = @([regex]::Matches($t, 'data-kit-([a-z][a-z-]*)') | ForEach-Object { $_.Groups[1].Value }) + @(if ($t -match 'KitCharts[\.\[]') { 'chart' }) + @([regex]::Matches($t, 'KitUI\.(\w+)') | ForEach-Object { $_.Groups[1].Value })
+                $fromKit.Add(@{ token = ''; file = $rel; hooks = @($partHooks) })
+            }
+            continue
+        }
+        foreach ($m in [regex]::Matches($t, 'data-kit-([a-z][a-z-]*)')) { [void]$hooks.Add($m.Groups[1].Value) }
+        foreach ($m in [regex]::Matches($t, 'KitUI\.(\w+)')) { [void]$hooks.Add($m.Groups[1].Value) }
+        if ($t -match 'KitCharts[\.\[]') { [void]$hooks.Add('chart') }
+        if ($t -match 'KitIcons\.') { [void]$hooks.Add('icon') }
+        if ($t -match 'kit-(tabs|segmented)--animated') { [void]$hooks.Add('tabs') }
         foreach ($m in [regex]::Matches($t, '(?i)styles/kit/([\w./-]+?)(?=["''`?#)\s;,]|$)')) { [void]$refs.Add($m.Groups[1].Value) }
+    }
+    $pageList = @($classes) + @($prefixes)
+    $reactIn = {
+        param($file)
+        if ($file -notmatch '(?i)^styles/kit/react/([\w-]+)\.') { return $false }
+        $re = '(?i)^react/' + [regex]::Escape($Matches[1]) + '(\.\w+)?$'
+        @($refs | Where-Object { $_ -match $re }).Count -gt 0
+    }
+    # The hooks of the React parts a page imports count like the page's own.
+    foreach ($k in @($fromKit | Where-Object { $_.hooks })) { if (& $reactIn $k.file) { foreach ($h in $k.hooks) { [void]$hooks.Add($h) } } }
+    foreach ($k in @($fromKit | Where-Object { $_.token })) {
+        $v = $k.token
+        $keep = $false
+        if ($k.file -match '(?i)^styles/kit/react/') {
+            # A React part: its classes count when a page imports that part.
+            $keep = & $reactIn $k.file
+        } else {
+            $family = ($v -replace '^kit-', '') -replace '(__|--).*$', ''
+            $keep = @($pageList | Where-Object { $_ -eq "kit-$family" -or $_.StartsWith("kit-$family-") -or $_.StartsWith("kit-" + $family + "_") }).Count -gt 0
+            if (-not $keep -and $kitHooks.ContainsKey($family)) { $keep = @($kitHooks[$family] | Where-Object { $hooks.Contains($_) }).Count -gt 0 }
+        }
+        if (-not $keep) { continue }
+        if ($v -match '[-_]$') { [void]$prefixes.Add($v) } else { [void]$classes.Add($v) }
     }
     @{ classes = $classes; prefixes = @($prefixes); refs = @($refs) }
 }
@@ -638,7 +723,10 @@ function Select-KitCss {
     }
     $text = $out -join "`n"
     # Kept when a kept rule names them, or a page or kit script does (an animation set from code).
-    foreach ($f in $frames) { if ($Usage.classes.Contains($f.name) -or $text -match ('(?<![\w-])' + [regex]::Escape($f.name) + '(?![\w-])')) { $out.Add($f.text) } }
+    foreach ($f in $frames) {
+        $byPrefix = @($Usage.prefixes | Where-Object { $_ -and $f.name.StartsWith($_) }).Count -gt 0
+        if ($Usage.classes.Contains($f.name) -or $byPrefix -or $text -match ('(?<![\w-])' + [regex]::Escape($f.name) + '(?![\w-])')) { $out.Add($f.text) }
+    }
     $out -join "`n"
 }
 
@@ -677,6 +765,8 @@ function Update-UiKitProject {
        every kit file a page or script refers to (styles/kit/FILE) copied with what it needs, and the
        icons the pages use (kit-icons.js). Returns @{ added; updated; unknown (icons) }. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$AppRoot)
+    Set-KitScanHold $true   # one walk for every scan of this update (nothing writes pages meanwhile)
+    try {
     $kit = Join-Path $ProjectRoot (Get-UiKitFolder).Replace('/', '\')
     $added = New-Object System.Collections.Generic.List[string]
     $updated = New-Object System.Collections.Generic.List[string]
@@ -708,8 +798,9 @@ function Update-UiKitProject {
     }
     $before = $added.Count
     . $copyQueued
-    # Kit scripts just copied add markup of their own: their classes count too.
-    if ($added.Count -gt $before) { $usage = Get-KitUsage $ProjectRoot }
+    # Kit scripts just copied add markup of their own: their classes count too (a fresh walk: the
+    # held list is from before the copies).
+    if ($added.Count -gt $before) { Set-KitScanHold $true; $usage = Get-KitUsage $ProjectRoot }
     # The stylesheet: only the rules in use.
     $cssSrc = Get-KitFileSource $ProjectRoot $AppRoot 'kit.css'
     $cssFile = Join-Path $kit 'kit.css'
@@ -745,6 +836,7 @@ function Update-UiKitProject {
     # A PowerShell window app (WPF): the kit's theme with the project's colours.
     foreach ($wp in @(Update-KitWpf $ProjectRoot $AppRoot)) { $added.Add($wp) }
     @{ added = $added.ToArray(); updated = $updated.ToArray(); unknown = $unknown }
+    } finally { Set-KitScanHold $false }
 }
 
 # Icons every project gets (common interface icons); the others come when a page uses them.
@@ -770,15 +862,20 @@ function Get-LucideIcons([string]$AppRoot) {
     $script:IconCache
 }
 
-function Find-UsedIcons([string]$ProjectRoot) {
-    <# Icon names the project's pages and code use: data-kit-icon="NAME", <Icon name="NAME">, KitIcons.svg('NAME'). #>
+function Find-UsedIcons([string]$ProjectRoot, $Known = $null) {
+    <# Icon names the project's pages and code use: data-kit-icon="NAME", <Icon name="NAME">, KitIcons.svg('NAME'),
+       and names set from code; with -Known (the Lucide set) also every quoted known name in a file that uses icons. #>
     $names = New-Object 'System.Collections.Generic.HashSet[string]'
-    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include *.html, *.htm, *.js, *.mjs, *.jsx, *.ts, *.tsx, *.vue, *.svelte -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch '\\(node_modules|dist|build|\.git|\.streamhub|styles\\kit)\\' -and $_.Length -lt 2MB } | Select-Object -First 3000)
+    $files = @(Get-KitScanFiles $ProjectRoot @('.html', '.htm', '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.vue', '.svelte', '.cshtml', '.razor', '.astro', '.php', '.ejs', '.hbs', '.njk', '.pug', '.ps1', '.py') |
+        Where-Object { $_.FullName -notmatch '\\styles\\kit\\' -and $_.Length -lt 2MB })
     foreach ($f in $files) {
         $t = try { [IO.File]::ReadAllText($f.FullName) } catch { '' }
-        if ($t -notmatch 'kit-icon|<Icon|KitIcons') { continue }
-        foreach ($m in [regex]::Matches($t, '(?:data-kit-icon\s*=\s*|<Icon\b[^>]*?\bname\s*=\s*|KitIcons\.svg\(\s*)["'']([a-z0-9-]+)["'']')) { [void]$names.Add($m.Groups[1].Value) }
+        if ($t -notmatch 'kit-icon|kitIcon|<Icon|KitIcons') { continue }
+        # In markup, and chosen in code: setAttribute("data-kit-icon", NAME), el.dataset.kitIcon = NAME,
+        # { icon: NAME } in data, <Icon name={ok ? NAME : NAME}>.
+        foreach ($m in [regex]::Matches($t, '(?:data-kit-icon\s*=\s*|<Icon\b[^>]*?\bname\s*=\s*|KitIcons\.svg\(\s*|["'']data-kit-icon["'']\s*,\s*|dataset\.kitIcon\s*=\s*|\bicon\s*:\s*)["'']([a-z0-9-]+)["'']')) { [void]$names.Add($m.Groups[1].Value) }
+        foreach ($m in [regex]::Matches($t, '<Icon\b[^>]*?\bname=\{([^}]*)\}')) { foreach ($q in [regex]::Matches($m.Groups[1].Value, '["'']([a-z0-9-]+)["'']')) { [void]$names.Add($q.Groups[1].Value) } }
+        if ($Known) { foreach ($q in [regex]::Matches($t, '["'']([a-z][a-z0-9-]{2,})["'']')) { if ($Known.ContainsKey($q.Groups[1].Value)) { [void]$names.Add($q.Groups[1].Value) } } }
     }
     @($names)
 }
@@ -809,7 +906,7 @@ function Update-KitIcons {
     $exists = Test-Path -LiteralPath $file
     if (-not $exists -and -not $Create) { return @{ written = $false; created = $false; count = 0; unknown = @() } }
     $lib = Get-LucideIcons $AppRoot
-    $used = @(Find-UsedIcons $ProjectRoot)
+    $used = @(Find-UsedIcons $ProjectRoot $lib.icons)
     $unknown = @($used | Where-Object { -not $lib.icons.ContainsKey($_) } | ForEach-Object { @{ name = $_; like = @(Get-IconSuggestions $_ $lib.icons) } })
     $names = @(@($script:BaseIcons) + $used | Where-Object { $lib.icons.ContainsKey($_) } | Sort-Object -Unique)
     $text = Get-KitIconsText $AppRoot $used
@@ -827,11 +924,11 @@ function Test-ReactProject([string]$ProjectRoot) {
     <# A React project: package.json names react, or the project has .jsx / .tsx files. #>
     $pkg = Join-Path $ProjectRoot 'package.json'
     if ((Test-Path -LiteralPath $pkg) -and ([IO.File]::ReadAllText($pkg) -match '"react"\s*:')) { return $true }
-    [bool]@(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include *.jsx, *.tsx -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\(node_modules|dist|build|styles\\kit|\.streamhub)\\' } | Select-Object -First 1).Count
+    [bool]@(Get-KitScanFiles $ProjectRoot @('.jsx', '.tsx') -Max 100000 | Where-Object { $_.FullName -notmatch '\\styles\\kit\\' } | Select-Object -First 1).Count
 }
 
 function Test-UiKitInProject([string]$ProjectRoot) {
     Test-Path -LiteralPath (Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css'))
 }
 
-Export-ModuleMember -Function Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder
+Export-ModuleMember -Function Get-KitScanFiles, Clear-KitScanCache, Set-KitScanHold, Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder

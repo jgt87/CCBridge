@@ -182,7 +182,7 @@ function Get-KitBlockTexts {
     if ($hasCat) {
         $want = [ordered]@{
             'kit-icons.js'  = ($page -match 'data-kit-icon|KitIcons\.')
-            'kit.js'        = ($page -match 'data-kit-(sort|pages|rows|hold|search|drop|theme|open|multi|range|filter|tip|stamp|print|menu|iconbar|avatar|slider-range|tags|board|calendar|cycle)|KitUI\.|kit-(tabs|segmented)--animated|kit-progress[^>]*aria-valuenow|aria-valuenow[^>]*kit-progress')
+            'kit.js'        = ($page -match 'data-kit-(sort|pages|rows|hold|search|drop|theme|open|close|multi|range|filter|tip|stamp|print|menu|iconbar|avatar|slider-range|tags|board|calendar|cycle|shell-menu|select|bulk)|KitUI\.|kit-(tabs|segmented)--animated|kit-progress[^>]*aria-valuenow|aria-valuenow[^>]*kit-progress')
             'kit-charts.js' = ($page -match 'KitCharts\.|data-kit-chart')
             'kit-data.js'   = ($page -match 'KitData\.')
             # SQL in the page: the engine first, then the kit's helper (Python needs a served page, so not here).
@@ -219,8 +219,8 @@ function Get-KitBlockTexts {
 function Get-OneFilePages([string]$ProjectRoot) {
     # The project's pages with a block the helper program writes (one-file pages).
     $root = $ProjectRoot.TrimEnd('\')
-    @(Get-ChildItem -LiteralPath $root -Recurse -File -Include *.html, *.htm -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName.Substring($root.Length) -notmatch '(?i)\\(node_modules|dist|build|\.git|\.streamhub|Source|styles\\kit)\\' -and $_.Length -lt 100MB } |
+    @(Get-KitScanFiles $root @('.html', '.htm') -Max 100000 |
+        Where-Object { $_.FullName -notmatch '(?i)\\styles\\kit\\' -and $_.Length -lt 100MB } |
         ForEach-Object { $_.FullName } | Where-Object {
             $sr = New-Object IO.StreamReader($_)
             try { $found = $false; while (-not $sr.EndOfStream -and -not $found) { if ($sr.ReadLine() -match 'data-streamhub') { $found = $true } }; $found } finally { $sr.Dispose() }

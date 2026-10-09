@@ -233,8 +233,8 @@ Describe 'The kit charts' {
         $js = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-charts.js'))
         foreach ($k in 'bar', 'line', 'area', 'ring', 'gauge', 'heatmap', 'sparkline') { $js | Should Match ("\b" + $k + "\b") }
         $js | Should Match 'kit-chart__table'
-        $js | Should Match 'role: "img"'
-        [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md')) | Should Match 'data-kit-chart="bar\|line\|area\|ring\|gauge\|heatmap\|sparkline\|barlist"'
+        $js | Should Match 'role: picks \? "group" : "img"'   # an image, or a group when its parts are buttons
+        [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md')) | Should Match 'data-kit-chart="bar\|line\|area\|ring\|gauge\|heatmap\|sparkline\|barlist\|scatter"'
     }
     It 'stack bars, list categories, show ring values and filter on a click, with the CSS for each' {
         $js = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-charts.js'))

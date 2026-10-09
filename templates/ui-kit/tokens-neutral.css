@@ -5,10 +5,14 @@
 */
 :root {
   color-scheme: light;   /* the browser draws its own parts (scrollbars, pickers) to match */
-  --kit-gradient: linear-gradient(45deg, #5a5f66 0%, #1f2328 100%);
+  --kit-gradient-from: #5a5f66;
+  --kit-gradient-to: #1f2328;
+  --kit-gradient: linear-gradient(45deg, var(--kit-gradient-from) 0%, var(--kit-gradient-to) 100%);
   --kit-on-gradient: #ffffff;
 
   --kit-accent: #1f2328;
+  --kit-title: #1f2328;
+  --kit-icon: #1f2328;
   --kit-accent-hover: #3a3f45;
   --kit-accent-soft: #ececee;
   --kit-on-accent: #ffffff;
@@ -40,6 +44,7 @@
      case ("Totals", not "TOTALS"). */
   --kit-font: Arial, "Helvetica Neue", Helvetica, "Segoe UI", system-ui, sans-serif;
   --kit-font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  --kit-text-2xs: 0.6875rem;
   --kit-text-xs: 0.75rem;
   --kit-text-sm: 0.875rem;
   --kit-text-md: 1rem;
@@ -64,18 +69,25 @@
   --kit-page-width: 1200px;
   --kit-page-pad: 1.5rem;
 
+  --kit-radius-sm: 4px;
   --kit-radius: 6px;
   --kit-radius-lg: 10px;
   --kit-shadow: 0 1px 2px rgba(20, 20, 30, 0.06), 0 2px 8px rgba(20, 20, 30, 0.06);
-  --kit-focus: 0 0 0 3px rgba(31, 35, 40, 0.3);
+  --kit-backdrop: rgba(10, 10, 20, 0.4);
+  --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);
   --kit-speed: 140ms;
+  --kit-speed-slow: 280ms;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --kit-gradient: linear-gradient(45deg, #5a5f66 0%, #2b2f34 100%);
+    --kit-gradient-to: #2b2f34;
     --kit-accent: #e6e6e6;
+  --kit-title: #ededee;
+  --kit-icon: #ededee;
+    --kit-title: #ededee;
+    --kit-icon: #ededee;
     --kit-accent-hover: #ffffff;
     --kit-accent-soft: #2e3034;
     --kit-on-accent: #1f2328;
@@ -93,20 +105,22 @@
     --kit-error: #f07a6e;
     --kit-error-soft: #321a18;
     --kit-chart-1: #56b4e9;
-    --kit-chart-2: #2bb68a;
-    --kit-chart-3: #e69f00;
-    --kit-chart-4: #f07a3a;
-    --kit-chart-5: #d48ab8;
+    --kit-chart-2: #f07a3a;
+    --kit-chart-3: #2bb68a;
+    --kit-chart-4: #d48ab8;
+    --kit-chart-5: #e69f00;
     --kit-chart-6: #b8bec6;
     --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
-    --kit-focus: 0 0 0 3px rgba(230, 230, 230, 0.35);
+    --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --kit-gradient: linear-gradient(45deg, #5a5f66 0%, #2b2f34 100%);
+  --kit-gradient-to: #2b2f34;
   --kit-accent: #e6e6e6;
+  --kit-title: #ededee;
+  --kit-icon: #ededee;
   --kit-accent-hover: #ffffff;
   --kit-accent-soft: #2e3034;
   --kit-on-accent: #1f2328;
@@ -124,11 +138,11 @@
   --kit-error: #f07a6e;
   --kit-error-soft: #321a18;
   --kit-chart-1: #56b4e9;
-  --kit-chart-2: #2bb68a;
-  --kit-chart-3: #e69f00;
-  --kit-chart-4: #f07a3a;
-  --kit-chart-5: #d48ab8;
+  --kit-chart-2: #f07a3a;
+  --kit-chart-3: #2bb68a;
+  --kit-chart-4: #d48ab8;
+  --kit-chart-5: #e69f00;
   --kit-chart-6: #b8bec6;
   --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
-  --kit-focus: 0 0 0 3px rgba(230, 230, 230, 0.35);
+  --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);
 }

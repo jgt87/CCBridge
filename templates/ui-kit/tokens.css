@@ -11,6 +11,11 @@
   color-scheme: light;   /* the browser draws its own parts (scrollbars, pickers) to match */
   /* The palette. Accent */
   --kit-palette-blue: #10069f;
+  /* Shades of the blue (1 lightest .. 3 nearest the base): a second blue where one blue is not
+     enough (a selected row against a hovered one, the steps of a stepper); all read 9:1 and up on white. */
+  --kit-palette-blue-1: #1709e9;
+  --kit-palette-blue-2: #1508d0;
+  --kit-palette-blue-3: #1207b8;
   --kit-palette-light-blue: #00a3e0;
   /* Basics */
   --kit-palette-white: #ffffff;
@@ -28,6 +33,10 @@
   /* Variations (1 lighter, 2 darker) */
   --kit-palette-light-blue-1: #50c0e6;
   --kit-palette-light-blue-2: #0089b7;
+  /* Vivid blues between the blue and the light blue (3 nearest the blue .. 5 lightest); 5.9:1 and up on white. */
+  --kit-palette-light-blue-3: #2011f6;
+  --kit-palette-light-blue-4: #3224f7;
+  --kit-palette-light-blue-5: #4337f7;
   --kit-palette-teal-1: #55d1c9;
   --kit-palette-teal-2: #119d97;
   --kit-palette-green-1: #80c572;
@@ -44,8 +53,11 @@
   --kit-palette-magenta-2: #ba1b7b;
   --kit-palette-violet-1: #a473be;
   --kit-palette-violet-2: #6b2c89;
-  /* The one allowed gradient: light blue to blue, from bottom left to top right. */
-  --kit-gradient: linear-gradient(45deg, #00a3e0 0%, #10069f 100%);
+  /* The one allowed gradient: light blue to blue, from bottom left to top right. Its light end is a
+     darker light blue (derived), so white text reads on every part of it (4.5:1). */
+  --kit-gradient-from: #007fa9;
+  --kit-gradient-to: #10069f;
+  --kit-gradient: linear-gradient(45deg, var(--kit-gradient-from) 0%, var(--kit-gradient-to) 100%);
   --kit-on-gradient: #ffffff;
 
   /* Accent: primary blue for main buttons, links, focus and the selected tab. */
@@ -54,6 +66,11 @@
   --kit-accent-soft: #e5f6fc;           /* derived: light blue, very light */
   --kit-on-accent: #ffffff;
   --kit-accent-2: #00a3e0;              /* secondary: decoration, the gradient, highlights */
+  /* Tints of the accent for surfaces (the accent at 8, 16 and 32 % over the surface): a hovered row,
+     a selected row, a picked chip; text on them stays --kit-text. */
+  --kit-accent-tint-1: color-mix(in srgb, var(--kit-accent) 8%, var(--kit-surface));
+  --kit-accent-tint-2: color-mix(in srgb, var(--kit-accent) 16%, var(--kit-surface));
+  --kit-accent-tint-3: color-mix(in srgb, var(--kit-accent) 32%, var(--kit-surface));
 
   /* Neutrals */
   --kit-bg: #f5f5f6;                    /* derived: light grey, very light */
@@ -63,6 +80,9 @@
   --kit-border-strong: #5a5b5e;         /* dark grey: edges of fields and buttons */
   --kit-text: #000000;
   --kit-text-muted: #5a5b5e;
+  /* Titles (kit-h1 to h3, panel titles) and icons in the blue; on a blue surface the kit makes them white. */
+  --kit-title: #10069f;
+  --kit-icon: #10069f;
 
   /* Status colours: for status only, never decoration. */
   --kit-ok: #187623;                    /* derived: green var2, darker for text */
@@ -72,11 +92,14 @@
   --kit-error: #c50e16;
   --kit-error-soft: #fde8e8;
 
-  /* Chart series colours, in this order (kit-charts.js); each stands out 3:1 from the panels. */
-  --kit-chart-1: #10069f;
-  --kit-chart-2: #0089b7;
-  --kit-chart-3: #119d97;
-  --kit-chart-4: #d04a1e;
+  /* Chart series colours, in this order (kit-charts.js): the first is the light blue #019adc (bars on a white panel,
+     3.15:1; the palette's own #00a3e0 would not reach 3:1), the
+     dark blue comes third; neighbours differ in hue, so two series next to each other never read as
+     one colour. */
+  --kit-chart-1: #019adc;
+  --kit-chart-2: #d04a1e;
+  --kit-chart-3: #10069f;
+  --kit-chart-4: #119d97;
   --kit-chart-5: #df1995;
   --kit-chart-6: #8021a7;
 
@@ -84,6 +107,7 @@
      case ("Totals", not "TOTALS"). */
   --kit-font: Arial, "Helvetica Neue", Helvetica, "Segoe UI", system-ui, sans-serif;
   --kit-font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  --kit-text-2xs: 0.6875rem;            /* the smallest: chart axis labels, tiny marks */
   --kit-text-xs: 0.75rem;
   --kit-text-sm: 0.875rem;
   --kit-text-md: 1rem;
@@ -108,16 +132,22 @@
   --kit-page-width: 1200px;
   --kit-page-pad: 1.5rem;
 
+  --kit-radius-sm: 4px;
   --kit-radius: 6px;
   --kit-radius-lg: 10px;
   --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.06);
-  --kit-focus: 0 0 0 3px rgba(0, 163, 224, 0.45);
+  --kit-backdrop: rgba(10, 10, 20, 0.4);
+  /* Focus: a solid ring in the accent with a gap in the surface colour, visible on any background. */
+  --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);
   --kit-speed: 140ms;
+  --kit-speed-slow: 280ms;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
+    --kit-title: #ffffff;
+    --kit-icon: #ffffff;
     --kit-accent: #00a3e0;               /* light blue: the blue is too dark on a dark page */
     --kit-accent-hover: #50c0e6;
     --kit-accent-soft: #18163d;          /* derived: blue over the dark surface */
@@ -136,18 +166,20 @@
     --kit-error: #f25052;
     --kit-error-soft: #2e1a1b;
     --kit-chart-1: #00a3e0;
-    --kit-chart-2: #00bfb3;
+    --kit-chart-2: #ff6a13;
     --kit-chart-3: #43b02a;
-    --kit-chart-4: #ff6a13;
-    --kit-chart-5: #e565b3;
+    --kit-chart-4: #e565b3;
+    --kit-chart-5: #00bfb3;
     --kit-chart-6: #a473be;
     --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
-    --kit-focus: 0 0 0 3px rgba(0, 163, 224, 0.5);
+    --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --kit-title: #ffffff;
+  --kit-icon: #ffffff;
   --kit-accent: #00a3e0;
   --kit-accent-hover: #50c0e6;
   --kit-accent-soft: #18163d;
@@ -166,11 +198,11 @@
   --kit-error: #f25052;
   --kit-error-soft: #2e1a1b;
   --kit-chart-1: #00a3e0;
-  --kit-chart-2: #00bfb3;
+  --kit-chart-2: #ff6a13;
   --kit-chart-3: #43b02a;
-  --kit-chart-4: #ff6a13;
-  --kit-chart-5: #e565b3;
+  --kit-chart-4: #e565b3;
+  --kit-chart-5: #00bfb3;
   --kit-chart-6: #a473be;
   --kit-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
-  --kit-focus: 0 0 0 3px rgba(0, 163, 224, 0.5);
+  --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);
 }

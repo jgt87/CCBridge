@@ -328,7 +328,11 @@ $script:RadiusPattern = '(?i)\bborder-?(top-?|bottom-?)?(left-?|right-?)?radius\
 # An emoji (pictographs, symbols, dingbats, arrows) as the first content of a button, heading, label, link or option.
 $script:EmojiIconPattern = '(?i)<(button|h[1-6]|label|th|a|summary|legend|option)\b[^>]*>[^<]*?([\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2B05-\u2B07\u2B50\u2B55])'
 # Colours in scripts: a string that is only a colour (chart settings, canvas fills, inline styles).
-$script:ScriptColorPattern = '(?i)["''`]\s*(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]*\)|hsla?\([^)]*\))\s*["''`]|["''`]\s*(hsla?|rgba?)\(\s*["''`]\s*\+'   # also a palette put together: 'hsl(' + h + ...
+$script:ScriptColorPattern = '(?i)["''`]\s*(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]*\)|hsla?\([^)]*\))\s*["''`]|["''`]\s*(hsla?|rgba?)\(\s*["''`]\s*\+'   # also a palette put together: 'hsl(' + h
+# A "#abc" string that is a selector or an anchor, not a colour (querySelector("#fab"), href="#add").
+$script:SelectorStringPattern = '(?i)(querySelector(All)?|getElementById|closest|matches|\$|href\s*=|hash\s*=)\s*\(?\s*["''`]#'
+# Colours set from a script: canvas fills, style properties, a CSS-in-JS declaration (styled.button`color: #fff`).
+$script:CodeColorPattern = '(?i)\b(fillStyle|strokeStyle|shadowColor|style\.\w+|backgroundColor|borderColor|color|background(-color)?|border(-color)?|fill|stroke|stop-color)\s*[:=]\s*["''`]?\s*(#[0-9a-f]{3,8}\b|rgba?\(|hsla?\()'
 
 function Find-UiSlop {
     <# Interface patterns that make a page look generated, on the lines a change adds to a style,
@@ -379,8 +383,8 @@ function Find-UiSlop {
                 else { "line ${n}: an emoji used as an icon (in a button, heading, label or link); emoji look different on every system and screen readers read out their names: use an SVG icon with aria-hidden=`"true`", or leave it out" }
         }
         if ($slop -and -not $found.blur -and $t -match '(?i)backdrop-filter\s*:\s*blur') { $found.blur = "line ${n}: a decorative blur (glass effect) looks generated; use a plain surface" }
-        if ($slop -and $UseKit -and -not $tokensFile -and -not $found.color -and $isStyle -and $t -match '(?i)(#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\()' -and $t -notmatch 'var\(--kit-') { $found.color = "line ${n}: a hard-coded colour; use a token from styles/kit/tokens.css (var(--kit-...)) so the page follows the kit" }
-        if ($slop -and $UseKit -and -not $found.color -and -not $isStyle -and $t -notmatch 'var\(--kit-' -and (($isMarkup -and $t -match $script:MarkupColorPattern) -or ($isScript -and $t -match $script:ScriptColorPattern))) { $found.color = "line ${n}: a hard-coded colour; use a kit token instead: var(--kit-...) in styles, var(--kit-chart-1) to var(--kit-chart-6) in order for chart series (in canvas code KitCharts.palette(N) gives them as colour values, or read them with getComputedStyle(document.documentElement).getPropertyValue(`"--kit-chart-1`")), so the page follows the kit in light and dark" }
+        if ($slop -and $UseKit -and -not $tokensFile -and -not $found.color -and $isStyle -and $t -match '(?i):\s*[^;{}]*?(#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\()' -and $t -notmatch 'var\(--kit-' -and -not ($found.shadow -and $found.shadow -like "line ${n}:*")) { $found.color = "line ${n}: a hard-coded colour; use a token from styles/kit/tokens.css (var(--kit-...)) so the page follows the kit" }
+        if ($slop -and $UseKit -and -not $found.color -and -not $isStyle -and $t -notmatch 'var\(--kit-' -and $t -notmatch $script:SelectorStringPattern -and (($isMarkup -and ($t -match $script:MarkupColorPattern -or ($Rel -match '(?i)\.html?$' -and $t -match $script:CodeColorPattern))) -or ($isScript -and ($t -match $script:ScriptColorPattern -or $t -match $script:CodeColorPattern)))) { $found.color = "line ${n}: a hard-coded colour; use a kit token instead: var(--kit-...) in styles, var(--kit-chart-1) to var(--kit-chart-6) in order for chart series (in canvas code KitCharts.palette(N) gives them as colour values, or read them with getComputedStyle(document.documentElement).getPropertyValue(`"--kit-chart-1`")), so the page follows the kit in light and dark" }
     }
     @($found.Values)
 }
@@ -499,6 +503,45 @@ function Find-UnsortedTables {
     }
 }
 
+function Get-TableHeaderFindings([AllowEmptyString()][string]$Text) {
+    <# Header rows of kit-tables in markup (also markup inside a script's strings) that are not one
+       piece: a numeric column with kit-num on the header but not its cells (or the reverse), and a
+       header cell aligned, filled or sized by a style of its own. "line N: ..." per table. #>
+    $out = New-Object System.Collections.Generic.List[string]
+    if (-not $Text -or $Text -notmatch 'kit-table') { return @() }
+    foreach ($m in [regex]::Matches($Text, '(?is)<table\b[^>]*\bkit-table\b[^>]*>(.*?)</table>')) {
+        $line = ([regex]::Matches($Text.Substring(0, $m.Index), "`n")).Count + 1
+        $body = $m.Groups[1].Value
+        $head = [regex]::Match($body, '(?is)<thead\b[^>]*>(.*?)</thead>')
+        $headHtml = if ($head.Success) { $head.Groups[1].Value } else { [regex]::Match($body, '(?is)<tr\b[^>]*>(.*?)</tr>').Groups[1].Value }
+        $ths = @([regex]::Matches($headHtml, '(?is)<th\b([^>]*)>(.*?)</th>'))
+        if (-not $ths.Count) { continue }
+        $styled = @($ths | Where-Object { $_.Groups[1].Value -match '(?i)\bstyle\s*=\s*["''][^"'']*(text-align|background|width)\s*:' -or $_.Groups[1].Value -match '(?i)\balign\s*=' })
+        if ($styled.Count) { $out.Add("line ${line}: a header cell of this table has a style of its own (text-align, background or width): header cells align through kit-num (the th and every td of a numeric column), and keep the kit's fill; remove the style") }
+        $rows = @([regex]::Matches($body, '(?is)<tr\b[^>]*>(.*?)</tr>') | Where-Object { $_.Groups[1].Value -match '(?i)<td\b' -and $_.Value -notmatch 'data-kit-empty' })
+        if (-not $rows.Count) { continue }
+        $tds = @([regex]::Matches($rows[0].Groups[1].Value, '(?is)<td\b([^>]*)>'))
+        for ($i = 0; $i -lt [Math]::Min($ths.Count, $tds.Count); $i++) {
+            $thNum = $ths[$i].Groups[1].Value -match '(?i)\bclass\s*=\s*["''][^"'']*\bkit-num\b'
+            $tdNum = $tds[$i].Groups[1].Value -match '(?i)\bclass\s*=\s*["''][^"'']*\bkit-num\b'
+            if ($thNum -eq $tdNum) { continue }
+            $title = ([regex]::Replace($ths[$i].Groups[2].Value, '<[^>]+>', '')).Trim()
+            $out.Add("line ${line}: column $($i + 1) ('$title'): the header and the cells do not align the same way (kit-num on $(if ($thNum) { 'the header but not the cells' } else { 'the cells but not the header' })): a numeric column has kit-num on its th and on every td, a text column on neither")
+            break
+        }
+    }
+    @($out)
+}
+
+function Find-TableHeaderIssues {
+    <# Header problems a change adds to kit-tables (see Get-TableHeaderFindings): markup files, and
+       scripts that write tables into the page. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte|php|cshtml|razor)$' -or $Rel -match '(?i)(^|/)(styles/kit|\.streamhub|node_modules|dist|build)/') { return }
+    $before = @(Get-TableHeaderFindings $Old | ForEach-Object { $_ -replace '^line \d+: ', '' })
+    @(Get-TableHeaderFindings $New | Where-Object { $before -notcontains ($_ -replace '^line \d+: ', '') })
+}
+
 function Find-QualityIssues {
     <# The second batch, for the round's file check: what a change adds, as "line N: ..." or a
        whole-file note. -UserLook (the person asked for a look of their own): the kit's look checks rest
@@ -506,7 +549,7 @@ function Find-QualityIssues {
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit, [switch]$UserLook)
     # A one-file page: the helper program's kit and data blocks are not the change's own text.
     if ($Rel -match '(?i)\.html?$') { $loads = Find-OneFileLoads $Rel $Old $New; $Old = Hide-GeneratedBlocks $Old; $New = Hide-GeneratedBlocks $New } else { $loads = $null }
-    @($loads) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
+    @($loads) + @(Find-TableHeaderIssues $Rel $Old $New) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {
@@ -545,4 +588,4 @@ function Get-DoneReminders {
     "Before finishing, one check:`n- " + ($notes -join "`n- ") + "`nThen send done again."
 }
 
-Export-ModuleMember -Function Find-TailwindSlop, Find-RoundedBarBase, Find-UnsortedTables, Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders
+Export-ModuleMember -Function Find-TailwindSlop, Find-RoundedBarBase, Find-UnsortedTables, Find-TableHeaderIssues, Get-TableHeaderFindings, Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders

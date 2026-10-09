@@ -51,11 +51,18 @@
   /* ---- CSV and typed tables -------------------------------------------------------------- */
 
   function guessDelimiter(text) {
-    var first = text.split("\n", 1)[0].replace(/"[^"]*"/g, "");
-    var best = ",", most = 0;
+    // The first lines (quotes removed): the delimiter is the one that gives every line the same
+    // number of fields, with the most fields; a header "Last, First\tAge" does not fool it.
+    var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); }).slice(0, 10).map(function (l) { return l.replace(/"[^"]*"/g, ""); });
+    if (!lines.length) return ",";
+    var best = ",", bestScore = -1;
     [",", ";", "\t", "|"].forEach(function (d) {
-      var n = first.split(d).length - 1;
-      if (n > most) { best = d; most = n; }
+      var counts = lines.map(function (l) { return l.split(d).length - 1; });
+      var n = counts[0];
+      if (!n) return;
+      var same = counts.every(function (c) { return c === n; });
+      var score = (same ? 1000 : 0) + n;
+      if (score > bestScore) { best = d; bestScore = score; }
     });
     return best;
   }
@@ -100,7 +107,7 @@
 
   var DOT = /^[-+]?(\d+|\d{1,3}(,\d{3})+)(\.\d+)?([eE][-+]?\d+)?$/;
   var COMMA = /^[-+]?(\d+|\d{1,3}(\.\d{3})+)(,\d+)?$/;
-  var ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
+  var ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
   var DMY = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{4})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
 
   function columnType(values, delimiter) {
@@ -179,6 +186,8 @@
   }
 
   function parseCsv(text, options) {
+    text = String(text == null ? "" : text);
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);   // a byte order mark (file.text(), fetch) is not part of the first name
     var delimiter = (options && options.delimiter) || guessDelimiter(text);
     var t = toTable(splitCsv(text, delimiter), delimiter);
     return { columns: t.columns, rows: t.rows };
@@ -491,15 +500,19 @@
   // Rows as CSV text: columns [{ key, label }] or key names (default: the first row's keys). Values
   // with a comma, quote or line break are quoted; null and undefined are empty. Excel reads it as
   // UTF-8 because of the byte order mark download() puts in front.
-  function toCsv(rows, columns) {
+  // options.delimiter: "," (default) or ";" (what Excel expects on a computer whose list separator
+  // is a semicolon, such as Dutch or German Windows: KitData.toCsv(rows, cols, { delimiter: ";" })).
+  function toCsv(rows, columns, options) {
     rows = rows || [];
+    var sep = (options && options.delimiter) || ",";
     var cols = (columns || Object.keys(rows[0] || {})).map(function (c) { return typeof c === "string" ? { key: c, label: c } : { key: c.key, label: c.label === undefined ? c.key : c.label }; });
+    var risky = new RegExp('[",\\r\\n' + (sep === "," ? "" : sep.replace(/[|\\]/g, "\\$&")) + "]");
     var cell = function (v) {
       var t = v === null || v === undefined ? "" : String(v);
-      return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+      return risky.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
     };
-    var lines = [cols.map(function (c) { return cell(c.label); }).join(",")];
-    rows.forEach(function (r) { lines.push(cols.map(function (c) { return cell(r[c.key]); }).join(",")); });
+    var lines = [cols.map(function (c) { return cell(c.label); }).join(sep)];
+    rows.forEach(function (r) { lines.push(cols.map(function (c) { return cell(r[c.key]); }).join(sep)); });
     return lines.join("\r\n");
   }
   // Saves text as a file in the person's downloads (nothing is uploaded). A .csv gets a byte order

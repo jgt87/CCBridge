@@ -59,10 +59,11 @@ export function Board({ columns, cards, onMove }: { columns: BoardColumn[]; card
                 const id = dragging.current;
                 dragging.current = null;
                 if (!id) return;
-                // The place: before the first card whose middle is below the pointer.
-                const items = Array.from(e.currentTarget.children) as HTMLElement[];
-                let index = items.findIndex((el) => el.getAttribute("data-id") !== id && el.getBoundingClientRect().top + el.offsetHeight / 2 > e.clientY);
-                if (index < 0) index = list.filter((c) => c.id !== id).length;
+                // The place: before the first card whose middle is below the pointer, counted among
+                // the other cards (the dragged one leaves its slot).
+                const items = (Array.from(e.currentTarget.children) as HTMLElement[]).filter((el) => el.getAttribute("data-id") !== id);
+                let index = items.findIndex((el) => el.getBoundingClientRect().top + el.offsetHeight / 2 > e.clientY);
+                if (index < 0) index = items.length;
                 onMove(id, col.id, index);
               }}
             >

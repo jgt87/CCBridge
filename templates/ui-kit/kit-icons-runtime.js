@@ -17,9 +17,16 @@
     Array.prototype.forEach.call(list, function (el) {
       var name = el.getAttribute("data-kit-icon");
       if (el.getAttribute("data-kit-icon-drawn") === name) return;
-      el.innerHTML = svg(name);
+      var markup = svg(name);
+      if (!markup && name) console.warn("Unknown icon: " + name + " (kit-icons.js has no icon of that name)");
+      // The icon goes before any text the element already has (a button with an icon and a word).
+      var old = el.querySelector("svg.kit-icon");
+      if (old) old.parentNode.removeChild(old);
+      if (el.firstChild) el.insertAdjacentHTML("afterbegin", markup); else el.innerHTML = markup;
       el.setAttribute("data-kit-icon-drawn", name);
-      if (el.getAttribute("aria-label") && !el.getAttribute("role")) el.setAttribute("role", "img");
+      // A named icon on its own is an image; a button, link or field with a label stays what it is.
+      var interactive = /^(button|a|input|select|textarea|summary)$/i.test(el.tagName) || el.hasAttribute("tabindex") || el.getAttribute("role");
+      if (el.getAttribute("aria-label") && !interactive) el.setAttribute("role", "img");
     });
     if (root && root.getAttribute && root.hasAttribute("data-kit-icon")) paint({ querySelectorAll: function () { return [root]; } });
   }

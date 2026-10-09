@@ -9,10 +9,13 @@
 */
 (function () {
   "use strict";
+  if (window.KitUI) return;   // loaded twice (head and tail of the page): once is enough
 
   // Hold to confirm: <button class="kit-btn kit-btn--hold" data-kit-hold="1500">Delete</button>
   // Fires "kit:hold" on the button when held long enough (mouse, touch, Space or Enter).
   function setupHold(btn) {
+    if (btn.kitHold) return;
+    btn.kitHold = true;
     var ms = parseInt(btn.getAttribute("data-kit-hold"), 10) || 1500;
     var timer = null;
     btn.style.setProperty("--kit-hold-ms", ms + "ms");
@@ -44,46 +47,56 @@
   // <ul class="kit-search__list"><li class="kit-search__item">...</li></ul></div>
   // Filters the items as you type; arrow keys and Enter pick one. Fires "kit:pick" with { text }.
   function setupSearch(box) {
+    if (box.kitSearch) return;
     var input = box.querySelector("input");
     var list = box.querySelector(".kit-search__list");
     if (!input || !list) return;
+    box.kitSearch = true;
     var items = Array.prototype.slice.call(list.querySelectorAll(".kit-search__item"));
     var active = -1;
+    if (!list.id) list.id = "kit-search-" + Math.random().toString(36).slice(2, 8);
+    list.setAttribute("role", "listbox");
+    items.forEach(function (i, n) { i.setAttribute("role", "option"); if (!i.id) i.id = list.id + "-" + n; });
+    input.setAttribute("role", "combobox"); input.setAttribute("aria-autocomplete", "list"); input.setAttribute("aria-controls", list.id); input.setAttribute("aria-expanded", "false");
     function visible() { return items.filter(function (i) { return !i.hidden; }); }
     function mark(n) {
       var v = visible();
-      items.forEach(function (i) { i.classList.remove("is-active"); });
+      items.forEach(function (i) { i.classList.remove("is-active"); i.removeAttribute("aria-selected"); });
       active = v.length ? (n + v.length) % v.length : -1;
-      if (active >= 0) v[active].classList.add("is-active");
+      if (active >= 0) { v[active].classList.add("is-active"); v[active].setAttribute("aria-selected", "true"); input.setAttribute("aria-activedescendant", v[active].id); }
+      else input.removeAttribute("aria-activedescendant");
     }
+    function open(on) { list.hidden = !on; input.setAttribute("aria-expanded", String(on)); }
     function pick(item) {
       if (!item) return;
       input.value = item.getAttribute("data-value") || item.textContent.trim();
-      list.hidden = true;
+      open(false);
       box.dispatchEvent(new CustomEvent("kit:pick", { bubbles: true, detail: { text: input.value } }));
     }
     function filter() {
       var q = input.value.trim().toLowerCase();
       items.forEach(function (i) { i.hidden = q !== "" && i.textContent.toLowerCase().indexOf(q) < 0; });
-      list.hidden = visible().length === 0;
+      open(visible().length > 0);
       mark(-1);
     }
     input.addEventListener("input", filter);
     input.addEventListener("focus", filter);
-    input.addEventListener("blur", function () { setTimeout(function () { list.hidden = true; }, 120); });
+    input.addEventListener("blur", function () { setTimeout(function () { open(false); }, 120); });
     input.addEventListener("keydown", function (e) {
       if (e.key === "ArrowDown") { e.preventDefault(); mark(active + 1); }
       else if (e.key === "ArrowUp") { e.preventDefault(); mark(active - 1); }
       else if (e.key === "Enter" && active >= 0) { e.preventDefault(); pick(visible()[active]); }
-      else if (e.key === "Escape") { list.hidden = true; }
+      else if (e.key === "Escape") { open(false); }
     });
     items.forEach(function (i) { i.addEventListener("mousedown", function (e) { e.preventDefault(); pick(i); }); });
-    list.hidden = true;
+    open(false);
   }
 
   // File drop zone: <label class="kit-drop" data-kit-drop><input type="file" multiple> ...</label>
   // Highlights while a file is over it and lists the chosen files. Fires "kit:files" with { files }.
   function setupDrop(zone) {
+    if (zone.kitDrop) return;
+    zone.kitDrop = true;
     var input = zone.querySelector('input[type="file"]');
     var out = zone.querySelector(".kit-drop__files");
     function show(files) {
@@ -99,6 +112,8 @@
   // Animated tabs / segmented choice: add kit-tabs--animated or kit-segmented--animated.
   // Clicking a tab selects it (aria-selected / aria-pressed) and slides the indicator; fires "kit:select".
   function setupSlider(group, itemSel, attr, indicatorClass) {
+    if (group.kitSlider) return;
+    group.kitSlider = true;
     var ind = document.createElement("span");
     ind.className = indicatorClass;
     ind.setAttribute("aria-hidden", "true");
@@ -114,7 +129,7 @@
       b.addEventListener("click", function () {
         buttons.forEach(function (o) { o.setAttribute(attr, o === b ? "true" : "false"); });
         move();
-        group.dispatchEvent(new CustomEvent("kit:select", { bubbles: true, detail: { text: b.textContent.trim(), index: buttons.indexOf(b) } }));
+        group.dispatchEvent(new CustomEvent("kit:select", { bubbles: true, detail: { value: b.getAttribute("data-value") || b.textContent.trim(), text: b.textContent.trim(), index: buttons.indexOf(b) } }));
       });
     });
     window.addEventListener("resize", move);
@@ -144,6 +159,7 @@
     var size = parseInt(table.getAttribute("data-kit-pages"), 10) || 0;
     var heads = [];
     var col = -1, asc = true, page = 0, pager = null, info = null, prev = null, next = null, obs = null, query = "", matched = 0;
+    var sortedCol = -1, sortedAsc = true, numSep = {};
     function rows() { return body ? Array.prototype.filter.call(body.rows, function (r) { return !r.hasAttribute("data-kit-empty"); }) : []; }
     function value(row, i) {
       var c = row.cells[i];
@@ -151,12 +167,50 @@
       var v = c.getAttribute("data-sort");
       return v === null ? c.textContent.trim() : v;
     }
+    // Numbers as people write them (kit-num columns): "1,234.56", "1.234,56", "41,7%", "(1,234)",
+    // "5.210". The column decides its decimal separator: a value with 1, 2 or 4+ digits after a
+    // separator makes that one the decimal; dots only in groups of three are thousands.
+    function decimalSep(i) {
+      if (numSep[i]) return numSep[i];
+      var comma = false, dot = false, dotGroups = true;
+      rows().forEach(function (r) {
+        var v = value(r, i).replace(/[^\d.,]/g, "");
+        if (/,\d{3}\./.test(v) || /\.\d{1,2}$/.test(v) || /\.\d{4,}$/.test(v)) dot = true;
+        if (/\.\d{3},/.test(v) || /,\d{1,2}$/.test(v) || /,\d{4,}$/.test(v)) comma = true;
+        if (v.indexOf(".") >= 0 && !/^\d{1,3}(\.\d{3})+$/.test(v.replace(/,.*$/, ""))) dotGroups = false;
+      });
+      numSep[i + "g"] = dotGroups && !dot;   // every dot in the column groups thousands ("5.210")
+      return (numSep[i] = comma && !dot ? "," : ".");
+    }
+    function toNumber(s, i) {
+      var raw = String(s).trim();
+      if (!raw) return NaN;
+      var neg = /^\(.*\)$/.test(raw) || /^[^\d]*-/.test(raw);
+      var v = raw.replace(/[^\d.,]/g, "");
+      if (!v) return NaN;
+      var sep = decimalSep(i);
+      if (sep === ",") v = v.replace(/\./g, "").replace(",", ".");
+      else { v = v.replace(/,/g, ""); if (numSep[i + "g"] && /^\d{1,3}(\.\d{3})+$/.test(v)) v = v.replace(/\./g, ""); }
+      var n = parseFloat(v);
+      return isNaN(n) ? NaN : (neg ? -n : n);
+    }
+    function sortKey(row) {
+      var k = row.__kitKeys || (row.__kitKeys = {});
+      if (k[col] === undefined) k[col] = heads[col] && heads[col].classList.contains("kit-num") ? toNumber(value(row, col), col) : value(row, col);
+      return k[col];
+    }
     function compare(a, b) {
-      var x = value(a, col), y = value(b, col), c;
-      if (heads[col] && heads[col].classList.contains("kit-num")) c = (Number(String(x).replace(/[^\d.eE-]/g, "")) || 0) - (Number(String(y).replace(/[^\d.eE-]/g, "")) || 0);
-      else c = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+      var x = sortKey(a), y = sortKey(b), c;
+      if (typeof x === "number" || typeof y === "number") {
+        var nx = typeof x === "number" && !isNaN(x), ny = typeof y === "number" && !isNaN(y);
+        if (!nx && !ny) return 0;
+        if (!nx) return 1;   // what is not a number (empty, "n/a") sorts last, whichever way
+        if (!ny) return -1;
+        c = x - y;
+      } else c = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
       return asc ? c : -c;
     }
+    function forgetKeys() { numSep = {}; sortedCol = -1; rows().forEach(function (r) { r.__kitKeys = null; }); }
     function slice(pages) {
       return { page: page + 1, pages: pages, start: page * size, end: size ? (page + 1) * size : Infinity };
     }
@@ -176,14 +230,21 @@
         return xpages;
       }
       var all = rows();
-      if (col >= 0 && body) all.sort(compare).forEach(function (r) { body.appendChild(r); });
+      if (col >= 0 && body && (col !== sortedCol || asc !== sortedAsc)) {
+        all.sort(compare).forEach(function (r) { body.appendChild(r); });
+        sortedCol = col; sortedAsc = asc;
+      } else if (col >= 0) all.sort(compare);
       // The search box (data-kit-filter): rows without the words are hidden, paging counts the rest.
-      var words = query.toLowerCase().split(/s+/).filter(Boolean);
+      var words = query.toLowerCase().split(/\s+/).filter(Boolean);
       var list = all.filter(function (r) { var t = r.textContent.toLowerCase(); var hit = words.every(function (w) { return t.indexOf(w) >= 0; }); if (!hit) r.hidden = true; return hit; });
       matched = list.length;
       var pages = size ? Math.max(1, Math.ceil(list.length / size)) : 1;
       page = Math.max(0, Math.min(page, pages - 1));
       list.forEach(function (r, i) { r.hidden = !!size && (i < page * size || i >= (page + 1) * size); });
+      // No rows left (a search with no match, or no data yet): the empty row shows, the totals row hides.
+      var emptyRow = body && body.querySelector("tr[data-kit-empty]");
+      if (emptyRow) emptyRow.hidden = list.length > 0;
+      if (table.tFoot && table.tFoot.classList.contains("kit-table__total")) table.tFoot.hidden = list.length === 0;
       if (pager) {
         pager.hidden = pages < 2;
         info.textContent = "Page " + (page + 1) + " of " + pages + ", " + list.length + (words.length ? " of " + all.length : "") + " rows";
@@ -193,6 +254,12 @@
       if (obs) obs.takeRecords();   // our own moves are not a new set of rows
       return pages;
     }
+    // On paper every matching row shows (kit.js calls this around printing).
+    table.kitPrint = function (on) {
+      if (external || !size) return;
+      if (on) rows().forEach(function (r) { var t = r.textContent.toLowerCase(), words = query.toLowerCase().split(/\s+/).filter(Boolean); r.hidden = !words.every(function (w) { return t.indexOf(w) >= 0; }); });
+      else apply();
+    };
     // The search box: the page's own rows in external mode (kit:filter with the words), else here.
     table.kitFilter = function (q) {
       query = String(q || "");
@@ -230,6 +297,55 @@
       });
     }
     arm();
+    // Row selection (data-kit-select): a checkbox column, "select all" in the header, picked rows
+    // marked aria-selected, a kit-bulk bar (data-kit-bulk="TABLE-ID") with the count and the actions,
+    // and "kit:selection" with detail.ids (the rows' data-id), rows and count.
+    if (table.hasAttribute("data-kit-select")) {
+      var bulk = table.id ? document.querySelector('[data-kit-bulk="' + table.id + '"]') : null;
+      var all = document.createElement("input");
+      all.type = "checkbox";
+      all.setAttribute("aria-label", "Select all rows");
+      var selHead = table.tHead && table.tHead.rows[0];
+      if (selHead && !selHead.querySelector("th.kit-table__select")) {
+        var th0 = document.createElement("th");
+        th0.className = "kit-table__select";
+        th0.setAttribute("data-kit-nosort", "");
+        th0.appendChild(all);
+        selHead.insertBefore(th0, selHead.firstChild);
+      }
+      var boxes = function () { return rows().map(function (r) { return r.querySelector("td.kit-table__select input"); }).filter(Boolean); };
+      var picked = function () { return rows().filter(function (r) { return r.getAttribute("aria-selected") === "true"; }); };
+      var tell = function () {
+        var p = picked(), sb = boxes().filter(function (b) { return !b.closest("tr").hidden; });
+        all.checked = sb.length > 0 && sb.every(function (b) { return b.checked; });
+        all.indeterminate = !all.checked && sb.some(function (b) { return b.checked; });
+        if (bulk) { bulk.hidden = p.length === 0; var c = bulk.querySelector(".kit-bulk__count"); if (c) c.textContent = p.length + " selected"; }
+        table.dispatchEvent(new CustomEvent("kit:selection", { bubbles: true, detail: { ids: p.map(function (r) { return r.getAttribute("data-id"); }), rows: p, count: p.length } }));
+      };
+      var armSelect = function () {
+        rows().forEach(function (r) {
+          if (r.querySelector("td.kit-table__select")) return;
+          var td = document.createElement("td"), box = document.createElement("input");
+          td.className = "kit-table__select";
+          box.type = "checkbox";
+          box.setAttribute("aria-label", "Select row");
+          box.addEventListener("change", function () { r.setAttribute("aria-selected", String(box.checked)); tell(); });
+          td.appendChild(box);
+          r.insertBefore(td, r.firstChild);
+        });
+        var emptyCell = body && body.querySelector("tr[data-kit-empty] td[colspan]");
+        if (emptyCell && !emptyCell.kitSpan) { emptyCell.kitSpan = true; emptyCell.colSpan = emptyCell.colSpan + 1; }
+      };
+      all.addEventListener("change", function () {
+        boxes().forEach(function (b) { var r = b.closest("tr"); if (!r.hidden) { b.checked = all.checked; r.setAttribute("aria-selected", String(all.checked)); } });
+        tell();
+      });
+      table.kitArmSelect = armSelect;
+      table.kitSelected = picked;
+      table.kitSelect = function (on) { all.checked = !!on; all.dispatchEvent(new Event("change")); };
+      armSelect();
+      arm();   // the header cells moved one to the right: the sort buttons learn their new places
+    }
     if (size) {
       pager = document.createElement("div");
       pager.className = "kit-pager";
@@ -257,7 +373,9 @@
           else rowsChanged = true;
         });
         if (table.tBodies[0] !== body) body = table.tBodies[0];
+        if (rowsChanged) forgetKeys();
         if (headChanged || rowsChanged) arm();
+        if (rowsChanged && table.kitArmSelect) table.kitArmSelect();
         if (external) { if (attrs || rowsChanged) apply(); }
         else if (rowsChanged) { page = 0; apply(); }
         obs.takeRecords();
@@ -283,6 +401,8 @@
   var saved = readTheme();
   if (saved === "dark" || saved === "light") document.documentElement.setAttribute("data-theme", saved);
   function setupTheme(btn) {
+    if (btn.kitTheme) return;
+    btn.kitTheme = true;
     function showTheme() {
       var dark = isDark(), icon = btn.querySelector("[data-kit-icon]");
       if (icon) icon.setAttribute("data-kit-icon", dark ? "sun" : "moon");
@@ -351,14 +471,7 @@
   // Toasts: KitUI.toast("Saved", { tone: "ok" | "warn" | "error", ms: 4000 }), read out by screen readers.
   function toast(text, opts) {
     opts = opts || {};
-    var region = document.querySelector(".kit-toasts");
-    if (!region) {
-      region = document.createElement("div");
-      region.className = "kit-toasts";
-      region.setAttribute("role", "status");
-      region.setAttribute("aria-live", "polite");
-      document.body.appendChild(region);
-    }
+    var region = toastRegion();
     var t = document.createElement("div");
     t.className = "kit-toast" + (/^(ok|warn|error)$/.test(opts.tone || "") ? " kit-toast--" + opts.tone : "");
     t.textContent = String(text);
@@ -384,7 +497,12 @@
     bubble.textContent = btn.getAttribute("data-kit-tip");
     btn.appendChild(bubble);
     btn.setAttribute("aria-describedby", bubble.id);
-    var show = function () { bubble.textContent = btn.getAttribute("data-kit-tip"); bubble.hidden = false; };
+    var show = function () {
+      bubble.textContent = btn.getAttribute("data-kit-tip"); bubble.hidden = false;
+      bubble.classList.remove("is-left", "is-right");
+      var r = bubble.getBoundingClientRect();
+      if (r.left < 8) bubble.classList.add("is-left"); else if (r.right > window.innerWidth - 8) bubble.classList.add("is-right");
+    };
     var hide = function () { bubble.hidden = true; };
     btn.addEventListener("mouseenter", show);
     btn.addEventListener("focus", show);
@@ -494,10 +612,11 @@
     if (el.kitRange) return;
     el.kitRange = true;
     var presets = (el.getAttribute("data-presets") || "7d,30d,month,quarter,year,all,custom").split(",").map(function (p) { return p.trim(); }).filter(function (p) { return RANGE_NAMES[p] || /^\d+d$/.test(p); });
+    if (el.getAttribute("aria-label") && !el.getAttribute("role")) el.setAttribute("role", "group");
     var seg = document.createElement("div");
     seg.className = "kit-segmented";
     seg.setAttribute("role", "group");
-    seg.setAttribute("aria-label", el.getAttribute("aria-label") || "Period");
+    seg.setAttribute("aria-label", (el.getAttribute("aria-label") || "Period") + " presets");
     var custom = document.createElement("span");
     custom.className = "kit-range__custom";
     custom.hidden = true;
@@ -574,14 +693,16 @@
   function showStamps() { Array.prototype.forEach.call(document.querySelectorAll(".kit-stamp, [data-kit-stamp], [data-kit-stamp-of]"), function (el) { showStamp(el); }); }
   setInterval(showStamps, 60000);
 
-  // Printing: in the light theme, whatever the screen shows.
+  // Printing: in the light theme, and a paged table prints every row that matches (not one page).
   var printTheme = null;
   window.addEventListener("beforeprint", function () {
     printTheme = document.documentElement.getAttribute("data-theme");
     document.documentElement.setAttribute("data-theme", "light");
+    Array.prototype.forEach.call(document.querySelectorAll("table"), function (t) { if (t.kitPrint) t.kitPrint(true); });
   });
   window.addEventListener("afterprint", function () {
     if (printTheme) document.documentElement.setAttribute("data-theme", printTheme); else document.documentElement.removeAttribute("data-theme");
+    Array.prototype.forEach.call(document.querySelectorAll("table"), function (t) { if (t.kitPrint) t.kitPrint(false); });
   });
 
   // Menu (from kokonutui profile-dropdown): a button with data-kit-menu opens the kit-menu__list next to
@@ -621,7 +742,7 @@
     var items = menuItems(list), i = items.indexOf(document.activeElement);
     if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); var n = items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]; if (n) n.focus(); }
     else if (e.key === "Home" || e.key === "End") { e.preventDefault(); var h = items[e.key === "Home" ? 0 : items.length - 1]; if (h) h.focus(); }
-    else if (e.key === "Escape" || e.key === "Tab") { var mb = list.closest(".kit-menu").querySelector("[data-kit-menu]"); closeMenus(); if (e.key === "Escape" && mb) mb.focus(); }
+    else if (e.key === "Escape" || e.key === "Tab") { var box = list.closest(".kit-menu"), mb = box ? box.querySelector("[data-kit-menu]") : (list.previousElementSibling && list.previousElementSibling.hasAttribute("data-kit-menu") ? list.previousElementSibling : null); closeMenus(); if (e.key === "Escape" && mb) mb.focus(); }
   });
 
   // Icon toolbar (from kokonutui toolbar): data-kit-iconbar="single" (one pressed) or "multiple";
@@ -669,6 +790,7 @@
   function setupSliderRange(el) {
     if (el.kitSlider) return;
     el.kitSlider = true;
+    if (el.getAttribute("aria-label") && !el.getAttribute("role")) el.setAttribute("role", "group");
     var num = function (n, d) { var v = parseFloat(el.getAttribute(n)); return isNaN(v) ? d : v; };
     var min = num("data-min", 0), max = num("data-max", 100), step = num("data-step", 1), name = el.getAttribute("aria-label") || "Range";
     var fill = document.createElement("span");
@@ -704,6 +826,7 @@
   function setupTags(el) {
     if (el.kitTags) return;
     el.kitTags = true;
+    if (el.getAttribute("aria-label") && !el.getAttribute("role")) el.setAttribute("role", "group");
     var values = (el.getAttribute("data-tags") || "").split(",").map(function (v) { return v.trim(); }).filter(Boolean);
     var input = document.createElement("input");
     input.className = "kit-tags__input";
@@ -801,13 +924,14 @@
     el.appendChild(head);
     var grid = document.createElement("div");
     grid.className = "kit-calendar__grid";
-    grid.setAttribute("role", "grid");
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", title);
     var fmt = null;
     try { fmt = new Intl.DateTimeFormat(undefined, { weekday: "short" }); } catch (e) { fmt = null; }
     for (var d = 0; d < 7; d++) {
       var dow = document.createElement("div");
       dow.className = "kit-calendar__dow";
-      dow.setAttribute("role", "columnheader");
+      dow.setAttribute("aria-hidden", "true");
       var ref = new Date(2024, 0, 7 + ((start + d) % 7));   // 7 Jan 2024 was a Sunday
       dow.textContent = fmt ? fmt.format(ref) : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][ref.getDay()];
       grid.appendChild(dow);
@@ -862,6 +986,51 @@
     calendarDraw(el);
   }
 
+  // App shell: on a narrow screen the side navigation (kit-shell__nav) folds away; the button with
+  // data-kit-shell-menu (aria-controls="NAV-ID") opens and closes it; a click on a link or Escape closes it.
+  function setupShellMenu(btn) {
+    if (btn.kitShell) return;
+    btn.kitShell = true;
+    var nav = document.getElementById(btn.getAttribute("aria-controls") || "") || (btn.closest(".kit-shell") || document).querySelector(".kit-shell__nav");
+    if (!nav) return;
+    var set = function (open) { nav.classList.toggle("is-open", open); btn.setAttribute("aria-expanded", String(open)); };
+    btn.addEventListener("click", function () { set(!nav.classList.contains("is-open")); });
+    nav.addEventListener("click", function (e) { if (e.target.closest && e.target.closest("a")) set(false); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && nav.classList.contains("is-open")) { set(false); btn.focus(); } });
+    set(false);
+  }
+
+  // Numbers, percentages, dates and times the same on every page (the page's language, html lang,
+  // decides the separators): KitUI.format.number(v, { decimals }), percent(v, decimals) (v as 0..100;
+  // one decimal unless whole), date(v, { time }) -> "9 Oct 2026" / "9 Oct 2026, 14:00", relative(v)
+  // -> "2 hours ago"; "-" for what is not a number or date.
+  function pageLang() { return document.documentElement.lang || undefined; }
+  var format = {
+    number: function (v, opts) {
+      var n = Number(v);
+      if (v === null || v === undefined || v === "" || !isFinite(n)) return "-";
+      var d = opts && opts.decimals;
+      return n.toLocaleString(pageLang(), d === undefined ? { maximumFractionDigits: 2 } : { minimumFractionDigits: d, maximumFractionDigits: d });
+    },
+    percent: function (v, decimals) {
+      var n = Number(v);
+      if (v === null || v === undefined || v === "" || !isFinite(n)) return "-";
+      var d = decimals === undefined ? (Math.round(n) === n ? 0 : 1) : decimals;
+      return n.toLocaleString(pageLang(), { minimumFractionDigits: d, maximumFractionDigits: d }) + "%";
+    },
+    date: function (v, opts) {
+      var d = v instanceof Date ? v : new Date(v);
+      if (!v || isNaN(d.getTime())) return "-";
+      // Day, month, year in that order whatever the language ("9 Oct 2026"), the month's name in the page's language.
+      var month;
+      try { month = new Intl.DateTimeFormat(pageLang(), { month: "short" }).format(d).replace(/\.$/, ""); } catch (e) { month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()]; }
+      var text = d.getDate() + " " + month + " " + d.getFullYear();
+      if (opts && opts.time) text += ", " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+      return text;
+    },
+    relative: function (v) { var d = v instanceof Date ? v : new Date(v); return !v || isNaN(d.getTime()) ? "-" : ago(d.getTime()); }
+  };
+
   // Loading text that changes (from kokonutui dynamic text, toned down): data-kit-cycle="First|Second|Third"
   // on a kit-loading__text shows the next line every 2.4 seconds while it is on the page.
   function setupCycle(el) {
@@ -881,11 +1050,17 @@
   // The parts that need setting up, in what the page has now or writes later.
   var PARTS = [[".kit-tip[data-kit-tip], [data-kit-tip]", setupTip], ["select[data-kit-multi]", setupMulti], ["[data-kit-range]", setupRange],
     ["[data-kit-iconbar]", setupIconbar], ["[data-kit-avatar]", setupAvatar], ["[data-kit-slider-range]", setupSliderRange], ["[data-kit-tags]", setupTags],
-    ["[data-kit-board] > *", setupBoardCard], ["[data-kit-board]", setupBoardList], ["[data-kit-calendar]", function (el) { if (!el.kitCal) setupCalendar(el); }], ["[data-kit-cycle]", setupCycle]];
+    ["[data-kit-board] > *", setupBoardCard], ["[data-kit-board]", setupBoardList], ["[data-kit-calendar]", function (el) { if (!el.kitCal) setupCalendar(el); }], ["[data-kit-cycle]", setupCycle],
+    [".kit-avatars[aria-label], .kit-board[aria-label]", function (el) { if (!el.getAttribute("role")) el.setAttribute("role", "group"); }],
+    // Also for what a page writes after it loaded (a search box in a panel drawn later).
+    ["[data-kit-hold]", setupHold], ["[data-kit-search]", setupSearch], ["[data-kit-drop]", setupDrop], ["[data-kit-theme]", setupTheme],
+    [".kit-tabs--animated", function (g) { setupSlider(g, ".kit-tab", "aria-selected", "kit-tabs__indicator"); }],
+    [".kit-segmented--animated", function (g) { setupSlider(g, "button", "aria-pressed", "kit-segmented__indicator"); }],
+    ['[role="tablist"], .kit-tabs', setupTablist], ["[data-kit-shell-menu]", setupShellMenu]];
   function setupParts(root) {
     PARTS.forEach(function (p) {
-      if (root.matches && root.matches(p[0])) p[1](root);
-      if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(p[0]), p[1]);
+      if (root.matches && root.matches(p[0])) safe(p[1], root);
+      if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(p[0]), function (el) { safe(p[1], el); });
     });
     if (root.matches && root.matches(".kit-stamp, [data-kit-stamp], [data-kit-stamp-of]")) showStamp(root);
     if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(".kit-stamp, [data-kit-stamp], [data-kit-stamp-of]"), function (el) { showStamp(el); });
@@ -893,6 +1068,7 @@
 
   window.KitUI = {
     toast: toast,
+    format: format,
     open: openPanel,
     close: closePanel,
     stamp: function (el, when) { showStamp(typeof el === "string" ? document.querySelector(el) : el, when); },
@@ -902,11 +1078,44 @@
 
   var TABLES = "table[data-kit-sort], table[data-kit-pages]";
   function setupTables(root) {
-    if (root.matches && root.matches(TABLES)) setupTable(root);
-    if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(TABLES), setupTable);
+    if (root.matches && root.matches(TABLES)) safe(setupTable, root);
+    if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(TABLES), function (el) { safe(setupTable, el); });
   }
 
+  function toastRegion() {
+    var region = document.querySelector(".kit-toasts");
+    if (!region) {
+      region = document.createElement("div");
+      region.className = "kit-toasts";
+      region.setAttribute("role", "status");
+      region.setAttribute("aria-live", "polite");
+      document.body.appendChild(region);
+    }
+    return region;
+  }
+  // Tabs (role="tablist"): the arrow keys, Home and End move between the tabs and select; one tab stop.
+  function setupTablist(group) {
+    if (group.kitTabs) return;
+    group.kitTabs = true;
+    var tabs = function () { return Array.prototype.slice.call(group.querySelectorAll('[role="tab"], .kit-tab')); };
+    var roving = function () { var list = tabs(), cur = list.filter(function (b) { return b.getAttribute("aria-selected") === "true"; })[0] || list[0]; list.forEach(function (b) { b.setAttribute("tabindex", b === cur ? "0" : "-1"); }); };
+    group.addEventListener("keydown", function (e) {
+      var list = tabs(), i = list.indexOf(document.activeElement);
+      if (i < 0) return;
+      var n = e.key === "ArrowRight" ? (i + 1) % list.length : e.key === "ArrowLeft" ? (i - 1 + list.length) % list.length : e.key === "Home" ? 0 : e.key === "End" ? list.length - 1 : -1;
+      if (n < 0) return;
+      e.preventDefault();
+      list[n].focus();
+      list[n].click();
+      roving();
+    });
+    group.addEventListener("click", function () { setTimeout(roving, 0); });
+    roving();
+  }
+  // A part that fails to set up (odd markup) does not stop the parts after it.
+  function safe(fn, el) { try { fn(el); } catch (e) { if (window.console) console.error("UI kit: a part could not be set up", el, e); } }
   function startKit() {
+    toastRegion();
     fillBars(document);
     setupParts(document);
     // Bars and tables a script writes after the page loaded (a dashboard drawn from its data).
@@ -918,13 +1127,7 @@
         });
       }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-valuenow", "aria-valuemin", "aria-valuemax", "data-kit-sort", "data-kit-pages"] });
     }
-    Array.prototype.forEach.call(document.querySelectorAll("[data-kit-hold]"), setupHold);
-    Array.prototype.forEach.call(document.querySelectorAll("[data-kit-search]"), setupSearch);
-    Array.prototype.forEach.call(document.querySelectorAll("[data-kit-drop]"), setupDrop);
     setupTables(document);
-    Array.prototype.forEach.call(document.querySelectorAll("[data-kit-theme]"), setupTheme);
-    Array.prototype.forEach.call(document.querySelectorAll(".kit-tabs--animated"), function (g) { setupSlider(g, ".kit-tab", "aria-selected", "kit-tabs__indicator"); });
-    Array.prototype.forEach.call(document.querySelectorAll(".kit-segmented--animated"), function (g) { setupSlider(g, "button", "aria-pressed", "kit-segmented__indicator"); });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startKit); else startKit();
 })();

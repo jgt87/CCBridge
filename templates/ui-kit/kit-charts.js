@@ -25,6 +25,7 @@
 */
 (function () {
   "use strict";
+  if (window.KitCharts) return;   // loaded twice: once is enough
   var NS = "http://www.w3.org/2000/svg";
   var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -48,10 +49,11 @@
   function percent(v, total) { return total ? Math.round((v / total) * 1000) / 10 + "%" : "-"; }
   function fmt(v, opts) {
     if (opts && typeof opts.format === "function") return opts.format(v);
-    var n = Number(v);
-    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
-    if (Math.abs(n) >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
-    return n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ((opts && opts.unit) || "");
+    var n = Number(v), unit = (opts && opts.unit) || "";
+    if (v === null || v === undefined || v === "" || !isFinite(n)) return "-";
+    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" + unit;
+    if (Math.abs(n) >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k" + unit;
+    return n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + unit;
   }
   // Round axis steps: 1, 2 or 5 times a power of ten.
   function niceMax(max, ticks) {
@@ -59,6 +61,11 @@
     var raw = max / ticks, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
     var step = (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
     return { max: Math.ceil(max / step) * step, step: step };
+  }
+  function niceRange(min, max, ticks) {
+    if (!(min < 0)) { var s = niceMax(max, ticks); return { min: 0, max: s.max, step: s.step }; }
+    var sp = niceMax(Math.max(max, 0) - min, ticks);
+    return { min: -Math.ceil(-min / sp.step) * sp.step, max: Math.ceil(Math.max(max, 0) / sp.step) * sp.step, step: sp.step };
   }
   function clear(host) {
     while (host.firstChild) host.removeChild(host.firstChild);
@@ -142,23 +149,25 @@
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function size(host, h) { return { w: Math.max(200, host.clientWidth || 600), h: h || Number(host.getAttribute("data-kit-height")) || 260 }; }
   function frame(host, s, label) {
-    return svgEl("svg", { width: s.w, height: s.h, viewBox: "0 0 " + s.w + " " + s.h, role: "img", "aria-label": label || host.getAttribute("aria-label") || "Chart", class: "kit-chart__svg" }, host);
+    var picks = host.__kitChart && host.__kitChart.data && host.__kitChart.data.selectable;
+    return svgEl("svg", { width: s.w, height: s.h, viewBox: "0 0 " + s.w + " " + s.h, role: picks ? "group" : "img", "aria-label": label || host.getAttribute("aria-label") || "Chart", class: "kit-chart__svg" }, host);
   }
   // Dashed horizontal grid with value labels (left).
   // Target or reference lines (data.targets: [{ value, label }]): dashed across the plot at the value,
   // with its label at the end; horizontal bars get them upright.
   function targetMax(data) { return Math.max.apply(null, [0].concat((data.targets || []).map(function (t) { return Number(t && t.value) || 0; }))); }
   function targets(svg, s, pad, scale, data, horizontal) {
+    var lo = scale.min || 0;
     (data.targets || []).forEach(function (t) {
       var v = Number(t && t.value);
-      if (!t || isNaN(v) || v < 0 || v > scale.max) return;
+      if (!t || isNaN(v) || v < lo || v > scale.max) return;
       var g = svgEl("g", { class: "kit-chart__targets" }, svg), txt;
       if (horizontal) {
-        var x = pad.l + (s.w - pad.l - pad.r) * (v / scale.max);
+        var x = pad.l + (s.w - pad.l - pad.r) * ((v - lo) / (scale.max - lo));
         svgEl("line", { x1: x, x2: x, y1: pad.t, y2: s.h - pad.b, class: "kit-chart__target" }, g);
         txt = svgEl("text", { x: x, y: pad.t - 2 > 8 ? pad.t - 2 : s.h - pad.b + 14, "text-anchor": "middle", class: "kit-chart__target-label" }, g);
       } else {
-        var y = pad.t + (s.h - pad.t - pad.b) * (1 - v / scale.max);
+        var y = pad.t + (s.h - pad.t - pad.b) * (1 - (v - lo) / (scale.max - lo));
         svgEl("line", { x1: pad.l, x2: s.w - pad.r, y1: y, y2: y, class: "kit-chart__target" }, g);
         txt = svgEl("text", { x: s.w - pad.r - 4, y: y - 5, "text-anchor": "end", class: "kit-chart__target-label" }, g);
       }
@@ -166,9 +175,9 @@
     });
   }
   function grid(svg, s, pad, scale, opts) {
-    var g = svgEl("g", { class: "kit-chart__grid" }, svg);
-    for (var v = 0; v <= scale.max + 1e-9; v += scale.step) {
-      var y = pad.t + (s.h - pad.t - pad.b) * (1 - v / scale.max);
+    var g = svgEl("g", { class: "kit-chart__grid" }, svg), lo = scale.min || 0;
+    for (var v = lo; v <= scale.max + 1e-9; v += scale.step) {
+      var y = pad.t + (s.h - pad.t - pad.b) * (1 - (v - lo) / (scale.max - lo));
       svgEl("line", { x1: pad.l, x2: s.w - pad.r, y1: y, y2: y, "stroke-dasharray": v === 0 ? null : "4 4", class: v === 0 ? "kit-chart__base" : "kit-chart__line" }, g);
       svgEl("text", { x: pad.l - 8, y: y + 4, "text-anchor": "end", class: "kit-chart__label" }, g).textContent = fmt(v, opts);
     }
@@ -180,7 +189,7 @@
   }
   function series(data) {
     return (data.series || []).map(function (sr, i) {
-      return { name: sr.name || "", values: (sr.values || []).map(Number), i: i, line: sr.type === "line", right: sr.type === "line" && sr.axis === "right" };
+      return { name: sr.name || "", values: (sr.values || []).map(function (v) { var n = Number(v); return v === null || v === undefined || v === "" || !isFinite(n) ? null : n; }), i: i, line: sr.type === "line", right: sr.type === "line" && sr.axis === "right" };
     });
   }
 
@@ -203,7 +212,8 @@
     var axis = pct ? Object.assign({}, data, { format: function (v) { return Math.round(v * 10) / 10 + "%"; } }) : data;
     var tip = null, bars = [], marks = [];
     var svg = frame(host, s, data.title);
-    var pad = horizontal ? { t: 8, r: 16, b: 24, l: 96 } : { t: 12, r: rscale ? 52 : 12, b: 28, l: 44 };
+    var labelRoom = horizontal ? Math.min(Math.round(s.w * 0.4), 16 + 7 * Math.max.apply(null, [4].concat(labels.map(function (l) { return String(l).length; })))) : 0;
+    var pad = horizontal ? { t: 8, r: 16, b: 24, l: labelRoom } : { t: 12, r: rscale ? 52 : 12, b: 28, l: 44 };
     var plotW = s.w - pad.l - pad.r, plotH = s.h - pad.t - pad.b;
     if (!horizontal) grid(svg, s, pad, scale, axis);
     if (rscale) for (var rv = 0; rv <= rscale.max + 1e-9; rv += rscale.step) {
@@ -235,8 +245,8 @@
         var r = stacked && si !== top ? 0 : Math.min(bw / 4, 4);
         var rect = svgEl("path", { d: barPath(a, r, horizontal), fill: color(x.i), class: "kit-chart__bar" }, svg);
         if (isOff(data.selected, lab) || isOff(data.selectedSeries, x.name)) rect.classList.add("is-off");
-        if (!reduce) rect.style.animation = (horizontal ? "kit-grow-x" : "kit-grow-y") + " 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
-        if (!reduce) rect.style.transformOrigin = horizontal ? (pad.l + "px 0") : ("0 " + (pad.t + plotH) + "px");
+        if (!reduce && !host.__kitDrawn) rect.style.animation = (horizontal ? "kit-grow-x" : "kit-grow-y") + " 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
+        if (!reduce && !host.__kitDrawn) rect.style.transformOrigin = horizontal ? (pad.l + "px 0") : ("0 " + (pad.t + plotH) + "px");
         var text = stacked
           ? "<strong>" + esc(lab) + "</strong> &middot; " + esc(fmt(total(li), data)) + sr.map(function (y) { return (y.values[li] || 0) > 0 ? "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li], data)) + (pct ? " (" + percent(y.values[li], total(li)) + ")" : "") : ""; }).join("")
           : "<strong>" + esc(lab) + "</strong><br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(v, data));
@@ -258,7 +268,10 @@
       var t = horizontal
         ? svgEl("text", { x: pad.l - 8, y: start + inner / 2 + 4, "text-anchor": "end", class: "kit-chart__label" }, svg)
         : svgEl("text", { x: start + inner / 2, y: s.h - 8, "text-anchor": "middle", class: "kit-chart__label" }, svg);
-      t.textContent = lab;
+      var maxChars = horizontal ? Math.max(3, Math.floor((pad.l - 16) / 7)) : Infinity, shown = String(lab);
+      if (shown.length > maxChars) shown = shown.slice(0, maxChars - 1) + "\u2026";
+      t.textContent = shown;
+      if (shown !== String(lab)) svgEl("title", {}, t).textContent = lab;   // the whole name on hover and for screen readers
     });
     if (!pct) targets(svg, s, pad, scale, data, horizontal);
     // Line series over the bars: through the middle of each label's band.
@@ -268,7 +281,7 @@
       var d = labels.map(function (l, i) { return (i ? "L" : "M") + px(i).toFixed(1) + " " + py(x.values[i] || 0).toFixed(1); }).join(" ");
       var p = svgEl("path", { d: d, fill: "none", stroke: color(x.i), "stroke-width": 2.25, "stroke-linejoin": "round", "stroke-linecap": "round", class: "kit-chart__path" }, svg);
       if (isOff(data.selectedSeries, x.name)) p.classList.add("is-off");
-      if (!reduce && p.getTotalLength) { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
+      if (!reduce && !host.__kitDrawn && p.getTotalLength) { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
       marks.push({ el: p, s: x.i });
       if (labels.length <= 60) labels.forEach(function (l, i) { marks.push({ el: svgEl("circle", { cx: px(i), cy: py(x.values[i] || 0), r: 3, fill: color(x.i), class: "kit-chart__dot" }, svg), s: x.i }); });
     });
@@ -280,35 +293,45 @@
       off: function (i) { return isOff(data.selectedSeries, all[i].name); },
       pick: function (i) { return { chart: "bar", part: "legend", value: all[i].name, index: i, series: all[i].name, seriesIndex: i }; }
     });
-    dataTable(host, [""].concat(all.map(function (x) { return x.name || "Value"; })), labels.map(function (l, li) { return [l].concat(all.map(function (x) { return fmt(x.values[li] || 0, data); })); }));
+    dataTable(host, [""].concat(all.map(function (x) { return x.name || "Value"; })), labels.map(function (l, li) { return [l].concat(all.map(function (x) { return fmt(x.values[li], data); })); }));
   }
 
-  // Line chart (data.area for a fading fill under each line).
+  // Line chart (data.area for a fading fill under each line). A value that is not a number leaves
+  // a gap in the line; values below zero get an axis below zero.
   function line(host, data, area) {
     clear(host);
     var sr = series(data), labels = data.labels || [], s = size(host);
-    var all = [].concat.apply([], sr.map(function (x) { return x.values; }));
-    var scale = niceMax(Math.max(Math.max.apply(null, [0].concat(all)), targetMax(data)), 4);
+    var known = function (v) { return v !== null; };
+    var all = [].concat.apply([], sr.map(function (x) { return x.values; })).filter(known);
+    if (!labels.length || !sr.some(function (x) { return x.values.filter(known).length >= 2; })) { empty(host, data); return; }
+    var scale = niceRange(Math.min.apply(null, [0].concat(all)), Math.max(Math.max.apply(null, [0].concat(all)), targetMax(data)), 4);
     var svg = frame(host, s, data.title);
     var pad = { t: 12, r: 16, b: 28, l: 44 }, plotW = s.w - pad.l - pad.r, plotH = s.h - pad.t - pad.b;
     grid(svg, s, pad, scale, data);
     targets(svg, s, pad, scale, data, false);
     var px = function (i) { return pad.l + (labels.length < 2 ? plotW / 2 : (plotW * i) / (labels.length - 1)); };
-    var py = function (v) { return pad.t + plotH * (1 - v / scale.max); };
+    var py = function (v) { return pad.t + plotH * (1 - (v - scale.min) / (scale.max - scale.min)); };
+    var base = py(0);
     var defs = svgEl("defs", {}, svg), paths = [];
     var uid = "k" + Math.random().toString(36).slice(2, 8);
     sr.forEach(function (x, si) {
-      var pts = x.values.map(function (v, i) { return [px(i), py(v)]; });
-      var d = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ");
+      // Runs of known points: a gap where a value is missing.
+      var runs = [], run = [];
+      x.values.forEach(function (v, i) { if (v === null) { if (run.length) runs.push(run); run = []; } else run.push([px(i), py(v)]); });
+      if (run.length) runs.push(run);
+      var d = runs.map(function (r) { return r.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" "); }).join(" ");
       if (area || data.area) {
         var gid = uid + "a" + si;
         var lg = svgEl("linearGradient", { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
         svgEl("stop", { offset: "0%", "stop-color": color(si), "stop-opacity": 0.32 }, lg);
         svgEl("stop", { offset: "100%", "stop-color": color(si), "stop-opacity": 0 }, lg);
-        svgEl("path", { d: d + " L" + pts[pts.length - 1][0] + " " + (pad.t + plotH) + " L" + pts[0][0] + " " + (pad.t + plotH) + " Z", fill: "url(#" + gid + ")", class: "kit-chart__area" }, svg);
+        var fill = runs.filter(function (r) { return r.length > 1; }).map(function (r) {
+          return r.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ") + " L" + r[r.length - 1][0].toFixed(1) + " " + base.toFixed(1) + " L" + r[0][0].toFixed(1) + " " + base.toFixed(1) + " Z";
+        }).join(" ");
+        if (fill) svgEl("path", { d: fill, fill: "url(#" + gid + ")", class: "kit-chart__area" }, svg);
       }
       var p = svgEl("path", { d: d, fill: "none", stroke: color(si), "stroke-width": 2.25, "stroke-linejoin": "round", "stroke-linecap": "round", class: "kit-chart__path" }, svg);
-      if (!reduce) { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
+      if (!reduce && !host.__kitDrawn && typeof p.getTotalLength === "function") { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
       paths.push(p);
     });
     var lstep = labelStep(labels, plotW);
@@ -326,11 +349,14 @@
       var i = Math.max(0, Math.min(labels.length - 1, Math.round(((x - pad.l) / plotW) * (labels.length - 1))));
       guide.setAttribute("x1", px(i)); guide.setAttribute("x2", px(i)); guide.setAttribute("visibility", "visible");
       var html = "<strong>" + esc(labels[i]) + "</strong>";
+      var ys = [];
       sr.forEach(function (x, si) {
-        dots[si].setAttribute("cx", px(i)); dots[si].setAttribute("cy", py(x.values[i] || 0)); dots[si].setAttribute("visibility", "visible");
-        html += "<br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(x.values[i] || 0, data));
+        var v = x.values[i];
+        if (v === null) dots[si].setAttribute("visibility", "hidden");
+        else { dots[si].setAttribute("cx", px(i)); dots[si].setAttribute("cy", py(v)); dots[si].setAttribute("visibility", "visible"); ys.push(py(v)); }
+        html += "<br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(v, data));
       });
-      tip.show(html, px(i) * (r.width / s.w), Math.min.apply(null, sr.map(function (x) { return py(x.values[i] || 0); })) * (r.height / s.h));
+      tip.show(html, px(i) * (r.width / s.w), (ys.length ? Math.min.apply(null, ys) : pad.t) * (r.height / s.h));
     });
     hit.addEventListener("mouseleave", function () { guide.setAttribute("visibility", "hidden"); dots.forEach(function (d) { d.setAttribute("visibility", "hidden"); }); tip.hide(); });
     paths.forEach(function (p, pi) { if (isOff(data.selectedSeries, sr[pi].name)) p.classList.add("is-off"); });
@@ -338,7 +364,7 @@
       off: function (i) { return isOff(data.selectedSeries, sr[i].name); },
       pick: function (i) { return { chart: "line", part: "legend", value: sr[i].name, index: i, series: sr[i].name, seriesIndex: i }; }
     });
-    dataTable(host, [""].concat(sr.map(function (x) { return x.name || "Value"; })), labels.map(function (l, li) { return [l].concat(sr.map(function (x) { return fmt(x.values[li] || 0, data); })); }));
+    dataTable(host, [""].concat(sr.map(function (x) { return x.name || "Value"; })), labels.map(function (l, li) { return [l].concat(sr.map(function (x) { return fmt(x.values[li], data); })); }));
   }
 
   // Ring (donut): data.items [{ label, value }]; data.center for the text in the middle;
@@ -349,6 +375,7 @@
     clear(host);
     var items = (data.items || []).map(function (it, i) { return { label: String(it.label), value: Math.max(0, Number(it.value) || 0), color: tone(it.color, color(i)) }; });
     var sum = items.reduce(function (a, b) { return a + b.value; }, 0), total = sum || 1;
+    if (!items.length || !sum) { empty(host, data); return; }
     var share = function (v) { return sum ? percent(v, total) : "-"; };
     var s = size(host, Number(host.getAttribute("data-kit-height")) || 220), cx = s.h / 2, cy = s.h / 2, R = s.h / 2 - 8, w = Math.max(10, R * 0.22);
     host.classList.add("kit-chart--ring");
@@ -411,8 +438,8 @@
     svgEl("path", { d: "M" + arc(0) + " A" + R + " " + R + " 0 0 1 " + arc(1), fill: "none", stroke: "var(--kit-surface-2)", "stroke-width": w, "stroke-linecap": "round" }, svg);
     var f = v / max;
     if (f > 0) {
-      var p = svgEl("path", { d: "M" + arc(0) + " A" + R + " " + R + " 0 0 1 " + arc(f), fill: "none", stroke: data.color || color(0), "stroke-width": w, "stroke-linecap": "round" }, svg);
-      if (!reduce) { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 800ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
+      var p = svgEl("path", { d: "M" + arc(0) + " A" + R + " " + R + " 0 0 1 " + arc(f), fill: "none", stroke: tone(data.color, color(0)), "stroke-width": w, "stroke-linecap": "round" }, svg);
+      if (!reduce && !host.__kitDrawn && typeof p.getTotalLength === "function") { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 800ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
     }
     svgEl("text", { x: cx, y: cy - 22, "text-anchor": "middle", class: "kit-chart__center" }, svg).textContent = fmt(v, data);
     if (data.label) svgEl("text", { x: cx, y: cy - 2, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = data.label;
@@ -423,7 +450,8 @@
   function heatmap(host, data) {
     clear(host);
     var rows = data.rows || [], cols = data.cols || [], vals = data.values || [];
-    var max = Math.max.apply(null, [1].concat.apply([], vals.map(function (r) { return r.map(Number); })));
+    if (!rows.length || !cols.length) { empty(host, data); return; }
+    var max = Math.max.apply(null, [1].concat.apply([], vals.map(function (r) { return (r || []).map(function (v) { return Number(v) || 0; }); })));
     var s = size(host), pad = { t: 22, r: 8, b: 8, l: 64 };
     var cw = Math.max(8, (s.w - pad.l - pad.r) / Math.max(1, cols.length)), ch = Math.min(28, Math.max(10, cw)), h = pad.t + ch * rows.length + pad.b;
     var svg = frame(host, { w: s.w, h: h }, data.title), tip = tooltip(host);
@@ -444,11 +472,12 @@
   function sparkline(host, data) {
     clear(host);
     host.classList.add("kit-chart--spark");
-    var v = (data.values || []).map(Number), W = Number(host.getAttribute("data-kit-width")) || 96, H = Number(host.getAttribute("data-kit-height")) || 28;
+    var v = (data.values || []).map(Number).filter(isFinite), W = Number(host.getAttribute("data-kit-width")) || 96, H = Number(host.getAttribute("data-kit-height")) || 28;
+    if (v.length < 2) { empty(host, data); return; }
     var lo = Math.min.apply(null, v), hi = Math.max.apply(null, v), span = hi - lo || 1;
     var svg = frame(host, { w: W, h: H }, data.title || ("Trend from " + fmt(v[0], data) + " to " + fmt(v[v.length - 1], data)));
     var d = v.map(function (x, i) { return (i ? "L" : "M") + ((W - 4) * i / Math.max(1, v.length - 1) + 2).toFixed(1) + " " + (H - 3 - (H - 6) * (x - lo) / span).toFixed(1); }).join(" ");
-    svgEl("path", { d: d, fill: "none", stroke: data.color || color(0), "stroke-width": 1.75, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    svgEl("path", { d: d, fill: "none", stroke: tone(data.color, color(0)), "stroke-width": 1.75, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
   }
 
   // Bar list: one row per item (label, bar, value) in the order given, for categories (countries,
@@ -484,7 +513,7 @@
       row.innerHTML = '<span class="kit-barlist__label">' + esc(it.label) + '</span><span class="kit-barlist__track"><span class="kit-barlist__fill" style="width:' +
         Math.min(100, 100 * Math.max(0, it.value) / max).toFixed(1) + "%;background:" + it.color + '"></span></span><span class="kit-barlist__value">' +
         (data.share ? "<b>" + esc(fmt(it.value, data)) + "</b> \u00b7 " + percent(it.value, whole) : esc(fmt(it.value, data))) + "</span>";
-      if (!reduce) row.querySelector(".kit-barlist__fill").style.animation = "kit-grow-x 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
+      if (!reduce && !host.__kitDrawn) row.querySelector(".kit-barlist__fill").style.animation = "kit-grow-x 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
       pickable(host, data, row, { chart: "barlist", part: "row", value: it.label, index: x.i }, it.label + ": " + text(it.value));
       list.appendChild(row);
     });
@@ -500,21 +529,85 @@
     }
   }
 
-  var kinds = { bar: bar, line: function (h, d) { line(h, d, false); }, area: function (h, d) { line(h, d, true); }, ring: ring, gauge: gauge, heatmap: heatmap, sparkline: sparkline, barlist: barlist };
+  // Scatter (is A related to B): data.series [{ name, points: [{ x, y, r, label }] }] with x and y
+  // numbers, r 1..14 for a bubble, label for the tooltip; data.xLabel and data.yLabel name the axes.
+  // Selectable points send kit:select with part "point", value the point's label (or "x, y"), series.
+  function scatter(host, data) {
+    clear(host);
+    var sr = (data.series || []).map(function (s, i) {
+      return { name: s.name || "", i: i, points: (s.points || []).map(function (p) {
+        var x = Number(p && p.x), y = Number(p && p.y);
+        return p && isFinite(x) && isFinite(y) ? { x: x, y: y, r: Math.max(2, Math.min(14, Number(p.r) || 4)), label: p.label } : null;
+      }).filter(Boolean) };
+    });
+    var all = [].concat.apply([], sr.map(function (s) { return s.points; }));
+    if (!all.length) { empty(host, data); return; }
+    var s = size(host), pad = { t: 12, r: 16, b: data.xLabel ? 42 : 28, l: data.yLabel ? 60 : 44 }, plotW = s.w - pad.l - pad.r, plotH = s.h - pad.t - pad.b;
+    var xs = all.map(function (p) { return p.x; }), ys = all.map(function (p) { return p.y; });
+    var xr = niceRange(Math.min.apply(null, xs), Math.max.apply(null, xs), 5), yr = niceRange(Math.min.apply(null, ys), Math.max.apply(null, ys), 4);
+    if (xr.max === xr.min) xr.max = xr.min + 1;
+    var svg = frame(host, s, data.title);
+    grid(svg, s, pad, yr, data);
+    for (var v = xr.min; v <= xr.max + 1e-9; v += xr.step) {
+      var gx = pad.l + plotW * ((v - xr.min) / (xr.max - xr.min));
+      svgEl("line", { x1: gx, x2: gx, y1: pad.t, y2: pad.t + plotH, "stroke-dasharray": "4 4", class: "kit-chart__line" }, svg);
+      svgEl("text", { x: gx, y: pad.t + plotH + 16, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = fmt(v, data);
+    }
+    if (data.xLabel) svgEl("text", { x: pad.l + plotW / 2, y: s.h - 6, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = data.xLabel;
+    if (data.yLabel) svgEl("text", { x: 12, y: pad.t + plotH / 2, "text-anchor": "middle", class: "kit-chart__label", transform: "rotate(-90 12 " + (pad.t + plotH / 2) + ")" }, svg).textContent = data.yLabel;
+    var px = function (x) { return pad.l + plotW * ((x - xr.min) / (xr.max - xr.min)); }, py = function (y) { return pad.t + plotH * (1 - (y - yr.min) / (yr.max - yr.min)); };
+    var tip = tooltip(host), dots = [];
+    sr.forEach(function (x) {
+      x.points.forEach(function (p, pi) {
+        var c = svgEl("circle", { cx: px(p.x).toFixed(1), cy: py(p.y).toFixed(1), r: p.r, fill: color(x.i), "fill-opacity": 0.75, class: "kit-chart__point" }, svg);
+        var name = (p.label ? p.label + ": " : "") + fmt(p.x, data) + ", " + fmt(p.y, data);
+        if (isOff(data.selectedSeries, x.name) || isOff(data.selected, p.label || name)) c.classList.add("is-off");
+        var show = function () { dots.forEach(function (d) { d.el.classList.toggle("is-faded", d.el !== c); }); tip.show("<strong>" + esc(x.name || p.label || "Point") + "</strong><br>" + esc(name), px(p.x), py(p.y) - p.r); };
+        var hide = function () { dots.forEach(function (d) { d.el.classList.remove("is-faded"); }); tip.hide(); };
+        c.addEventListener("mouseenter", show); c.addEventListener("focus", show); c.addEventListener("mouseleave", hide); c.addEventListener("blur", hide);
+        pickable(host, data, c, { chart: "scatter", part: "point", value: p.label || name, index: pi, series: x.name, seriesIndex: x.i }, (x.name ? x.name + ", " : "") + name);
+        dots.push({ el: c, s: x.i });
+      });
+    });
+    legend(host, sr.map(function (x) { return x.name; }), function (i) { dots.forEach(function (d) { d.el.classList.toggle("is-faded", i >= 0 && d.s !== i); }); }, data, {
+      off: function (i) { return isOff(data.selectedSeries, sr[i].name); },
+      pick: function (i) { return { chart: "scatter", part: "legend", value: sr[i].name, index: i, series: sr[i].name, seriesIndex: i }; }
+    });
+    dataTable(host, ["Series", "Label", data.xLabel || "x", data.yLabel || "y"], [].concat.apply([], sr.map(function (x) { return x.points.map(function (p) { return [x.name, p.label || "", fmt(p.x, data), fmt(p.y, data)]; }); })));
+  }
+
+  var kinds = { bar: bar, line: function (h, d) { line(h, d, false); }, area: function (h, d) { line(h, d, true); }, ring: ring, gauge: gauge, heatmap: heatmap, sparkline: sparkline, barlist: barlist, scatter: scatter };
   function render(host, kind, data) {
     var fn = kinds[kind];
     if (!fn) return;
+    data = data || {};
+    var parts = function () { return Array.prototype.slice.call(host.querySelectorAll('[role="button"], button')); };
+    var at = document.activeElement, focusAt = at && host.contains(at) ? parts().indexOf(at) : -1;
     host.__kitChart = { kind: kind, data: data };
-    fn(host, data);
+    try { fn(host, data); }
+    catch (e) {
+      clear(host);
+      empty(host, { empty: "This chart could not be drawn: " + (e && e.message ? e.message : e) });
+      if (window.console) console.error("UI kit chart (" + kind + ")", host, e);
+    }
+    host.__kitDrawn = true;
+    if (focusAt >= 0) { var again = parts()[focusAt]; if (again) again.focus(); }
   }
-  // Redraw when the box changes width (the SVG is drawn for its size).
+  // Redraw when the box changes width (the SVG is drawn for its size), once per frame.
+  var pending = [], frameAsked = false;
+  function redrawPending() {
+    frameAsked = false;
+    var list = pending; pending = [];
+    list.forEach(function (h) { var c = h.__kitChart; if (c) render(h, c.kind, c.data); });
+  }
   var ro = window.ResizeObserver ? new ResizeObserver(function (entries) {
     entries.forEach(function (en) {
       var h = en.target, c = h.__kitChart;
       if (!c || h.__kitWidth === Math.round(en.contentRect.width)) return;
       h.__kitWidth = Math.round(en.contentRect.width);
-      kinds[c.kind](h, c.data);
+      if (pending.indexOf(h) < 0) pending.push(h);
     });
+    if (pending.length && !frameAsked) { frameAsked = true; (window.requestAnimationFrame || setTimeout)(redrawPending); }
   }) : null;
   var api = {};
   Object.keys(kinds).forEach(function (k) { api[k] = function (host, data) { render(host, k, data); if (ro) ro.observe(host); }; });
