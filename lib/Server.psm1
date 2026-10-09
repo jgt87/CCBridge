@@ -856,7 +856,9 @@ function Set-Project($State, [string]$Path) {
         $new = try { (Read-TextFile (Join-Path $State.ProjectRoot $f.path.Replace('/', ''))).Text } catch { $null }
         Add-OwnChangeEvent $State 'edit' $f.path "$($f.count) link(s) or reference(s) now point at the new folders. The earlier version is kept in $($re.backup)." @{ path = $f.path; exists = $true; old = $old; new = $new }
     }
-    Sync-DataMirrors $State   # data copies (JS wrapping a JSON file) follow their JSON
+    # Data files converted and data copies following their JSON: by the worker at its next idle
+    # moment, since a large data file takes a minute and the open must answer at once.
+    $State.OpenSync = $State.ProjectRoot
     Publish-PackagesNeeded $State   # a card when package.json lists packages that are not installed
     # Line counts and "new" marks in the Files tab cover the change sets in the restored chat too.
     try { $State.SessionSince = Get-ChangeCountStart $State $mark ([string]$State.SessionSince) } catch { Write-CCBLogError server 'change counts' $_ }

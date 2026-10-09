@@ -34,6 +34,7 @@ function New-AgentState {
         ResponseOptions = @((Read-ResponseOptionsFile).options); ResponseOptionsRead = (Read-ResponseOptionsFile).read   # what Copilot's picker offers (read weekly)
         ReviewByCaller = $false   # MCP tasks: the calling model checks the result, so no Copilot review round
         NextConnectAttempt = $null
+        OpenSync = $null   # a project just opened: its data files are converted at the next idle moment
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
         WorkIq = $(if ($Config.workIq) { [string]$Config.workIq } else { 'leave' }); WorkIqActual = $null; WorkIqWarned = $false
         # Issue cycle: what the worker is doing besides Copilot (shown like "waiting for Copilot"),
@@ -1246,11 +1247,12 @@ function Sync-DataImports {
 
 function Sync-DataMirrors {
     <# Data copies (JS files that wrap a JSON file) follow their JSON: after each task and when a
-       project opens. What was rewritten is one change set; problems are said in the chat. Data
-       files are converted first (Sync-DataImports). #>
-    param($State, [switch]$NoImport)
+       project opens. What was rewritten is one change set; problems are said in the chat. With
+       -Import, data files are converted first (Sync-DataImports); otherwise that happens only when
+       a work request starts, never just because a project opened or a task ended. #>
+    param($State, [switch]$Import)
     if (-not $State.ProjectRoot) { return }
-    if (-not $NoImport) { $null = Sync-DataImports $State }
+    if ($Import) { $null = Sync-DataImports $State }
     if (-not (Test-DataCopiesOn $State.AppRoot)) { return }   # setting dataCopies off
     try {
         $r = Update-DataMirrors $State.ProjectRoot
@@ -3964,6 +3966,16 @@ function Start-AgentWorker {
                 $State.Tasks.Enqueue(@{ kind = 'connect' })
             }
             Update-CopilotTheme $State   # idle: a theme just chosen in the app reaches the Copilot tab at once
+            # A project just opened (Set-Project): data copies follow their JSON. Data files are not
+            # converted for an open alone; a live data file the person chose is brought in at once.
+            if ($State.OpenSync) {
+                $openRoot = $State.OpenSync; $State.OpenSync = $null
+                if ($openRoot -eq $State.ProjectRoot) {
+                    $live = try { [bool](Get-ProjectSetup $openRoot).liveSource } catch { $false }
+                    $prev = if ($live) { Enter-Activity $State 'index' 'Bringing in the live data file' } else { $null }
+                    try { Sync-DataMirrors $State -Import:$live } catch { Write-CCBLogError agent 'data at project open' $_ } finally { if ($prev) { Exit-Activity $State $prev } }
+                }
+            }
             # Live data (project setup): the outside file checked once a minute; a new version is
             # copied in, converted and filled into one-file pages at once.
             if ($State.ProjectRoot -and (-not $State.NextLiveCheck -or (Get-Date) -ge [datetime]$State.NextLiveCheck)) {

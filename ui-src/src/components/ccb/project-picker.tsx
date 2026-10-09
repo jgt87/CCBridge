@@ -1,4 +1,4 @@
-import { Cloud, FolderGit2, FolderOpen, RefreshCw } from "lucide-react";
+import { Cloud, FolderGit2, FolderOpen, Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,8 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  // The project being opened: shown on its row, and further clicks wait for it.
+  const [opening, setOpening] = useState("");
   // The full load, also for the Refresh button (folders, sizes and types read again).
   const loadRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
@@ -67,12 +69,16 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
   };
 
   const open = async (path: string) => {
+    if (opening) return;
     setError("");
+    setOpening(path);
     try {
       await api.openProject(path);
       onOpened();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setOpening("");
     }
   };
 
@@ -128,7 +134,12 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
       <div className="space-y-2">
         {projects.map((p) => (
           <button
-            className="flex w-full items-center gap-3 rounded-xl border border-black/10 px-4 py-3 text-left transition-colors hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+            aria-busy={opening === p.path}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-xl border border-black/10 px-4 py-3 text-left transition-colors hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5",
+              opening && opening !== p.path && "opacity-50",
+            )}
+            disabled={Boolean(opening)}
             key={p.path}
             onClick={() => open(p.path)}
             type="button"
@@ -136,10 +147,10 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
             <FolderGit2 className="h-5 w-5 text-muted-foreground" />
             <span className="flex-1">
               <span className="block font-medium text-sm">{p.name}</span>
-              <span className="block text-muted-foreground text-xs">changed {p.modified.replace("T", " ")}</span>
+              <span className="block text-muted-foreground text-xs">{opening === p.path ? "Opening..." : `changed ${p.modified.replace("T", " ")}`}</span>
               {overviewText(p.overview) && <span className="block text-muted-foreground text-xs">{overviewText(p.overview)}</span>}
             </span>
-            <FolderOpen className="h-4 w-4 text-muted-foreground" />
+            {opening === p.path ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <FolderOpen className="h-4 w-4 text-muted-foreground" />}
           </button>
         ))}
         {!projects.length && root && (

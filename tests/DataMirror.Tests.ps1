@@ -108,5 +108,33 @@ Describe 'Sync-DataMirrors' {
             (Get-ReviewFiles $p).files -contains 'calendar-data.js' | Should Be $true
         } finally { Remove-Item $p -Recurse -Force }
     }
+    It 'converts a data file only when asked (-Import), never because a project opened or a task ended' {
+        $p = Join-Path $env:TEMP ('ccb-mirror-' + [guid]::NewGuid().ToString('N'))
+        Add-File $p 'sales.csv' "region,amount`nNorth,120`n"
+        try {
+            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+            Sync-DataMirrors $s
+            Test-Path (Join-Path $p 'data') | Should Be $false
+            Sync-DataMirrors $s -Import
+            Test-Path (Join-Path $p 'data\sales.json') | Should Be $true
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+    It 'opens a project at once: Set-Project leaves the data work to the idle worker' {
+        Import-Module (Join-Path $root 'lib\Server.psm1') -Force
+        $od = Join-Path $env:TEMP ('ccb-mirror-' + [guid]::NewGuid().ToString('N'))
+        Add-File $od 'sales.csv' "region,amount`nNorth,120`n"
+        # Set-Project records the project StreamHub opens next time: kept as it was.
+        $last = Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'
+        $lastText = if (Test-Path -LiteralPath $last) { [IO.File]::ReadAllText($last) } else { $null }
+        try {
+            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+            & (Get-Module Server) { param($st, $path) Set-Project $st $path } $s $od
+            $s.OpenSync | Should Be $od
+            Test-Path (Join-Path $od 'data') | Should Be $false
+        } finally {
+            Remove-Item $od -Recurse -Force
+            if ($null -ne $lastText) { [IO.File]::WriteAllText($last, $lastText) } else { Remove-Item -LiteralPath $last -ErrorAction SilentlyContinue }
+        }
+    }
 }
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
