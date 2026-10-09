@@ -296,8 +296,9 @@ function Update-DataImports {
         $exists = Test-Path -LiteralPath $outFull -PathType Leaf
         if ($prev -and "$($prev.stamp)" -eq $s.stamp -and ($exists -or $prev.status)) { continue }   # unchanged (or already reported)
         $entry = [ordered]@{ output = $out; source = $s.rel; stamp = $s.stamp }
-        if ($exists -and -not $prev) {
-            # Someone else's file with that name (often Copilot's own conversion): left alone.
+        if ($exists -and -not ($prev -and $prev.hash)) {
+            # Someone else's file with that name (often Copilot's own conversion): left alone. An
+            # entry without a hash (a conversion that failed or was too large) never wrote the file.
             $results.Add([pscustomobject]@{ source = $s.rel; output = $out; status = 'taken'; note = '' }); continue
         }
         $done++

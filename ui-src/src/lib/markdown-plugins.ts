@@ -33,7 +33,10 @@ export function rehypeAlerts() {
  *  the classes the renderer itself adds (code languages, math, callouts). */
 export const sanitizeSchema = {
   ...defaultSchema,
-  clobberPrefix: "",
+  // An image may only come from the project (a relative path) or be embedded (data:); never from a
+  // web address, which would be fetched the moment a reply renders. The app's page policy refuses
+  // such loads as well (Server.psm1 AppPolicy); imageSource turns them into a link.
+  protocols: { ...defaultSchema.protocols, src: ["data"] },
   attributes: {
     ...defaultSchema.attributes,
     code: [...(defaultSchema.attributes?.code ?? []), ["className", /^language-./, "math-inline", "math-display"]],
@@ -64,6 +67,32 @@ export function splitFrontMatter(text: string): FrontMatter {
     }
   }
   return { fields, body: text.slice(m[0].length) };
+}
+
+/** Where an image in Markdown is shown from: a project file through the preview address, an embedded
+ *  data: image as it is, and a web address not at all (`remote`: the view shows a link instead). */
+export function imageSource(src: string, path: string | undefined, previewBase: string | undefined): { url: string } | { remote: string } | null {
+  if (!src) return null;
+  if (/^data:image\//i.test(src)) return { url: src };
+  if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith("//")) return { remote: src };
+  const target = path ? resolveProjectPath(path, src) : null;
+  if (target && previewBase) return { url: previewBase + target.split("/").map(encodeURIComponent).join("/") };
+  return null;
+}
+
+/** The host of a web address, for showing where a picture would come from; the address itself when it has none. */
+export function safeHost(url: string): string {
+  try {
+    return new URL(url, "https://x.invalid").host || url;
+  } catch {
+    return url;
+  }
+}
+
+/** The element a heading or raw-HTML anchor points at: slug ids are plain, ids written in HTML get
+ *  rehype-sanitize's clobber prefix. */
+export function findAnchor(root: ParentNode, id: string): Element | null {
+  return root.querySelector(`[id="${CSS.escape(id)}"]`) ?? root.querySelector(`[id="${CSS.escape("user-content-" + id)}"]`);
 }
 
 /** A link or image target relative to a project file, as a project path; null for web links and anchors. */

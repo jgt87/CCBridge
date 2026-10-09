@@ -725,7 +725,9 @@ function Get-CopilotCharts {
 '@
     $until = (Get-Date).AddSeconds($WaitSec)
     do {
-        $list = @((Invoke-CdpEval $Bridge.Session $js) | ConvertFrom-Json)
+        # Assigned first: in 5.1 a JSON list arrives as one object inside a pipeline or @().
+        $parsed = ConvertFrom-Json "$(Invoke-CdpEval $Bridge.Session $js)"
+        $list = @(foreach ($x in $parsed) { $x })
         if ($list.Count) { break }
         Start-Sleep -Milliseconds 700
     } while ((Get-Date) -lt $until)

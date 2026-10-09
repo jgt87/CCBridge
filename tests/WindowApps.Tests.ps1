@@ -260,3 +260,18 @@ Describe 'Window app alignment' {
         "$([Windows.Controls.Grid]::GetColumn((& $f 'L2')))" | Should Be '0'
     }
 }
+
+Describe 'A C# window project is not a PowerShell window app' {
+    It 'gets no PowerShell helpers or theme, and its XAML is left alone' {
+        $p = New-TempProject
+        try {
+            Add-File $p 'App.csproj' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><UseWPF>true</UseWPF></PropertyGroup></Project>'
+            Add-File $p 'MainWindow.xaml' '<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" x:Class="App.MainWindow"><Grid/></Window>'
+            Add-File $p 'MainWindow.xaml.cs' 'namespace App { public partial class MainWindow { } }'
+            Test-PsGuiProject $p | Should Be $false
+            @(Update-KitWpf $p $root).Count | Should Be 0
+            Add-File $p 'Tool.ps1' "Add-Type -AssemblyName PresentationFramework`n[Windows.MessageBox]::Show('x')"
+            Test-PsGuiProject $p | Should Be $true   # a script of its own still counts
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+}

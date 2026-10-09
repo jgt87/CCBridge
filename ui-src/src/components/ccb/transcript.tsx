@@ -332,6 +332,37 @@ function UnfinishedCard({ item, onSend }: { item: Extract<TranscriptItem, { kind
 /** A package.json lists packages that are not installed: npm install on a click (never by itself). */
 function PackagesCard({ item }: { item: Extract<TranscriptItem, { kind: "packages" }> }) {
   const [state, setState] = useState<"" | "started" | "later" | "failed">("");
+  // Without npm the card offers Node.js (which brings npm) first, the same install as Settings >
+  // This computer: started here, followed until it is done, then npm install can run.
+  const [npm, setNpm] = useState(item.npm);
+  const [node, setNode] = useState<"" | "installing" | "pending" | "done" | "failed">("");
+  const [nodeMessage, setNodeMessage] = useState("");
+  useEffect(() => {
+    if (node !== "installing") return;
+    let stop = false;
+    const look = () =>
+      import("@/lib/api")
+        .then(({ api }) => api.tools())
+        .then((tools) => {
+          if (stop) return;
+          const n = tools.find((t) => t.name === "node");
+          const s = n?.install?.state;
+          if (s === "done") {
+            setNode("done");
+            setNpm(true);
+          } else if (s === "failed" || s === "pending") {
+            setNode(s);
+            setNodeMessage(n?.install?.message ?? "");
+          }
+        })
+        .catch(() => undefined);
+    look();
+    const t = window.setInterval(look, 3000);
+    return () => {
+      stop = true;
+      window.clearInterval(t);
+    };
+  }, [node]);
   if (item.restored || state === "later" || state === "started") {
     return (
       <div className="flex items-start gap-2 px-1 text-muted-foreground text-sm">
@@ -344,14 +375,32 @@ function PackagesCard({ item }: { item: Extract<TranscriptItem, { kind: "package
     setState("started");
     import("@/lib/api").then(({ api }) => api.installPackages(item.folder)).catch(() => setState("failed"));
   };
+  const installNode = () => {
+    setNode("installing");
+    import("@/lib/api")
+      .then(({ api }) => api.installTool("node"))
+      .catch(() => {
+        setNode("failed");
+        setNodeMessage("The install could not be started.");
+      });
+  };
   const btn = "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs hover:bg-black/10 disabled:opacity-40 dark:hover:bg-white/15";
   return (
     <div className="space-y-2 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
       <div>This project needs its packages: {item.text}. Install them with npm now? It downloads them from npm's registry and runs their install steps.</div>
-      {!item.npm && <div className="text-muted-foreground text-xs">npm is not installed: Settings &gt; This computer &gt; Node.js &gt; Install for me brings it.</div>}
+      {!npm && node === "" && <div className="text-muted-foreground text-xs">npm is not installed. Node.js brings it: an install for this user only, from nodejs.org (nothing needs admin rights).</div>}
+      {node === "installing" && <div className="text-muted-foreground text-xs">Installing Node.js in the background...</div>}
+      {node === "pending" && <div className="text-muted-foreground text-xs">Node.js is in use; it is installed at the next start of StreamHub. {nodeMessage}</div>}
+      {node === "done" && <div className="text-muted-foreground text-xs">Node.js and npm are installed.</div>}
+      {node === "failed" && <div className="text-rose-600 text-xs dark:text-rose-400">Node.js could not be installed. {nodeMessage}</div>}
       {state === "failed" && <div className="text-rose-600 text-xs dark:text-rose-400">npm install could not be started.</div>}
       <div className="flex gap-1.5">
-        <button className={cn(btn, "bg-black/5 dark:bg-white/10")} disabled={!item.npm} onClick={install} type="button">
+        {!npm && node !== "done" && (
+          <button className={cn(btn, "bg-black/5 dark:bg-white/10")} disabled={node === "installing" || node === "pending"} onClick={installNode} type="button">
+            Install Node.js
+          </button>
+        )}
+        <button className={cn(btn, npm ? "bg-black/5 dark:bg-white/10" : "")} disabled={!npm} onClick={install} type="button">
           Run npm install
         </button>
         <button className={btn} onClick={() => setState("later")} type="button">

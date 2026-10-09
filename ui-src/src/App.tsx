@@ -101,6 +101,7 @@ export default function App() {
   const [stopping, setStopping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const lastSeq = useRef(0);
+  const instance = useRef<string | undefined>(undefined);
 
   // Side panel: always beside the chat when the window is wide enough. On a narrow window it is
   // hidden and a button (shown only then) opens it over the chat; a click beside it or Esc closes it.
@@ -162,6 +163,19 @@ export default function App() {
     const tick = async () => {
       try {
         const r = await api.poll(lastSeq.current);
+        // StreamHub was restarted while this tab stayed open (the token survives a restart): its
+        // event numbers start over, so the transcript starts over and the next poll reads from 0.
+        if (r.state.instance && r.state.instance !== instance.current) {
+          const restarted = instance.current !== undefined;
+          instance.current = r.state.instance;
+          if (restarted) {
+            lastSeq.current = 0;
+            setEvents([]);
+            setState(r.state);
+            if (!stop) timer = window.setTimeout(tick, 0);
+            return;
+          }
+        }
         setState(r.state);
         if (!r.state.busy) setStopping(false);
         // Desktop notifications for queue changes (the first poll only records the current state).

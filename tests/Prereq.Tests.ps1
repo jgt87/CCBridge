@@ -123,3 +123,14 @@ Describe 'Optional tools' {
         $node.detail | Should Be 'v16.20.0, npm 8.19.4, registry reachable'
     }
 }
+
+Describe 'The start report names the optional tools without touching the network' {
+    It 'includes Node.js (with npm) as an optional line, and asks the registry only when online' {
+        $c = @(Get-PrereqChecks -Tools)
+        $node = @($c | Where-Object name -eq 'Node.js')
+        $node.Count | Should Be 1
+        $node[0].status | Should Match '^(OK|INFO|WARN)$'
+        $node[0].detail | Should Not Match 'registry'
+        ($c | ForEach-Object { $_.name }) -join ',' | Should Match 'Python,Node\.js,\.NET SDK,Git$'
+    }
+}

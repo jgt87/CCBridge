@@ -14,6 +14,8 @@ function New-AgentState {
         Mode = 'ask'; ProjectRoot = $null; Busy = $false; Cancel = $false; Stop = $false
         Progress = ''; Copilot = 'idle'; CopilotMessage = ''
         Throttle = @{ used = 0; max = 0 }; Credits = $null; Todos = @(); ChatStarted = $false; NeedNewChat = $true; Summary = $null
+        # This run of the app: event numbers start over with it, so an open tab knows to start over too.
+        Instance = [guid]::NewGuid().ToString('N').Substring(0, 12)
         # Headless (MCP): no person approves; 'auto' mode applies changes, commands only when AllowCommands.
         Headless = $false; AllowCommands = $false; Jobs = [hashtable]::Synchronized(@{})
         LogLevel = $null   # set by the front end; the worker applies changes on the fly
@@ -1541,6 +1543,7 @@ function Invoke-PackagesJob {
         Add-AgentEvent $State 'error' @{ text = "npm install failed: $($_.Exception.Message)"; record = $_ }
     } finally {
         $State.Activity.label = ''
+        $State.Busy = $false
         if ($cp) {
             if (-not $cp.Files.Count) { Remove-Item $cp.Dir -Recurse -Force -ErrorAction SilentlyContinue }
             else { Add-ChangeSetEvent $State $cp 'npm install' }
@@ -2089,7 +2092,10 @@ function Test-WebPageCore {
                         $d = $m.params.exceptionDetails
                         $msg = if ($d.exception.description) { ($d.exception.description -split "`n")[0] } else { $d.text }
                         $where = if ($d.url) { " ($(& $rel $d.url):$([int]$d.lineNumber + 1))" } else { '' }
-                        $problems.Add("$page JavaScript error$where`: $msg")
+                        # The check serves the page in a sandbox without storage (as a private window
+                        # has none): a page that needs it unguarded is told so, not held up.
+                        if ($msg -match "Failed to read the '(local|session)Storage' property") { $problems.Add("$page reads $($Matches[1])Storage$where, and storage is not available where the helper program checks the page (nor in a private window): wrap it in try/catch so the page works without it") }
+                        else { $problems.Add("$page JavaScript error$where`: $msg") }
                     }
                     'Runtime.consoleAPICalled' {
                         if ($m.params.type -in 'error', 'assert') {
@@ -2380,6 +2386,12 @@ function Invoke-ProjectHooksCore {
         $cmd = Get-HookCommand $r.hook $r.path
         $label = "$HookEvent hook$(if ($r.hook.name) { " '$($r.hook.name)'" })$(if ($r.path) { " for $($r.path)" })"
         $id = 'hook-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        if (-not $cmd) {
+            Add-AgentEvent $State 'action' @{ id = $id; action = 'run'; target = "$($r.hook.run)"; status = 'running'; by = 'streamhub' }
+            Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'failed'; summary = "$label not run"; output = "Not run: the file name '$($r.path)' holds characters a command line would read as code. Hooks only take plain file names." }
+            $fails.Add("$label was not run: the file name holds characters a command line would read as code (rename the file to letters, digits, dots, dashes and underscores)")
+            continue
+        }
         Add-AgentEvent $State 'action' @{ id = $id; action = 'run'; target = $cmd; status = 'running'; by = 'streamhub' }
         $risk = Get-CommandRisk $cmd
         $outside = Test-DeleteScope $root $cmd
@@ -2599,6 +2611,7 @@ function Invoke-RolloverIfNeeded($State) {
     $kind = $State.ChatKind
     Start-NewChat $State
     $State.ChatKind = $kind   # the new chat continues the same kind of task
+    $true
 }
 
 # --- Actions -------------------------------------------------------------------------
@@ -2881,6 +2894,17 @@ function Invoke-AgentAction {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "left-out code: line $($ph.line) '$($ph.text)'" })
             return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (left-out code)"; output = "error: not written: line $($ph.line) of the new text, '$($ph.text)', stands for code that was left out. $how" }
         }
+        # A script that generates a page with stand-ins for its tags (LT in brackets before a tag
+        # name): refused as a whole, whether the stand-ins are new or were there before (a page is
+        # repaired instead).
+        if ($Action.arg -match '(?i)\.(ps[md]?1|py|m?js|cjs|ts|rb|php|cmd|bat|sh)$') {
+            $sm = Find-PlaceholderMarkup $Action.arg $newText
+            if ($sm) {
+                Write-CCBLog info agent "Stand-in markup script refused: $($Action.arg)"
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = 'a script writing markup with stand-ins' })
+                return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (stand-in markup)"; output = "error: not written: $sm" }
+            }
+        }
         # PowerShell whose [Type] before :: the chat removed cannot run: refuse, ask for a safe form.
         if ($Action.arg -match '(?i)\.ps[md]?1$') {
             $oldSet = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -2915,6 +2939,23 @@ function Invoke-AgentAction {
         $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0) -or [bool]$riskWarning
     } elseif ($Action.type -eq 'run') {
         $evt.target = Repair-RunCommand $Action.body.Trim()   # &lt;/&gt; and [Type\]:: from the chat put back
+        if (-not $evt.target) {
+            # Nothing to run: no card to approve, the block goes back as a mistake.
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = 'empty run block' })
+            return @{ ok = $false; summary = 'run skipped (no command)'; output = 'error: the run block has no command. Put the command on the line after ACTION run.' }
+        }
+        # A project script the command runs that writes a page with stand-ins for its tags would write
+        # a broken page: not run, the page is to be written with a write action.
+        foreach ($sm in [regex]::Matches($evt.target, '(?i)(?:-File\s+|\bpython3?\s+|\bnode\s+)"?([^\s"]+\.(?:ps1|py|m?js|cjs))"?')) {
+            $sp = $sm.Groups[1].Value
+            $sfull = try { Resolve-ProjectPath $State.ProjectRoot $sp } catch { $null }
+            if (-not $sfull -or -not (Test-Path -LiteralPath $sfull -PathType Leaf)) { continue }
+            $why = Find-PlaceholderMarkup $sp.Replace('\', '/') ([IO.File]::ReadAllText($sfull))
+            if ($why) {
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = 'the script writes markup with stand-ins' })
+                return @{ ok = $false; summary = 'run skipped (stand-in markup)'; output = "not executed: $sp would write a page with stand-ins for its tags ($why). Write the page itself with a write action holding its real tags, and leave the generator out." }
+            }
+        }
         # A script packed into one powershell -Command line: written as a script file instead, which
         # gets the syntax check before it runs and can be read when it is approved.
         if ($evt.target -match '(?i)\b(powershell|pwsh)\b') {
@@ -3359,7 +3400,8 @@ function Invoke-AgentTurn {
     Write-CCBLog trace agent 'User message' @{ text = $Text }
     Add-AgentEvent $State 'user' @{ text = $Text }
     $State.TurnText = $Text
-    $checkpoint = New-Checkpoint $State.ProjectRoot $Text
+    # Busy is already set: a checkpoint that cannot be made must not leave it set.
+    try { $checkpoint = New-Checkpoint $State.ProjectRoot $Text } catch { $State.Busy = $false; throw }
     $baseline = $null
     try { Sync-SourceVault $State.ProjectRoot } catch { Add-AgentEvent $State 'error' @{ text = "Could not back up source data: $($_.Exception.Message)" } }
     try {
@@ -3427,9 +3469,10 @@ function Invoke-AgentTurn {
         $reviewed = $false   # the consistency review after a big change happens once per message
         for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
-            Invoke-RolloverIfNeeded $State
-            if (-not $State.ChatStarted -and $round -gt 1) {
-                # A rollover started a fresh chat: give it the parts again, with the summary.
+            $rolled = [bool](Invoke-RolloverIfNeeded $State)
+            if (-not $State.ChatStarted -and ($round -gt 1 -or $rolled)) {
+                # A rollover started a fresh chat (also before the first send of this turn, when the
+                # previous turn filled the chat): give it the parts again, with the summary.
                 $prefix = New-PromptMessage -AppRoot $State.AppRoot -Kind $(if ($State.ChatKind) { $State.ChatKind } else { 'chat' }) -Text '' -Sent $State.SentParts -Context (Get-ProjectContext $State) -Summary $State.Summary
                 $State.Summary = $null
                 if ($prefix) { $message = "$prefix`n`n$message" }
@@ -3489,7 +3532,7 @@ function Invoke-AgentTurn {
 
             $State.LastTurnActed = $true
             $results = New-Object Collections.Generic.List[object]
-            $isDone = $false
+            $isDone = $false; $stepFailed = $false   # a write, edit or run step of this reply failed: done is not accepted
             # A change that is meant to fix a reported problem: the file as it was, to roll back to
             # when the change makes it worse.
             $roundSnap = @{}
@@ -3502,7 +3545,11 @@ function Invoke-AgentTurn {
             for ($k = 0; $k -lt $actions.Count; $k++) {
                 if ($State.Cancel) { break }
                 $a = $actions[$k]
-                if ($a.type -eq 'done') { $isDone = $true; $doneText = $a.body.Trim(); Add-AgentEvent $State 'done' @{ text = $doneText }; continue }
+                if ($a.type -eq 'done') {
+                    # Done next to a step that failed in the same reply is not done: the failure goes back.
+                    if ($stepFailed) { $results.Add(@{ head = '### done'; output = 'not accepted: a write, edit or run step in this reply failed (see above), so the task is not finished. Fix that step first, then send done in a reply of its own.' }); continue }
+                    $isDone = $true; $doneText = $a.body.Trim(); continue   # the done card comes after the steps, when none failed
+                }
                 $id = "$($State.Seq)-$k"
                 if ($a.type -in 'write', 'edit', 'run' -and -not $a.closed -and $k -eq $actions.Count - 1) {
                     # The reply ended inside this block (no closing fence): it may be cut off. Applying
@@ -3525,6 +3572,12 @@ function Invoke-AgentTurn {
                 }
                 $out = "$($res.output)"
                 if (-not $res.ok -and $a.type -in 'edit', 'write', 'run') {
+                    $stepFailed = $true
+                    if ($isDone) {
+                        # Done came earlier in this reply: taken back, the failure goes to Copilot.
+                        $isDone = $false
+                        $results.Add(@{ head = '### done'; output = 'not accepted: a step in this reply failed (see below), so the task is not finished. Fix that step first, then send done in a reply of its own.' })
+                    }
                     $times = Register-StepFailure $failSeen $a $out
                     if ($times -eq 2) {
                         $out += "`nThis is the second time this exact step failed in the same way. Do not send it again unchanged: read the lines it is about first and send a corrected step$(if ($a.type -eq 'edit') { ', or replace the whole file with a write block' })."
@@ -3539,6 +3592,7 @@ function Invoke-AgentTurn {
             # File checks of what this round changed (per type: syntax, unclosed brackets, tags and
             # strings, duplicate keys or code, missing local files...), so a broken file is fixed in
             # the next round, before more edits build on it. Only problems the task added count.
+            if ($isDone) { Add-AgentEvent $State 'done' @{ text = $doneText } }
             $roundChanged = @($results | ForEach-Object { $_.changedPath } | Where-Object { $_ } | Select-Object -Unique)
             if ($null -ne $State.ChatFiles) { foreach ($f in @($results | ForEach-Object { @($_.readPaths) + @($_.changedPath) } | Where-Object { $_ })) { [void]$State.ChatFiles.Add("$f".Replace('\', '/')) } }
             if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
@@ -3617,7 +3671,7 @@ function Invoke-AgentTurn {
                 # kit's theme, one height for buttons and fields) written into the XAML itself, so the
                 # window lines up however it is loaded. Copilot is told: its next edits must match.
                 $laidOut = New-Object System.Collections.Generic.List[string]
-                foreach ($p in @($roundChanged | Where-Object { $_ -match '(?i)\.xaml$' -and $_ -notmatch '(?i)^styles/kit/' })) {
+                foreach ($p in @($roundChanged | Where-Object { $_ -match '(?i)\.xaml$' -and $_ -notmatch '(?i)^styles/kit/' -and (Test-PsGuiProject $State.ProjectRoot) })) {
                     try {
                         $full = Resolve-ProjectPath $State.ProjectRoot $p
                         if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }

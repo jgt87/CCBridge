@@ -783,7 +783,7 @@ function Find-GeneratedCodeIssues {
         & $first $m7 'PowerShell 7 only (Windows PowerShell 5.1 does not have it): use a 5.1 way, or add #Requires -Version 7'
     }
     if ($Path -match '(?i)\.css$') {
-        & $first ([regex]::Match($masked, '(?m)(?<![:\w/])//[^\n]*')) '// is not a comment in CSS (the next rule is skipped): use /* */'
+        & $first ([regex]::Match($masked, '(?m)(?<![:\w/(])//[^\n]*')) '// is not a comment in CSS (the next rule is skipped): use /* */'
         & $first ([regex]::Match($masked, '(?m)^\s*\$[\w-]+\s*:|@(mixin|include|extend)\b')) 'SCSS syntax ($variables, @mixin, @include) in a .css file: use CSS variables (--name) or make it .scss'
     }
     if ($Path -match '(?i)\.(cmd|bat)$') {

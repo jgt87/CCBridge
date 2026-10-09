@@ -63,8 +63,10 @@ function Find-DataMirrors {
             $stem = [IO.Path]::GetFileNameWithoutExtension($js.rel) -replace '(?i)\.data$', ''
             $dir = $(if ($js.rel.Contains('/')) { $js.rel.Substring(0, $js.rel.LastIndexOf('/')) } else { '' })
             $same = @($jsons | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_.rel) -ieq $stem })
+            # Only the places a data copy belongs with its JSON: the same folder, data/, Runbooks/Exports/.
+            # A same-named JSON elsewhere is unrelated (a translation table src/i18n/en.js and locales/en.json).
             $pick = @($same | Where-Object { $(if ($_.rel.Contains('/')) { $_.rel.Substring(0, $_.rel.LastIndexOf('/')) } else { '' }) -ieq $dir }) +
-                    @($same | Where-Object { $_.rel -match '(?i)^data/' }) + @($same | Where-Object { $_.rel -match '(?i)^Runbooks/Exports/' }) + $same
+                    @($same | Where-Object { $_.rel -match '(?i)^data/' }) + @($same | Where-Object { $_.rel -match '(?i)^Runbooks/Exports/' })
             if ($pick.Count) { $src = $pick[0].rel }
         }
         if ($src) { [pscustomobject]@{ js = $js.rel; json = $src; decl = $w.decl; name = $w.name; marked = [bool]$w.source } }

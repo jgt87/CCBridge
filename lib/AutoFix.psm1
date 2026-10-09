@@ -40,7 +40,10 @@ function Repair-MechanicalIssues {
             $c = [int]$mask[$i]
             if ($c -eq 0x201C -or $c -eq 0x201D) { $dq += $i } elseif ($c -eq 0x2018 -or $c -eq 0x2019) { $sq += $i }
         }
-        if ($dq.Count -or $sq.Count) {
+        # Not in files that mix markup with code (JSX, Vue, Svelte): the mask does not know their text,
+        # and a typographic quote or a non-breaking space in the text is content, not a mistake.
+        $mixed = $Path -match '(?i)\.(jsx|tsx|vue|svelte)$'
+        if (($dq.Count -or $sq.Count) -and -not $mixed) {
             $t = Set-At $t $dq '"'; $t = Set-At $t $sq "'"
             $fixes.Add("$($dq.Count + $sq.Count) typographic quote(s) in code made straight")
             $mask = Get-CodeMask $Path $t
@@ -51,6 +54,7 @@ function Repair-MechanicalIssues {
             $c = [int]$mask[$i]
             if ($c -eq 0x00A0) { $nb += $i } elseif ($c -in 0x200B, 0x200C, 0x200D, 0x2060 -or ($c -eq 0xFEFF -and $i -gt 0)) { $zw += $i }
         }
+        if ($mixed) { $nb = @() }
         if ($nb.Count) { $t = Set-At $t $nb ' '; $fixes.Add("$($nb.Count) non-breaking space(s) in code made normal spaces") }
         if ($zw.Count) { $t = Set-At $t $zw ''; $fixes.Add("$($zw.Count) zero-width character(s) in code removed") }
         if ($nb.Count -or $zw.Count) { $mask = Get-CodeMask $Path $t }
@@ -68,7 +72,8 @@ function Repair-MechanicalIssues {
         }
         # CSS: a // line comment becomes /* ... */.
         if ($Path -match '(?i)\.css$') {
-            $cm = @([regex]::Matches($mask, '(?m)(?<![:\w/])//([^\n\r]*)'))
+            # Not after ( : url(//host/x) is an address without a scheme, not a comment.
+            $cm = @([regex]::Matches($mask, '(?m)(?<![:\w/(])//([^\n\r]*)'))
             if ($cm.Count) {
                 $sb = New-Object Text.StringBuilder $t
                 foreach ($m in @($cm | Sort-Object Index -Descending)) {

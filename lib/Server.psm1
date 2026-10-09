@@ -64,6 +64,14 @@ function Send-Response($Ctx, [int]$Status, [string]$ContentType, [byte[]]$Bytes)
     $res.Close()
 }
 
+function Test-PageOrigin($Ctx, $State) {
+    <# The request comes from the StreamHub page itself (the Origin a browser sets and no page can
+       forge). What changes settings or the mode, installs tools, opens links in the work browser,
+       undoes work or clears history is for the person at the app, not for another program that
+       holds the token (an MCP client, a preview page). #>
+    "$($Ctx.Request.Headers['Origin'])" -eq "http://localhost:$($State.Config.port)"
+}
+
 function Send-Json($Ctx, $Object, [int]$Status = 200) {
     $json = ConvertTo-Json -InputObject $Object -Depth 10 -Compress
     Send-Response $Ctx $Status 'application/json; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($json))
@@ -92,6 +100,7 @@ function Get-StateSnapshot($State) {
         promptLimit = $State.Config.promptCharBudget
         logLevel = (Get-CCBLogLevel)
         version = [string]$State.Version
+        instance = [string]$State.Instance   # changes when the app was restarted: the page starts its events over
         queue = @(Get-QueueView $State 40)
         responseMode = [string]$State.ResponseMode
         responseModeActual = $State.ResponseModeActual
@@ -252,6 +261,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx (Get-ChangeSetFileDiff $State.ProjectRoot ([string]$req.QueryString['id']) ([string]$req.QueryString['path']))
         }
         '^POST /api/open-link$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             # An external link as a real new tab in StreamHub's Edge (see Open-LinkInEdgeTab).
             $b = Read-JsonBody $Ctx
             $r = Open-LinkInEdgeTab ([string]$b.url) ([int]$State.Config.port) ([int]$State.Config.cdpPort) -PreviewPrefix "http://localhost:$([int]$State.Config.port)/preview/$($State.PreviewToken)/"
@@ -483,6 +493,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ tools = @(Get-InstallableTools) }
         }
         '^POST /api/tools/install$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             $b = Read-JsonBody $Ctx
             $name = "$($b.name)"
             if ($name -notin 'python', 'pytest', 'node', 'dotnet', 'git') { throw "Unknown tool '$name'." }
@@ -655,6 +666,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/mode$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             $b = Read-JsonBody $Ctx
             if (@('ask', 'auto', 'plan') -notcontains $b.mode) { throw "Unknown mode $($b.mode)" }
             $State.Mode = [string]$b.mode
@@ -708,6 +720,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/settings/reset$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             $changed = @(Reset-CCBridgeSettings $State.AppRoot)
             $keep = @{ port = $State.Config.port; cdpPort = $State.Config.cdpPort }
             $State.Config = Get-CCBridgeConfig harness $State.AppRoot
@@ -748,6 +761,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx (Request-EdgeCacheClear -Port ([int]$State.Config.cdpPort))
         }
         '^POST /api/history/clear$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             # Settings > Privacy: forget this project's conversation (the chat view empties too).
             if (-not $State.ProjectRoot) { throw 'Open a project first.' }
             $f = Get-ChatHistoryPath $State.ProjectRoot
@@ -759,6 +773,7 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^GET /api/settings$' { return Send-Json $Ctx @{ settings = @(Get-CCBridgeSettings $State.AppRoot) } }
         '^POST /api/settings$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             $b = Read-JsonBody $Ctx
             $value = Set-CCBridgeSetting ([string]$b.key) $b.value $State.AppRoot
             # In effect right away: the worker reads $State.Config on every turn.
@@ -770,6 +785,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ ok = $true; value = $value; settings = @(Get-CCBridgeSettings $State.AppRoot) }
         }
         '^POST /api/logging$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             $b = Read-JsonBody $Ctx
             if (@('info', 'verbose', 'trace', 'off') -notcontains $b.level) { throw 'level must be off, info, verbose or trace' }
             Set-CCBLogLevel $b.level
@@ -814,6 +830,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/undo$'    {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             # Without "to": the newest change set. With "to": that one and every newer one (History > Restore).
             $b = Read-JsonBody $Ctx
             $to = "$($b.to)"
@@ -876,6 +893,11 @@ $script:PreviewTypes = @{ '.html' = 'text/html; charset=utf-8'; '.htm' = 'text/h
     # Built apps (Vite, webpack): WebAssembly, source maps, other fonts, the web app manifest.
     '.wasm' = 'application/wasm'; '.map' = 'application/json; charset=utf-8'; '.ttf' = 'font/ttf'; '.otf' = 'font/otf'; '.webmanifest' = 'application/manifest+json' }
 
+# Project pages: an opaque origin (no allow-same-origin), scripts, forms, dialogs and downloads allowed.
+$script:PreviewPolicy = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads'
+# The app's own page: everything from itself; inline styles for the components; data and blob images.
+$script:AppPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+
 function Send-PreviewFile($Ctx, $State, [string]$RelPath) {
     <# The project's files, read-only, for the page check (GET only, confined to the project). #>
     $res = $Ctx.Response
@@ -891,6 +913,11 @@ function Send-PreviewFile($Ctx, $State, [string]$RelPath) {
         $ext = [IO.Path]::GetExtension($full).ToLowerInvariant()
         $res.ContentType = if ($script:PreviewTypes[$ext]) { $script:PreviewTypes[$ext] } else { 'application/octet-stream' }
         $res.Headers['Cache-Control'] = 'no-store'
+        # A project page runs code Copilot wrote. It must never be the StreamHub page: the sandbox gives
+        # it an opaque origin (its requests carry "Origin: null", which the API refuses, and the app's
+        # page with the session token is unreadable to it), while the page's own files stay readable.
+        $res.Headers['Content-Security-Policy'] = $script:PreviewPolicy
+        $res.Headers['Access-Control-Allow-Origin'] = '*'
         $res.ContentLength64 = $bytes.Length
         $res.OutputStream.Write($bytes, 0, $bytes.Length)
     } catch { try { $res.StatusCode = 404 } catch { } }
@@ -907,6 +934,9 @@ function Send-StaticFile($Ctx, [string]$UiDir, [string]$Token) {
     $ext = [IO.Path]::GetExtension($full).ToLowerInvariant()
     $type = if ($script:Mime.ContainsKey($ext)) { $script:Mime[$ext] } else { 'application/octet-stream' }
     if ($ext -eq '.html') {
+        # The app's page loads nothing from elsewhere: a reply or file it shows cannot fetch a remote
+        # image (a way to carry data out) or frame another site.
+        $Ctx.Response.Headers['Content-Security-Policy'] = $script:AppPolicy
         $html = [IO.File]::ReadAllText($full).Replace('</head>', "<meta name=`"ccb-token`" content=`"$Token`"></head>")
         return Send-Response $Ctx 200 $type ([Text.Encoding]::UTF8.GetBytes($html))
     }

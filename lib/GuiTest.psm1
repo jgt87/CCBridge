@@ -412,6 +412,9 @@ function Test-PsGuiApp {
     $hwnd = [IntPtr]::Zero; $title = ''; $shot = ''; $access = @(); $layout = @(); $ranSteps = 0
     $stepErrors = New-Object System.Collections.Generic.List[string]
     $until = (Get-Date).AddSeconds($WaitSec)
+    # The app, or what it started (a script that starts itself again with -STA and ends): the window
+    # is waited for while any process of the tree runs, and the whole tree is ended at the end.
+    $treeAlive = { @(Get-ProcessTreeIds $p.Id | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }).Count -gt 0 }
     try {
         while ((Get-Date) -lt $until -and $hwnd -eq [IntPtr]::Zero) {
             Start-Sleep -Milliseconds 300
@@ -419,7 +422,7 @@ function Test-PsGuiApp {
                 $q = Get-Process -Id $id -ErrorAction SilentlyContinue
                 if ($q -and $q.MainWindowHandle -ne [IntPtr]::Zero) { $hwnd = $q.MainWindowHandle; break }
             }
-            if ($p.HasExited -and $hwnd -eq [IntPtr]::Zero) { break }
+            if ($hwnd -eq [IntPtr]::Zero -and -not (& $treeAlive)) { break }
         }
         if ($hwnd -ne [IntPtr]::Zero) {
             Start-Sleep -Milliseconds 1200   # let the window draw itself
@@ -429,16 +432,18 @@ function Test-PsGuiApp {
             if ($winEl) { $access = @(try { Get-GuiAccessIssues $winEl } catch { }); $layout = @(try { Get-GuiLayoutIssues $winEl } catch { }) }
             # The steps of NAME.guitest, one by one; a crash or a message box after a step is a problem too.
             foreach ($st in @($Steps)) {
-                if (-not $winEl -or $p.HasExited) { break }
+                if (-not $winEl -or -not (& $treeAlive)) { break }
                 $ranSteps++
                 $bad = try { Invoke-GuiStep $winEl $st } catch { "line $($st.line): $($st.kind) $($st.target) failed: $($_.Exception.Message)" }
                 if ($bad) { $stepErrors.Add($bad) }
                 Start-Sleep -Milliseconds 500
-                if ($p.HasExited) { $stepErrors.Add("line $($st.line): the app closed after this step (exit code $($p.ExitCode))"); break }
-                # Message boxes: top-level windows of the app, and windows the main window owns (UI Automation
-                # lists those inside it).
+                if (-not (& $treeAlive)) { $stepErrors.Add("line $($st.line): the app closed after this step$(if ($p.HasExited) { " (exit code $($p.ExitCode))" })"); break }
+                # Message boxes only: dialog windows of the app (class #32770) and windows the main window
+                # owns (UI Automation lists those inside it). A second window a step opened on purpose
+                # (settings, details) stays open for the steps after it.
                 $owned = @($winEl.FindAll([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window))))
-                foreach ($w in @(@(Get-ProcessWindows (Get-ProcessTreeIds $p.Id)) + $owned)) {
+                $dialogs = @(Get-ProcessWindows (Get-ProcessTreeIds $p.Id) | Where-Object { $_.Current.ClassName -eq '#32770' })
+                foreach ($w in @($dialogs + $owned)) {
                     if ($w.Current.NativeWindowHandle -eq [int]$hwnd) { continue }
                     $txt = (@($w.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -Unique) -join ' ').Trim()
                     if ($txt -match '(?i)error|exception|failed|could not|cannot|went wrong|fout|mislukt') { $stepErrors.Add("line $($st.line): after this step a message said: $($txt.Substring(0, [Math]::Min(300, $txt.Length)))") }
@@ -452,7 +457,11 @@ function Test-PsGuiApp {
             $q = Get-Process -Id $id -ErrorAction SilentlyContinue
             if ($q) { try { $null = $q.CloseMainWindow() } catch { } }
         }
-        if (-not $p.WaitForExit(3000)) { foreach ($id in @(Get-ProcessTreeIds $p.Id)) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } }
+        $null = $p.WaitForExit(3000)
+        # Whatever is left of the tree (the parent may have ended long ago, its child still running).
+        $left = @(Get-ProcessTreeIds $p.Id | Where-Object { $_ -ne $p.Id -or -not $p.HasExited } | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+        if ($left.Count) { Start-Sleep -Milliseconds 1500 }
+        foreach ($id in $left) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
     }
     $null = $errTask.Wait(3000); $null = $outTask.Wait(3000)
     $err = "$($errTask.Result)".Trim()

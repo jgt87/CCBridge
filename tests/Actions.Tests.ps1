@@ -286,3 +286,15 @@ Describe 'Executor' {
 
 if ($env:CCBRIDGE_STATE_ROOT -and (Test-Path -LiteralPath $env:CCBRIDGE_STATE_ROOT)) { [IO.Directory]::Delete($env:CCBRIDGE_STATE_ROOT, $true) }
 $env:CCBRIDGE_STATE_ROOT = $null
+Describe 'A run block with the command on the ACTION line' {
+    It 'takes the command from the ACTION line when nothing follows it, and keeps a body when there is one' {
+        $a = @(Get-ActionBlocks ('```text' + "`nACTION run powershell.exe -NoProfile -ExecutionPolicy Bypass -File Work/Fix.ps1`n" + '```'))
+        $a.Count | Should Be 1
+        $a[0].type | Should Be 'run'
+        $a[0].body | Should Be 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File Work/Fix.ps1'
+        $b = @(Get-ActionBlocks ('```text' + "`nACTION run`nnpm test`n" + '```'))
+        $b[0].body | Should Be 'npm test'
+        $c = @(Get-ActionBlocks ('```text' + "`nACTION run`n`n" + '```'))
+        $c[0].body.Trim() | Should Be ''
+    }
+}

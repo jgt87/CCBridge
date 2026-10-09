@@ -63,6 +63,9 @@ function Get-ActionBlocks {
         if ($script:ActionTypes -notcontains $type) { continue }
 
         $action = [pscustomobject]@{ type = $type; arg = $arg; body = ($body -join "`n"); closed = $closed; edits = @() }
+        # The command of a run block belongs on the line after ACTION run; Copilot also puts it on the
+        # ACTION line itself (ACTION run powershell.exe ...), which is the same command.
+        if ($type -eq 'run' -and -not $action.body.Trim() -and $arg) { $action.body = $arg }
         if ($type -eq 'edit') { $action.edits = @(Get-EditPairs $action.body) }
         $actions.Add($action)
     }

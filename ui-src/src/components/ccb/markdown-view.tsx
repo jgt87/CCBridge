@@ -8,7 +8,7 @@ import rehypeSanitize from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import { rehypeAlerts, resolveProjectPath, sanitizeSchema, splitFrontMatter } from "@/lib/markdown-plugins";
+import { findAnchor, imageSource, rehypeAlerts, resolveProjectPath, safeHost, sanitizeSchema, splitFrontMatter } from "@/lib/markdown-plugins";
 import { openExternal } from "@/lib/links";
 import { cn } from "@/lib/utils";
 import { CodeBlock } from "./code-block";
@@ -70,7 +70,7 @@ export function MarkdownView({
             onClick={(e) => {
               e.preventDefault();
               const id = decodeURIComponent(href.slice(1));
-              root.current?.querySelector(`[id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+              if (root.current) findAnchor(root.current, id)?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
           >
             {children}
@@ -100,9 +100,17 @@ export function MarkdownView({
       );
     },
     img({ src = "", alt, ...rest }: { src?: string; alt?: string }) {
-      const target = path && typeof src === "string" ? resolveProjectPath(path, src) : null;
-      const url = target && previewBase ? previewBase + target.split("/").map(encodeURIComponent).join("/") : src;
-      return <img {...rest} alt={alt ?? ""} loading="lazy" src={url} />;
+      const from = imageSource(typeof src === "string" ? src : "", path, previewBase);
+      if (!from) return <span className="text-muted-foreground">[image{alt ? `: ${alt}` : ""}]</span>;
+      if ("remote" in from) {
+        // Nothing is fetched from the web by showing a reply; the person can open the picture.
+        return (
+          <a href={from.remote} onClick={openExternal} rel="noreferrer" target="_blank" className="text-muted-foreground underline">
+            [image{alt ? `: ${alt}` : ""} from {safeHost(from.remote)}]
+          </a>
+        );
+      }
+      return <img {...rest} alt={alt ?? ""} loading="lazy" src={from.url} />;
     },
   };
 

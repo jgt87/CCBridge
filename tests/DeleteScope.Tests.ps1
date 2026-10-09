@@ -79,3 +79,28 @@ Describe 'Resolve-ProjectPath and links' {
 cmd /c "rmdir ""$proj\link"" >nul 2>&1"
 cmd /c "rmdir ""$proj\innerlink"" >nul 2>&1"
 cmd /c "rmdir /s /q ""$base"" >nul 2>&1"
+
+Describe 'Test-DeleteScope: nothing hides a delete' {
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Remove-Item C:\Users\x\Documents\y -Recurse'))
+    It 'refuses every abbreviation of -EncodedCommand, and the risk check names it' {
+        foreach ($sw in '-e', '-ec', '-en', '-enco', '-encoded', '-EncodedCommand') {
+            Test-DeleteScope $proj "powershell -NoProfile $sw $b64" | Should Match 'encoded command'
+            (Get-CommandRisk "powershell $sw $b64").destructive | Should Be $true
+        }
+        Test-DeleteScope $proj 'powershell -ExecutionPolicy Bypass -ErrorAction SilentlyContinue -File Scripts\x.ps1' | Should BeNullOrEmpty
+    }
+    It 'checks what a shell inside the command runs' {
+        Test-DeleteScope $proj "cmd /c `"rd /s /q $outside`"" | Should Match 'outside the project'
+        Test-DeleteScope $proj 'cmd /c "del ..\..\x.txt"' | Should Match 'outside the project'
+        Test-DeleteScope $proj 'powershell -c "gci ..\.. | ri -Force"' | Should Match 'outside the project'
+        Test-DeleteScope $proj 'powershell -Command "Remove-Item ..\..\other -Recurse -Force"' | Should Match 'outside|dot or space'
+        Test-DeleteScope $proj 'bash -c "rm -rf ../../x"' | Should Match 'outside the project'
+        Test-DeleteScope $proj 'cmd /c "rd /s /q build"' | Should BeNullOrEmpty
+        Test-DeleteScope $proj 'powershell -Command "Remove-Item build -Recurse -Force"' | Should BeNullOrEmpty
+        Test-DeleteScope $proj 'cmd /c "npm run build"' | Should BeNullOrEmpty
+    }
+    It 'refuses a name ending in a dot or space, which Windows reads differently' {
+        Test-DeleteScope $proj 'del "build\x. "' | Should Match 'dot or space'
+        Test-DeleteScope $proj 'del build\x.txt' | Should BeNullOrEmpty
+    }
+}

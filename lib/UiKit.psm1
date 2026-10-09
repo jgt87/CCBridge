@@ -150,10 +150,14 @@ function Get-WpfThemeText {
 function Test-PsGuiProject([string]$ProjectRoot, [switch]$Forms) {
     <# The project has a PowerShell window app: a script that loads WPF or Windows Forms, or a .xaml file
        (-Forms: a script that uses Windows Forms). #>
-    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include *.ps1, *.psm1, *.xaml -ErrorAction SilentlyContinue |
+    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include *.ps1, *.psm1, *.xaml, *.csproj, *.xaml.cs -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -notmatch '\\(node_modules|\.git|\.streamhub|Source|styles\\kit)\\' -and $_.Name -notmatch '(?i)\.Tests\.ps1$' -and $_.Length -lt 1MB } | Select-Object -First 200)
+    # A .xaml next to a C# project (a .csproj or code-behind .xaml.cs) is a C#, Avalonia or MAUI
+    # window, not a PowerShell one: only its scripts count.
+    $csharp = @($files | Where-Object { $_.Name -match '(?i)\.(csproj|xaml\.cs)$' }).Count -gt 0
     foreach ($f in $files) {
-        if ($f.Extension -ieq '.xaml') { if ($Forms) { continue } else { return $true } }
+        if ($f.Name -match '(?i)\.(csproj|xaml\.cs)$') { continue }
+        if ($f.Extension -ieq '.xaml') { if ($Forms -or $csharp) { continue } else { return $true } }
         $t = try { [IO.File]::ReadAllText($f.FullName) } catch { '' }
         if ($Forms) { if ($t -match '(?i)System\.Windows\.Forms') { return $true } else { continue } }
         if ($t -match '(?i)PresentationFramework|System\.Windows\.Forms|XamlReader|\bShow-KitWindow\b|KitWpf\.ps1') { return $true }

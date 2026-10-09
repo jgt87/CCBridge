@@ -138,3 +138,18 @@ Describe 'Sync-DataMirrors' {
     }
 }
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+
+Describe 'A data copy is paired only with a JSON in its own places' {
+    It 'leaves a same-named JSON elsewhere in the project alone' {
+        $p = Join-Path $env:TEMP ('ccb-mirror-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        try {
+            Add-File $p 'src/i18n/en.js' 'const en = {"hello": "Hello"};'
+            Add-File $p 'locales/en.json' '{"hello": "Hallo"}'
+            Add-File $p 'data/sales.js' 'window.salesData = [1];'
+            Add-File $p 'data/sales.json' '[1, 2]'
+            @(Find-DataMirrors $p | ForEach-Object { "$($_.js)<-$($_.json)" }) -join ',' | Should Be 'data/sales.js<-data/sales.json'
+            $null = Update-DataMirrors $p
+            [IO.File]::ReadAllText((Join-Path $p 'src\i18n\en.js')) | Should Be 'const en = {"hello": "Hello"};'
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+}

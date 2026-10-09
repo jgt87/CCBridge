@@ -228,6 +228,8 @@ export interface AppState {
   logLevel: "off" | "info" | "verbose" | "trace";
   /** Installed CCBridge version (version.txt), or git-<sha> for a development copy. */
   version: string;
+  /** This run of the app: a new value after a restart, when event numbers start over. */
+  instance?: string;
   /** Every task, newest first, whatever started it (you, an MCP client, ...). */
   queue?: QueueEntry[];
   /** Copilot's response mode: leave (as set in Copilot), auto, quick or deep (Think deeper). */

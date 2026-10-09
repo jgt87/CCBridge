@@ -52,7 +52,7 @@ try { foreach ($s in @(Rename-AppShortcuts)) { Write-Host "Renamed the shortcut 
     Import-Module (Join-Path $root 'lib\Config.psm1') -Force
     $cfgCheck = Get-CCBridgeConfig harness $root
     $checkPort = if ($Port) { $Port } elseif ($cfgCheck.port) { [int]$cfgCheck.port } else { 8765 }
-    $checks = Get-PrereqChecks -WebPort $checkPort -CdpPort ([int]$cfgCheck.cdpPort)
+    $checks = Get-PrereqChecks -WebPort $checkPort -CdpPort ([int]$cfgCheck.cdpPort) -Tools   # the optional tools too (no network): Node.js and npm, Python, .NET, Git
     # Safe repairs (a busy port, OneDrive sign-in); a port given with -Port is kept.
     $checks = @(Repair-PrereqChecks $checks -AppRoot $root -KeepWebPort:([bool]$Port) -WebPort $checkPort -CdpPort ([int]$cfgCheck.cdpPort))
     $checksOk = Write-PrereqReport $checks

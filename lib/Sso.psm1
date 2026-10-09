@@ -135,7 +135,8 @@ function Get-PageSwitches($Session, [int]$WaitSec = 10) {
     $deadline = (Get-Date).AddSeconds($WaitSec)
     do {
         Start-Sleep -Milliseconds 500
-        try { $list = @((Invoke-CdpEval $Session $script:FindJs) | ConvertFrom-Json) } catch { $list = @() }
+        # Assigned first: in 5.1 a JSON list arrives as one object inside a pipeline or @().
+        try { $parsed = ConvertFrom-Json "$(Invoke-CdpEval $Session $script:FindJs)"; $list = @(foreach ($x in $parsed) { $x }) } catch { $list = @() }
     } while (-not $list.Count -and (Get-Date) -lt $deadline)
     , $list
 }

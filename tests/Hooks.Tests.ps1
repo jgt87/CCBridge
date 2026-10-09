@@ -71,3 +71,13 @@ Describe 'Invoke-ProjectHooks' {
     }
 }
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+
+Describe 'Hook file names' {
+    It 'never puts a file name with shell characters into an approved command' {
+        $hook = @{ run = 'powershell -NoProfile -Command "ParseFile((Resolve-Path {file}))"' }
+        Get-HookCommand $hook 'src/My File.ps1' | Should Be 'powershell -NoProfile -Command "ParseFile((Resolve-Path "src\My File.ps1"))"'
+        foreach ($bad in 'src/x$(Set-Content y z).ps1', 'a&b.ps1', 'a;b.ps1', 'a"b.ps1', 'a`b.ps1', 'a|b.ps1', 'a%b%.ps1', 'a(b).ps1') { Get-HookCommand $hook $bad | Should Be '' }
+        Get-HookCommand @{ run = 'npm test' } 'a&b.ps1' | Should Be 'npm test'
+        Test-HookFileName 'src/app-v2_final.test.ts' | Should Be $true
+    }
+}

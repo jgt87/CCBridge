@@ -233,9 +233,26 @@ function Get-FileFingerprint([string]$Path) {
 }
 
 function Get-RelativeFiles([string]$Dir) {
+    <# The files under a folder as relative paths. Junctions and symbolic links are not followed: a link
+       inside Source/ to a folder elsewhere must never make the vault or the restore touch files
+       outside the project (such a link needs no rights to create). #>
     if (-not (Test-Path -LiteralPath $Dir)) { return @() }
     $base = $Dir.TrimEnd('\').Length + 1
-    @([IO.Directory]::GetFiles($Dir, '*', 'AllDirectories') | ForEach-Object { $_.Substring($base) })
+    $out = New-Object System.Collections.Generic.List[string]
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    $stack.Push($Dir.TrimEnd('\'))
+    while ($stack.Count) {
+        $d = $stack.Pop()
+        foreach ($f in [IO.Directory]::GetFiles($d)) {
+            if (([IO.File]::GetAttributes($f) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            $out.Add($f.Substring($base))
+        }
+        foreach ($sub in [IO.Directory]::GetDirectories($d)) {
+            if (([IO.File]::GetAttributes($sub) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            $stack.Push($sub)
+        }
+    }
+    $out.ToArray()
 }
 
 function Set-ReadOnly([string]$Path, [bool]$On) {
@@ -363,9 +380,11 @@ function Restore-SourceData {
         $s = Join-Path $src $rel
         $dest = Join-Path (Join-Path $ProjectRoot 'Work') $rel
         $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest)
-        if (Test-Path -LiteralPath $dest) { [IO.File]::Delete($dest) }
+        # A file already in Work/ with that name is the person's; the new one gets a numbered name.
+        $n = 1
+        while (Test-Path -LiteralPath $dest) { $n++; $dest = Join-Path (Split-Path -Parent $dest) ([IO.Path]::GetFileNameWithoutExtension($rel) + " ($n)" + [IO.Path]::GetExtension($rel)) }
         [IO.File]::Move($s, $dest)
-        $fixed.Add("moved new file Source/$($rel.Replace('\', '/')) to Work/$($rel.Replace('\', '/'))")
+        $fixed.Add("moved new file Source/$($rel.Replace('\', '/')) to Work/$($dest.Substring((Join-Path $ProjectRoot 'Work').Length + 1).Replace('\', '/'))")
     }
     if ($fixed.Count) { Write-CCBLog info source 'Source data restored after agent activity' @{ fixed = @($fixed) } }
     @($fixed)

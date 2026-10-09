@@ -135,6 +135,16 @@ Describe 'Converting the files of a project' {
         @($t.items | ForEach-Object { $_.status }) -join ',' | Should Be 'taken'
         [IO.File]::ReadAllText((Join-Path $p 'data\orders.json')) | Should Be '[1]'
     }
+    It 'never overwrites a file written after a conversion failed' {
+        [IO.File]::WriteAllText((Join-Path $p 'Source\late.csv'), "a,b`n`"open,1`n")
+        @((Update-DataImports $p -AppRoot $root).items | Where-Object { $_.source -match 'late' } | ForEach-Object { $_.status }) -join ',' | Should Be 'failed'
+        [IO.File]::WriteAllText((Join-Path $p 'data\late.json'), '["mine"]')   # the person's or Copilot's own file meanwhile
+        $f = Join-Path $p 'Source\late.csv'
+        [IO.File]::WriteAllText($f, "a,b`n1,2`n")
+        (Get-Item $f).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddMinutes(4)
+        @((Update-DataImports $p -AppRoot $root).items | Where-Object { $_.source -match 'late' } | ForEach-Object { $_.status }) -join ',' | Should Be 'taken'
+        [IO.File]::ReadAllText((Join-Path $p 'data\late.json')) | Should Be '["mine"]'
+    }
     It 'reports a file it cannot read' {
         [IO.File]::WriteAllText((Join-Path $p 'Source\broken.csv'), "a,b`n`"open,1`n")
         $b = Update-DataImports $p -AppRoot $root

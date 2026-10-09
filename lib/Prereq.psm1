@@ -277,7 +277,7 @@ function Get-PrereqChecks {
     }))
 
     # Optional tools (Python, Node.js...): check.cmd and the installer show them; not at every start.
-    if ($Tools) { foreach ($c in @(Get-OptionalToolChecks -Registry)) { $out.Add($c) } }
+    if ($Tools) { foreach ($c in @(Get-OptionalToolChecks -Registry:$Online)) { $out.Add($c) } }
 
     if ($Online) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12

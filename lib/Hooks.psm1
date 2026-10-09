@@ -44,10 +44,24 @@ function Test-HookMatch($Hook, [string]$Path) {
     $false
 }
 
+# Characters a command line reads as code (variables, quotes, separators, cmd.exe and PowerShell
+# operators): a file name with one of these never goes into a hook's command.
+$script:UnsafeFileName = '[$`"''`;&|<>(){}\[\]^%!\r\n]'
+
+function Test-HookFileName([string]$Path) {
+    <# $true when the changed file's name can be put into a command line as data (quoted). #>
+    -not ($Path -match $script:UnsafeFileName)
+}
+
 function Get-HookCommand($Hook, [string]$Path = '') {
-    # The command line: {file} becomes the (quoted) changed file.
+    <# The command line: {file} becomes the (quoted) changed file. The name is chosen by Copilot, and
+       a hook was approved by a person for its command, not for what a name could add to it: a name
+       holding characters a shell would read as code gives '' (the hook is not run for that file). #>
     $cmd = $Hook.run
-    if ($cmd -match '\{file\}') { $cmd = $cmd.Replace('{file}', $(if ($Path) { '"' + $Path.Replace('/', '\') + '"' } else { '' })) }
+    if ($cmd -match '\{file\}') {
+        if ($Path -and -not (Test-HookFileName $Path)) { return '' }
+        $cmd = $cmd.Replace('{file}', $(if ($Path) { '"' + $Path.Replace('/', '\') + '"' } else { '' }))
+    }
     $cmd.Trim()
 }
 
@@ -74,4 +88,4 @@ function New-HooksFile {
     '.streamhub/hooks.json'
 }
 
-Export-ModuleMember -Function Get-HooksPath, Read-Hooks, Test-HookMatch, Get-HookCommand, New-HooksFile
+Export-ModuleMember -Function Get-HooksPath, Read-Hooks, Test-HookMatch, Get-HookCommand, Test-HookFileName, New-HooksFile

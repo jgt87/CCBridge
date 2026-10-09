@@ -198,7 +198,7 @@ function Get-UselessCheckCommand([AllowEmptyString()][string]$Command) {
 function Test-LongPowerShellCommand([AllowEmptyString()][string]$Command, [int]$MaxChars = 300) {
     <# A script packed into one command line (powershell -Command "..."): quoting through cmd.exe
        breaks these easily and nobody can read them when approving. Returns why, or $null. #>
-    $m = [regex]::Match($Command, '(?i)\b(powershell|pwsh)(\.exe)?\b.*?\s-(c|command|encodedcommand|ec|e)\b\s*(.*)$', 'Singleline')
+    $m = [regex]::Match($Command, '(?i)\b(powershell|pwsh)(\.exe)?\b.*?\s-(c|co|com|comm|comma|comman|command|e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand)\b\s*(.*)$', 'Singleline')
     if (-not $m.Success) { return $null }
     $body = $m.Groups[4].Value
     if ($body.Length -le $MaxChars) { return $null }
@@ -1863,7 +1863,9 @@ $script:DestructiveCommandPatterns = @(
     @{ re = 'robocopy\b.*\s/(MIR|PURGE)\b'; why = 'mirrors with deletion' },
     @{ re = 'Format-Volume|\bformat\s+[a-z]:|diskpart|cipher\s+/w'; why = 'wipes a disk' },
     @{ re = '\bgit\s+(clean\s+-[a-z]*f|reset\s+--hard|push\s+.*--force)'; why = 'discards data in git' },
-    @{ re = '(?i)\bprisma(\.cmd)?\s+(migrate\s+reset|db\s+push\b.*--(force-reset|accept-data-loss))'; why = 'deletes database data (Prisma)' }
+    @{ re = '(?i)\bprisma(\.cmd)?\s+(migrate\s+reset|db\s+push\b.*--(force-reset|accept-data-loss))'; why = 'deletes database data (Prisma)' },
+    @{ re = '(?i)(^|\s)-e(c|n|nc|nco|ncod|ncode|ncoded|ncodedc|ncodedco|ncodedcom|ncodedcomm|ncodedcomma|ncodedcomman|ncodedcommand)?\s+[A-Za-z0-9+/=]{16,}'; why = 'runs an encoded command that cannot be read' },
+    @{ re = '(?i)\bmklink\b|New-Item\b[^\r\n]*-ItemType\s+(Junction|SymbolicLink|HardLink)|\bfsutil\s+(hardlink|reparsepoint)'; why = 'creates a link to another folder or file' }
 )
 
 # Commands that delete or move files (cmd, PowerShell and their aliases, Unix-style tools).
@@ -1895,6 +1897,30 @@ function Split-CommandGroups([string]$Command) {
     $groups.ToArray()
 }
 
+# Every abbreviation powershell.exe takes for -EncodedCommand (-e, -ec, -en, -enc, ..., -encodedcommand).
+$script:EncodedCommandPattern = '(?i)(^|\s)-(' + (@(1..14 | ForEach-Object { 'encodedcommand'.Substring(0, $_) }) + @('ec') -join '|') + ')\s+[A-Za-z0-9+/=]{16,}'
+$script:InnerShells = '(?i)^(cmd(\.exe)?|powershell(\.exe)?|pwsh(\.exe)?|bash(\.exe)?|sh|wsl(\.exe)?)$'
+
+function Get-InnerShellCommand([string[]]$Group) {
+    <# The command a shell inside this group runs (cmd /c "...", /k, powershell -Command "..." or -c,
+       bash -c "..."), with one level of quotes removed; $null when the group is no such shell. #>
+    $shellAt = -1
+    for ($i = 0; $i -lt $Group.Count; $i++) { if (($Group[$i] -replace '^.*\\', '') -match $script:InnerShells) { $shellAt = $i; break } }
+    if ($shellAt -lt 0) { return $null }
+    $isCmd = ($Group[$shellAt] -replace '^.*\\', '') -match '(?i)^cmd(\.exe)?$'
+    for ($i = $shellAt + 1; $i -lt $Group.Count; $i++) {
+        $sw = $Group[$i]
+        $hit = if ($isCmd) { $sw -match '(?i)^/[ck]$' } else { $sw -match '(?i)^-(c|co|com|comm|comma|comman|command)$' }
+        if (-not $hit) { continue }
+        $rest = @($Group[($i + 1)..($Group.Count - 1)] | Where-Object { $null -ne $_ })
+        if (-not $rest.Count) { return '' }
+        $text = $rest -join ' '
+        if ($rest.Count -eq 1 -and $text -match '^(["''])(.*)\1$') { $text = $Matches[2] }
+        return $text
+    }
+    $null
+}
+
 function Test-ScopedPath([string]$ProjectRoot, [string]$Token) {
     <# Why a path written in a deleting command is not safely inside the project, or $null. #>
     $t = $Token.Trim().Trim('"', "'").TrimEnd(';', ',', ')').TrimStart('(')
@@ -1902,6 +1928,9 @@ function Test-ScopedPath([string]$ProjectRoot, [string]$Token) {
     if ($t -match '[$%!`]' -or $t.StartsWith('~')) { return "'$t' uses a variable, so the target cannot be checked" }
     $root = $ProjectRoot.TrimEnd('\')
     $p = $t.Replace('/', '\') -replace '[*?]', 'x'
+    # Windows drops dots and spaces at the end of a name ("Remove-Item ..\x" read as one path becomes
+    # "Remove-Item" + "x"), so such a name cannot be checked as written.
+    if ($p -match '(^|\\)(?!\.\.?(\\|$))[^\\]*[. ](\\|$)') { return "'$t' has a name ending in a dot or space, which Windows reads differently" }
     $full = try { [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $root $p })).TrimEnd('\') } catch { return "'$t' is not a path that can be checked" }
     if ($full -eq $root) { return "'$t' is the project folder itself" }
     if (-not $full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { return "'$t' is outside the project folder" }
@@ -1917,11 +1946,18 @@ function Test-DeleteScope {
        python -c / node -e / -Command text, and in project scripts the command runs, is checked
        the same way (its quoted paths). #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command, [int]$Depth = 0)
-    if ($Command -match '(?i)(^|\s)-(e|ec|enc|encodedcommand)\s+[A-Za-z0-9+/=]{16,}') { return 'it contains an encoded command, which cannot be checked' }
+    if ($Command -match $script:EncodedCommandPattern) { return 'it contains an encoded command, which cannot be checked' }
     $groups = @(Split-CommandGroups $Command)
     $all = @($groups | ForEach-Object { $_ })
     $deletes = $false
     foreach ($g in $groups) {
+        # A shell inside the command (cmd /c "...", powershell -Command "...", bash -c "..."): what it
+        # runs is checked as a command of its own, so a quoted string cannot hide a delete.
+        $inner = Get-InnerShellCommand $g
+        if ($null -ne $inner) {
+            $why = Test-DeleteScope $ProjectRoot $inner $Depth
+            if ($why) { return $why }
+        }
         $verbs = @($g | Where-Object { ($_ -replace '^@', '') -match $script:DeleteVerbs })
         $isGit = ($g -contains 'git') -and (@($g | Where-Object { $_ -in 'clean', 'rm', 'mv' }).Count -gt 0)
         $isRobo = ($g | Where-Object { $_ -match '(?i)^robocopy(\.exe)?$' }) -and ($g | Where-Object { $_ -match '(?i)^/(mir|purge|mov|move)$' })
@@ -1944,6 +1980,9 @@ function Test-DeleteScope {
             if ($s -match '["'';]') { continue }
             if ($s -notmatch '[\\/]|^\.\.?$' -and -not [IO.Path]::IsPathRooted($s)) { continue }   # only path-like strings
             if ($s -match '^\w+://') { continue }
+            # A string with spaces may be a command line of its own ("Remove-Item ..\x -Recurse"):
+            # checked as one first, then as the path it may also be.
+            if ($s -match '\s' -and $Depth -lt 2) { $why = Test-DeleteScope $ProjectRoot $s ($Depth + 1); if ($why) { return $why } }
             $why = Test-ScopedPath $ProjectRoot $s
             if ($why) { return "it deletes or moves files and $why" }
         }
