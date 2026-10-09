@@ -475,7 +475,7 @@ Describe 'UI kit parts switched off (Settings > UI kit)' {
         $cat = Join-Path $p '.streamhub\ui-kit'
         Test-Path (Join-Path $cat 'kit-data.js') | Should Be $true
         Test-Path (Join-Path $cat 'react\useFileData.ts') | Should Be $true
-        Test-Path (Join-Path $cat 'vendor') | Should Be $false
+        Test-Path (Join-Path $cat 'vendor\pdfjs') | Should Be $false
         $ex = [IO.File]::ReadAllText((Join-Path $cat 'kit-examples.html'))
         $ex | Should Match 'KitData\.readFile'
         $ex | Should Not Match 'pdf\.min\.js|or PDF'

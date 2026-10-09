@@ -1,0 +1,1 @@
+Pyodide 314.0.7: Python (CPython, PSF licence) compiled to WebAssembly, by the Pyodide project (Mozilla Public License 2.0; source and licence text at pyodide.org). Unmodified core files apart from links in text. Used by the UI kit's kit-python.js; it loads its parts from this folder, so it works when the page is served (Open app), not when opened from disk.

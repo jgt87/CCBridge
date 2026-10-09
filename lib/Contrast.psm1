@@ -119,4 +119,9 @@ function Get-PageContentScript {
     [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'page-content-check.js'))
 }
 
-Export-ModuleMember -Function ConvertFrom-CssColor, Get-RelativeLuminance, Get-ContrastRatio, Get-TokenBlocks, Test-TokenContrast, Get-ContrastScript, Get-PageContentScript
+function Get-NarrowScreenScript {
+    <# The page check at phone width (lib/narrow-check.js): sideways scrolling and the parts that cause it. #>
+    [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'narrow-check.js'))
+}
+
+Export-ModuleMember -Function ConvertFrom-CssColor, Get-RelativeLuminance, Get-ContrastRatio, Get-TokenBlocks, Test-TokenContrast, Get-ContrastScript, Get-PageContentScript, Get-NarrowScreenScript

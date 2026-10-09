@@ -130,7 +130,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 }
 .kit-tab:hover { color: var(--kit-text); }
 .kit-tab[aria-selected="true"] { color: var(--kit-text); border-bottom-color: var(--kit-accent); font-weight: 600; }
-.kit-segmented { display: inline-flex; align-self: flex-start; border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); padding: 2px; gap: 2px; }
+.kit-segmented { display: inline-flex; flex-wrap: wrap; max-width: 100%; align-self: flex-start; border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); padding: 2px; gap: 2px; }
 .kit-segmented button {
   border: 0; background: none; border-radius: calc(var(--kit-radius) - 2px);
   padding: var(--kit-space-1) var(--kit-space-3); font: inherit; font-size: var(--kit-text-sm); color: var(--kit-text-muted); cursor: pointer;
@@ -583,7 +583,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 /* Icon toolbar (from kokonutui toolbar): <div class="kit-iconbar" role="toolbar" aria-label="View" data-kit-iconbar="single">
    <button class="kit-iconbar__item" type="button" aria-pressed="true" aria-label="Table"><span data-kit-icon="table" aria-hidden="true"></span><span class="kit-iconbar__label">Table</span></button>..</div>
    The pressed button shows its label; arrow keys move between buttons; kit:select with detail.value. */
-.kit-iconbar { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); background: var(--kit-surface); }
+.kit-iconbar { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 2px; padding: 2px; border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); background: var(--kit-surface); }
 .kit-iconbar__item { display: inline-flex; align-items: center; gap: var(--kit-space-1); min-width: 2rem; height: 2rem; justify-content: center; padding: 0 var(--kit-space-2); border: 0; border-radius: calc(var(--kit-radius) - 2px); background: transparent; color: var(--kit-text-muted); font: inherit; font-size: var(--kit-text-sm); cursor: pointer; }
 .kit-iconbar__item:hover { color: var(--kit-text); background: var(--kit-surface-2); }
 .kit-iconbar__item:focus-visible { outline: none; box-shadow: var(--kit-focus); }

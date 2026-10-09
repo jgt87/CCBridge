@@ -185,6 +185,9 @@ function Get-KitBlockTexts {
             'kit.js'        = ($page -match 'data-kit-(sort|pages|rows|hold|search|drop|theme|open|multi|range|filter|tip|stamp|print|menu|iconbar|avatar|slider-range|tags|board|calendar|cycle)|KitUI\.|kit-(tabs|segmented)--animated|kit-progress[^>]*aria-valuenow|aria-valuenow[^>]*kit-progress')
             'kit-charts.js' = ($page -match 'KitCharts\.|data-kit-chart')
             'kit-data.js'   = ($page -match 'KitData\.')
+            # SQL in the page: the engine first, then the kit's helper (Python needs a served page, so not here).
+            'vendor/sqljs/sql-asm.js' = ($page -match 'KitSql\.')
+            'kit-sql.js'    = ($page -match 'KitSql\.')
         }
         foreach ($name in $want.Keys) {
             if (-not $want[$name]) { continue }

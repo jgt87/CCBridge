@@ -370,10 +370,13 @@ Describe 'Agent: Auto picks an agent by fixed words (Get-AutoAgent)' {
 }
 
 Describe 'React instructions follow what this computer can build' {
-    It 'tells Copilot to use plain HTML and JavaScript when npm is missing' {
+    It 'tells Copilot about the built-in builder when npm is missing, and plain HTML when the builder is off' {
         Mock -ModuleName Prompts Test-ToolInstalled { $false }
         $t = Get-PromptPart $root 'rules:react'
         $t | Should Match 'no Node\.js or npm'
+        $t | Should Match 'builds React and TypeScript apps itself'
+        Mock -ModuleName Prompts Test-WebBuildOn { $false }
+        $t = Get-PromptPart $root 'rules:react'
         $t | Should Match 'plain HTML, CSS and JavaScript'
     }
     It 'tells Copilot how to build with Vite when npm is there, and never to start a dev server' {

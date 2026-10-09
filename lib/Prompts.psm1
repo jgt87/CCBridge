@@ -11,6 +11,7 @@
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'WebFetch.psm1')
 Import-Module (Join-Path $PSScriptRoot 'UiKit.psm1')
+Import-Module (Join-Path $PSScriptRoot 'WebBuild.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 
 # Signals for the kind of task (English and common Dutch words).
@@ -32,6 +33,8 @@ $script:OfficePattern = '(?i)\b(word|powerpoint|excel)[ -]?(document|doc|file|be
 $script:DataPattern = '(?i)\b(csv|tsv|excel|xlsx|xls|spreadsheets?|data ?files?|import (the )?data|export (the )?data|parse|parsing|columns?|rows?)\b|\.(csv|tsv|xlsx?)\b'
 $script:BigTaskPattern = '(?i)\b(build|create|make|develop)\s+(an?|the|my|me an?|me the)?\s*(new\s+)?(app|application|website|web ?site|tool|dashboard|portal|system|game)\b|\b(multiple|several|all the) (pages|screens|features|parts)\b|\bfrom scratch\b'
 $script:ScriptPattern = '(?i)\b(scripts?|automat\w*|schedul\w*|chains?|cron|task scheduler|batch job)\b|scripts/'
+# A PowerShell app with a window (WPF): the request says so, or the project has a .xaml file.
+$script:PsGuiPattern = '(?i)\b(gui|wpf|winforms|windows forms|xaml|desktop app|window app|form app|venster|schermapp)\b|\b(window|form|dialog|venster|scherm)\b[^.\n]{0,60}\b(powershell|ps1)\b|\b(powershell|ps1)\b[^.\n]{0,60}\b(window|form|gui|dialog|venster|scherm)\b'
 $script:UiPattern = '(?i)\b(ui|ux|user interface|layout|screens?|responsive|accessib\w*|a11y|loading state|empty state|design)\b'
 # A request to review the design of the interface (prompts/rules/designreview.md).
 $script:DesignReviewPattern = '(?i)\b(design ?review|review (the |my |this |our )?(design|ui|interface|layout|pages?|screens?|dashboard)|(ontwerp|design) ?(review|beoordel\w*)|beoordeel (het |de )?(ontwerp|interface|pagina\w*))\b'
@@ -92,6 +95,7 @@ function Get-ProjectTraits {
 }
 
 $script:ReactWithNpm = '- Building React here: use Vite with base: ''./'' in vite.config, so the built app (dist/index.html) also opens from a subfolder address; build with npm run build. Do not start a development server (npm run dev, vite, npm start): the user cannot run one. The user opens the built app from the helper program.'
+$script:ReactBuiltIn = '- This computer has no Node.js or npm, so the helper program builds React and TypeScript apps itself (its built-in builder, in Edge): the app starts at src/main.tsx (or .jsx, .ts, .js) and imports its own files and CSS; the only packages are react, react-dom/client and react/jsx-runtime. index.html at the project root loads dist/app.css and <script src="dist/app.js"></script> (a classic script, no type=module), so the page also opens from disk. The helper program builds dist/ after every change and sends you its errors and TypeScript type errors; never write dist/ yourself, and never run npm, npx, vite or tsc.'
 $script:ReactWithoutNpm = '- This computer has no Node.js or npm, so a React app (or any npm package, bundler or build step) cannot be built here. Build the page with plain HTML, CSS and JavaScript instead, unless the user asks to install Node.js first.'
 
 function Test-ToolInstalled([string]$Name) {
@@ -160,6 +164,7 @@ function Get-PromptModules {
     if (($traits -contains 'office') -or ($Text -match $script:OfficePattern)) { $ids.Add('rules:office') }
     if (($Text -match $script:BigTaskPattern) -or $Text.Length -gt 600) { $ids.Add('rules:bigtask') }
     if ($Text -match $script:ScriptPattern) { $ids.Add('rules:scripts') }
+    if ($Text -match $script:PsGuiPattern -or @($Context.Paths | Where-Object { "$_" -match '(?i)\.xaml$' -and "$_" -notmatch '(?i)^styles/kit/' }).Count) { $ids.Add('rules:psgui') }
     $designReview = $Text -match $script:DesignReviewPattern
     if (($web -and ($Text -match $script:AppPartPattern -or $Text -match $script:BuildPattern)) -or ($Text -match $script:UiPattern) -or $designReview) {
         $ids.Add('rules:ui')
@@ -228,7 +233,7 @@ function Read-PromptPart([string]$AppRoot, [string]$Name) {
     # Data copies turned off (setting dataCopies): no word about the helper program keeping them.
     if ($Name -eq 'rules\web.md' -and -not (Test-DataCopiesOn $AppRoot)) { $t = $t -replace '; when the data is also a \.json file[^)]*', ';' }
     # React needs Node.js and npm to build; without them a React setup cannot work here.
-    if ($Name -eq 'rules\react.md') { $t += "`n" + $(if (Test-ToolInstalled 'npm') { $script:ReactWithNpm } else { $script:ReactWithoutNpm }) }
+    if ($Name -eq 'rules\react.md') { $t += "`n" + $(if (Test-ToolInstalled 'npm') { $script:ReactWithNpm } elseif (Test-WebBuildOn (Split-Path -Parent $PSScriptRoot)) { $script:ReactBuiltIn } else { $script:ReactWithoutNpm }) }
     $t
 }
 
@@ -269,6 +274,8 @@ function Get-PromptPart {
             if (-not (Test-UiKitPart 'dashboard' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Dashboard parts*' }) }
             if (-not (Test-UiKitPart 'print' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Printing:*' }) }
             if (-not (Test-UiKitPart 'extras' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- More components*' }) }
+            if (-not (Test-UiKitPart 'sql' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- SQL in the page*' }) }
+            if (-not (Test-UiKitPart 'python' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Python in the page*' }) }
             if (-not (Test-UiKitPart 'data' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Reading files*' -and $_ -notlike '- Export:*' }) }
             elseif (-not (Test-UiKitPart 'pdf' $AppRoot)) { $lines = @(foreach ($l in $lines) { if ($l -like '- Reading files*') { $l -replace ' PDF: .*', ' PDF files cannot be read in the page (pdf.js is switched off).' } else { $l } }) }
             $text = $lines -join "`n"

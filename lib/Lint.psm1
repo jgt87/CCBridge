@@ -1210,6 +1210,102 @@ function Format-OpenBlocks {
     "Brackets still open at the end of line $Line in $Path (outermost first; each must be closed after it, in reverse order):`n" + ($rows -join "`n")
 }
 
+$script:DataGlobalsCache = @{ root = ''; at = [datetime]::MinValue; names = $null }
+
+function Get-ProjectDataGlobals([string]$ProjectRoot) {
+    <# The global names the project's scripts define (window.NAME = ..., and var/let/const/function
+       NAME at the start of a line in a classic script), with the data files in data/ marked. Cached
+       for 15 seconds. @{ all = HashSet; data = list }. #>
+    $c = $script:DataGlobalsCache
+    if ($c.root -eq $ProjectRoot -and $c.names -and ((Get-Date) - $c.at).TotalSeconds -lt 15) { return $c.names }
+    $all = New-Object 'System.Collections.Generic.HashSet[string]'
+    $data = New-Object System.Collections.Generic.List[string]
+    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include *.js, *.mjs, *.html, *.htm -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\(node_modules|\.git|\.streamhub|dist|build|Source)\\' -and $_.Length -lt 50MB } | Select-Object -First 500)
+    foreach ($f in $files) {
+        $isData = $f.FullName -match '\\data\\[^\\]+\.js$'
+        $t = try { if ($isData) { $r = New-Object IO.StreamReader($f.FullName); try { $b = New-Object char[] 4000; $n = $r.Read($b, 0, 4000); New-Object string($b, 0, $n) } finally { $r.Dispose() } } elseif ($f.Length -lt 2MB) { [IO.File]::ReadAllText($f.FullName) } else { '' } } catch { '' }
+        foreach ($m in [regex]::Matches($t, '(?m)(?:\bwindow\.([A-Za-z_$][\w$]*)\s*=(?!=)|^\s*(?:var|let|const|function|class)\s+([A-Za-z_$][\w$]*))')) {
+            $n = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+            [void]$all.Add($n)
+            if ($isData -and $m.Groups[1].Success -and -not $data.Contains($n)) { $data.Add($n) }
+        }
+    }
+    $names = @{ all = $all; data = $data }
+    $script:DataGlobalsCache = @{ root = $ProjectRoot; at = (Get-Date); names = $names }
+    $names
+}
+
+function Find-DataGlobalIssues {
+    <# A page or script that uses a data global (a name ending in Data, like the ones the helper
+       program writes in data/*.js) that nothing in the project defines: the page loads but stays
+       empty. "line N: ..." with the names the data files do define. #>
+    param([string]$ProjectRoot, [string]$Path, [string]$Text)
+    if (-not $ProjectRoot -or $Path -notmatch '(?i)\.(html?|m?js|jsx)$' -or $Path -match '(?i)(^|/)(data|node_modules|dist|build|styles/kit)/') { return }
+    if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'data'))) { return }
+    $g = Get-ProjectDataGlobals $ProjectRoot
+    if (-not $g.data.Count) { return }
+    # The script parts only, with strings and comments blanked.
+    $code = if ($Path -match '(?i)\.html?$') {
+        $sb = New-Object Text.StringBuilder (' ' * $Text.Length)
+        foreach ($s in [regex]::Matches($Text, '(?is)(<script\b(?![^>]*\bsrc\s*=)[^>]*>)(.*?)</script>')) {
+            $body = $s.Groups[2]; $masked = (Get-JsMask $body.Value).masked
+            [void]$sb.Remove($body.Index, $body.Length); [void]$sb.Insert($body.Index, $masked)
+        }
+        $sb.ToString()
+    } else { (Get-JsMask $Text).masked }
+    foreach ($m in [regex]::Matches($code, '(?<![\w$.])(?:window\.)?([a-z][A-Za-z0-9_$]*Data)\b(?!\s*:)')) {
+        $n = $m.Groups[1].Value
+        if ($g.all.Contains($n)) { continue }
+        if ($code -match ('(?<![\w$.])(var|let|const|function|class)\s+' + [regex]::Escape($n) + '\b|[(,]\s*' + [regex]::Escape($n) + '\s*[,)=]|\b' + [regex]::Escape($n) + '\s*=>')) { continue }   # its own variable or parameter
+        return "line $(LineAt $Text $m.Index): uses $n, which no script or data file in the project defines, so the page has no data there; the data files define: $(@($g.data | Select-Object -First 8) -join ', ')"
+    }
+}
+
+# XAML that PowerShell loads with XamlReader cannot have a code-behind class or event attributes.
+$script:XamlEventPattern = '\s(Click|Loaded|Unloaded|Checked|Unchecked|SelectionChanged|TextChanged|MouseDown|MouseUp|MouseDoubleClick|KeyDown|KeyUp|Closing|Closed|ValueChanged|DropDownClosed|LostFocus|GotFocus)\s*=\s*"'
+
+function Find-PsGuiIssues {
+    <# Mistakes that stop a PowerShell window app (WPF loaded with XamlReader) from opening: x:Class or an
+       event attribute in its XAML (a .xaml file in a project without a C# project, or XAML in a script),
+       WPF or Windows Forms types used without Add-Type loading them first. "line N: ..." or nothing. #>
+    param([string]$ProjectRoot, [string]$Path, [string]$Text)
+    $xaml = $null; $offset = 0
+    if ($Path -match '(?i)\.xaml$') {
+        if ($Path -match '(?i)^styles/kit/') { return }
+        if ($ProjectRoot -and @(Get-ChildItem -LiteralPath $ProjectRoot -Filter *.csproj -Recurse -Depth 2 -File -ErrorAction SilentlyContinue).Count) { return }   # a C# app has code-behind
+        $xaml = $Text
+    } elseif ($Path -match '(?i)\.ps[md]?1$' -and $Text -match 'XamlReader') {
+        $h = [regex]::Match($Text, '(?s)@[''"]\s*\r?\n(\s*<(Window|UserControl|Page|Grid|StackPanel)\b.*?)\r?\n[''"]@')
+        if ($h.Success) { $xaml = $h.Groups[1].Value; $offset = $h.Groups[1].Index }
+    }
+    if ($null -ne $xaml) {
+        $c = [regex]::Match($xaml, '\sx:Class\s*=')
+        if ($c.Success) { return "line $(LineAt $Text ($offset + $c.Index)): x:Class in XAML that PowerShell loads with XamlReader stops the window from opening: remove it" }
+        $e = [regex]::Match($xaml, $script:XamlEventPattern)
+        if ($e.Success) { $ev = $e.Groups[1].Value; return ("line $(LineAt $Text ($offset + $e.Index)): the event attribute " + $ev + '="..." stops XamlReader from loading the window: give the element an x:Name, then connect the event in PowerShell ($window.FindName(''NAME'').Add_' + $ev + '({ ... }))') }
+    }
+    if ($null -ne $xaml) {
+        # A style for every TextBlock that sets a colour also colours the text inside buttons (white
+        # text on the primary button turns black).
+        $tb = [regex]::Match($xaml, '(?s)<Style\b(?![^>]*\bx:Key\s*=)[^>]*\bTargetType\s*=\s*"(\{x:Type\s+)?TextBlock\}?"[^>]*>((?:(?!</Style>).)*?)Property\s*=\s*"Foreground"')
+        if ($tb.Success) { return "line $(LineAt $Text ($offset + $tb.Index)): a style for every TextBlock that sets Foreground also colours the text inside buttons and other controls: remove it (the window's Foreground reaches all text), or give it an x:Key and use it where it is meant" }
+    }
+    if ($Path -match '(?i)\.ps[md]?1$' -and $Text -match '(?i)KitTheme\.xaml') {
+        # The kit theme must be in the application's resources before the window is parsed: a window
+        # that uses its styles (StaticResource KitPrimaryButton) does not open otherwise.
+        $late = [regex]::Match($Text, '(?i)\$\w+\.Resources\.MergedDictionaries\.Add\(')
+        $app = $Text -match '(?i)\[(System\.)?Windows\.Application\]::Current|New-Object\s+(System\.)?Windows\.Application|\$app\w*\.Resources\.MergedDictionaries\.Add'
+        if (-not $app -and $late.Success) { return "line $(LineAt $Text $late.Index): the kit theme goes into the application's resources before the window is parsed, not into the window afterwards (a window that uses its styles does not open): `$app = [Windows.Application]::Current; if (-not `$app) { `$app = New-Object Windows.Application }; `$app.Resources.MergedDictionaries.Add(`$theme); then parse the window" }
+    }
+    if ($Path -match '(?i)\.ps[md]?1$') {
+        $wpf = [regex]::Match($Text, '\[(System\.)?Windows\.(Markup\.XamlReader|Window\b|MessageBox\b|Controls\.)')
+        if ($wpf.Success -and $Text -notmatch '(?i)Add-Type\s+(-AssemblyName\s+)?[^\n]*PresentationFramework') { return "line $(LineAt $Text $wpf.Index): WPF is used before it is loaded: put Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase at the top of the script" }
+        $wf = [regex]::Match($Text, '\[System\.Windows\.Forms\.')
+        if ($wf.Success -and $Text -notmatch '(?i)Add-Type\s+(-AssemblyName\s+)?[^\n]*System\.Windows\.Forms|LoadWithPartialName\(\s*[''"]System\.Windows\.Forms') { return "line $(LineAt $Text $wf.Index): Windows Forms is used before it is loaded: put Add-Type -AssemblyName System.Windows.Forms at the top of the script" }
+    }
+}
+
 function Get-NewFileIssues {
     <# Problems a change added: those in the new text that the old text did not have (compared
        without line numbers, so an existing problem that only moved is not reported again). #>
@@ -1219,7 +1315,9 @@ function Get-NewFileIssues {
         @(Test-FileContent $Path $text $Crlf) + @(Test-LocalReferences $text.Replace("`r`n", "`n") $Path $ProjectRoot) +
             @(if ($Path -match '(?i)\.ps[md]?1$') { Test-PsCommands $text $ProjectRoot }) +
             @(if ($Path -match '(?i)\.prisma$') { Test-PrismaEnv $text.Replace("`r`n", "`n") $Path $ProjectRoot }) +
-            @(Find-UndefinedCssVars $text.Replace("`r`n", "`n") $Path $ProjectRoot) | Where-Object { $_ }
+            @(Find-UndefinedCssVars $text.Replace("`r`n", "`n") $Path $ProjectRoot) +
+            @(Find-DataGlobalIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
+            @(Find-PsGuiIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) | Where-Object { $_ }
     }
     # The fixed rules; when they find nothing, the language's own syntax check (node, python, when
     # installed) for what they cannot see (one problem is not reported twice).
@@ -1239,4 +1337,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Find-PsGuiIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences

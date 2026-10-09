@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -1170,6 +1170,45 @@ function Invoke-RunbookJob {
     }
 }
 
+function Start-OwnRunCard {
+    <# A card for something StreamHub runs itself (the built-in build, a tool check, a window app
+       test): "running" now, finished with Complete-OwnRunCard. Returns its id. #>
+    param($State, [string]$Target, [string]$Command = '')
+    $id = 'own-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    Add-AgentEvent $State 'action' @{ id = $id; action = 'run'; target = $Target; status = 'running'; by = 'streamhub'; command = $Command }
+    $id
+}
+
+function Complete-OwnRunCard {
+    param($State, [string]$Id, [bool]$Ok, [string]$Summary, [string]$Output = '')
+    Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $Ok; status = $(if ($Ok) { 'ok' } else { 'failed' }); summary = $Summary; output = (Limit-Text $(if ($Output) { "$Summary`n$Output" } else { $Summary }) 4000) }
+}
+
+function Invoke-ProjectBuild {
+    <# The built-in build of a React or TypeScript project without npm (WebBuild): after a round that
+       changed src/, with a card while it runs. Returns the problems as "FILE:LINE: text" lines. #>
+    param($State, [string[]]$Changed)
+    if (-not (Test-WebBuildProject $State.ProjectRoot $State.AppRoot)) { return @() }
+    $src = @($Changed | ForEach-Object { "$_".Replace('\', '/') } | Where-Object { $_ -match '(?i)^src/' })
+    if (-not $src.Count) { return @() }
+    $script = try { Write-BuildScript $State.ProjectRoot $State.AppRoot } catch { '' }
+    if ($script) { Add-OwnChangeEvent $State 'write' $script 'StreamHub wrote a script that builds this app (src/ into dist/) without Node.js, for when StreamHub is closed.' }
+    $typed = [bool]@($src | Where-Object { $_ -match '(?i)\.(ts|tsx)$' }).Count
+    $card = Start-OwnRunCard $State "Build the app (built-in builder in Edge$(if ($typed) { ', with a TypeScript check' }))" 'esbuild + TypeScript'
+    $prevAct = Enter-Activity $State 'tests' 'Building the app'
+    try {
+        $r = Invoke-WebBuild -ProjectRoot $State.ProjectRoot -AppRoot $State.AppRoot -TypeCheck:$typed -CdpPort ([int]$State.Config.cdpPort) -Minify
+        $problems = @(Format-WebBuildProblems $r)
+        $sum = if (-not $r.ok) { "build failed ($(@($r.errors).Count) error(s))" } elseif (@($r.typeErrors).Count) { "built, $(@($r.typeErrors).Count) type error(s)" } else { "built in $([Math]::Round($r.ms / 1000, 1)) s" }
+        Complete-OwnRunCard $State $card ($r.ok -and -not @($r.typeErrors).Count) $sum (@(@($problems) + @(if ($r.written.Count) { "Written: $($r.written -join ', ')" })) -join "`n")
+        $problems
+    } catch {
+        Write-CCBLogError agent 'built-in build' $_
+        Complete-OwnRunCard $State $card $false "the builder could not run: $($_.Exception.Message)"
+        @()
+    } finally { Exit-Activity $State $prevAct }
+}
+
 function Add-OwnChangeEvent {
     <# A change StreamHub made to the project itself (data copies, folder moves, links, source data
        put back): an action card in the chat like Copilot's reads and writes, with the diff when
@@ -1999,6 +2038,15 @@ function Test-WebPage {
     try { Test-WebPageCore @PSBoundParameters } finally { Exit-Activity $State $prev }
 }
 
+function Split-PageWarnings {
+    <# Page check results without the likely problems (CheckPolicy warnings, such as sideways scrolling
+       at phone width): those are shown in the chat once (unless -Quiet) and do not hold up "done". #>
+    param($State, $Issues, [switch]$Quiet)
+    $warn = @($Issues | Where-Object { $_ -and (Get-CheckLevel "$_" 'script') -eq 'warning' })
+    if ($warn.Count -and -not $Quiet) { Add-AgentEvent $State 'status' @{ text = "Page check, worth a look (not holding up the task):`n" + (($warn | Select-Object -First 5 | ForEach-Object { "- $_" }) -join "`n") } }
+    @($Issues | Where-Object { $_ -and (Get-CheckLevel "$_" 'script') -ne 'warning' })
+}
+
 function Test-WebPageCore {
     <# Opens project pages in a spare Edge tab (served read-only by the web app at /preview/<token>/)
        and collects what goes wrong while they load: JavaScript errors, console errors, and files
@@ -2133,6 +2181,16 @@ function Test-WebPageCore {
                     $list = ConvertFrom-Json "$($res.result.value)"
                     foreach ($f in $list) { if ($f -and $f.text) { $problems.Add("$page $($f.text)") } }
                 } catch { Write-CCBLogError agent "Page content check of $page" $_ }
+            }
+            # At phone width (375 px): sideways scrolling and the parts that cause it (a warning).
+            if ($loaded) {
+                try {
+                    $null = Invoke-Cdp $s 'Emulation.setDeviceMetricsOverride' @{ width = 375; height = 800; deviceScaleFactor = 1; mobile = $false }   # a narrow window: 375 px of layout, also without a viewport tag
+                    $until = (Get-Date).AddMilliseconds(500); while ((Get-Date) -lt $until) { $null = Receive-CdpEvent $s 50 }
+                    $res = Invoke-Cdp $s 'Runtime.evaluate' @{ expression = (Get-NarrowScreenScript); returnByValue = $true } -TimeoutMs 15000
+                    if ("$($res.result.value)") { $problems.Add("$page $($res.result.value)") }
+                } catch { Write-CCBLogError agent "Phone width check of $page" $_ }
+                finally { try { $null = Invoke-Cdp $s 'Emulation.clearDeviceMetricsOverride' } catch { } }
             }
             foreach ($p in ($problems | Select-Object -Unique -First 20)) { $p }
             Write-CCBLog info agent "Page check $page" @{ problems = $problems.Count }
@@ -3348,6 +3406,8 @@ function Invoke-AgentTurn {
         $errorFirst = @{}; $lastErrorKeys = @(); $turnSeq = [int]$State.Seq   # for the fix case log of errors that needed more than one change
         $syntaxNudges = 0   # times "done" was refused because a changed file has a syntax error
         $verifyNudges = 0   # times "done" was refused because the project's verify command failed
+        $toolNudges = 0     # times "done" was refused because a build or check tool found errors (ToolChecks)
+        $guiNudges = 0      # times "done" was refused because a window app did not open (GuiTest)
         $doneReminded = $false   # the one reminder at "done" (tests, README) was sent
         $shotShown = $false; $attach = @(); $fileAttach = @()   # a screenshot of a changed page goes to Copilot once per task
         $State.BeforeShots = @{}; $State.ReadRanges = @{}; $shotAgain = $false; $sameNudged = $false; $shotNote = ''   # before/after comparison (Save-BeforeShot)
@@ -3551,6 +3611,10 @@ function Invoke-AgentTurn {
                     # A project with the whole kit in styles/kit (from before the catalogue): only its icons.
                     try { $kitSync = Update-KitIcons $State.ProjectRoot $State.AppRoot } catch { Write-CCBLogError agent 'kit icons' $_ }
                 }
+                # A PowerShell window app: the kit's WPF theme with the project's colours.
+                if (Test-UiKitOn $State.AppRoot) {
+                    try { foreach ($w in @(Update-KitWpf $State.ProjectRoot $State.AppRoot)) { Add-OwnChangeEvent $State 'write' $w 'StreamHub wrote the UI kit''s theme for the window app (WPF), with the project''s colours: merge it into the window''s resources.' } } catch { Write-CCBLogError agent 'WPF theme' $_ }
+                }
                 # One-file pages: their UI kit and data blocks follow what the page uses now.
                 $onePages = @(Sync-OneFilePages $State)
                 if ($onePages.Count) { $results.Add(@{ head = '### One-file page'; output = "The helper program filled the UI kit and data blocks (data-streamhub) of $($onePages -join ', ') with what the page uses now. Those lines are its own: they show as a note when you read the page; never edit them." }) }
@@ -3595,6 +3659,8 @@ function Invoke-AgentTurn {
                 }
                 # A new .env file that .gitignore does not cover would end up in git.
                 try { foreach ($i in @(Find-UnignoredEnv $State.ProjectRoot $roundChanged)) { $found.Add((& $other $i 'env')) } } catch { Write-CCBLogError agent 'env check' $_ }
+                # The built-in build (React or TypeScript without npm): its errors and type errors.
+                foreach ($i in @(Invoke-ProjectBuild $State @($roundChanged))) { $found.Add((& $other $i 'tool')) }
                 foreach ($i in @($hookIssues | Where-Object { $_ })) { $found.Add((ConvertTo-CheckFinding '' "$i" 'hook')) }
                 foreach ($u in @($kitSync.unknown)) { $found.Add((ConvertTo-CheckFinding '' "there is no icon named '$($u.name)'$(if (@($u.like).Count) { "; close names: $(@($u.like) -join ', ')" }) (data-kit-icon takes a Lucide icon name)" 'quality')) }
                 # Left out: what Copilot disputed in this task, what the user ignored, and warnings
@@ -3698,6 +3764,49 @@ function Invoke-AgentTurn {
                         }
                     }
                 }
+                # The project's own build and check tools for the languages this task changed (ToolChecks:
+                # tsc, dotnet build, go vet, javac, PSScriptAnalyzer), when installed; errors go back like tests.
+                if ($checkpoint.Files.Count -and $State.Mode -ne 'plan' -and -not $State.NoCommands -and (Test-CheckSwitch 'tools') -and $toolNudges -lt [Math]::Max(1, $enf.testTries) -and -not $State.Cancel) {
+                    $toolErrors = New-Object System.Collections.Generic.List[string]
+                    foreach ($tc in @(try { Get-ToolChecks $State.ProjectRoot @($checkpoint.Files.Keys) } catch { Write-CCBLogError agent 'tool checks' $_ })) {
+                        $card = Start-OwnRunCard $State "Check with $($tc.name)" $tc.command
+                        $prevAct = Enter-Activity $State 'tests' "Checking with $($tc.name)"
+                        try { $tr = Invoke-RunAction $State.ProjectRoot $tc.command ([int]$State.Config.commandTimeoutSec) 6000 { $State.Cancel } } finally { Exit-Activity $State $prevAct }
+                        $errs = @(Get-ToolCheckErrors $tc.kind "$($tr.output)" ([int]$tr.exitCode))
+                        if ($tr.timedOut) { Complete-OwnRunCard $State $card $false 'timed out, not checked'; continue }
+                        Complete-OwnRunCard $State $card (-not $errs.Count) $(if ($errs.Count) { "$($errs.Count) error(s)" } else { 'no errors' }) ($errs -join "`n")
+                        if ($errs.Count) { $toolErrors.Add("$($tc.name):`n" + (($errs | ForEach-Object { "- $_" }) -join "`n")) }
+                    }
+                    if ($toolErrors.Count) {
+                        $toolNudges++
+                        if ($enf.testTries -gt 0) {
+                            $message = "The project's own build and check tools found errors, so the task is not finished:`n" + ($toolErrors -join "`n`n") + "`nFix them, then send done again."
+                            continue
+                        }
+                    }
+                }
+                # PowerShell window apps the task changed: started once with STREAMHUB_GUI_TEST set, a picture of
+                # the window for Copilot, start errors sent back (GuiTest); like the tests, not without commands.
+                if ($checkpoint.Files.Count -and $State.Mode -ne 'plan' -and -not $State.NoCommands -and -not $State.Headless -and "$($State.Config.autoTests)" -notin 'False', 'off' -and $guiNudges -lt [Math]::Max(1, $enf.testTries) -and -not $State.Cancel) {
+                    $guiProblems = New-Object System.Collections.Generic.List[string]
+                    foreach ($gs in @(try { Find-GuiScripts $State.ProjectRoot @($checkpoint.Files.Keys) } catch { Write-CCBLogError agent 'window apps' $_ })) {
+                        $card = Start-OwnRunCard $State "Open the window app $gs (start test)" "powershell -STA -File $gs"
+                        $prevAct = Enter-Activity $State 'tests' "Opening $gs"
+                        $shotRel = '.streamhub/Screenshots/window-' + (Get-Date).ToString('yyyyMMdd-HHmmss') + '-' + ((Split-Path $gs -Leaf) -replace '[^\w.-]+', '-') + '.png'
+                        try { $gr = Test-PsGuiApp -ProjectRoot $State.ProjectRoot -Script $gs -ShotPath (Join-Path $State.ProjectRoot $shotRel.Replace('/', '\')) } catch { Write-CCBLogError agent 'window app test' $_; $gr = $null } finally { Exit-Activity $State $prevAct }
+                        if (-not $gr) { Complete-OwnRunCard $State $card $false 'the start test could not run'; continue }
+                        if ($gr.skipped) { Complete-OwnRunCard $State $card $true "not started: $($gr.skipped)"; continue }
+                        if ($gr.shot) { $State.PageShots = @($State.PageShots) + @($shotRel) }
+                        $okGui = $gr.opened -and -not @($gr.errors).Count
+                        Complete-OwnRunCard $State $card $okGui $(if ($okGui) { "the window '$($gr.title)' opened" } elseif ($gr.opened) { "the window opened, with errors" } else { 'no window opened' }) ((@($gr.errors) + @(if ($gr.shot) { "Picture: $shotRel" })) -join "`n")
+                        if (-not $okGui) { $guiProblems.Add("$($gs):`n" + ((@($gr.errors) | ForEach-Object { "- $_" }) -join "`n")) }
+                    }
+                    if ($guiProblems.Count -and $enf.testTries -gt 0) {
+                        $guiNudges++
+                        $message = "The helper program started the window app to check it (with STREAMHUB_GUI_TEST set), and it did not open cleanly:`n" + ($guiProblems -join "`n`n") + "`nFix the cause, then send done again."
+                        continue
+                    }
+                }
                 # The project's beforeDone hooks: a failure goes back to Copilot (its own two tries, so
                 # failing tests do not stop the hooks from running).
                 if ($checkpoint.Files.Count -and $hookNudges -lt [Math]::Max(1, $enf.hookTries) -and -not $State.Cancel) {
@@ -3726,7 +3835,7 @@ function Invoke-AgentTurn {
                         if ($pages.Count) {
                             Add-AgentEvent $State 'status' @{ text = "Checking $($pages -join ', ') in a browser tab for JavaScript errors and files that fail to load..." }
                             $wantShot = ((-not $shotShown) -or $shotAgain) -and "$($State.Config.pageScreenshot)" -notin 'False', 'off' -and -not $State.ReviewByCaller
-                            $pageIssues = @(Test-WebPage $State $pages -Screenshot:$wantShot)
+                            $pageIssues = @(Split-PageWarnings $State @(Test-WebPage $State $pages -Screenshot:$wantShot))
                             if ($wantShot) { $State.LastShotPage = "$(@($pages)[0])" }
                             $ev.page = @($pageIssues)
                             if ($pageIssues.Count) { $pagesToRecheck = @($pages) }   # opened again after Copilot's fix
@@ -3796,7 +3905,7 @@ function Invoke-AgentTurn {
                     # (no screenshot) to see that the fix worked; what is left goes back once more.
                     $pageRechecks++
                     Add-AgentEvent $State 'status' @{ text = "Checking $($pagesToRecheck -join ', ') again after the fix..." }
-                    $again = @(Test-WebPage $State $pagesToRecheck)
+                    $again = @(Split-PageWarnings $State @(Test-WebPage $State $pagesToRecheck) -Quiet)
                     $ev.page = @($again)
                     if ($again.Count) {
                         $message = "The page check still finds problems after your fix:`n" + (($again | Select-Object -First 15 | ForEach-Object { "- $_" }) -join "`n") + "`nFix them, then send done again."
@@ -3808,7 +3917,7 @@ function Invoke-AgentTurn {
                     # The fix tries are used up: how the pages are now goes into the report and the chat,
                     # so a task never ends as "done" with page errors nobody sees.
                     $pageFinal = $true
-                    $final = @(Test-WebPage $State $pagesToRecheck)
+                    $final = @(Split-PageWarnings $State @(Test-WebPage $State $pagesToRecheck) -Quiet)
                     $ev.page = @($final)
                     if ($final.Count) {
                         $ev.pageLeft = $true

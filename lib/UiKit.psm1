@@ -11,6 +11,8 @@ $script:KitParts = [ordered]@{
     charts      = @('kit-charts.js', 'LICENSE-bklit-ui.txt')
     icons       = @('LICENSE-lucide.txt')       # kit-icons.js is written by Update-KitIcons
     data        = @('kit-data.js')
+    sql         = @('kit-sql.js', 'vendor/sqljs/sql-asm.js', 'vendor/sqljs/LICENSE-sqljs.txt', 'vendor/sqljs/README.txt')
+    python      = @('kit-python.js', 'vendor/pyodide/pyodide.js', 'vendor/pyodide/pyodide.asm.mjs', 'vendor/pyodide/pyodide.asm.wasm', 'vendor/pyodide/python_stdlib.zip', 'vendor/pyodide/pyodide-lock.json', 'vendor/pyodide/README.txt')
     pdf         = @('vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/pdfjs/LICENSE-pdfjs.txt', 'vendor/pdfjs/README.txt')
 }
 $script:ReactFiles = @{ icons = @('Icon.tsx'); interactive = @('HoldButton.tsx', 'SearchBox.tsx', 'DropZone.tsx', 'Tabs.tsx', 'Loading.tsx', 'Composer.tsx', 'CommandButton.tsx'); charts = @('Chart.tsx'); data = @('useFileData.ts')
@@ -108,17 +110,83 @@ function Update-KitTailwind {
     @("$(Get-UiKitFolder)/tailwind/$name")
 }
 
+function Get-TokenValues([string]$Css) {
+    <# The light values of the kit's tokens (the first :root block): name (without --kit-) -> value,
+       var(--kit-...) references resolved. #>
+    $m = [regex]::Match($Css, '(?s):root\s*\{(.*?)\n\}')
+    $map = @{}
+    if (-not $m.Success) { return $map }
+    foreach ($d in [regex]::Matches($m.Groups[1].Value, '--kit-([\w-]+)\s*:\s*([^;]+);')) { $map[$d.Groups[1].Value] = $d.Groups[2].Value.Trim() }
+    for ($round = 0; $round -lt 4; $round++) {
+        foreach ($k in @($map.Keys)) {
+            $v = [regex]::Match($map[$k], '^var\(--kit-([\w-]+)\)$')
+            if ($v.Success -and $map.ContainsKey($v.Groups[1].Value)) { $map[$k] = $map[$v.Groups[1].Value] }
+        }
+    }
+    $map
+}
+
+function Get-WpfThemeText {
+    <# The kit's WPF theme (templates/ui-kit/wpf/KitTheme.template.xaml) with the project's colours,
+       font and corners from its tokens.css. #>
+    param([Parameter(Mandatory)][string]$AppRoot, [AllowEmptyString()][string]$TokensCss)
+    $t = [IO.File]::ReadAllText((Join-Path $AppRoot 'templates\ui-kit\wpf\KitTheme.template.xaml'))
+    $tok = Get-TokenValues $TokensCss
+    $fallback = @{ bg = '#f5f5f6'; surface = '#ffffff'; 'surface-2' = '#edeeee'; text = '#000000'; 'text-muted' = '#5a5b5e'; border = '#d6d7d9'; 'border-strong' = '#5a5b5e'; accent = '#10069f'; 'accent-hover' = '#0e0587'; 'accent-soft' = '#e5f6fc'; 'on-accent' = '#ffffff'; ok = '#187623'; warn = '#a63b17'; error = '#c50e16'
+        'chart-1' = '#10069f'; 'chart-2' = '#0089b7'; 'chart-3' = '#119d97'; 'chart-4' = '#d04a1e'; 'chart-5' = '#df1995'; 'chart-6' = '#8021a7' }
+    foreach ($k in $fallback.Keys) {
+        $v = "$($tok[$k])"
+        if ($v -notmatch '^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$') { $v = $fallback[$k] }
+        $t = $t.Replace('{{' + $k + '}}', $v)
+    }
+    $font = ("$($tok['font'])" -split ',')[0].Trim().Trim('"', "'")
+    if (-not $font -or $font -match '^(system-ui|sans-serif)$') { $font = 'Arial' }
+    $t = $t.Replace('{{font}}', [Security.SecurityElement]::Escape($font))
+    $px = { param($n, $d) $x = [regex]::Match("$($tok[$n])", '^(\d+(?:\.\d+)?)px$'); if ($x.Success) { $x.Groups[1].Value } else { $d } }
+    $t.Replace('{{radius-lg}}', (& $px 'radius-lg' '10')).Replace('{{radius}}', (& $px 'radius' '6'))
+}
+
+function Test-PsGuiProject([string]$ProjectRoot) {
+    <# The project has a PowerShell window app: a script that loads WPF or Windows Forms, or a .xaml file. #>
+    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include *.ps1, *.psm1, *.xaml -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\(node_modules|\.git|\.streamhub|Source|styles\\kit)\\' -and $_.Name -notmatch '(?i)\.Tests\.ps1$' -and $_.Length -lt 1MB } | Select-Object -First 200)
+    foreach ($f in $files) {
+        if ($f.Extension -ieq '.xaml') { return $true }
+        $t = try { [IO.File]::ReadAllText($f.FullName) } catch { '' }
+        if ($t -match '(?i)PresentationFramework|System\.Windows\.Forms|XamlReader') { return $true }
+    }
+    $false
+}
+
+function Update-KitWpf {
+    <# In a project with a PowerShell window app: styles/kit/wpf/KitTheme.xaml with the project's colours
+       (written again when tokens.css or the kit's template changes; a file without the helper program's
+       note is the project's own and stays). Returns the paths written. #>
+    param([string]$ProjectRoot, [string]$AppRoot)
+    if (-not (Test-PsGuiProject $ProjectRoot)) { return @() }
+    $tokens = Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css')
+    # The project's own colours, else those of the colour preset in Settings.
+    $css = if (Test-Path -LiteralPath $tokens) { [IO.File]::ReadAllText($tokens) } else { [IO.File]::ReadAllText((Join-Path $AppRoot $(if ((Get-UiKitColors $AppRoot) -eq 'blue') { 'templates\ui-kit\tokens.css' } else { 'templates\ui-kit\tokens-neutral.css' }))) }
+    $new = Get-WpfThemeText $AppRoot $css
+    $dst = Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\wpf\KitTheme.xaml')
+    $old = if (Test-Path -LiteralPath $dst) { [IO.File]::ReadAllText($dst) } else { $null }
+    if ($old -eq $new -or ($null -ne $old -and $old -notmatch 'written by the helper program')) { return @() }
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $dst)
+    [IO.File]::WriteAllText($dst, $new, (New-Object Text.UTF8Encoding($false)))
+    @("$(Get-UiKitFolder)/wpf/KitTheme.xaml")
+}
+
 function Get-UiKitParts([string]$AppRoot) {
     <# The kit parts switched on: base plus interactive / charts / icons / data / dashboard / print / pdf / react as set
        (pdf.js only with the file readers). #>
-    $on = @(foreach ($p in 'interactive', 'charts', 'icons', 'data', 'dashboard', 'extras', 'print', 'tailwind', 'pdf', 'react') { if (Test-UiKitPart $p $AppRoot) { $p } })
+    $on = @(foreach ($p in 'interactive', 'charts', 'icons', 'data', 'sql', 'python', 'dashboard', 'extras', 'print', 'tailwind', 'pdf', 'react') { if (Test-UiKitPart $p $AppRoot) { $p } })
     if ($on -notcontains 'data') { $on = @($on | Where-Object { $_ -ne 'pdf' }) }
     @('base') + $on + @(if ((Get-UiKitColors $AppRoot) -eq 'blue') { 'palette' }) + @(if ((Get-UiKitDarkMode $AppRoot) -eq 'switch') { 'themeswitch' })
 }
 
 function Get-KitExamplesText([string]$Text, [string[]]$Parts) {
     <# The examples page without the sections of parts that are off (<!-- kit-part:NAME --> ... <!-- /kit-part:NAME -->). #>
-    foreach ($p in 'interactive', 'charts', 'icons', 'data', 'dashboard', 'extras', 'print', 'pdf', 'palette', 'themeswitch') {
+    foreach ($p in 'interactive', 'charts', 'icons', 'data', 'sql', 'python', 'dashboard', 'extras', 'print', 'pdf', 'palette', 'themeswitch') {
         if ($Parts -contains $p) { continue }
         $Text = [regex]::Replace($Text, '(?s)<!-- kit-part:' + $p + ' -->.*?<!-- /kit-part:' + $p + ' -->\r?\n?', '')
     }
@@ -134,12 +202,14 @@ $script:Companions = @{
     'kit.js'                         = @('LICENSE-kokonutui.txt')
     'kit-charts.js'                  = @('LICENSE-bklit-ui.txt')
     'kit-icons.js'                   = @('LICENSE-lucide.txt')
+    'kit-sql.js'                     = @('vendor/sqljs/sql-asm.js', 'vendor/sqljs/LICENSE-sqljs.txt', 'vendor/sqljs/README.txt')
+    'kit-python.js'                  = @('vendor/pyodide/pyodide.js', 'vendor/pyodide/pyodide.asm.mjs', 'vendor/pyodide/pyodide.asm.wasm', 'vendor/pyodide/python_stdlib.zip', 'vendor/pyodide/pyodide-lock.json', 'vendor/pyodide/README.txt')
     'vendor/pdfjs/pdf.min.js'        = @('vendor/pdfjs/LICENSE-pdfjs.txt', 'vendor/pdfjs/README.txt')
     'vendor/pdfjs/pdf.worker.min.js' = @('vendor/pdfjs/LICENSE-pdfjs.txt', 'vendor/pdfjs/README.txt')
 }
 # The kit's revision: raise it when the kit changes in a way projects should get (new classes, chart
 # options the rules name). Update-UiKitCatalog brings an older project catalogue up to date.
-$script:KitRevision = 6
+$script:KitRevision = 8
 $script:KitCssHeader = '/* Generated by the helper program from the UI kit (.streamhub/ui-kit/kit.css): the rules of the kit classes this project uses, nothing else.'
 
 function Get-UiKitFiles([string]$AppRoot) {
@@ -253,6 +323,8 @@ $script:KitFileNotes = [ordered]@{
     'kit.js'        = 'behaviour by data-kit-* attributes: sortable tables with pages and a search box, progress bars from aria-valuenow, hold to confirm, search with suggestions, file drop zone, animated tabs and choices, side panel and dialog openers, filters for several values and for a period, info tips, data-as-of stamps, a print button; KitUI.toast for confirmations'
     'kit-charts.js' = 'charts on the kit colours: bar (grouped, stacked or 100% stacked), line, area, ring, gauge, heatmap, sparkline, barlist (shares, funnels, colours by meaning); target lines; filter the page on a click; KitCharts.palette for canvas code'
     'kit-data.js'   = 'reading a file a person picks or drops: CSV, TSV, Excel, JSON, Word, PowerPoint'
+    'kit-sql.js'    = 'SQL in the page: KitSql.open({ name: rows }) then db.query("SELECT ...") (SQLite; load vendor/sqljs/sql-asm.js first; works from disk)'
+    'kit-python.js' = 'Python in the page: KitPython.run(code, { data }) (Pyodide, standard library only; only when the page is served)'
 }
 
 function Format-UiKitContext {
@@ -651,6 +723,8 @@ function Update-UiKitProject {
     }
     # Tailwind (setting uiKitParts.tailwind): the kit's tokens as Tailwind names in a Tailwind project.
     foreach ($tw in @(Update-KitTailwind $ProjectRoot $AppRoot)) { $added.Add($tw) }
+    # A PowerShell window app (WPF): the kit's theme with the project's colours.
+    foreach ($wp in @(Update-KitWpf $ProjectRoot $AppRoot)) { $added.Add($wp) }
     @{ added = $added.ToArray(); updated = $updated.ToArray(); unknown = $unknown }
 }
 
@@ -741,4 +815,4 @@ function Test-UiKitInProject([string]$ProjectRoot) {
     Test-Path -LiteralPath (Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css'))
 }
 
-Export-ModuleMember -Function Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder
+Export-ModuleMember -Function Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder

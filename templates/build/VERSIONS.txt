@@ -1,0 +1,7 @@
+esbuild-wasm 0.28.2
+typescript 6.0.3
+react 19.3.0
+react-dom 19.3.0
+scheduler 0.28.0
+@types/react 19.3.0
+@types/react-dom 19.3.0
