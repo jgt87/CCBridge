@@ -463,14 +463,13 @@ function Find-TailwindSlop {
 function Find-RoundedBarBase {
     <# Bars a change draws itself rounded on the side where they start (the axis, or the start of
        their track): canvas roundRect with one radius (all four corners), Chart.js borderSkipped
-       false with a radius, CSS giving a bar or fill one radius on every corner. Bars are flat at
-       the axis; only the far end may be round. One finding per file, only for what is new. #>
+       false with a radius. Bars of a chart are flat at the axis; bars in a track (status bars) are
+       round at both ends, which a stylesheet cannot tell apart, so CSS is not checked. One finding per file, only for what is new. #>
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
     if ($Rel -notmatch '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte|css|scss|less)$' -or $Rel -match '(?i)(^|/)(styles/kit|\.streamhub|node_modules|dist|build)/') { return }
     $rules = @(
         @{ re = '\.roundRect\(\s*[^,()]+,\s*[^,()]+,\s*[^,()]+,\s*[^,()]+,\s*(?!\[)[^,()\[\]]+\)'; msg = 'roundRect with one radius rounds all four corners of a bar, also the side at the axis: give the corners as [r, r, 0, 0] (a vertical bar; [0, r, r, 0] for a horizontal one)' }
         @{ re = '(?s)borderSkipped\s*:\s*false.{0,200}?borderRadius|borderRadius.{0,200}?borderSkipped\s*:\s*false'; msg = 'borderSkipped: false rounds the bars at the axis too: leave borderSkipped out (start), so only the far end is round' }
-        @{ re = '(?im)^[^{}\n]*\.[\w-]*(?<!(?:progress|scroll|tool|nav|side|top|tab|search|status|title|app|menu|action|sticky)[-_]?)(bar|column|fill)\b[^{}\n]*\{[^}]*\bborder-radius\s*:\s*(?!0\b|0px\b)[\d.]+(px|rem|em|%)?\s*(;|\})'; msg = 'a bar with one corner radius is round at the axis too: round only its far end (border-radius: 0 R R 0 for a bar to the right, R R 0 0 for a bar upward)' }
     )
     foreach ($r in $rules) {
         $now = [regex]::Matches("$New", $r.re)

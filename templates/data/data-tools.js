@@ -1,4 +1,4 @@
-/* Data tools v2, from the helper program. Do not edit: a newer version replaces this file.
+/* Data tools v3, from the helper program. Do not edit: a newer version replaces this file.
 
    Helpers for the project's data. Load this file with a script tag before the page's own script
    (<script src="data/data-tools.js"></script>); it sets window.DataTools. It also works as a
@@ -24,7 +24,8 @@
    DataTools.where(rows, test)           rows where test(row) is true, or test = { Column: value }
    DataTools.sortBy(rows, column, desc?) a sorted copy (numbers, dates and text; nulls last)
    DataTools.unique(rows, column)        the distinct values, sorted
-   DataTools.sum / avg / min / max / count(rows, column)   (non-numbers and nulls left out)
+   DataTools.sum / avg / min / max / count(rows, column)   (non-numbers and nulls left out; min and
+                                         max of a date column give the earliest / latest date, as stored)
    DataTools.groupBy(rows, key)          [{ key, rows }] in first-seen order; key = column or function
    DataTools.summarize(rows, key, { Name: ['sum', 'Column'], Rows: ['count'] })
                                          one row per group: { key, Name, Rows }
@@ -318,8 +319,26 @@
 
   function sum(list, column) { return numbers(list, column).reduce(function (a, b) { return a + b; }, 0); }
   function avg(list, column) { var n = numbers(list, column); return n.length ? sum(list, column) / n.length : null; }
-  function min(list, column) { var n = numbers(list, column); return n.length ? Math.min.apply(null, n) : null; }
-  function max(list, column) { var n = numbers(list, column); return n.length ? Math.max.apply(null, n) : null; }
+  // The smallest or largest value: numbers when the column has them, else dates (yyyy-mm-dd text, with
+  // or without a time, or Date objects), returned as stored; null when there are neither. A loop, not
+  // Math.max.apply, which fails on very long lists.
+  function dateKey(v) {
+    if (v instanceof Date) return v.getTime();
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) { var t = Date.parse(v.length === 10 ? v + 'T00:00:00' : v); return isNaN(t) ? null : t; }
+    return null;
+  }
+  function extreme(list, column, larger) {
+    var n = numbers(list, column);
+    if (n.length) { var r = n[0]; for (var i = 1; i < n.length; i++) { if (larger ? n[i] > r : n[i] < r) r = n[i]; } return r; }
+    var get = keyFn(column), best = null, bestKey = null;
+    list.forEach(function (row) {
+      var v = get(row), k = dateKey(v);
+      if (k !== null && (bestKey === null || (larger ? k > bestKey : k < bestKey))) { best = v; bestKey = k; }
+    });
+    return best;
+  }
+  function min(list, column) { return extreme(list, column, false); }
+  function max(list, column) { return extreme(list, column, true); }
   function count(list, column) {
     if (column === undefined) return list.length;
     var get = keyFn(column);

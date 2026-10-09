@@ -336,3 +336,17 @@ describe("KitData.toCsv", () => {
     expect(KitData.toCsv([], ["a", "b"])).toBe("a,b");
   });
 });
+
+describe("DataTools min and max", () => {
+  const rows = [{ d: "2026-09-30", n: 5 }, { d: "2026-10-07", n: 2 }, { d: null, n: "x" }, { d: "2026-01-02", n: 9 }];
+  it("gives the earliest and latest date of a date column, as stored", () => {
+    expect(DataTools.max(rows, "d")).toBe("2026-10-07");
+    expect(DataTools.min(rows, "d")).toBe("2026-01-02");
+  });
+  it("keeps numbers first, null for a column without either, and copes with long lists", () => {
+    expect(DataTools.max(rows, "n")).toBe(9);
+    expect(DataTools.min(rows, "n")).toBe(2);
+    expect(DataTools.max(rows, "none")).toBeNull();
+    expect(DataTools.max(Array.from({ length: 300000 }, (_, i) => ({ n: i })), "n")).toBe(299999);
+  });
+});

@@ -154,6 +154,25 @@ function Get-InlineScripts([AllowEmptyString()][string]$Html) {
     }
 }
 
+function Get-HiddenErrorNote {
+    <# A command that ended with exit code 0 but printed PowerShell errors (an error that does not stop
+       the script, without $ErrorActionPreference = 'Stop'): a note naming the first error, or ''. #>
+    param([string]$Output)
+    if ($Output -notmatch '(?m)^\s*\+\s*(CategoryInfo|FullyQualifiedErrorId)\s*:') { return '' }
+    $lines = @($Output.Replace("`r`n", "`n").Split("`n"))
+    $at = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^At .+:\d+ char:\d+') { $at = $i; break } }
+    $msg = ''; $where = ''
+    if ($at -gt 0) {
+        $where = $lines[$at].Trim()
+        $from = $at - 1
+        while ($from -gt 0 -and $lines[$from - 1].Trim() -and $lines[$from - 1] -notmatch '^\s*[+~]' -and ($at - $from) -lt 4) { $from-- }
+        $msg = (($lines[$from..($at - 1)] | ForEach-Object { $_.Trim() }) -join ' ').Trim()
+    }
+    if (-not $msg) { $msg = 'see the output above' }
+    "The command ended with exit code 0, but PowerShell reported an error, so it did not do all it should: $msg$(if ($where) { " ($where)" }). A script goes on after such an error unless it sets ErrorActionPreference to Stop. Fix the cause and run it again; files it wrote may be incomplete."
+}
+
 function Get-UselessCheckCommand([AllowEmptyString()][string]$Command) {
     <# A run command that cannot work here, with what to do instead, or $null: node --check on a file
        that is not JavaScript (an HTML page), or a bash here-string (<<<), which neither cmd.exe nor
@@ -2100,5 +2119,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction

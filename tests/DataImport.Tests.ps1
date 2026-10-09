@@ -181,7 +181,7 @@ Describe 'Loading data in a page (DataTools.load)' {
         [IO.File]::WriteAllText($tools, "/* Data tools: small, tested helpers for the data files in this folder */`nold")
         $r = Update-DataImports $p -AppRoot $root
         @($r.items | ForEach-Object { $_.status }) -join ',' | Should Be 'tools-updated'
-        [IO.File]::ReadAllText($tools) | Should Match '^/\* Data tools v2'
+        [IO.File]::ReadAllText($tools) | Should Match '^/\* Data tools v3'
         [IO.File]::WriteAllText($tools, "// my own tools")
         @((Update-DataImports $p -AppRoot $root).items).Count | Should Be 0
         [IO.File]::ReadAllText($tools) | Should Be '// my own tools'
@@ -215,6 +215,23 @@ Describe 'Excel workbooks' {
         $d.Notes[0].Note | Should Be 'Hi'
         Format-DataImportContext $p | Should Match 'an object with one list of rows per sheet; sheet "Sales": 2 rows; columns: Date \(date\), Amount \(number\), Paid \(boolean\)'
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Describe 'Progress while converting' {
+    It 'says which file it converts before each one, and nothing for files that did not change' {
+        $p = Join-Path $env:TEMP ('ccb-dprog-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory $p -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $p 'sales.csv'), "region,amount`nNorth,120`n")
+        [IO.File]::WriteAllText((Join-Path $p 'people.csv'), "name,team`nAnn,A`n")
+        try {
+            $seen = New-Object System.Collections.Generic.List[string]
+            $null = Update-DataImports $p -AppRoot $root -OnProgress { param($rel, $n, $of) $seen.Add("$rel $n/$of") }.GetNewClosure()
+            @($seen) -join '|' | Should Match '^(people|sales)\.csv 1/2\|(people|sales)\.csv 2/2$'
+            $seen.Clear()
+            $null = Update-DataImports $p -AppRoot $root -OnProgress { param($rel, $n, $of) $seen.Add($rel) }.GetNewClosure()
+            $seen.Count | Should Be 0
+        } finally { Remove-Item $p -Recurse -Force }
     }
 }
 

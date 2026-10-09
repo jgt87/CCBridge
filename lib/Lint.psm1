@@ -856,6 +856,8 @@ function Find-LanguagePitfalls {
                 break
             }
         }
+        # String.Replace with a text and a single character: no such overload, it fails at run time.
+        & $first ([regex]::Match($Text, '(?i)\.Replace\(\s*(''[^''\n]{2,}''|"[^"\n]{2,}")\s*,\s*\[char\]|\.Replace\(\s*\[char\][^,\n]+,\s*(''[^''\n]{2,}''|"[^"\n]{2,}")')) 'String.Replace takes two texts or two single characters, not a text and a [char] (Windows PowerShell stops there with "Cannot convert argument"): write [string][char]60, or the character itself'
         # A JSON array from ConvertFrom-Json is one object in 5.1 unless the call is in parentheses.
         & $first ([regex]::Match($Text, '@\((?!\()[^()\n]*\|\s*ConvertFrom-Json\s*\)\s*\|')) 'in Windows PowerShell 5.1 a JSON array arrives as one object here: put the call in parentheses, @((... | ConvertFrom-Json)) | ...'
         # A parameter overwritten by a variable that only differs in case (names ignore case).
@@ -1015,6 +1017,30 @@ function Find-BrokenEncoding {
     }
 }
 
+# Tags written with a stand-in for < or > (a workaround a chat answer sometimes invents) or escaped:
+# the browser shows them as text.
+$script:StandInPattern = '(\[\[|\{\{|__)(LT|GT)(\]\]|\}\}|__)'
+$script:EscapedPagePattern = '(?im)^\s*&lt;(!doctype|html|head|body|main|div|section|header|script|style|table)\b'
+
+function Find-PlaceholderMarkup {
+    <# A page (or markup a script writes) whose tags are stand-ins ([[LT]] and [[GT]] around a tag name) or escaped
+       (&lt;html&gt; with no real tag in the file): "line N: ..." or nothing. #>
+    param([string]$Path, [string]$Text)
+    # A script that writes a page with stand-ins for its tags (a generator kept next to the page): the
+    # page drifts from it and every change goes through the stand-ins.
+    if ($Path -match '(?i)\.(ps[md]?1|py|m?js|cjs|ts|rb|php|cmd|bat|sh)$') {
+        if ($Path -match '(?i)\.Tests\.ps1$|(^|[\\/])test_[^\\/]+\.py$|\.(test|spec)\.[cm]?[jt]s$') { return }   # tests hold such text on purpose
+        $g = [regex]::Match($Text, '(\[\[|\{\{|__)LT(\]\]|\}\}|__)/?[!a-zA-Z]')
+        if ($g.Success) { return "line $(LineAt $Text $g.Index): this script writes markup with the stand-in $($g.Groups[1].Value)LT$($g.Groups[2].Value) for <: write the page itself with a write or edit action (the helper program keeps < and > as they are) and delete this script, so the page and its generator cannot drift apart" }
+        return
+    }
+    if ($Path -notmatch '(?i)\.(html?|xhtml|svg|xml|vue|svelte)$') { return }
+    $m = [regex]::Match($Text, $script:StandInPattern)
+    if ($m.Success) { return "line $(LineAt $Text $m.Index): the page's tags are written with the stand-in $($m.Value) instead of < or >, so the browser shows them as text: write < and > themselves in a write action (the helper program keeps them as they are), never through a script that swaps stand-ins" }
+    $e = [regex]::Match($Text, $script:EscapedPagePattern)
+    if ($e.Success -and $Text -notmatch '<(!doctype|[a-zA-Z][\w-]*)[\s>/]') { return "line $(LineAt $Text $e.Index): the page's tags are escaped ($($e.Value.Trim())...), so the browser shows them as text: write the tags themselves" }
+}
+
 function Test-TextEncoding {
     <# File problems with characters: text broken by a wrong encoding (any text file), and a web
        page without <meta charset="utf-8"> in its first 1024 bytes (Edge then reads a page opened
@@ -1077,6 +1103,7 @@ function Test-FileContent {
     if ($esc.Count) { & $add "line $(LineAt $t $esc[0].index): $($esc.Count) HTML tag(s) written escaped in a script ($($esc[0].text.Substring(0, [Math]::Min(40, $esc[0].text.Length)))): in JavaScript that stays text, so the page shows the tag instead of making it; write < and >" }
     & $add (Test-Duplicates $t $Path)
     & $add (Test-TextEncoding $Path $t)
+    & $add (Find-PlaceholderMarkup $Path $t)
     & $add (Find-GeneratedCodeIssues $Path $t)
     & $add (Find-LanguagePitfalls $Path $t ($Text.Contains("`r`n") -and [regex]::IsMatch($Text, '(?<!\r)\n')))
     $issues.ToArray()
@@ -1212,4 +1239,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences

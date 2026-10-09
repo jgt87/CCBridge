@@ -1230,8 +1230,13 @@ function Sync-DataImports {
     if (-not $NoLive) { $null = Sync-LiveData $State }
     if (-not (Test-DataImportOn $State.AppRoot)) { return (@(Sync-OneFilePages $State).Count -gt 0) }
     $wrote = $false
+    # What is happening while a data file is converted (a large Excel file takes a while): a line in
+    # the chat per file and the waiting indicator saying which file; the change cards follow.
+    $st = $State
+    $progress = { param($rel, $n, $of) $name = Split-Path $rel -Leaf; Add-AgentEvent $st 'status' @{ text = "Converting $name for Copilot, so it can read the data (StreamHub writes it to data/)." }; $st.Activity.kind = 'busy'; $st.Activity.label = "Converting $name for Copilot" }.GetNewClosure()
+    $prevActivity = Enter-Activity $State "$($State.Activity.kind)" "$($State.Activity.label)"
     try {
-        $r = Update-DataImports $State.ProjectRoot -JsCopy (Test-DataCopiesOn $State.AppRoot) -AppRoot $State.AppRoot
+        $r = Update-DataImports $State.ProjectRoot -JsCopy (Test-DataCopiesOn $State.AppRoot) -AppRoot $State.AppRoot -OnProgress $progress
         $notes = @(Format-DataImportNotes $r)
         $items = @($r.items | Where-Object { $_.status -ne 'taken' })
         for ($i = 0; $i -lt $items.Count; $i++) {
@@ -1240,7 +1245,7 @@ function Sync-DataImports {
             elseif ($notes[$i]) { Add-AgentEvent $State 'status' @{ text = $notes[$i] } }
         }
         if ($r.checkpoint -and $r.checkpoint.Files.Count) { Add-ChangeSetEvent $State $r.checkpoint 'Data files converted for Copilot'; $wrote = $true }
-    } catch { Write-CCBLogError agent 'data import' $_ }
+    } catch { Write-CCBLogError agent 'data import' $_ } finally { Exit-Activity $State $prevActivity }
     if (@(Sync-OneFilePages $State).Count) { $wrote = $true }
     $wrote
 }
@@ -2765,7 +2770,9 @@ function Invoke-AgentAction {
             }
             $preview = @{ path = $Action.arg; exists = $true; old = (Get-PreviewText $er.old); new = (Get-PreviewText $er.new) }
         }
-        $newText = if ($Action.type -eq 'write') { $content } else { $er.new }
+        # The text as it will be written: repairs of what the chat damages (a stripped script tag, entities)
+        # come first, so the checks below look at the same text the file gets.
+        $newText = if ($Action.type -eq 'write') { if ($null -ne $p.new) { "$($p.new)" } else { $content } } else { $er.new }
         $oldText = if ($Action.type -eq 'write') { "$($p.old)" } else { "$($er.old)" }
         # The file's encoding must be able to hold the new text (batch files ASCII, ANSI files their
         # code page, no garbled replacement characters).
@@ -2980,7 +2987,10 @@ function Invoke-AgentAction {
                     $out += "`nNote: Source/ and the files the user protected are read-only. This command changed them, so they were put back: " + ($fixed -join '; ') + '. Work on copies elsewhere in the project.'
                 }
                 if ($runChanged.Count) { $out += "`nFiles this command changed: " + ($runChanged -join ', ') }
-                return @{ ok = (-not $r.timedOut -and -not $r.cancelled -and $r.exitCode -eq 0); summary = "ran: $status"; output = $out; changed = [bool]$runChanged.Count }
+                # Exit code 0 with PowerShell errors in the output: the command did not do what it should.
+                $hidden = if ($r.exitCode -eq 0 -and -not $r.cancelled -and -not $r.timedOut) { Get-HiddenErrorNote "$($r.output)" } else { '' }
+                if ($hidden) { $out += "`n$hidden"; $status = 'exit code 0, with errors' }
+                return @{ ok = (-not $r.timedOut -and -not $r.cancelled -and $r.exitCode -eq 0 -and -not $hidden); summary = "ran: $status"; output = $out; changed = [bool]$runChanged.Count }
             }
         }
     } catch {

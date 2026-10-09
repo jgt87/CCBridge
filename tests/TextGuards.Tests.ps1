@@ -120,7 +120,6 @@ Describe 'Bars flat at the axis' {
     It 'reports a bar the change rounds at the axis, in canvas, Chart.js and CSS' {
         Find-RoundedBarBase 'js/chart.js' '' 'ctx.roundRect(x, y, w, h, 6); ctx.fill();' | Should Match 'roundRect with one radius'
         Find-RoundedBarBase 'js/chart.js' '' "datasets: [{ data: d, borderRadius: 6, borderSkipped: false }]" | Should Match 'borderSkipped: false'
-        Find-RoundedBarBase 'css/app.css' '' ".chart-bar { height: 100%; border-radius: 6px; }" | Should Match 'one corner radius'
     }
     It 'leaves bars flat at the axis, other rounded parts and kit files alone' {
         Find-RoundedBarBase 'js/chart.js' '' 'ctx.roundRect(x, y, w, h, [6, 6, 0, 0]);' | Should BeNullOrEmpty
@@ -129,12 +128,9 @@ Describe 'Bars flat at the axis' {
         Find-RoundedBarBase 'styles/kit/kit.css' '' ".kit-bar { border-radius: 6px; }" | Should BeNullOrEmpty
         Find-RoundedBarBase 'js/chart.js' 'ctx.roundRect(x, y, w, h, 6);' 'ctx.roundRect(x, y, w, h, 6); // same' | Should BeNullOrEmpty
     }
-    It 'the kit draws bar lists flat at their start, and progress and status bars round at both ends' {
+    It 'the kit draws bars in a track (bar lists, progress and status bars) round at both ends' {
         $css = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
-        foreach ($sel in 'kit-barlist__track', 'kit-barlist__fill') {
-            [regex]::Match($css, "\.$sel \{[^}]*\}").Value | Should Match 'border-radius: 0 999px 999px 0'
-        }
-        foreach ($sel in 'kit-progress', 'kit-progress__bar') {
+        foreach ($sel in 'kit-progress', 'kit-progress__bar', 'kit-barlist__track', 'kit-barlist__fill') {
             [regex]::Match($css, "\.$sel \{[^}]*\}").Value | Should Match 'border-radius: 999px;'
         }
     }
@@ -150,5 +146,38 @@ Describe 'Chart colours from the preset' {
         $out = @(Find-QualityIssues -Rel 'js/chart.js' -Old '' -New "var c = 'hsl(' + (i * 40) + ', 70%, 50%)';" -UseKit) -join ' '
         $out | Should Match 'hard-coded colour'
         $out | Should Match 'KitCharts\.palette'
+    }
+}
+
+Describe 'Pages written with stand-ins for < and >' {
+    It 'reports a page whose tags are stand-ins or escaped, not a normal page' {
+        Find-PlaceholderMarkup 'index.html' "[[LT]]!doctype html[[GT]]`n[[LT]]html lang=`"en`"[[GT]]" | Should Match 'line 1: .*stand-in \[\[LT\]\]'
+        Find-PlaceholderMarkup 'index.html' "&lt;!doctype html&gt;`n&lt;html&gt;" | Should Match 'escaped'
+        Find-PlaceholderMarkup 'index.html' "<!doctype html>`n<p>Use &lt;b&gt; for bold</p>" | Should BeNullOrEmpty
+        Find-PlaceholderMarkup 'Work/Write-Index.ps1' "`$html = @'`n[[LT]]div>`n  [[LT]]p class=`"kit-help`">[[LT]]/p>`n'@" | Should Match 'line 2: this script writes markup with the stand-in \[\[LT\]\].*delete this script'
+        Find-PlaceholderMarkup 'js/app.js' "const lt = '<';" | Should BeNullOrEmpty
+        (Test-FileContent 'index.html' "[[LT]]!doctype html>`n[[LT]]html>") -join ' ' | Should Match 'stand-in'
+    }
+    It 'repairs them into tags' {
+        (Repair-MechanicalIssues 'index.html' "[[LT]]!doctype html>`n[[LT]]html lang=`"en`">`n[[LT]]head>[[LT]]meta charset=`"utf-8`">[[LT]]/head>").text | Should Be "<!doctype html>`n<html lang=`"en`">`n<head><meta charset=`"utf-8`"></head>"
+        (Repair-MechanicalIssues 'index.html' "&lt;!doctype html&gt;`n&lt;html&gt;&lt;head&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;/head&gt;&lt;/html&gt;").text | Should Be "<!doctype html>`n<html><head><meta charset=`"utf-8`"></head></html>"
+    }
+    It 'reports String.Replace with a text and a [char] in PowerShell' {
+        $ch = '[ch' + 'ar]'   # put together, so this test file does not hold the pattern itself
+        (Test-FileContent 'Work/Write-Index.ps1' "`$html = 'x'`n`$html = `$html.Replace('[[LT]]', ${ch}60)`n") -join ' ' | Should Match "line 2: String\.Replace takes two texts"
+        (Test-FileContent 'Work/Write-Index.ps1' "`$html = 'x'`n`$html = `$html.Replace('[[LT]]', [string]${ch}60)`n") -join ' ' | Should Not Match 'String\.Replace'
+    }
+}
+
+Describe 'A command that ends with exit code 0 but printed PowerShell errors' {
+    It 'names the first error' {
+        Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
+        $ch = '[ch' + 'ar]'   # put together, so this test file does not hold the pattern itself
+        $out = "Cannot convert argument `"oldChar`", with value: `"[[LT]]`", for `"Replace`" to type `"System.Char`": `"Cannot convert value`n`"[[LT]]`" to type `"System.Char`". Error: `"String must be exactly one character long.`"`"`nAt C:\p\Work\Write-Index.ps1:164 char:1`n+ `$html = `$html.Replace('[[LT]]', ${ch}60)`n+ ~~~~~`n    + CategoryInfo          : NotSpecified: (:) [], MethodException`n    + FullyQualifiedErrorId : MethodArgumentConversionInvalidCastArgument`n`nGenerated index.html."
+        $n = Get-HiddenErrorNote $out
+        $n | Should Match 'exit code 0, but PowerShell reported an error'
+        $n | Should Match 'Cannot convert argument "oldChar"'
+        $n | Should Match 'Write-Index\.ps1:164 char:1'
+        Get-HiddenErrorNote "Generated index.html." | Should Be ''
     }
 }

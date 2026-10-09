@@ -65,6 +65,16 @@ Describe 'A script tag stripped to PATH.jsscript> is put back' {
 </head>'
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
     }
+    It 'writes a whole page whose script tag arrived stripped, with the tag put back (not refused)' {
+        $p = Join-Path $env:TEMP ('ccb-strip-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        $config = Get-CCBridgeConfig harness $root
+        $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
+        $page = "<!doctype html>`n<html>`n<head>`n  <meta charset=`"utf-8`">`n  <title>Usage</title>`n</head>`n<body>`n  <p>Usage</p>`n  data/data-tools.jsscript>`n</body>`n</html>`n"
+        $r = & (Get-Module Agent) { param($st, $b) Invoke-AgentAction $st ([pscustomobject]@{ type = 'write'; arg = 'index.html'; body = $b; closed = $true }) 'a1' $null 0 } $s $page
+        $r.ok | Should Be $true
+        [IO.File]::ReadAllText((Join-Path $p 'index.html')) | Should Match '  <script src="data/data-tools\.js"></script>'
+        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 Describe 'A reply with a damaged tag is replaced by the page copy of the same reply' {
     It 'recognises damaged tag text and leaves correct HTML and code alone' {

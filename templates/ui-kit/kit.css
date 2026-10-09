@@ -509,7 +509,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-drop input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .kit-drop__title { color: var(--kit-text); font-weight: 600; }
 .kit-drop__files { list-style: none; margin: 0; padding: 0; font-size: var(--kit-text-xs); color: var(--kit-text); }
-/* Progress and status bars (not part of a chart) are round at both ends; chart bars are flat at their axis. */
+/* Bars in a track (progress and status bars, bar lists) are round at both ends; bars drawn against a chart axis are flat at the axis. */
 .kit-progress { width: 100%; height: 6px; border-radius: 999px; background: var(--kit-surface-2); overflow: hidden; }
 .kit-progress__bar { height: 100%; width: 0; border-radius: 999px; background: var(--kit-accent); transition: width var(--kit-speed) ease-out; }
 /* Colours by meaning; the figure or label next to the bar says what it means. */
@@ -678,8 +678,8 @@ button.kit-barlist__row { cursor: pointer; transition: background var(--kit-spee
 button.kit-barlist__row:hover { background: var(--kit-surface-2); }
 button.kit-barlist__row:focus-visible { outline: none; box-shadow: var(--kit-focus); }
 .kit-barlist__label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kit-barlist__track { display: block; height: 0.75rem; border-radius: 0 999px 999px 0; overflow: hidden; background: var(--kit-surface-2); }
-.kit-barlist__fill { display: block; height: 100%; border-radius: 0 999px 999px 0; transform-origin: left center; }
+.kit-barlist__track { display: block; height: 0.75rem; border-radius: 999px; overflow: hidden; background: var(--kit-surface-2); }
+.kit-barlist__fill { display: block; height: 100%; border-radius: 999px; transform-origin: left center; }
 .kit-barlist__value { text-align: right; font-variant-numeric: tabular-nums; font-size: var(--kit-text-xs); color: var(--kit-text-muted); white-space: nowrap; }
 .kit-barlist__value b { color: var(--kit-text); font-weight: 600; }
 .kit-barlist--share .kit-barlist__row { grid-template-columns: minmax(80px, 34%) minmax(48px, 1fr) auto; }

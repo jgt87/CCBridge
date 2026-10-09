@@ -49,7 +49,7 @@ Describe 'More components' {
 Describe 'Status bars and chart bars' {
     It 'rounds a progress or status bar at both ends' {
         [regex]::Match($kitCss, '\.kit-progress \{[^}]*\}').Value | Should Match 'border-radius: 999px;'
-        $rule | Should Match 'Progress and status bars that are not part of a chart \(kit-progress\) are round at both ends'
+        $rule | Should Match 'Bars in a track \(progress and status bars, bar lists'
     }
 }
 

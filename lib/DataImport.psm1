@@ -265,8 +265,9 @@ function Update-DataImports {
     <# Converts new and changed data files (Get-DataImportSources) to data/NAME.json, and for a project
        opened from disk ($JsCopy) adds data/NAME.js (a data copy, DataMirror). Never overwrites a file
        it did not write or one changed since. Earlier versions go into one change set. Returns
-       @{ items = @(@{ source; output; js; status (created, updated, failed, too-large, edited, taken); note; old; new }); checkpoint }. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [bool]$JsCopy = $true, $Checkpoint = $null, [string]$AppRoot = '')
+       @{ items = @(@{ source; output; js; status (created, updated, failed, too-large, edited, taken); note; old; new }); checkpoint }.
+       $OnProgress (source path, its number, how many sources) is called before each file is converted. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [bool]$JsCopy = $true, $Checkpoint = $null, [string]$AppRoot = '', [scriptblock]$OnProgress = $null)
     $root = $ProjectRoot.TrimEnd('\')
     $man = Read-DataImportManifest $root
     $results = New-Object System.Collections.Generic.List[object]
@@ -277,6 +278,7 @@ function Update-DataImports {
     # A source that is gone: its converted file stays (it is still data), without a source to follow.
     foreach ($k in @($man.Keys)) { if (-not $present.ContainsKey("$($man[$k].source)")) { $man.Remove($k); $changed = $true } }
     $bySource = @{}; foreach ($k in $man.Keys) { $bySource["$($man[$k].source)"] = $k }
+    $done = 0
     foreach ($s in $sources) {
         $out = if ($bySource.ContainsKey($s.rel)) { $bySource[$s.rel] } else {
             $stem = Get-DataOutputStem $s.rel
@@ -298,6 +300,8 @@ function Update-DataImports {
             # Someone else's file with that name (often Copilot's own conversion): left alone.
             $results.Add([pscustomobject]@{ source = $s.rel; output = $out; status = 'taken'; note = '' }); continue
         }
+        $done++
+        if ($OnProgress) { try { & $OnProgress $s.rel $done $sources.Count } catch { } }
         $old = if ($exists) { [IO.File]::ReadAllText($outFull) } else { $null }
         if ($exists -and $prev.hash -and (Get-TextHash $old) -ne "$($prev.hash)") {
             if (-not $prev.edited) { $prev | Add-Member -Force edited $true; $prev.stamp = $s.stamp; $changed = $true; $results.Add([pscustomobject]@{ source = $s.rel; output = $out; status = 'edited'; note = '' }) }

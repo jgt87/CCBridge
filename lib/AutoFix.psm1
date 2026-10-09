@@ -101,6 +101,18 @@ function Repair-MechanicalIssues {
         $t = $sb.ToString()
         $fixes.Add("$($bad.Count) broken character sequence(s) (UTF-8 read as Windows-1252, such as '$($bad[0].text)') written as the real characters")
     }
+    # Tags written with stand-ins ([[LT]] for <, [[GT]] for >) or a page escaped as a whole: the tags.
+    if ($Path -match '(?i)\.(html?|xhtml|svg)$') {
+        $n = ([regex]::Matches($t, '(\[\[|\{\{|__)(LT|GT)(\]\]|\}\}|__)')).Count
+        if ($n) {
+            $t = [regex]::Replace($t, '(\[\[|\{\{|__)LT(\]\]|\}\}|__)', '<')
+            $t = [regex]::Replace($t, '(\[\[|\{\{|__)GT(\]\]|\}\}|__)', '>')
+            $fixes.Add("$n stand-in(s) for < and > (such as [[LT]]) written as the characters")
+        } elseif ($t -match '(?im)^\s*&lt;(!doctype|html|head|body|main|div|section|header|script|style|table)\b' -and $t -notmatch '<(!doctype|[a-zA-Z][\w-]*)[\s>/]') {
+            $t = $t.Replace('&lt;', '<').Replace('&gt;', '>').Replace('&quot;', '"').Replace('&#39;', "'").Replace('&amp;', '&')
+            $fixes.Add('the escaped page (&lt;html&gt;...) written as tags')
+        }
+    }
     # A web page without a charset: <meta charset="utf-8"> first in <head>, so Edge reads the page
     # and its scripts as UTF-8 when it is opened from disk.
     if ($Path -match '(?i)\.html?$') {
