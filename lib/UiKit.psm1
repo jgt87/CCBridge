@@ -6,14 +6,16 @@ Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 
 # The files of each part (Settings > UI kit). The base is always there with the kit.
 $script:KitParts = [ordered]@{
-    base        = @('tokens.css', 'kit.css', 'kit-examples.html')
+    base        = @('tokens.css', 'kit.css', 'kit-examples.html', 'kit.js', 'LICENSE-kokonutui.txt')   # kit.js: tables, bars, dashboard parts
     interactive = @('kit.js', 'LICENSE-kokonutui.txt')
     charts      = @('kit-charts.js', 'LICENSE-bklit-ui.txt')
     icons       = @('LICENSE-lucide.txt')       # kit-icons.js is written by Update-KitIcons
     data        = @('kit-data.js')
     pdf         = @('vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/pdfjs/LICENSE-pdfjs.txt', 'vendor/pdfjs/README.txt')
 }
-$script:ReactFiles = @{ icons = @('Icon.tsx'); interactive = @('HoldButton.tsx', 'SearchBox.tsx', 'DropZone.tsx', 'Tabs.tsx', 'Loading.tsx', 'Composer.tsx', 'CommandButton.tsx'); charts = @('Chart.tsx'); data = @('useFileData.ts') }
+$script:ReactFiles = @{ icons = @('Icon.tsx'); interactive = @('HoldButton.tsx', 'SearchBox.tsx', 'DropZone.tsx', 'Tabs.tsx', 'Loading.tsx', 'Composer.tsx', 'CommandButton.tsx'); charts = @('Chart.tsx'); data = @('useFileData.ts')
+    dashboard = @('Drawer.tsx', 'Toast.tsx', 'Tip.tsx', 'MultiSelect.tsx', 'PeriodFilter.tsx', 'Stamp.tsx')
+    extras = @('Menu.tsx', 'IconBar.tsx', 'Avatar.tsx', 'SliderRange.tsx', 'TagInput.tsx', 'Board.tsx', 'Calendar.tsx', 'Switch.tsx') }
 
 function Get-UiKitColors([string]$AppRoot) {
     <# Setting uiKitColors: blue (default), neutral, or none (no colours set for the project). #>
@@ -21,17 +23,102 @@ function Get-UiKitColors([string]$AppRoot) {
     if ($v -in 'neutral', 'none') { $v } else { 'blue' }
 }
 
+function Get-UiKitDarkMode([string]$AppRoot) {
+    <# Setting uiKitDarkMode: light-only (default: no dark mode and no switch unless asked for),
+       follow-system (dark when the computer is), switch (that plus a light/dark button). #>
+    try { $v = "$((Get-CCBridgeConfig harness $AppRoot).uiKitDarkMode)" } catch { $v = '' }
+    if ($v -in 'follow-system', 'switch') { $v } else { 'light-only' }
+}
+
+function Remove-DarkTokens([string]$Text) {
+    <# Tokens without their dark values (light only): the @media (prefers-color-scheme: dark) block and
+       the :root[data-theme="dark"] block go, and the header says how to add dark mode later. #>
+    foreach ($start in @('@media (prefers-color-scheme: dark)', ':root[data-theme="dark"]')) {
+        $i = $Text.IndexOf($start)
+        if ($i -lt 0) { continue }
+        $open = $Text.IndexOf('{', $i)
+        if ($open -lt 0) { continue }
+        $depth = 0; $end = -1
+        for ($k = $open; $k -lt $Text.Length; $k++) {
+            if ($Text[$k] -eq '{') { $depth++ } elseif ($Text[$k] -eq '}') { $depth--; if ($depth -eq 0) { $end = $k; break } }
+        }
+        if ($end -lt 0) { continue }
+        $Text = $Text.Remove($i, $end - $i + 1)
+    }
+    $Text = [regex]::Replace($Text, '(?m)^  values only; the components in kit.css follow\. Light by default, dark when the computer prefers it\r?\n  \(or with data-theme="dark" on <html>; data-theme="light" keeps it light\)\.', "  values only; the components in kit.css follow. Light only (Settings > UI kit > Dark mode): the dark`n  values are in .streamhub/ui-kit/tokens.css, to copy here when the project wants a dark mode.")
+    if ($Text -notmatch 'Light only \(Settings') {
+        $end = $Text.IndexOf('*/')
+        if ($end -ge 0) { $Text = $Text.Insert($end + 2, "`n/* Light only (Settings > UI kit > Dark mode): the dark values are in .streamhub/ui-kit/tokens.css, to copy here when the project wants a dark mode. */") }
+    }
+    [regex]::Replace($Text, '(\r?\n){3,}', "`n`n")
+}
+
+$script:TailwindCache = @{ root = ''; at = [datetime]::MinValue; on = $false; version = 0 }
+
+function Get-TailwindInfo([string]$ProjectRoot) {
+    <# Whether the project uses Tailwind CSS and which major version: a tailwind.config file, tailwindcss
+       or @tailwindcss/* in a package.json, a stylesheet with @tailwind or @import "tailwindcss", or a page
+       loading Tailwind from its CDN. @{ on; version } (4 for @import "tailwindcss", @tailwindcss/* or a
+       ^4 version, else 3); cached for 15 seconds. #>
+    $c = $script:TailwindCache
+    if ($c.root -eq $ProjectRoot -and ((Get-Date) - $c.at).TotalSeconds -lt 15) { return @{ on = $c.on; version = $c.version } }
+    $on = $false; $v4 = $false
+    $skip = '\\(node_modules|\.git|\.streamhub|dist|build|out|Source)\\'
+    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -ErrorAction SilentlyContinue -Include 'package.json', 'tailwind.config.*', '*.css', '*.html', '*.htm' |
+        Where-Object { $_.FullName -notmatch $skip -and $_.FullName -notmatch '\\styles\\kit\\' -and $_.Length -lt 1MB } | Select-Object -First 400)
+    foreach ($f in $files) {
+        $n = $f.Name.ToLowerInvariant()
+        if ($n -like 'tailwind.config.*') { $on = $true; continue }
+        $t = try { [IO.File]::ReadAllText($f.FullName) } catch { '' }
+        if ($n -eq 'package.json') {
+            $m = [regex]::Match($t, '"tailwindcss"\s*:\s*"[~^>=\s]*(\d+)')
+            if ($m.Success) { $on = $true; if ([int]$m.Groups[1].Value -ge 4) { $v4 = $true } }
+            if ($t -match '"@tailwindcss/(vite|postcss|cli|browser)"') { $on = $true; $v4 = $true }
+        } elseif ($n -like '*.css') {
+            if ($t -match '@import\s+["'']tailwindcss') { $on = $true; $v4 = $true }
+            elseif ($t -match '@tailwind\s+(base|components|utilities)') { $on = $true }
+        } elseif ($t -match 'cdn\.tailwindcss\.com') { $on = $true }
+        elseif ($t -match '@tailwindcss/browser') { $on = $true; $v4 = $true }
+    }
+    $version = if ($on) { if ($v4) { 4 } else { 3 } } else { 0 }
+    $script:TailwindCache = @{ root = $ProjectRoot; at = (Get-Date); on = $on; version = $version }
+    @{ on = $on; version = $version }
+}
+
+function Test-TailwindProject([string]$ProjectRoot) { [bool](Get-TailwindInfo $ProjectRoot).on }
+
+function Update-KitTailwind {
+    <# In a project that uses Tailwind (setting uiKitParts.tailwind): styles/kit/tailwind/ gets the kit's
+       tokens as Tailwind names, kit-tailwind.css for Tailwind 4 or kit-preset.cjs for 3, written again when
+       the kit's copy changes (a file without the helper program's header is the project's own and stays).
+       Returns the paths written. #>
+    param([string]$ProjectRoot, [string]$AppRoot)
+    if (-not (Test-UiKitPart 'tailwind' $AppRoot)) { return @() }
+    $info = Get-TailwindInfo $ProjectRoot
+    if (-not $info.on) { return @() }
+    $name = if ($info.version -ge 4) { 'kit-tailwind.css' } else { 'kit-preset.cjs' }
+    $src = Join-Path $AppRoot "templates\ui-kit\tailwind\$name"
+    if (-not (Test-Path -LiteralPath $src)) { return @() }
+    $dst = Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + "\tailwind\$name")
+    $new = [IO.File]::ReadAllText($src)
+    $old = if (Test-Path -LiteralPath $dst) { [IO.File]::ReadAllText($dst) } else { $null }
+    if ($old -eq $new -or ($null -ne $old -and $old -notmatch 'written by the helper program')) { return @() }
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $dst)
+    [IO.File]::WriteAllText($dst, $new, (New-Object Text.UTF8Encoding($false)))
+    @("$(Get-UiKitFolder)/tailwind/$name")
+}
+
 function Get-UiKitParts([string]$AppRoot) {
-    <# The kit parts switched on: base plus interactive / charts / icons / data / pdf / react as set
+    <# The kit parts switched on: base plus interactive / charts / icons / data / dashboard / print / pdf / react as set
        (pdf.js only with the file readers). #>
-    $on = @(foreach ($p in 'interactive', 'charts', 'icons', 'data', 'pdf', 'react') { if (Test-UiKitPart $p $AppRoot) { $p } })
+    $on = @(foreach ($p in 'interactive', 'charts', 'icons', 'data', 'dashboard', 'extras', 'print', 'tailwind', 'pdf', 'react') { if (Test-UiKitPart $p $AppRoot) { $p } })
     if ($on -notcontains 'data') { $on = @($on | Where-Object { $_ -ne 'pdf' }) }
-    @('base') + $on + @(if ((Get-UiKitColors $AppRoot) -eq 'blue') { 'palette' })
+    @('base') + $on + @(if ((Get-UiKitColors $AppRoot) -eq 'blue') { 'palette' }) + @(if ((Get-UiKitDarkMode $AppRoot) -eq 'switch') { 'themeswitch' })
 }
 
 function Get-KitExamplesText([string]$Text, [string[]]$Parts) {
     <# The examples page without the sections of parts that are off (<!-- kit-part:NAME --> ... <!-- /kit-part:NAME -->). #>
-    foreach ($p in 'interactive', 'charts', 'icons', 'data', 'pdf', 'palette') {
+    foreach ($p in 'interactive', 'charts', 'icons', 'data', 'dashboard', 'extras', 'print', 'pdf', 'palette', 'themeswitch') {
         if ($Parts -contains $p) { continue }
         $Text = [regex]::Replace($Text, '(?s)<!-- kit-part:' + $p + ' -->.*?<!-- /kit-part:' + $p + ' -->\r?\n?', '')
     }
@@ -52,15 +139,15 @@ $script:Companions = @{
 }
 # The kit's revision: raise it when the kit changes in a way projects should get (new classes, chart
 # options the rules name). Update-UiKitCatalog brings an older project catalogue up to date.
-$script:KitRevision = 3
+$script:KitRevision = 5
 $script:KitCssHeader = '/* Generated by the helper program from the UI kit (.streamhub/ui-kit/kit.css): the rules of the kit classes this project uses, nothing else.'
 
 function Get-UiKitFiles([string]$AppRoot) {
     # The kit files of the parts that are switched on, as paths inside templates/ui-kit.
     $parts = @(Get-UiKitParts $AppRoot)
-    $files = @(foreach ($p in $parts) { if ($script:KitParts.Contains($p)) { $script:KitParts[$p] } })
+    $files = @(@(foreach ($p in $parts) { if ($script:KitParts.Contains($p)) { $script:KitParts[$p] } }) | Select-Object -Unique)
     if ($parts -contains 'react') {
-        foreach ($p in 'interactive', 'charts', 'icons', 'data') { if ($parts -contains $p) { $files += @($script:ReactFiles[$p] | ForEach-Object { "react/$_" }) } }
+        foreach ($p in 'interactive', 'charts', 'icons', 'data', 'dashboard', 'extras') { if ($parts -contains $p) { $files += @($script:ReactFiles[$p] | ForEach-Object { "react/$_" }) } }
     }
     @($files)
 }
@@ -163,8 +250,8 @@ function Get-KitExamplesIndex([string]$Text) {
 }
 
 $script:KitFileNotes = [ordered]@{
-    'kit.js'        = 'behaviour by data-kit-* attributes: sortable tables with pages, hold to confirm, search with suggestions, file drop zone, animated tabs and choices'
-    'kit-charts.js' = 'charts on the kit colours: bar (grouped or stacked), line, area, ring, gauge, heatmap, sparkline, barlist (shares, funnels, colours by meaning); filter the page on a click'
+    'kit.js'        = 'behaviour by data-kit-* attributes: sortable tables with pages and a search box, progress bars from aria-valuenow, hold to confirm, search with suggestions, file drop zone, animated tabs and choices, side panel and dialog openers, filters for several values and for a period, info tips, data-as-of stamps, a print button; KitUI.toast for confirmations'
+    'kit-charts.js' = 'charts on the kit colours: bar (grouped, stacked or 100% stacked), line, area, ring, gauge, heatmap, sparkline, barlist (shares, funnels, colours by meaning); target lines; filter the page on a click; KitCharts.palette for canvas code'
     'kit-data.js'   = 'reading a file a person picks or drops: CSV, TSV, Excel, JSON, Word, PowerPoint'
 }
 
@@ -229,7 +316,9 @@ function Install-UiKit {
     $catTokens = Join-Path $cat 'tokens.css'
     if (-not (Test-Path -LiteralPath $tokens) -and (Test-Path -LiteralPath $catTokens)) {
         $null = New-Item -ItemType Directory -Force -Path (Split-Path $tokens)
-        Copy-Item -LiteralPath $catTokens -Destination $tokens
+        # Light only (setting uiKitDarkMode): the project gets the tokens without their dark values.
+        if ((Get-UiKitDarkMode $AppRoot) -eq 'light-only') { [IO.File]::WriteAllText($tokens, (Remove-DarkTokens ([IO.File]::ReadAllText($catTokens))), (New-Object Text.UTF8Encoding($false))) }
+        else { Copy-Item -LiteralPath $catTokens -Destination $tokens }
         $added += "$(Get-UiKitFolder)/tokens.css"
     }
     $sync = Update-UiKitProject $ProjectRoot $AppRoot
@@ -391,12 +480,34 @@ function Test-KitSelectorUsed([string]$Selector, $Usage) {
     $true
 }
 
+function Get-KitSettingsCss {
+    <# What Settings > UI kit puts into a project's kit.css, for the parts its pages use: the period
+       filter's first day of the week (--kit-week-start: 1 Monday, 0 Sunday; setting uiKitWeekStart)
+       and the paper orientation for printing (@page; setting uiKitPrintOrientation, with print
+       styles on). '' when none applies. #>
+    param([string]$AppRoot, $Usage)
+    $cfg = try { Get-CCBridgeConfig harness $AppRoot } catch { $null }
+    $out = New-Object System.Collections.Generic.List[string]
+    if ($Usage -and $Usage.classes -and $Usage.classes.Contains('kit-range')) {
+        $week = if ("$($cfg.uiKitWeekStart)" -eq 'sunday') { 0 } else { 1 }
+        $out.Add("/* Settings: the first day of the week for the period filter (1 Monday, 0 Sunday). */")
+        $out.Add(":root { --kit-week-start: $week; }")
+    }
+    $o = "$($cfg.uiKitPrintOrientation)"
+    if ($o -in 'landscape', 'portrait' -and (Test-UiKitPart 'print' $AppRoot)) {
+        $out.Add("/* Settings: the paper orientation when the page is printed. */")
+        $out.Add("@page { size: $o; margin: 12mm; }")
+    }
+    $out -join "`n"
+}
+
 function Select-KitCss {
     <# The kit's stylesheet with only the rules for the classes $Usage has: a selector list keeps the
        selectors whose kit classes are all used; @media and similar blocks keep their used rules;
        @keyframes stay when a kept rule names them. A comment goes with the rule after it, and a
-       licence note with any rule of its section. #>
-    param([string]$Css, $Usage, [switch]$Inner)
+       licence note with any rule of its section. -NoPrint (print styles switched off) leaves out
+       @media print and @page. #>
+    param([string]$Css, $Usage, [switch]$Inner, [switch]$NoPrint)
     $out = New-Object System.Collections.Generic.List[string]
     $frames = New-Object System.Collections.Generic.List[object]
     $note = $null; $noteOut = $false; $comment = $null
@@ -422,8 +533,9 @@ function Select-KitCss {
             'at' {
                 $kf = [regex]::Match($it.head, '^@(?:-webkit-)?keyframes\s+([\w-]+)')
                 if ($kf.Success) { $frames.Add(@{ name = $kf.Groups[1].Value; text = $it.text }); $comment = $null; continue }
+                if ($NoPrint -and $it.head -match '^@(media\s+print\b|page\b)') { $comment = $null; continue }
                 if ($it.head -match '^@(media|supports|container|layer)\b') {
-                    $innerCss = Select-KitCss -Css $it.body -Usage $Usage -Inner:$true
+                    $innerCss = Select-KitCss -Css $it.body -Usage $Usage -Inner:$true -NoPrint:$NoPrint
                     if ($innerCss.Trim()) {
                         if ($note -and -not $noteOut) { $out.Add($note); $noteOut = $true }
                         $out.Add("$($it.head) { $($innerCss.Trim()) }")
@@ -513,7 +625,7 @@ function Update-UiKitProject {
     $exists = Test-Path -LiteralPath $cssFile
     $first = if ($exists) { try { (Get-Content -LiteralPath $cssFile -TotalCount 1) } catch { '' } } else { '' }
     if ($cssSrc -and (-not $exists -or "$first".StartsWith('/* Generated by the helper program from the UI kit'))) {
-        $body = Select-KitCss ([IO.File]::ReadAllText($cssSrc.path)) $usage
+        $body = (Select-KitCss ([IO.File]::ReadAllText($cssSrc.path)) $usage -NoPrint:(-not (Test-UiKitPart 'print' $AppRoot))).Trim() + "`n" + (Get-KitSettingsCss $AppRoot $usage)
         $text = $script:KitCssHeader + " Do not edit: use a kit class in a page and its rules are added after the change; change colours and sizes in tokens.css and put other rules in your own stylesheet. */`n" + $body.Trim() + "`n"
         $old = if ($exists) { [IO.File]::ReadAllText($cssFile) } else { '' }
         if ($old -ne $text) {
@@ -537,6 +649,8 @@ function Update-UiKitProject {
         }
         $unknown = @($ic.unknown)
     }
+    # Tailwind (setting uiKitParts.tailwind): the kit's tokens as Tailwind names in a Tailwind project.
+    foreach ($tw in @(Update-KitTailwind $ProjectRoot $AppRoot)) { $added.Add($tw) }
     @{ added = $added.ToArray(); updated = $updated.ToArray(); unknown = $unknown }
 }
 
@@ -627,4 +741,4 @@ function Test-UiKitInProject([string]$ProjectRoot) {
     Test-Path -LiteralPath (Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css'))
 }
 
-Export-ModuleMember -Function Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder
+Export-ModuleMember -Function Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder

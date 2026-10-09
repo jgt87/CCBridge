@@ -1,7 +1,8 @@
 # Mechanical fixes for problems that only have one right answer and cannot change what the code
 # does: typographic quotes used as code quotes, non-breaking and zero-width spaces in code, HTML
-# entities in code, mixed line endings, // comments in CSS, a single % in a batch for loop. Only in
-# code (strings and comments are left as they are, via Lint's Get-CodeMask). Whether they are
+# entities in code, mixed line endings, // comments in CSS, a single % in a batch for loop; and,
+# anywhere in a file, text broken by a wrong encoding, and a page without its charset line. The code
+# fixes only in code (strings and comments are left as they are, via Lint's Get-CodeMask). Whether they are
 # applied follows the enforcement setting (CheckPolicy Get-Enforcement): light fixes silently,
 # standard fixes and tells Copilot, strict leaves them to Copilot. Non-ASCII written as [char].
 
@@ -89,6 +90,28 @@ function Repair-MechanicalIssues {
             $m.Groups[2].Value + '%%' + $v + ([regex]::Replace($m.Groups[4].Value, "(?<!%)%$v\b", "%%$v"))
         })
         if ($script:n) { $fixes.Add("$script:n batch for loop(s) given %%"); $script:n = 0 }
+    }
+    # Text broken by a wrong encoding (UTF-8 read as Windows-1252): the real characters, also in
+    # strings and markup, where it shows. Not in the blocks the helper program fills in a page.
+    $filled = @(if ($Path -match '(?i)\.html?$') { [regex]::Matches($t, '(?is)<(script|style)\b[^>]*\bdata-streamhub\s*=[^>]*>.*?</\1\s*>') })
+    $bad = @(Find-BrokenEncoding $t | Where-Object { $b = $_; -not @($filled | Where-Object { $b.index -ge $_.Index -and $b.index -lt $_.Index + $_.Length }).Count })
+    if ($bad.Count) {
+        $sb = New-Object Text.StringBuilder $t
+        foreach ($b in @($bad | Sort-Object index -Descending)) { [void]$sb.Remove($b.index, $b.length); [void]$sb.Insert($b.index, $b.fixed) }
+        $t = $sb.ToString()
+        $fixes.Add("$($bad.Count) broken character sequence(s) (UTF-8 read as Windows-1252, such as '$($bad[0].text)') written as the real characters")
+    }
+    # A web page without a charset: <meta charset="utf-8"> first in <head>, so Edge reads the page
+    # and its scripts as UTF-8 when it is opened from disk.
+    if ($Path -match '(?i)\.html?$') {
+        $top = if ($t.Length -gt 1024) { $t.Substring(0, 1024) } else { $t }
+        $head = [regex]::Match($t, '(?i)<head(\s[^>]*)?>')
+        if ($head.Success -and $top -notmatch '(?i)<meta\b[^>]*\bcharset\s*=') {
+            $nl = if ($t.Contains("`r`n")) { "`r`n" } else { "`n" }
+            $indent = [regex]::Match($t.Substring($head.Index + $head.Length), '\A\r?\n([ \t]*)').Groups[1].Value
+            $t = $t.Insert($head.Index + $head.Length, $nl + $indent + '<meta charset="utf-8">')
+            $fixes.Add('<meta charset="utf-8"> added at the top of <head>')
+        }
     }
     # Mixed line endings: the kind most lines have.
     $crlf = ([regex]::Matches($t, "`r`n")).Count; $lf = ([regex]::Matches($t, '(?<!\r)\n')).Count

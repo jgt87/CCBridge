@@ -328,7 +328,7 @@ $script:RadiusPattern = '(?i)\bborder-?(top-?|bottom-?)?(left-?|right-?)?radius\
 # An emoji (pictographs, symbols, dingbats, arrows) as the first content of a button, heading, label, link or option.
 $script:EmojiIconPattern = '(?i)<(button|h[1-6]|label|th|a|summary|legend|option)\b[^>]*>[^<]*?([\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2B05-\u2B07\u2B50\u2B55])'
 # Colours in scripts: a string that is only a colour (chart settings, canvas fills, inline styles).
-$script:ScriptColorPattern = '(?i)["''`]\s*(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]*\)|hsla?\([^)]*\))\s*["''`]'
+$script:ScriptColorPattern = '(?i)["''`]\s*(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]*\)|hsla?\([^)]*\))\s*["''`]|["''`]\s*(hsla?|rgba?)\(\s*["''`]\s*\+'   # also a palette put together: 'hsl(' + h + ...
 
 function Find-UiSlop {
     <# Interface patterns that make a page look generated, on the lines a change adds to a style,
@@ -380,7 +380,7 @@ function Find-UiSlop {
         }
         if ($slop -and -not $found.blur -and $t -match '(?i)backdrop-filter\s*:\s*blur') { $found.blur = "line ${n}: a decorative blur (glass effect) looks generated; use a plain surface" }
         if ($slop -and $UseKit -and -not $tokensFile -and -not $found.color -and $isStyle -and $t -match '(?i)(#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\()' -and $t -notmatch 'var\(--kit-') { $found.color = "line ${n}: a hard-coded colour; use a token from styles/kit/tokens.css (var(--kit-...)) so the page follows the kit" }
-        if ($slop -and $UseKit -and -not $found.color -and -not $isStyle -and $t -notmatch 'var\(--kit-' -and (($isMarkup -and $t -match $script:MarkupColorPattern) -or ($isScript -and $t -match $script:ScriptColorPattern))) { $found.color = "line ${n}: a hard-coded colour; use a kit token instead: var(--kit-...) in styles, var(--kit-chart-1) to var(--kit-chart-6) in order for chart series (in canvas code read them with getComputedStyle(document.documentElement).getPropertyValue(`"--kit-chart-1`")), so the page follows the kit in light and dark" }
+        if ($slop -and $UseKit -and -not $found.color -and -not $isStyle -and $t -notmatch 'var\(--kit-' -and (($isMarkup -and $t -match $script:MarkupColorPattern) -or ($isScript -and $t -match $script:ScriptColorPattern))) { $found.color = "line ${n}: a hard-coded colour; use a kit token instead: var(--kit-...) in styles, var(--kit-chart-1) to var(--kit-chart-6) in order for chart series (in canvas code KitCharts.palette(N) gives them as colour values, or read them with getComputedStyle(document.documentElement).getPropertyValue(`"--kit-chart-1`")), so the page follows the kit in light and dark" }
     }
     @($found.Values)
 }
@@ -439,13 +439,75 @@ $script:KitBypassHints = @{
     dialog   = 'a dialog without the kit''s class: <dialog class="kit-dialog"> with its buttons in kit-dialog__actions'
 }
 
+function Find-TailwindSlop {
+    <# With the UI kit, Tailwind classes a change adds that leave the kit's look: Tailwind's own colour
+       palette (bg-blue-500), made-up colours and sizes in brackets (bg-[#123456], text-[13px],
+       rounded-[10px]), gradient text (bg-clip-text with text-transparent) and backdrop-blur. Only what is
+       new; one finding per file. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte|css|scss)$' -or $Rel -match '(?i)(^|/)(styles/kit|\.streamhub|node_modules|dist|build)/') { return }
+    $pre = '(?<![\w-])(?:[a-z0-9-]+:)*'
+    $rules = @(
+        @{ re = $pre + '(bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|divide|placeholder|accent|caret|shadow)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(50|[1-9]00|950)(?:/\d+)?(?![\w-])'; msg = "Tailwind's own colours leave the kit's colours: use the kit's names (bg-kit-accent, text-kit-muted, border-kit-border, bg-kit-chart-1 ...; styles/kit/tailwind/)" }
+        @{ re = $pre + '(bg|text|border|ring|fill|stroke|from|via|to|shadow|outline|decoration)-\[(#|rgba?\(|hsla?\(|oklch\()[^\]]*\]'; msg = "a made-up colour in brackets: use the kit's names (bg-kit-accent, text-kit-text, bg-kit-chart-1 ...)" }
+        @{ re = $pre + '(text|rounded|shadow|font)-\[[\d.]+(px|rem|em)?\]'; msg = "a made-up size in brackets: use the kit's sizes (text-kit-sm, rounded-kit, shadow-kit, p-kit-4 ...)" }
+        @{ re = '(?s)bg-clip-text(?=[^"''\x60]*text-transparent)|text-transparent(?=[^"''\x60]*bg-clip-text)'; msg = 'gradient text (bg-clip-text with text-transparent): write the text in a kit colour' }
+        @{ re = $pre + 'backdrop-blur(-[a-z0-9]+)?(?![\w-])'; msg = 'decorative blur (backdrop-blur): use a solid kit surface (bg-kit-surface)' }
+    )
+    foreach ($r in $rules) {
+        $now = [regex]::Matches("$New", $r.re)
+        if ($now.Count -gt ([regex]::Matches("$Old", $r.re)).Count) { return "line $(Get-LineIndex "$New" $now[$now.Count - 1].Index): $($r.msg) ('$($now[$now.Count - 1].Value)')" }
+    }
+}
+
+function Find-RoundedBarBase {
+    <# Bars a change draws itself rounded on the side where they start (the axis, or the start of
+       their track): canvas roundRect with one radius (all four corners), Chart.js borderSkipped
+       false with a radius, CSS giving a bar or fill one radius on every corner. Bars are flat at
+       the axis; only the far end may be round. One finding per file, only for what is new. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte|css|scss|less)$' -or $Rel -match '(?i)(^|/)(styles/kit|\.streamhub|node_modules|dist|build)/') { return }
+    $rules = @(
+        @{ re = '\.roundRect\(\s*[^,()]+,\s*[^,()]+,\s*[^,()]+,\s*[^,()]+,\s*(?!\[)[^,()\[\]]+\)'; msg = 'roundRect with one radius rounds all four corners of a bar, also the side at the axis: give the corners as [r, r, 0, 0] (a vertical bar; [0, r, r, 0] for a horizontal one)' }
+        @{ re = '(?s)borderSkipped\s*:\s*false.{0,200}?borderRadius|borderRadius.{0,200}?borderSkipped\s*:\s*false'; msg = 'borderSkipped: false rounds the bars at the axis too: leave borderSkipped out (start), so only the far end is round' }
+        @{ re = '(?im)^[^{}\n]*\.[\w-]*(?<!(?:progress|scroll|tool|nav|side|top|tab|search|status|title|app|menu|action|sticky)[-_]?)(bar|column|fill)\b[^{}\n]*\{[^}]*\bborder-radius\s*:\s*(?!0\b|0px\b)[\d.]+(px|rem|em|%)?\s*(;|\})'; msg = 'a bar with one corner radius is round at the axis too: round only its far end (border-radius: 0 R R 0 for a bar to the right, R R 0 0 for a bar upward)' }
+    )
+    foreach ($r in $rules) {
+        $now = [regex]::Matches("$New", $r.re)
+        if ($now.Count -gt ([regex]::Matches("$Old", $r.re)).Count) { return "line $(Get-LineIndex "$New" $now[$now.Count - 1].Index): $($r.msg)" }
+    }
+}
+
+function Find-UnsortedTables {
+    <# A table a change adds (markup, or markup a script writes) that cannot be sorted by its columns:
+       a kit-table without data-kit-sort, or a plain table in a file with no sorting at all
+       (aria-sort, a sort call, a table library's sorting). Layout tables (role presentation or
+       none) are left alone. One finding per file. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$' -or $Rel -match '(?i)(^|/)(styles/kit|\.streamhub|node_modules|dist|build)/') { return }
+    $tag = '(?i)<table\b[^>]*>'
+    $before = @{}; foreach ($m in [regex]::Matches("$Old", $tag)) { $before[($m.Value -replace '\s+', ' ')] = $true }
+    $sorting = "$New" -match '(?i)aria-sort|data-kit-sort|\.sort\(|localeCompare|\bsortBy\b|\borderBy\b|useSortBy|getSortedRowModel|sortable|data-sortable'
+    foreach ($m in [regex]::Matches("$New", $tag)) {
+        $t = $m.Value
+        if ($before.ContainsKey(($t -replace '\s+', ' ')) -or $t -match '(?i)\brole\s*=\s*["''](presentation|none)') { continue }
+        $line = Get-LineIndex "$New" $m.Index
+        if ($t -match '(?i)\bkit-table\b') {
+            if ($t -notmatch '(?i)\bdata-kit-sort\b') { return "line ${line}: a table that cannot be sorted by its columns: add data-kit-sort to the kit-table (th.kit-num on number columns, data-sort=""VALUE"" on cells with dates or formatted numbers)" }
+        } elseif (-not $sorting) {
+            return "line ${line}: a table that cannot be sorted by its columns: every table sorts its rows when a column header is clicked (a button in each th, aria-sort on the sorted one); with the UI kit use class=""kit-table"" with data-kit-sort"
+        }
+    }
+}
+
 function Find-QualityIssues {
     <# The second batch, for the round's file check: what a change adds, as "line N: ..." or a
-       whole-file note. #>
-    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit)
+       whole-file note. -UserLook (the person asked for a look of their own): the kit's look checks rest
+       (generated-looking patterns, kit bypass, Tailwind, bars at the axis); the others stay. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit, [switch]$UserLook)
     # A one-file page: the helper program's kit and data blocks are not the change's own text.
     if ($Rel -match '(?i)\.html?$') { $loads = Find-OneFileLoads $Rel $Old $New; $Old = Hide-GeneratedBlocks $Old; $New = Hide-GeneratedBlocks $New } else { $loads = $null }
-    @($loads) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UiSlop $Rel $Old $New -UseKit:$UseKit) + @(if ($UseKit) { Find-KitBypass $Rel $Old $New }) | Where-Object { $_ }
+    @($loads) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {
@@ -484,4 +546,4 @@ function Get-DoneReminders {
     "Before finishing, one check:`n- " + ($notes -join "`n- ") + "`nThen send done again."
 }
 
-Export-ModuleMember -Function Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders
+Export-ModuleMember -Function Find-TailwindSlop, Find-RoundedBarBase, Find-UnsortedTables, Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders

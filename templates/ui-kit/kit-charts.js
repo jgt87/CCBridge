@@ -66,12 +66,15 @@
   }
   // The data as a table, for screen readers (the SVG itself is one image with a summary).
   function dataTable(host, head, rows) {
+    // In a 1px box that clips it: a table grows to its content, which would widen the page.
+    var box = document.createElement("div");
+    box.className = "kit-chart__table";
     var t = document.createElement("table");
-    t.className = "kit-chart__table";
     var tr = t.insertRow();
     head.forEach(function (h) { var th = document.createElement("th"); th.textContent = h; tr.appendChild(th); });
     rows.forEach(function (r) { var row = t.insertRow(); r.forEach(function (c) { row.insertCell().textContent = c; }); });
-    host.appendChild(t);
+    box.appendChild(t);
+    host.appendChild(box);
   }
   // What is picked (data.selected: labels, data.selectedSeries: series names); nothing = all on.
   function picked(list) { return list && list.length ? list.map(String) : null; }
@@ -142,6 +145,26 @@
     return svgEl("svg", { width: s.w, height: s.h, viewBox: "0 0 " + s.w + " " + s.h, role: "img", "aria-label": label || host.getAttribute("aria-label") || "Chart", class: "kit-chart__svg" }, host);
   }
   // Dashed horizontal grid with value labels (left).
+  // Target or reference lines (data.targets: [{ value, label }]): dashed across the plot at the value,
+  // with its label at the end; horizontal bars get them upright.
+  function targetMax(data) { return Math.max.apply(null, [0].concat((data.targets || []).map(function (t) { return Number(t && t.value) || 0; }))); }
+  function targets(svg, s, pad, scale, data, horizontal) {
+    (data.targets || []).forEach(function (t) {
+      var v = Number(t && t.value);
+      if (!t || isNaN(v) || v < 0 || v > scale.max) return;
+      var g = svgEl("g", { class: "kit-chart__targets" }, svg), txt;
+      if (horizontal) {
+        var x = pad.l + (s.w - pad.l - pad.r) * (v / scale.max);
+        svgEl("line", { x1: x, x2: x, y1: pad.t, y2: s.h - pad.b, class: "kit-chart__target" }, g);
+        txt = svgEl("text", { x: x, y: pad.t - 2 > 8 ? pad.t - 2 : s.h - pad.b + 14, "text-anchor": "middle", class: "kit-chart__target-label" }, g);
+      } else {
+        var y = pad.t + (s.h - pad.t - pad.b) * (1 - v / scale.max);
+        svgEl("line", { x1: pad.l, x2: s.w - pad.r, y1: y, y2: y, class: "kit-chart__target" }, g);
+        txt = svgEl("text", { x: s.w - pad.r - 4, y: y - 5, "text-anchor": "end", class: "kit-chart__target-label" }, g);
+      }
+      txt.textContent = (t.label ? t.label + ": " : "") + fmt(v, data);
+    });
+  }
   function grid(svg, s, pad, scale, opts) {
     var g = svgEl("g", { class: "kit-chart__grid" }, svg);
     for (var v = 0; v <= scale.max + 1e-9; v += scale.step) {
@@ -171,16 +194,18 @@
     var sr = all.filter(function (x) { return horizontal || !x.line; }), ln = horizontal ? [] : all.filter(function (x) { return x.line; });
     if (!labels.length || !all.length) { empty(host, data); return; }
     var stacked = !!data.stacked && sr.length > 1;
+    var pct = stacked && data.stacked === "percent";   // every bar 100%: the parts as shares
     var total = function (li) { return sr.reduce(function (a, x) { return a + Math.max(0, x.values[li] || 0); }, 0); };
     var maxOf = function (list) { return Math.max.apply(null, [0].concat.apply([], list.map(function (x) { return x.values; }))); };
     var left = ln.filter(function (x) { return !x.right; }), right = ln.filter(function (x) { return x.right; });
     var max = Math.max(stacked ? Math.max.apply(null, [0].concat(labels.map(function (l, li) { return total(li); }))) : maxOf(sr), maxOf(left));
-    var scale = niceMax(max, 4), rscale = right.length ? niceMax(maxOf(right), 4) : null;
+    var scale = pct ? { max: 100, step: 25 } : niceMax(Math.max(max, targetMax(data)), 4), rscale = right.length ? niceMax(maxOf(right), 4) : null;
+    var axis = pct ? Object.assign({}, data, { format: function (v) { return Math.round(v * 10) / 10 + "%"; } }) : data;
     var tip = null, bars = [], marks = [];
     var svg = frame(host, s, data.title);
     var pad = horizontal ? { t: 8, r: 16, b: 24, l: 96 } : { t: 12, r: rscale ? 52 : 12, b: 28, l: 44 };
     var plotW = s.w - pad.l - pad.r, plotH = s.h - pad.t - pad.b;
-    if (!horizontal) grid(svg, s, pad, scale, data);
+    if (!horizontal) grid(svg, s, pad, scale, axis);
     if (rscale) for (var rv = 0; rv <= rscale.max + 1e-9; rv += rscale.step) {
       var ry = pad.t + (s.h - pad.t - pad.b) * (1 - rv / rscale.max);
       var rt = svgEl("text", { x: s.w - pad.r + 8, y: ry + 4, class: "kit-chart__label" }, svg);
@@ -196,7 +221,9 @@
       var acc = 0, top = -1;
       if (stacked) sr.forEach(function (x, si) { if ((x.values[li] || 0) > 0) top = si; });
       sr.forEach(function (x, si) {
-        var v = x.values[li] || 0, len = room * (Math.max(0, v) / scale.max), from = room * (acc / scale.max);
+        var v = x.values[li] || 0, tot = total(li);
+        if (pct) v = tot ? (Math.max(0, v) / tot) * 100 : 0;
+        var len = room * (Math.max(0, v) / scale.max), from = room * (acc / scale.max);
         if (stacked && v <= 0) return;
         var a;
         if (stacked) {
@@ -211,7 +238,7 @@
         if (!reduce) rect.style.animation = (horizontal ? "kit-grow-x" : "kit-grow-y") + " 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
         if (!reduce) rect.style.transformOrigin = horizontal ? (pad.l + "px 0") : ("0 " + (pad.t + plotH) + "px");
         var text = stacked
-          ? "<strong>" + esc(lab) + "</strong> &middot; " + esc(fmt(total(li), data)) + sr.map(function (y) { return (y.values[li] || 0) > 0 ? "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li], data)) : ""; }).join("")
+          ? "<strong>" + esc(lab) + "</strong> &middot; " + esc(fmt(total(li), data)) + sr.map(function (y) { return (y.values[li] || 0) > 0 ? "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li], data)) + (pct ? " (" + percent(y.values[li], total(li)) + ")" : "") : ""; }).join("")
           : "<strong>" + esc(lab) + "</strong><br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(v, data));
         text += ln.map(function (y) { return "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li] || 0, data)); }).join("");
         var show = function () {
@@ -233,6 +260,7 @@
         : svgEl("text", { x: start + inner / 2, y: s.h - 8, "text-anchor": "middle", class: "kit-chart__label" }, svg);
       t.textContent = lab;
     });
+    if (!pct) targets(svg, s, pad, scale, data, horizontal);
     // Line series over the bars: through the middle of each label's band.
     ln.forEach(function (x) {
       var sc = x.right ? rscale : scale;
@@ -260,10 +288,11 @@
     clear(host);
     var sr = series(data), labels = data.labels || [], s = size(host);
     var all = [].concat.apply([], sr.map(function (x) { return x.values; }));
-    var scale = niceMax(Math.max.apply(null, [0].concat(all)), 4);
+    var scale = niceMax(Math.max(Math.max.apply(null, [0].concat(all)), targetMax(data)), 4);
     var svg = frame(host, s, data.title);
     var pad = { t: 12, r: 16, b: 28, l: 44 }, plotW = s.w - pad.l - pad.r, plotH = s.h - pad.t - pad.b;
     grid(svg, s, pad, scale, data);
+    targets(svg, s, pad, scale, data, false);
     var px = function (i) { return pad.l + (labels.length < 2 ? plotW / 2 : (plotW * i) / (labels.length - 1)); };
     var py = function (v) { return pad.t + plotH * (1 - v / scale.max); };
     var defs = svgEl("defs", {}, svg), paths = [];
@@ -489,6 +518,14 @@
   }) : null;
   var api = {};
   Object.keys(kinds).forEach(function (k) { api[k] = function (host, data) { render(host, k, data); if (ro) ro.observe(host); }; });
+  // The project's chart colours (--kit-chart-1 ... --kit-chart-6, the colour preset's) as colour
+  // values for code that cannot use var(): a canvas, a chart drawn by the page itself. n colours
+  // in order, repeating after six; read again after a theme switch (kit:theme), they differ in dark.
+  api.palette = function (n) {
+    var st = getComputedStyle(document.documentElement), out = [];
+    for (var i = 0; i < (n || 6); i++) out.push(st.getPropertyValue("--kit-chart-" + ((i % 6) + 1)).trim());
+    return out;
+  };
   window.KitCharts = api;
 
   function startCharts() {

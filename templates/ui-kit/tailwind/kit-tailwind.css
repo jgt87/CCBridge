@@ -1,0 +1,51 @@
+/* UI kit for Tailwind CSS 4, written by the helper program: do not edit (change the values in
+   styles/kit/tokens.css). Import it after Tailwind, with the kit's tokens and stylesheet:
+     @import "tailwindcss";
+     @import "./styles/kit/tailwind/kit-tailwind.css";   (the path from your stylesheet)
+   and load styles/kit/tokens.css and styles/kit/kit.css in the page. The kit's tokens become Tailwind
+   names: bg-kit-accent, text-kit-muted, border-kit-border, bg-kit-chart-1, rounded-kit, shadow-kit,
+   font-kit, p-kit-4, gap-kit-3, text-kit-sm ... They follow the project's colour preset and its light
+   and dark values; Tailwind's own colours (bg-blue-500) and made-up values (bg-[#123456]) do not. */
+@theme inline {
+  --color-kit-bg: var(--kit-bg);
+  --color-kit-surface: var(--kit-surface);
+  --color-kit-surface-2: var(--kit-surface-2);
+  --color-kit-text: var(--kit-text);
+  --color-kit-muted: var(--kit-text-muted);
+  --color-kit-border: var(--kit-border);
+  --color-kit-border-strong: var(--kit-border-strong);
+  --color-kit-accent: var(--kit-accent);
+  --color-kit-accent-hover: var(--kit-accent-hover);
+  --color-kit-accent-soft: var(--kit-accent-soft);
+  --color-kit-accent-2: var(--kit-accent-2);
+  --color-kit-on-accent: var(--kit-on-accent);
+  --color-kit-ok: var(--kit-ok);
+  --color-kit-ok-soft: var(--kit-ok-soft);
+  --color-kit-warn: var(--kit-warn);
+  --color-kit-warn-soft: var(--kit-warn-soft);
+  --color-kit-error: var(--kit-error);
+  --color-kit-error-soft: var(--kit-error-soft);
+  --color-kit-chart-1: var(--kit-chart-1);
+  --color-kit-chart-2: var(--kit-chart-2);
+  --color-kit-chart-3: var(--kit-chart-3);
+  --color-kit-chart-4: var(--kit-chart-4);
+  --color-kit-chart-5: var(--kit-chart-5);
+  --color-kit-chart-6: var(--kit-chart-6);
+  --radius-kit: var(--kit-radius);
+  --radius-kit-lg: var(--kit-radius-lg);
+  --shadow-kit: var(--kit-shadow);
+  --font-kit: var(--kit-font);
+  --font-kit-mono: var(--kit-font-mono);
+  --spacing-kit-1: var(--kit-space-1);
+  --spacing-kit-2: var(--kit-space-2);
+  --spacing-kit-3: var(--kit-space-3);
+  --spacing-kit-4: var(--kit-space-4);
+  --spacing-kit-5: var(--kit-space-5);
+  --spacing-kit-6: var(--kit-space-6);
+  --spacing-kit-7: var(--kit-space-7);
+  --text-kit-xs: var(--kit-text-xs);
+  --text-kit-sm: var(--kit-text-sm);
+  --text-kit-md: var(--kit-text-md);
+  --text-kit-lg: var(--kit-text-lg);
+  --text-kit-xl: var(--kit-text-xl);
+}

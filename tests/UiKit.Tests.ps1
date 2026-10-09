@@ -347,12 +347,12 @@ Describe 'What the kit offers, for every task (Format-UiKitContext)' {
         $c | Should Match '\.streamhub/ui-kit/kit-examples\.html has the markup of every part'
         $c | Should Match '(?m)^  Buttons: lines \d+-\d+ \(kit-btn'
         $c | Should Match '(?m)^  Dashboard: lines \d+-\d+'
-        $c | Should Match 'kit-charts\.js \(charts on the kit colours: bar \(grouped or stacked\).*barlist'
+        $c | Should Match 'kit-charts\.js \(charts on the kit colours: bar \(grouped, stacked or 100% stacked\).*barlist'
         $c | Should Match 'kit\.js \(behaviour by data-kit-\* attributes: sortable tables with pages'
         $c | Should Match 'In use: styles/kit/ kit\.css, tokens\.css'
         $c | Should Not Match 'React parts'
         [IO.File]::WriteAllText((Join-Path $p 'package.json'), '{ "dependencies": { "react": "^19.0.0" } }')
-        Format-UiKitContext $p $root | Should Match 'React parts \(import from styles/kit/react/NAME\): Chart, .*HoldButton'
+        Format-UiKitContext $p $root | Should Match 'React parts \(import from styles/kit/react/NAME\): .*Chart, .*HoldButton'
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
     }
     It 'sends the kit rule with any change to a web project that has the kit, not only interface requests' {
@@ -432,7 +432,7 @@ Describe 'Update-UiKitCatalog' {
 Describe 'The kit files themselves' {
     It 'credit kokonutui where its parts are used, with its licence alongside' {
         [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\LICENSE-kokonutui.txt')) | Should Match 'Copyright \(c\) 2025 kokonutUI'
-        foreach ($f in @(Get-ChildItem (Join-Path $root 'templates\ui-kit\react') -Filter *.tsx | Where-Object { $_.Name -notin 'Chart.tsx', 'Icon.tsx' }) + @(Get-Item (Join-Path $root 'templates\ui-kit\kit.js'))) {
+        foreach ($f in @(Get-ChildItem (Join-Path $root 'templates\ui-kit\react') -Filter *.tsx | Where-Object { $_.BaseName -in 'HoldButton', 'SearchBox', 'DropZone', 'Tabs', 'Loading', 'Composer', 'CommandButton', 'Switch', 'Menu', 'IconBar', 'Avatar' }) + @(Get-Item (Join-Path $root 'templates\ui-kit\kit.js'))) {
             [IO.File]::ReadAllText($f.FullName) | Should Match '(?s)kokonutui.*MIT'
         }
         [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\LICENSE-bklit-ui.txt')) | Should Match 'Copyright \(c\) 2026 uixmat'

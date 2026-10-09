@@ -91,7 +91,7 @@ Describe 'The HTML file check finds what is left of a damaged tag' {
     It 'reports PATH.jsscript> in a page, not a correct script tag' {
         $bad = @(Test-FileContent 'index.html' "<html>`n<head>`n  data/example-manifest.jsscript>`n</head>`n<body></body>`n</html>`n")
         ($bad -join ' ') | Should Match "line 3: 'data/example-manifest.jsscript>' is what is left of a damaged <script> tag"
-        @(Test-FileContent 'index.html' "<html>`n<head>`n  <script src=`"data/example-manifest.js`"></script>`n</head>`n<body></body>`n</html>`n").Count | Should Be 0
+        @(Test-FileContent 'index.html' "<html>`n<head>`n  <meta charset=`"utf-8`">`n  <script src=`"data/example-manifest.js`"></script>`n</head>`n<body></body>`n</html>`n").Count | Should Be 0
     }
 }
 Describe 'An edit whose end marker and script close were eaten' {

@@ -838,6 +838,24 @@ function Find-LanguagePitfalls {
                 break
             }
         }
+        # Text files without -Encoding: 5.1 writes ANSI (Set-Content, Add-Content, Export-Csv) or
+        # UTF-16 (Out-File), and reads a UTF-8 file without a BOM as ANSI (Get-Content, Import-Csv),
+        # so an en dash or an accented letter comes out broken. Reads only in a script that writes a
+        # page, script, style or data file (a build script); not when the script sets a default.
+        # Scripts only for reads (a module or a test is no build script); tests not at all.
+        if ($Path -notmatch '(?i)\.Tests\.ps1$' -and $Text -notmatch '(?i)\$PSDefaultParameterValues\s*\[\s*[''"]\*:Encoding') {
+            $writesWeb = $Path -match '(?i)\.ps1$' -and $Text -match '(?i)\b(Set-Content|Out-File|Add-Content|WriteAllText|WriteAllLines|Export-Csv)\b' -and $Text -match '(?i)\.(html?|js|css|csv)\b'
+            foreach ($c in @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and "$($n.GetCommandName())" -match '(?i)^(Get-Content|Set-Content|Add-Content|Out-File|Export-Csv|Import-Csv)$' }, $true))) {
+                $name = "$($c.GetCommandName())"
+                if (@($c.CommandElements | Where-Object { $_ -is [Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -match '(?i)^(En|AsByte)' }).Count) { continue }
+                $reads = $name -match '(?i)^(Get-Content|Import-Csv)$'
+                if ($reads -and -not $writesWeb) { continue }
+                if ($name -ieq 'Get-Content' -and @($c.CommandElements | Where-Object { $_ -is [Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -match '(?i)^(TotalCount|Head|First|Tail)$' }).Count) { continue }
+                $what = if ($reads) { 'reads a UTF-8 file without a BOM as ANSI' } elseif ($name -ieq 'Out-File') { 'writes UTF-16' } else { 'writes ANSI' }
+                "line $($c.Extent.StartLineNumber): $name without -Encoding: Windows PowerShell 5.1 $what, so characters like an en dash or an accented letter come out broken (shown as text like '14" + [char]0xE2 + [char]0x20AC + [char]0x201C + "27'): add -Encoding UTF8"
+                break
+            }
+        }
         # A JSON array from ConvertFrom-Json is one object in 5.1 unless the call is in parentheses.
         & $first ([regex]::Match($Text, '@\((?!\()[^()\n]*\|\s*ConvertFrom-Json\s*\)\s*\|')) 'in Windows PowerShell 5.1 a JSON array arrives as one object here: put the call in parentheses, @((... | ConvertFrom-Json)) | ...'
         # A parameter overwritten by a variable that only differs in case (names ignore case).
@@ -967,6 +985,56 @@ function Test-ToolSyntax {
     } catch { } finally { try { [IO.Directory]::Delete($dir, $true) } catch { } }
 }
 
+# Text that was UTF-8 but was read as Windows-1252 somewhere ("14\u00e2\u20ac\u201c27 days" for an en
+# dash, \u00c3\u00a9 for e acute): a UTF-8 lead byte as a Latin-1 letter, then its continuation
+# bytes as Windows-1252 characters. A sequence counts only when its bytes are valid UTF-8 again.
+$script:MojibakeTail = '[\u0080-\u00BF\u0152\u0153\u0160\u0161\u0178\u017D\u017E\u0192\u02C6\u02DC\u2013\u2014\u2018-\u201A\u201C-\u201E\u2020-\u2022\u2026\u2030\u2039\u203A\u20AC\u2122]'
+$script:MojibakeSeq = "[\u00C2-\u00DF]$($script:MojibakeTail)|[\u00E0-\u00EF]$($script:MojibakeTail){2}|[\u00F0-\u00F4]$($script:MojibakeTail){3}"
+$script:Cp1252 = [Text.Encoding]::GetEncoding(1252, [Text.EncoderFallback]::ExceptionFallback, [Text.DecoderFallback]::ExceptionFallback)
+$script:StrictUtf8 = New-Object Text.UTF8Encoding($false, $true)
+
+function ConvertFrom-Mojibake([string]$Text) {
+    <# The text the sequence was before it was read as Windows-1252, or $null when it is not such a
+       sequence (bytes that are not valid UTF-8, or a two-byte character outside Latin, Greek and
+       Cyrillic, which real text next to a symbol can produce). #>
+    try { $s = $script:StrictUtf8.GetString($script:Cp1252.GetBytes($Text)) } catch { return $null }
+    if ($s.Length -eq 1 -and $Text.Length -eq 2) {
+        $c = [int]$s[0]
+        if (-not (($c -ge 0xA0 -and $c -le 0x17F) -or ($c -ge 0x370 -and $c -le 0x4FF))) { return $null }
+    }
+    $s
+}
+
+function Find-BrokenEncoding {
+    <# Broken characters in a text file: @{ index; length; text; fixed } per sequence (runs of them
+       together, e.g. a word of accented letters). #>
+    param([string]$Text)
+    foreach ($m in [regex]::Matches($Text, "(?:$($script:MojibakeSeq))+")) {
+        $fixed = ConvertFrom-Mojibake $m.Value
+        if ($null -ne $fixed) { [pscustomobject]@{ index = $m.Index; length = $m.Length; text = $m.Value; fixed = $fixed } }
+    }
+}
+
+function Test-TextEncoding {
+    <# File problems with characters: text broken by a wrong encoding (any text file), and a web
+       page without <meta charset="utf-8"> in its first 1024 bytes (Edge then reads a page opened
+       from disk, and the scripts it loads, as Windows-1252). #>
+    param([string]$Path, [string]$Text)
+    if ($Path -notmatch '(?i)\.(html?|xhtml|m?js|cjs|jsx|tsx?|vue|svelte|css|scss|less|json|jsonc|csv|tsv|md|markdown|txt|xml|svg|ya?ml|py|ps[md]?1|cs|java|go|php|rb|sql)$') { return }
+    $hits = @(Find-BrokenEncoding $Text)
+    if ($hits.Count) {
+        $h = $hits[0]
+        $more = if ($hits.Count -gt 1) { " ($($hits.Count) places)" } else { '' }
+        "line $(LineAt $Text $h.index): broken characters '$($h.text)' (UTF-8 text that was read as Windows-1252), which should be '$($h.fixed)'$more; write the real characters and keep the file UTF-8"
+    }
+    if ($Path -match '(?i)\.html?$' -and $Text -match '(?i)<(!doctype\s+html|html[\s>]|head[\s>])') {
+        $head = if ($Text.Length -gt 1024) { $Text.Substring(0, 1024) } else { $Text }
+        $cs = [regex]::Match($head, '(?i)<meta\b[^>]*\bcharset\s*=\s*["'']?([\w-]+)')
+        if (-not $cs.Success) { 'the page has no <meta charset="utf-8"> at the top of <head>: opened from disk, Edge reads it and its scripts as Windows-1252 and shows characters like an en dash as broken text; put it first in <head>' }
+        elseif ($cs.Groups[1].Value -notmatch '(?i)^utf-?8$') { "line $(LineAt $Text $cs.Index): the page says charset=$($cs.Groups[1].Value), but its files are UTF-8: write <meta charset=""utf-8"">" }
+    }
+}
+
 function Test-FileContent {
     <# The problems in a file's text, by its type: "line N: problem" (or a whole-file problem).
        Also for every code file: leftover edit or merge markers and ``` fence lines. #>
@@ -1008,6 +1076,7 @@ function Test-FileContent {
     $esc = @(Find-EscapedScriptTags $Path $t)
     if ($esc.Count) { & $add "line $(LineAt $t $esc[0].index): $($esc.Count) HTML tag(s) written escaped in a script ($($esc[0].text.Substring(0, [Math]::Min(40, $esc[0].text.Length)))): in JavaScript that stays text, so the page shows the tag instead of making it; write < and >" }
     & $add (Test-Duplicates $t $Path)
+    & $add (Test-TextEncoding $Path $t)
     & $add (Find-GeneratedCodeIssues $Path $t)
     & $add (Find-LanguagePitfalls $Path $t ($Text.Contains("`r`n") -and [regex]::IsMatch($Text, '(?<!\r)\n')))
     $issues.ToArray()
@@ -1143,4 +1212,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences

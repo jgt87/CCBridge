@@ -176,7 +176,7 @@ Describe 'One-file pages (OneFile.psm1)' {
         Find-OneFileLoads 'index.html' '<html></html>' '<html><link rel="stylesheet" href="css/app.css"></html>' | Should BeNullOrEmpty   # not a one-file page
     }
     It 'keeps the blocks out of the file checks and the quality checks' {
-        $page = "<html><body>`n<script data-streamhub=`"kit`">`nfunction show() {}`nfunction show() {}`n</script>`n<script>var a = 1;</script></body></html>"
+        $page = "<html><head><meta charset=`"utf-8`"></head><body>`n<script data-streamhub=`"kit`">`nfunction show() {}`nfunction show() {}`n</script>`n<script>var a = 1;</script></body></html>"
         @(Test-FileContent 'index.html' $page) | Should BeNullOrEmpty
         @(Find-QualityIssues 'index.html' '' $page -UseKit) | Should BeNullOrEmpty
     }

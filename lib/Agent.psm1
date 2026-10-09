@@ -2120,6 +2120,15 @@ function Test-WebPageCore {
                     }
                 } catch { Write-CCBLogError agent "Contrast check of $page" $_ }
             }
+            # What the page shows: broken characters, bars that do not show their percentage, tables
+            # that cannot be sorted (it clicks the column headers, so it runs last).
+            if ($loaded) {
+                try {
+                    $res = Invoke-Cdp $s 'Runtime.evaluate' @{ expression = (Get-PageContentScript); returnByValue = $true; awaitPromise = $true } -TimeoutMs 30000
+                    $list = ConvertFrom-Json "$($res.result.value)"
+                    foreach ($f in $list) { if ($f -and $f.text) { $problems.Add("$page $($f.text)") } }
+                } catch { Write-CCBLogError agent "Page content check of $page" $_ }
+            }
             foreach ($p in ($problems | Select-Object -Unique -First 20)) { $p }
             Write-CCBLog info agent "Page check $page" @{ problems = $problems.Count }
         } catch {
@@ -2484,7 +2493,8 @@ function Get-ProjectContext($State) {
     $setup = try { Get-ProjectSetup $root } catch { Write-CCBLogError agent 'project setup' $_; @{ build = ''; liveSource = '' } }
     $setupText = try { Format-ProjectSetupContext $root } catch { '' }
     if ($setupText) { $full += "`n`n$setupText" }
-    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = "$($setup.build)"; Live = [bool]$setup.liveSource }
+    $tailwind = try { Test-TailwindProject $State.ProjectRoot } catch { $false }
+    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = "$($setup.build)"; Live = [bool]$setup.liveSource; Tailwind = $tailwind }
 }
 
 function Format-ActionResults {
@@ -3275,6 +3285,7 @@ function Invoke-AgentTurn {
     param($State, [string]$Text, [string]$ForceKind = '')
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; $State.Busy = $false; return }
     $State.Busy = $true; $State.Cancel = $false
+    $State.UserLook = Test-LookRequest $Text   # a look the person asks for wins over the kit's (Prompts)
     $turnWatch = [Diagnostics.Stopwatch]::StartNew()
     Write-CCBLog info agent "Turn started" @{ chars = $Text.Length; mode = $State.Mode; headless = [bool]$State.Headless; allowCommands = [bool]$State.AllowCommands; workIq = $State.WorkIq; chatStarted = [bool]$State.ChatStarted }
     Write-CCBLog trace agent 'User message' @{ text = $Text }
@@ -3551,7 +3562,7 @@ function Invoke-AgentTurn {
                         foreach ($i in $issuesNow) { $found.Add((ConvertTo-CheckFinding $rel $i $(if ($i -match ' says: ') { 'tool' } else { 'file' }))) }
                         if ($quality) {
                             foreach ($i in @(Find-ChangeSmells $rel $before $now.Text)) { $found.Add((ConvertTo-CheckFinding $rel $i 'smell')) }
-                            foreach ($i in @(Find-QualityIssues $rel $before $now.Text -UseKit:((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $State.ProjectRoot) -and (Get-UiKitColors $State.AppRoot) -ne 'none'))) { $found.Add((ConvertTo-CheckFinding $rel $i 'quality')) }
+                            foreach ($i in @(Find-QualityIssues $rel $before $now.Text -UseKit:((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $State.ProjectRoot) -and (Get-UiKitColors $State.AppRoot) -ne 'none') -UserLook:([bool]$State.UserLook))) { $found.Add((ConvertTo-CheckFinding $rel $i 'quality')) }
                         }
                     } catch { Write-CCBLogError agent "File check $p" $_ }
                 }

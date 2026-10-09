@@ -116,6 +116,18 @@ function Get-EnvironmentText {
     $script:EnvText
 }
 
+# A request for a look of the person's own (a follow-up that changes how something looks): words for a
+# look (colour, size, shape, font, effects, a colour name) plus a word that asks for a change.
+$script:LookWords = '(?i)(\b(colou?rs?|kleur(en)?|background|achtergrond|fonts?|lettertype|bold|vet(ter)?|italic|cursief|bigger|larger|smaller|wider|narrower|taller|groter|kleiner|breder|smaller|rounded|round(er)?|ronde?r?|square|vierkant|corners?|hoeken|radius|shadows?|schaduw|borders?|randen?|gradient|verloop|darker|lighter|brighter|donkerder|lichter|feller|spacing|padding|margins?|ruimte|thicker|thinner|dikker|dunner|style|stijl|look|uiterlijk|theme|thema|dark mode|donkere modus|light mode|opacity|transparant|transparent|underlined?|onderstreept|uppercase|hoofdletters|size|grootte|blue|red|green|yellow|orange|purple|pink|grey|gray|black|white|navy|teal|blauw|rood|groen|geel|oranje|paars|roze|grijs|zwart|wit)\b|#[0-9a-f]{3,8}\b)'
+$script:LookVerbs = '(?i)\b(make|change|set|use|turn|give|should be|switch|replace|want|instead|more|less|maak|verander|wijzig|zet|gebruik|moet|liever|in plaats van|meer|minder)\b'
+
+function Test-LookRequest {
+    <# The message asks to change how something looks (a fixed rule on its words): then the person's
+       look wins over the UI kit's for this change (rules/userlook.md, and the kit's look checks rest). #>
+    param([string]$Text)
+    [bool]($Text -match $script:LookWords -and $Text -match $script:LookVerbs)
+}
+
 function Get-PromptModules {
     <# Case-specific parts for work on files, in order. 'actions:run' unless commands are off
        (trait 'nocommands'); 'rules:*' when the request or the project calls for them. #>
@@ -153,6 +165,8 @@ function Get-PromptModules {
         $ids.Add('rules:ui')
         if (Test-UiKitPart 'designRules' (Split-Path -Parent $PSScriptRoot)) { $ids.Add('rules:design') }   # how a good interface behaves (our own short rules)
         if ($designReview) { $ids.Add('rules:designreview') }
+        # A look the person asks for in a project with the kit: theirs wins (and stays).
+        if ((Test-LookRequest $Text) -and @($Context.Paths) -contains 'styles/kit/tokens.css') { $ids.Add('rules:userlook') }
         # Build from the UI kit (setting uiKit; the agent adds the kit to the project when this goes out).
         if (Test-UiKitOn (Split-Path -Parent $PSScriptRoot)) { $ids.Add('rules:uikit') }
     }
@@ -249,18 +263,29 @@ function Get-PromptPart {
             if (-not (Test-UiKitPart 'charts' $AppRoot)) {
                 # No kit charts: no dashboard example either, and a chart library gets the kit's colours.
                 $lines = @($lines | Where-Object { $_ -notlike '- Charts:*' -and $_ -notlike '- Dashboards:*' -and $_ -notlike '- Your choice, the kit*' })
-                $lines = @(foreach ($l in $lines) { if ($l -like '- Anything a page draws itself*') { $l -replace 'No chart library \(they bring their own colours\) and no colours of your own\.', 'A chart library gets these colours too, never its own palette.' } else { $l } })
+                $lines = @(foreach ($l in $lines) { if ($l -like '- Anything a page draws itself*') { $l -replace 'No chart library \(they bring their own colours\) and no colours of your own\.', 'A chart library gets these colours too, never its own palette.' -replace 'take KitCharts\.palette\(N\) \(the N preset colours in order; read them again on kit:theme\), or ', 'read them with ' } elseif ($l -like '- Chart colours:*') { $l -replace " The kit's charts do this by themselves;", '' } else { $l } })
             }
             if (-not (Test-UiKitPart 'icons' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Icons (Lucide*' }) }
+            if (-not (Test-UiKitPart 'dashboard' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Dashboard parts*' }) }
+            if (-not (Test-UiKitPart 'print' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Printing:*' }) }
+            if (-not (Test-UiKitPart 'extras' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- More components*' }) }
             if (-not (Test-UiKitPart 'data' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Reading files*' -and $_ -notlike '- Export:*' }) }
             elseif (-not (Test-UiKitPart 'pdf' $AppRoot)) { $lines = @(foreach ($l in $lines) { if ($l -like '- Reading files*') { $l -replace ' PDF: .*', ' PDF files cannot be read in the page (pdf.js is switched off).' } else { $l } }) }
+            $text = $lines -join "`n"
+            # Tailwind (setting uiKitParts.tailwind): in a project that uses it, the kit's names for Tailwind.
+            if ($Context.Tailwind -and (Test-UiKitPart 'tailwind' $AppRoot)) { $lines += '- Tailwind: this project uses Tailwind CSS. Components come from the kit''s classes (kit-btn, kit-table, kit-panel, kit-chart ...), never rebuilt from utilities; Tailwind utilities are for layout and spacing, with the kit''s names only: bg-kit-accent, bg-kit-surface, text-kit-text, text-kit-muted, border-kit-border, bg-kit-chart-1 to bg-kit-chart-6, rounded-kit, rounded-kit-lg, shadow-kit, font-kit, p-kit-1 to p-kit-7 (also m-, gap-, space-), text-kit-xs to text-kit-xl. They come from styles/kit/tailwind/ (the helper program writes it): kit-tailwind.css for Tailwind 4, imported right after tailwindcss in the main stylesheet; kit-preset.cjs for Tailwind 3, in presets in tailwind.config. The page also loads styles/kit/tokens.css and styles/kit/kit.css. Never Tailwind''s own colours (bg-blue-500, text-gray-600), made-up values (bg-[#123456], text-[13px], rounded-[10px]), gradient text (bg-clip-text with a gradient) or backdrop-blur.' }
+            # Dark mode (setting uiKitDarkMode): light only unless asked, following the computer, or with a switch.
+            $dark = Get-UiKitDarkMode $AppRoot
+            if ($dark -ne 'switch') { $lines = @(foreach ($l in $lines) { if ($l -like '- Page header:*') { $l -replace ' A light/dark switch is .*$', '' } else { $l } }) }
+            if ($dark -eq 'light-only') { $lines += '- Light only: pages are light, with no dark mode and no light/dark switch, unless the person asks for one; then copy the dark values from .streamhub/ui-kit/tokens.css into styles/kit/tokens.css and add a light/dark switch' + $(if (Test-UiKitPart 'interactive' $AppRoot) { ' (<button class="kit-btn kit-btn--ghost kit-btn--icon" type="button" data-kit-theme aria-label="Switch the theme"><span data-kit-icon="moon" aria-hidden="true"></span></button>, kit.js)' }) + '.' }
+            elseif ($dark -eq 'follow-system') { $lines += '- Dark mode follows the computer by itself (tokens.css); no light/dark switch unless the person asks for one.' }
             $text = $lines -join "`n"
             $colors = Get-UiKitColors $AppRoot
             if ($colors -ne 'blue') { $text = $text -replace ' With the blue palette the named colours are[^.]*\.[^.]*\.', '' }
             if ($colors -eq 'none') {
                 # Colours: None. No palette is set: Copilot uses the colours the project or the request asks for.
                 $text = @(foreach ($l in $text.Split("`n")) {
-                    if ($l -like '- Anything a page draws itself*') { continue }
+                    if ($l -like '- Anything a page draws itself*' -or $l -like '- Chart colours:*') { continue }
                     if ($l -like '- Colours:*') { '- Colours: no colours are set for this project. The tokens in styles/kit/tokens.css are neutral starting values only: use the colours the project already has or the request asks for, set them in tokens.css (--kit-accent, --kit-chart-1...) or in your own CSS. Hard-coded colours and gradients are fine.' }
                     elseif ($l -like '- Restyle through the tokens*') { $l -replace 'do not hard-code colours, sizes or shadows', 'do not hard-code sizes or shadows' -replace 'Your own CSS uses the same tokens\. ', '' }
                     else { $l }
@@ -270,6 +295,12 @@ function Get-PromptPart {
             if ("$($Context.Build)" -eq 'single') { $text += "`n- One-file page: the kit reaches the page through its data-streamhub=`"kit`" blocks (see the one-file rules), never through link or script tags to styles/kit/. Use the kit's classes, scripts, charts and icons the same way; the helper program puts what the page uses in the blocks. Change colours and sizes in styles/kit/tokens.css." }
             if (-not (Test-UiKitPart 'react' $AppRoot)) { $text = $text -replace ' In a React project use styles/kit/react/ instead:[^\n]*', '' -replace '; React: Chart from styles/kit/react/', '' -replace ' React: Icon from styles/kit/react/\.', '' -replace ' React: useFileData from styles/kit/react/\.', '' -replace ' and React parts come the same way', ' come the same way' -replace ', or an import from styles/kit/react/', '' }
             return $text
+        }
+        '^rules:design$' {
+            # Light only (setting uiKitDarkMode): no dark mode unless the person asks for one.
+            $d = Read-PromptPart $AppRoot 'rules\design.md'
+            if ((Test-UiKitOn $AppRoot) -and (Get-UiKitDarkMode $AppRoot) -eq 'light-only') { $d = $d -replace '- Light and dark both work\.', '- Pages are light only unless the person asks for a dark mode (then light and dark both work).' }
+            return $d
         }
         '^rules:(.+)$' { return Read-PromptPart $AppRoot "rules\$($Matches[1]).md" }
         '^actions:run$' { return Read-PromptPart $AppRoot 'actions-run.md' }
@@ -366,4 +397,4 @@ function Get-AutoAgent {
     @{ agent = ''; why = '' }
 }
 
-Export-ModuleMember -Function Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage
+Export-ModuleMember -Function Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage

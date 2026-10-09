@@ -161,7 +161,10 @@ function Get-DataBlockText {
     $global = if ($Block.global) { $Block.global } elseif ($it.global) { "$($it.global)" } else { Get-DataGlobalName ([IO.Path]::GetFileNameWithoutExtension($key)) }
     # </ inside a script block would end it: written as <\/ (the same string in JavaScript).
     $data = [IO.File]::ReadAllText($json).Trim().Replace('</', '<\/')
-    @{ text = "`nwindow.$global = $data;`n"; global = $global; note = '' }
+    # When the data is from (the source file's time), for a kit-stamp with data-kit-stamp-of="GLOBAL".
+    $asOf = ''
+    if ("$($it.stamp)" -match '\|(\d+)$') { $asOf = "(window.kitDataAsOf = window.kitDataAsOf || {})[`"$global`"] = `"$((New-Object DateTime ([long]$Matches[1]), ([DateTimeKind]::Utc)).ToString('yyyy-MM-ddTHH:mm:ssZ'))`";`n" }
+    @{ text = "`nwindow.$global = $data;`n$asOf"; global = $global; note = '' }
 }
 
 function Get-KitBlockTexts {
@@ -179,7 +182,7 @@ function Get-KitBlockTexts {
     if ($hasCat) {
         $want = [ordered]@{
             'kit-icons.js'  = ($page -match 'data-kit-icon|KitIcons\.')
-            'kit.js'        = ($page -match 'data-kit-(sort|pages|rows|hold|search|drop|theme)|kit-(tabs|segmented)--animated')
+            'kit.js'        = ($page -match 'data-kit-(sort|pages|rows|hold|search|drop|theme|open|multi|range|filter|tip|stamp|print|menu|iconbar|avatar|slider-range|tags|board|calendar|cycle)|KitUI\.|kit-(tabs|segmented)--animated|kit-progress[^>]*aria-valuenow|aria-valuenow[^>]*kit-progress')
             'kit-charts.js' = ($page -match 'KitCharts\.|data-kit-chart')
             'kit-data.js'   = ($page -match 'KitData\.')
         }
@@ -204,7 +207,7 @@ function Get-KitBlockTexts {
     if ($hasCat) {
         $tokens = @((Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css')), (Join-Path $cat 'tokens.css')) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
         $usage = Get-KitTextUsage (@($page) + @($js))
-        $css = $(if ($tokens) { [IO.File]::ReadAllText($tokens).Trim() + "`n" } else { '' }) + (Select-KitCss ([IO.File]::ReadAllText($kitCss)) $usage).Trim()
+        $css = $(if ($tokens) { [IO.File]::ReadAllText($tokens).Trim() + "`n" } else { '' }) + (Select-KitCss ([IO.File]::ReadAllText($kitCss)) $usage -NoPrint:(-not (Test-UiKitPart 'print' $AppRoot))).Trim() + "`n" + (Get-KitSettingsCss $AppRoot $usage)
     }
     $jsText = (@($js) -join "`n;`n").Replace('</script', '<\/script')
     @{ css = $(if ($css) { "`n$css`n" } else { '' }); js = $(if ($jsText) { "`n$jsText`n" } else { '' }); parts = $parts.ToArray(); kit = $hasCat }

@@ -246,10 +246,224 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 @keyframes kit-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .kit-spinner { animation-duration: 2.4s; } }
 
+/* Side panel (drawer): a <dialog class="kit-drawer"> at the right edge, for the details of a row or an
+   edit in place. Opened by a button with data-kit-open="ID" (kit.js), closed by data-kit-close,
+   Escape or a click beside it. */
+.kit-drawer {
+  position: fixed; inset: 0 0 0 auto; box-sizing: border-box; margin: 0; height: 100%; max-height: 100%; width: min(440px, 92%); max-width: 92%;
+  border: 0; border-left: 1px solid var(--kit-border); border-radius: 0; padding: 0;
+  background: var(--kit-surface); color: var(--kit-text); box-shadow: var(--kit-shadow);
+}
+.kit-drawer[open] { display: flex; flex-direction: column; animation: kit-slide-in var(--kit-speed) ease-out; }
+.kit-drawer::backdrop { background: rgba(10, 10, 20, 0.35); }
+.kit-drawer__head { display: flex; align-items: center; justify-content: space-between; gap: var(--kit-space-3); padding: var(--kit-space-4) var(--kit-space-5); border-bottom: 1px solid var(--kit-border); }
+.kit-drawer__title { margin: 0; font-size: var(--kit-text-md); font-weight: 600; }
+.kit-drawer__body { flex: 1; overflow: auto; padding: var(--kit-space-5); }
+.kit-drawer__actions { display: flex; justify-content: flex-end; gap: var(--kit-space-2); padding: var(--kit-space-4) var(--kit-space-5); border-top: 1px solid var(--kit-border); }
+@keyframes kit-slide-in { from { transform: translateX(24px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .kit-drawer[open] { animation: none; } }
+
+/* Toasts: KitUI.toast("Saved", { tone: "ok" }) shows a short confirmation at the bottom right. */
+.kit-toasts { position: fixed; right: var(--kit-space-5); bottom: var(--kit-space-5); z-index: 50; display: flex; flex-direction: column; gap: var(--kit-space-2); pointer-events: none; }
+.kit-toast {
+  pointer-events: auto; display: flex; align-items: center; gap: var(--kit-space-2); min-width: 220px; max-width: min(380px, 90vw);
+  padding: var(--kit-space-3) var(--kit-space-4); border-radius: var(--kit-radius); border: 1px solid var(--kit-border);
+  border-left: 4px solid var(--kit-accent); background: var(--kit-surface); color: var(--kit-text); box-shadow: var(--kit-shadow);
+  font-size: var(--kit-text-sm); animation: kit-toast-in var(--kit-speed) ease-out;
+}
+.kit-toast--ok { border-left-color: var(--kit-ok); }
+.kit-toast--warn { border-left-color: var(--kit-warn); }
+.kit-toast--error { border-left-color: var(--kit-error); }
+.kit-toast.is-leaving { opacity: 0; transition: opacity var(--kit-speed) ease-out; }
+@keyframes kit-toast-in { from { transform: translateY(8px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .kit-toast { animation: none; } }
+
+/* Info tip: <button class="kit-tip" type="button" aria-label="How it is counted" data-kit-tip="TEXT">
+   next to a figure or column name; kit.js shows the text on hover and focus (role="tooltip"). */
+.kit-tip {
+  display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; margin: 0 0 0 var(--kit-space-1); padding: 0;
+  border: 0; border-radius: 999px; background: transparent; color: var(--kit-text-muted); cursor: help; vertical-align: middle; position: relative;
+}
+.kit-tip::before { content: "?"; display: inline-flex; align-items: center; justify-content: center; width: 1rem; height: 1rem; border: 1px solid currentColor; border-radius: 999px; font-size: 0.7rem; font-weight: 600; line-height: 1; }
+.kit-tip:hover, .kit-tip:focus-visible { color: var(--kit-text); outline: none; }
+.kit-tip:focus-visible { box-shadow: var(--kit-focus); }
+.kit-tip__bubble {
+  position: absolute; z-index: 40; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); width: max-content; max-width: 280px;
+  padding: var(--kit-space-2) var(--kit-space-3); border-radius: var(--kit-radius); border: 1px solid var(--kit-border);
+  background: var(--kit-surface); color: var(--kit-text); box-shadow: var(--kit-shadow);
+  font-size: var(--kit-text-xs); font-weight: 400; line-height: 1.45; text-align: left; white-space: normal; pointer-events: none;
+}
+
+/* Skeleton: grey placeholders in the shape of what is loading (aria-busy="true" on the box). */
+.kit-skeleton { display: block; border-radius: var(--kit-radius); background: linear-gradient(90deg, var(--kit-surface-2) 25%, var(--kit-border) 37%, var(--kit-surface-2) 63%); background-size: 400% 100%; animation: kit-shimmer 1.4s ease infinite; }
+.kit-skeleton--text { height: 0.8em; margin: 0.35em 0; }
+.kit-skeleton--figure { height: 2.2rem; width: 60%; }
+.kit-skeleton--chart { height: 220px; }
+.kit-skeleton--row { height: 2rem; margin: 4px 0; }
+@keyframes kit-shimmer { from { background-position: 100% 50%; } to { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) { .kit-skeleton { animation: none; } }
+
+/* Trend next to a key figure: kit-trend with --up, --down or --flat for the direction and --good or
+   --bad for what it means (up is not always good). The arrow is drawn; the text says the change. */
+.kit-trend { display: inline-flex; align-items: center; gap: 0.25em; font-size: var(--kit-text-xs); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--kit-text-muted); }
+.kit-trend::before { font-size: 0.8em; }
+.kit-trend--up::before { content: "\25B2"; }
+.kit-trend--down::before { content: "\25BC"; }
+.kit-trend--flat::before { content: "\2013"; }
+.kit-trend--good { color: var(--kit-ok); }
+.kit-trend--bad { color: var(--kit-error); }
+.kit-figure__spark { height: 32px; margin-top: var(--kit-space-1); }
+
+/* Filters: a list box for several values (kit-multi: data-kit-multi on a <select multiple>) and a
+   period filter (kit-range, data-kit-range); kit.js draws them. */
+.kit-multi { position: relative; display: inline-block; }
+.kit-multi__button { display: inline-flex; align-items: center; justify-content: space-between; gap: var(--kit-space-2); min-width: 180px; }
+.kit-multi__button::after { content: ""; width: 0.45em; height: 0.45em; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg) translateY(-2px); opacity: 0.7; }
+.kit-multi__panel {
+  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content; max-width: 320px;
+  padding: var(--kit-space-2); border: 1px solid var(--kit-border); border-radius: var(--kit-radius); background: var(--kit-surface); box-shadow: var(--kit-shadow);
+}
+.kit-multi__list { list-style: none; margin: var(--kit-space-2) 0 0; padding: 0; max-height: 240px; overflow: auto; }
+.kit-multi__list label { display: flex; align-items: center; gap: var(--kit-space-2); padding: 4px var(--kit-space-1); border-radius: var(--kit-radius); font-size: var(--kit-text-sm); cursor: pointer; }
+.kit-multi__list label:hover { background: var(--kit-surface-2); }
+.kit-multi__actions { display: flex; justify-content: space-between; gap: var(--kit-space-2); margin-top: var(--kit-space-2); }
+.kit-multi.is-active .kit-multi__button, .kit-range.is-active .kit-range__custom .kit-input { border-color: var(--kit-accent); }
+.kit-range { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--kit-space-2); }
+.kit-range__custom { display: inline-flex; align-items: center; gap: var(--kit-space-1); }
+.kit-range__custom[hidden] { display: none; }
+.kit-range__custom .kit-input { width: auto; }
+
+/* Table extras: a search box that filters a table (data-kit-filter="TABLE-ID" on an input), a totals
+   row (<tfoot class="kit-table__total">, never sorted), the first column kept in view while the
+   table scrolls sideways (kit-table--sticky-first). */
+.kit-table-search { max-width: 280px; }
+.kit-table__total td, .kit-table__total th { font-weight: 600; border-top: 2px solid var(--kit-border-strong); background: var(--kit-surface-2); }
+.kit-table--sticky-first th:first-child, .kit-table--sticky-first td:first-child { position: sticky; left: 0; z-index: 1; background: var(--kit-surface); box-shadow: 1px 0 0 var(--kit-border); }
+.kit-table--sticky-first thead th:first-child { z-index: 2; }
+
+/* When the data is from: <span class="kit-stamp" data-kit-stamp="ISO DATE"> (kit.js writes "Data as
+   of DATE, TIME (2 hours ago)"); data-kit-stamp-of="GLOBAL" takes the time StreamHub gives a data block. */
+.kit-stamp { font-size: var(--kit-text-xs); color: var(--kit-text-muted); font-variant-numeric: tabular-nums; }
+
+/* Printing: a button with data-kit-print prints the page; kit-no-print parts stay off paper,
+   kit-print-only parts show only there. kit.js prints in the light theme. */
+.kit-print-only { display: none; }
+@media print {
+  .kit-no-print, .kit-toolbar, .kit-pager, .kit-drawer, .kit-toasts, .kit-tip, .kit-multi__panel, [data-kit-print], [data-kit-theme], .kit-table-search { display: none !important; }
+  .kit-print-only { display: block; }
+  .kit-page { background: #fff; }
+  .kit-panel, .kit-figures, .kit-chart, .kit-table-wrap, .kit-grid > * { break-inside: avoid; }
+  .kit-panel--sticky { position: static; }
+  .kit-table-wrap, .kit-table-wrap--scroll { max-height: none; overflow: visible; }
+  .kit-chart, .kit-progress, .kit-barlist__fill, .kit-badge, .kit-header--band { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* Collapsible sections: <details class="kit-accordion"><summary>TITLE</summary><div class="kit-accordion__body">...</div></details>;
+   the same name="GROUP" on several keeps one open at a time. */
+.kit-accordion { border: 1px solid var(--kit-border); border-radius: var(--kit-radius); background: var(--kit-surface); }
+.kit-accordion + .kit-accordion { margin-top: var(--kit-space-2); }
+.kit-accordion > summary { display: flex; align-items: center; justify-content: space-between; gap: var(--kit-space-3); padding: var(--kit-space-3) var(--kit-space-4); cursor: pointer; font-weight: 600; list-style: none; border-radius: var(--kit-radius); }
+.kit-accordion > summary::-webkit-details-marker { display: none; }
+.kit-accordion > summary::after { content: ""; width: 0.5em; height: 0.5em; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); transition: transform var(--kit-speed) ease-out; opacity: 0.7; flex: 0 0 auto; }
+.kit-accordion[open] > summary::after { transform: rotate(225deg); }
+.kit-accordion > summary:hover { background: var(--kit-surface-2); }
+.kit-accordion > summary:focus-visible { outline: none; box-shadow: var(--kit-focus); }
+.kit-accordion__body { padding: 0 var(--kit-space-4) var(--kit-space-4); }
+
+/* Breadcrumbs: <nav class="kit-breadcrumbs" aria-label="Breadcrumb"><ol><li><a href="..">Home</a></li><li aria-current="page">Now</li></ol></nav> */
+.kit-breadcrumbs ol { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kit-space-1); list-style: none; margin: 0; padding: 0; font-size: var(--kit-text-sm); color: var(--kit-text-muted); }
+.kit-breadcrumbs li + li::before { content: "/"; margin-right: var(--kit-space-1); opacity: 0.6; }
+.kit-breadcrumbs a { color: inherit; text-decoration: none; }
+.kit-breadcrumbs a:hover { color: var(--kit-text); text-decoration: underline; }
+.kit-breadcrumbs [aria-current="page"] { color: var(--kit-text); font-weight: 600; }
+
+/* Stepper: <ol class="kit-stepper"><li class="kit-stepper__step is-done">..</li><li class="kit-stepper__step" aria-current="step">..</li><li class="kit-stepper__step">..</li></ol> */
+.kit-stepper { display: flex; gap: var(--kit-space-2); list-style: none; margin: 0; padding: 0; counter-reset: kit-step; }
+.kit-stepper__step { flex: 1; display: flex; align-items: center; gap: var(--kit-space-2); padding-top: var(--kit-space-2); border-top: 3px solid var(--kit-border); color: var(--kit-text-muted); font-size: var(--kit-text-sm); counter-increment: kit-step; }
+.kit-stepper__step::before { content: counter(kit-step); display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid var(--kit-border-strong); font-size: var(--kit-text-xs); font-weight: 600; flex: 0 0 auto; }
+.kit-stepper__step.is-done { border-top-color: var(--kit-accent); color: var(--kit-text); }
+.kit-stepper__step.is-done::before { content: "\2713"; background: var(--kit-accent); border-color: var(--kit-accent); color: var(--kit-on-accent); }
+.kit-stepper__step[aria-current="step"] { border-top-color: var(--kit-accent); color: var(--kit-text); font-weight: 600; }
+.kit-stepper__step[aria-current="step"]::before { border-color: var(--kit-accent); color: var(--kit-accent); }
+
+/* Key and value list (details in a side panel): <dl class="kit-dl"><dt>Owner</dt><dd>Ann</dd>...</dl> */
+.kit-dl { display: grid; grid-template-columns: minmax(110px, 35%) 1fr; gap: var(--kit-space-2) var(--kit-space-4); margin: 0; font-size: var(--kit-text-sm); }
+.kit-dl dt { color: var(--kit-text-muted); }
+.kit-dl dd { margin: 0; color: var(--kit-text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* Timeline or activity feed: <ol class="kit-timeline"><li class="kit-timeline__item kit-timeline__item--ok"><span class="kit-timeline__time">09:30</span><div>WHAT HAPPENED</div></li></ol> */
+.kit-timeline { list-style: none; margin: 0; padding: 0 0 0 var(--kit-space-5); position: relative; }
+.kit-timeline::before { content: ""; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px; background: var(--kit-border); }
+.kit-timeline__item { position: relative; padding: 0 0 var(--kit-space-4); font-size: var(--kit-text-sm); }
+.kit-timeline__item::before { content: ""; position: absolute; left: calc(-1 * var(--kit-space-5) + 1px); top: 4px; width: 12px; height: 12px; border-radius: 999px; background: var(--kit-surface); border: 2px solid var(--kit-text-muted); box-sizing: border-box; }
+.kit-timeline__item--ok::before { border-color: var(--kit-ok); background: var(--kit-ok); }
+.kit-timeline__item--warn::before { border-color: var(--kit-warn); background: var(--kit-warn); }
+.kit-timeline__item--error::before { border-color: var(--kit-error); background: var(--kit-error); }
+.kit-timeline__item--accent::before { border-color: var(--kit-accent); background: var(--kit-accent); }
+.kit-timeline__time { display: block; font-size: var(--kit-text-xs); color: var(--kit-text-muted); font-variant-numeric: tabular-nums; }
+
+/* Slider: <input class="kit-slider" type="range" aria-label="..">; two values: <div class="kit-slider-range"
+   data-kit-slider-range data-min="0" data-max="100" data-from="20" data-to="80" aria-label=".."></div> (kit.js). */
+.kit-slider { width: 100%; height: 1.5rem; margin: 0; background: transparent; accent-color: var(--kit-accent); -webkit-appearance: none; appearance: none; }
+.kit-slider::-webkit-slider-runnable-track { height: 6px; border-radius: 999px; background: var(--kit-surface-2); }
+.kit-slider::-moz-range-track { height: 6px; border-radius: 999px; background: var(--kit-surface-2); }
+.kit-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: -6px; border-radius: 999px; background: var(--kit-accent); border: 2px solid var(--kit-surface); box-shadow: 0 0 0 1px var(--kit-accent); }
+.kit-slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 999px; background: var(--kit-accent); border: 2px solid var(--kit-surface); }
+.kit-slider:focus-visible { outline: none; }
+.kit-slider:focus-visible::-webkit-slider-thumb { box-shadow: var(--kit-focus); }
+.kit-slider-range { position: relative; height: 1.5rem; }
+.kit-slider-range__fill { position: absolute; top: calc(50% - 3px); height: 6px; border-radius: 999px; background: var(--kit-accent); pointer-events: none; }
+.kit-slider-range .kit-slider { position: absolute; inset: 0; pointer-events: none; }
+.kit-slider-range .kit-slider::-webkit-slider-runnable-track { background: transparent; }
+.kit-slider-range .kit-slider::-moz-range-track { background: transparent; }
+.kit-slider-range .kit-slider::-webkit-slider-thumb { pointer-events: auto; position: relative; z-index: 1; }
+.kit-slider-range .kit-slider::-moz-range-thumb { pointer-events: auto; }
+.kit-slider-range::before { content: ""; position: absolute; left: 0; right: 0; top: calc(50% - 3px); height: 6px; border-radius: 999px; background: var(--kit-surface-2); }
+.kit-slider__value { font-size: var(--kit-text-xs); color: var(--kit-text-muted); font-variant-numeric: tabular-nums; }
+
+/* Tag input: <div class="kit-tags" data-kit-tags data-name="FIELD" aria-label="Tags"></div> (kit.js: Enter or a comma adds
+   a tag, Backspace removes the last; a hidden input named FIELD holds them comma-separated; kit:tags). */
+.kit-tags { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kit-space-1); min-height: 2.5rem; padding: var(--kit-space-1) var(--kit-space-2); border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); background: var(--kit-surface); }
+.kit-tags:focus-within { box-shadow: var(--kit-focus); border-color: var(--kit-accent); }
+.kit-tags__tag { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px var(--kit-space-2); border-radius: var(--kit-radius); background: var(--kit-accent-soft); color: var(--kit-text); font-size: var(--kit-text-sm); }
+.kit-tags__remove { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; padding: 0; border: 0; border-radius: var(--kit-radius); background: transparent; color: var(--kit-text-muted); cursor: pointer; font-size: 1rem; line-height: 1; }
+.kit-tags__remove:hover { color: var(--kit-text); background: var(--kit-surface-2); }
+.kit-tags__input { flex: 1; min-width: 8rem; border: 0; outline: none; background: transparent; color: var(--kit-text); font: inherit; padding: var(--kit-space-1); }
+
+/* Board (kanban): <div class="kit-board"><div class="kit-board__column"><h3 class="kit-board__title">To do</h3>
+   <ul class="kit-board__list" data-kit-board="todo"><li class="kit-board__card" data-id="7">..</li></ul></div>..</div>
+   (kit.js: drag a card, or focus it and press Alt with an arrow key; kit:move). */
+.kit-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: var(--kit-space-3); overflow-x: auto; align-items: start; }
+.kit-board__column { display: flex; flex-direction: column; gap: var(--kit-space-2); padding: var(--kit-space-3); border-radius: var(--kit-radius-lg); background: var(--kit-surface-2); }
+.kit-board__title { display: flex; align-items: center; justify-content: space-between; margin: 0; font-size: var(--kit-text-sm); font-weight: 600; }
+.kit-board__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--kit-space-2); min-height: 3rem; border-radius: var(--kit-radius); }
+.kit-board__list.is-over { outline: 2px dashed var(--kit-accent); outline-offset: 2px; }
+.kit-board__card { padding: var(--kit-space-3); border: 1px solid var(--kit-border); border-radius: var(--kit-radius); background: var(--kit-surface); font-size: var(--kit-text-sm); cursor: grab; }
+.kit-board__card:focus-visible { outline: none; box-shadow: var(--kit-focus); }
+.kit-board__card.is-dragging { opacity: 0.5; }
+
+/* Calendar month: <div class="kit-calendar" data-kit-calendar data-month="2026-10" aria-label="Bookings"></div>, events with
+   KitUI.calendar(element, { month, events: [{ date: "2026-10-09", title, tone }] }); weeks start on the day Settings give. */
+.kit-calendar { font-size: var(--kit-text-sm); }
+.kit-calendar__head { display: flex; align-items: center; justify-content: space-between; gap: var(--kit-space-2); margin-bottom: var(--kit-space-2); }
+.kit-calendar__title { margin: 0; font-size: var(--kit-text-md); font-weight: 600; }
+.kit-calendar__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-top: 1px solid var(--kit-border); border-left: 1px solid var(--kit-border); }
+.kit-calendar__dow { padding: var(--kit-space-1) var(--kit-space-2); font-size: var(--kit-text-xs); color: var(--kit-text-muted); border-right: 1px solid var(--kit-border); border-bottom: 1px solid var(--kit-border); background: var(--kit-surface-2); }
+.kit-calendar__day { min-height: 5.5rem; padding: var(--kit-space-1); border-right: 1px solid var(--kit-border); border-bottom: 1px solid var(--kit-border); background: var(--kit-surface); text-align: left; font: inherit; color: var(--kit-text); cursor: pointer; display: flex; flex-direction: column; gap: 2px; align-items: stretch; }
+.kit-calendar__day.is-other { color: var(--kit-text-muted); background: var(--kit-bg); }
+.kit-calendar__day:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
+.kit-calendar__num { font-size: var(--kit-text-xs); font-variant-numeric: tabular-nums; }
+.kit-calendar__day.is-today .kit-calendar__num { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; background: var(--kit-accent); color: var(--kit-on-accent); font-weight: 600; }
+.kit-calendar__event { display: block; padding: 1px var(--kit-space-1); border-radius: 4px; background: var(--kit-accent-soft); font-size: var(--kit-text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kit-calendar__event--ok { background: var(--kit-ok-soft); }
+.kit-calendar__event--warn { background: var(--kit-warn-soft); }
+.kit-calendar__event--error { background: var(--kit-error-soft); }
+@media (max-width: 640px) { .kit-calendar__day { min-height: 3.5rem; } .kit-calendar__event { font-size: 0.65rem; } }
+
 /*
   Interactive components adapted from kokonutui (MIT licence, see LICENSE-kokonutui.txt; website
   https://kokonutui.com): hold button, search with suggestions, file drop zone, animated tabs,
-  loading text, composer, command button. Rebuilt on the kit's tokens without Tailwind or motion;
+  loading text, composer, command button; switch, menu (from the profile dropdown), icon toolbar, avatars (from the team selector), bento grid, the bottom sheet (from the smooth drawer), the success check (from the currency transfer). Rebuilt on the kit's tokens without Tailwind or motion;
   kit.js adds the behaviour (data-kit-* attributes).
 */
 
@@ -295,8 +509,9 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-drop input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .kit-drop__title { color: var(--kit-text); font-weight: 600; }
 .kit-drop__files { list-style: none; margin: 0; padding: 0; font-size: var(--kit-text-xs); color: var(--kit-text); }
+/* Progress and status bars (not part of a chart) are round at both ends; chart bars are flat at their axis. */
 .kit-progress { width: 100%; height: 6px; border-radius: 999px; background: var(--kit-surface-2); overflow: hidden; }
-.kit-progress__bar { height: 100%; width: 0; background: var(--kit-accent); transition: width var(--kit-speed) ease-out; }
+.kit-progress__bar { height: 100%; width: 0; border-radius: 999px; background: var(--kit-accent); transition: width var(--kit-speed) ease-out; }
 /* Colours by meaning; the figure or label next to the bar says what it means. */
 .kit-progress--ok .kit-progress__bar { background: var(--kit-ok); }
 .kit-progress--warn .kit-progress__bar { background: var(--kit-warn); }
@@ -337,6 +552,79 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 }
 .kit-composer__actions { display: flex; align-items: center; gap: var(--kit-space-2); padding: var(--kit-space-2); border-top: 1px solid var(--kit-border); }
 .kit-composer__actions .kit-toolbar__spacer { flex: 1; }
+
+/* Switch (from kokonutui switch-button, toned down): <label class="kit-switch"><input type="checkbox" role="switch">
+   <span class="kit-switch__track" aria-hidden="true"></span>Email me a copy</label> */
+.kit-switch { display: inline-flex; align-items: center; gap: var(--kit-space-2); cursor: pointer; font-size: var(--kit-text-sm); color: var(--kit-text); }
+.kit-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.kit-switch__track { position: relative; width: 2.25rem; height: 1.25rem; border-radius: 999px; background: var(--kit-border-strong); transition: background var(--kit-speed) ease-out; flex: 0 0 auto; }
+.kit-switch__track::after { content: ""; position: absolute; top: 2px; left: 2px; width: calc(1.25rem - 4px); height: calc(1.25rem - 4px); border-radius: 999px; background: var(--kit-surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform var(--kit-speed) ease-out; }
+.kit-switch input:checked + .kit-switch__track { background: var(--kit-accent); }
+.kit-switch input:checked + .kit-switch__track::after { transform: translateX(1rem); }
+.kit-switch input:focus-visible + .kit-switch__track { box-shadow: var(--kit-focus); }
+.kit-switch input:disabled + .kit-switch__track { opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) { .kit-switch__track, .kit-switch__track::after { transition: none; } }
+
+/* Menu (from kokonutui profile-dropdown, as a general menu): <div class="kit-menu"><button class="kit-btn" type="button"
+   data-kit-menu aria-haspopup="menu" aria-expanded="false">Actions</button><div class="kit-menu__list" role="menu" hidden>
+   <div class="kit-menu__head">Ann Smith<span class="kit-small kit-muted">ann@example.org</span></div>
+   <button class="kit-menu__item" role="menuitem" type="button" data-value="edit">Edit</button><hr class="kit-menu__sep">
+   <button class="kit-menu__item kit-menu__item--danger" role="menuitem" type="button" data-value="delete">Delete</button></div></div>
+   (kit.js: arrow keys, Escape, a click beside it; kit:menu with detail.value). */
+.kit-menu { position: relative; display: inline-block; }
+.kit-menu__list { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; min-width: 12rem; padding: var(--kit-space-1); border: 1px solid var(--kit-border); border-radius: var(--kit-radius); background: var(--kit-surface); box-shadow: var(--kit-shadow); }
+.kit-menu--left .kit-menu__list { right: auto; left: 0; }
+.kit-menu__head { display: flex; flex-direction: column; padding: var(--kit-space-2) var(--kit-space-3); border-bottom: 1px solid var(--kit-border); margin-bottom: var(--kit-space-1); font-weight: 600; font-size: var(--kit-text-sm); }
+.kit-menu__item { display: flex; align-items: center; gap: var(--kit-space-2); width: 100%; padding: var(--kit-space-2) var(--kit-space-3); border: 0; border-radius: var(--kit-radius); background: transparent; color: var(--kit-text); font: inherit; font-size: var(--kit-text-sm); text-align: left; cursor: pointer; }
+.kit-menu__item:hover, .kit-menu__item:focus-visible { background: var(--kit-surface-2); outline: none; }
+.kit-menu__item--danger { color: var(--kit-error); }
+.kit-menu__sep { border: 0; border-top: 1px solid var(--kit-border); margin: var(--kit-space-1) 0; }
+
+/* Icon toolbar (from kokonutui toolbar): <div class="kit-iconbar" role="toolbar" aria-label="View" data-kit-iconbar="single">
+   <button class="kit-iconbar__item" type="button" aria-pressed="true" aria-label="Table"><span data-kit-icon="table" aria-hidden="true"></span><span class="kit-iconbar__label">Table</span></button>..</div>
+   The pressed button shows its label; arrow keys move between buttons; kit:select with detail.value. */
+.kit-iconbar { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); background: var(--kit-surface); }
+.kit-iconbar__item { display: inline-flex; align-items: center; gap: var(--kit-space-1); min-width: 2rem; height: 2rem; justify-content: center; padding: 0 var(--kit-space-2); border: 0; border-radius: calc(var(--kit-radius) - 2px); background: transparent; color: var(--kit-text-muted); font: inherit; font-size: var(--kit-text-sm); cursor: pointer; }
+.kit-iconbar__item:hover { color: var(--kit-text); background: var(--kit-surface-2); }
+.kit-iconbar__item:focus-visible { outline: none; box-shadow: var(--kit-focus); }
+.kit-iconbar__item[aria-pressed="true"] { color: var(--kit-text); background: var(--kit-accent-soft); font-weight: 600; }
+.kit-iconbar__label { display: none; }
+.kit-iconbar__item[aria-pressed="true"] .kit-iconbar__label { display: inline; }
+
+/* Avatars (from kokonutui team-selector, the group only): <span class="kit-avatar" data-kit-avatar="Ann Smith"></span>
+   (kit.js writes the initials and a chart colour per name); a group: <div class="kit-avatars" aria-label="Team">..
+   <span class="kit-avatars__more">+3</span></div>; kit-avatar--sm, kit-avatar--lg. */
+.kit-avatar { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 999px; background: var(--kit-accent-soft); color: var(--kit-text); font-size: var(--kit-text-xs); font-weight: 600; flex: 0 0 auto; overflow: hidden; }
+.kit-avatar[style*="--kit-avatar-color"] { background: var(--kit-avatar-color); color: var(--kit-on-accent); }
+.kit-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.kit-avatar--sm { width: 1.5rem; height: 1.5rem; font-size: 0.65rem; }
+.kit-avatar--lg { width: 2.75rem; height: 2.75rem; font-size: var(--kit-text-sm); }
+.kit-avatars { display: inline-flex; align-items: center; }
+.kit-avatars > .kit-avatar, .kit-avatars__more { box-shadow: 0 0 0 2px var(--kit-surface); }
+.kit-avatars > * + * { margin-left: -0.5rem; }
+.kit-avatars__more { display: inline-flex; align-items: center; justify-content: center; min-width: 2rem; height: 2rem; padding: 0 var(--kit-space-1); border-radius: 999px; background: var(--kit-surface-2); color: var(--kit-text-muted); font-size: var(--kit-text-xs); font-weight: 600; }
+
+/* Bento grid (from kokonutui bento-grid, without its glow and hover motion): <div class="kit-bento"><div class="kit-panel
+   kit-bento__item kit-bento__item--wide">..</div>..</div>; --wide spans two columns, --tall two rows. */
+.kit-bento { display: grid; gap: var(--kit-space-4); grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-auto-rows: minmax(150px, auto); grid-auto-flow: dense; }
+.kit-bento__item--wide { grid-column: span 2; }
+.kit-bento__item--tall { grid-row: span 2; }
+@media (max-width: 560px) { .kit-bento__item--wide { grid-column: auto; } }
+
+/* The side panel as a sheet from the bottom on a phone (from kokonutui smooth-drawer). */
+@media (max-width: 640px) {
+  .kit-drawer { inset: auto 0 0 0; width: 100%; max-width: 100%; height: auto; max-height: 85%; border-left: 0; border-top: 1px solid var(--kit-border); border-radius: var(--kit-radius-lg) var(--kit-radius-lg) 0 0; }
+  .kit-drawer[open] { animation-name: kit-sheet-in; }
+}
+@keyframes kit-sheet-in { from { transform: translateY(24px); opacity: 0; } }
+
+/* Success (from kokonutui currency-transfer, the check only): <div class="kit-success" role="status"><svg class="kit-success__check"
+   viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M7 12.5l3.2 3.2L17 9"/></svg><span>Saved</span></div> */
+.kit-success { display: inline-flex; align-items: center; gap: var(--kit-space-2); color: var(--kit-text); font-weight: 600; }
+.kit-success__check { width: 1.75rem; height: 1.75rem; flex: 0 0 auto; }
+.kit-success__check circle { fill: var(--kit-ok-soft); stroke: var(--kit-ok); stroke-width: 1.5; }
+.kit-success__check path { fill: none; stroke: var(--kit-ok); stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 16; stroke-dashoffset: 16; animation: kit-draw 280ms ease-out 80ms forwards; }
+@media (prefers-reduced-motion: reduce) { .kit-success__check path { animation: none; stroke-dashoffset: 0; } }
 
 /*
   Charts (kit-charts.js): design adapted from bklit-ui (MIT licence, see LICENSE-bklit-ui.txt).
@@ -390,8 +678,8 @@ button.kit-barlist__row { cursor: pointer; transition: background var(--kit-spee
 button.kit-barlist__row:hover { background: var(--kit-surface-2); }
 button.kit-barlist__row:focus-visible { outline: none; box-shadow: var(--kit-focus); }
 .kit-barlist__label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kit-barlist__track { display: block; height: 0.75rem; border-radius: 999px; overflow: hidden; background: var(--kit-surface-2); }
-.kit-barlist__fill { display: block; height: 100%; border-radius: 999px; transform-origin: left center; }
+.kit-barlist__track { display: block; height: 0.75rem; border-radius: 0 999px 999px 0; overflow: hidden; background: var(--kit-surface-2); }
+.kit-barlist__fill { display: block; height: 100%; border-radius: 0 999px 999px 0; transform-origin: left center; }
 .kit-barlist__value { text-align: right; font-variant-numeric: tabular-nums; font-size: var(--kit-text-xs); color: var(--kit-text-muted); white-space: nowrap; }
 .kit-barlist__value b { color: var(--kit-text); font-weight: 600; }
 .kit-barlist--share .kit-barlist__row { grid-template-columns: minmax(80px, 34%) minmax(48px, 1fr) auto; }
@@ -404,3 +692,7 @@ button.kit-barlist__row:focus-visible { outline: none; box-shadow: var(--kit-foc
 @keyframes kit-grow-y { from { transform: scaleY(0); } }
 @keyframes kit-grow-x { from { transform: scaleX(0); } }
 @keyframes kit-draw { to { stroke-dashoffset: 0; } }
+
+/* Chart target line (data.targets) and its label. */
+.kit-chart__target { stroke: var(--kit-text); stroke-width: 1.5; stroke-dasharray: 6 4; opacity: 0.75; }
+.kit-chart__target-label { fill: var(--kit-text); font-size: 11px; font-weight: 600; }

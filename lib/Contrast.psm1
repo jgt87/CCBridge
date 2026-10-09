@@ -113,4 +113,10 @@ function Get-ContrastScript {
     [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'contrast-check.js'))
 }
 
-Export-ModuleMember -Function ConvertFrom-CssColor, Get-RelativeLuminance, Get-ContrastRatio, Get-TokenBlocks, Test-TokenContrast, Get-ContrastScript
+function Get-PageContentScript {
+    <# The page-side check of what the page shows (lib/page-content-check.js): broken characters, bars
+       that do not show their percentage, tables that cannot be sorted. Run by the page check. #>
+    [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'page-content-check.js'))
+}
+
+Export-ModuleMember -Function ConvertFrom-CssColor, Get-RelativeLuminance, Get-ContrastRatio, Get-TokenBlocks, Test-TokenContrast, Get-ContrastScript, Get-PageContentScript
