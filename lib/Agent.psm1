@@ -2557,7 +2557,7 @@ function Get-ProjectContext($State) {
     $setupText = try { Format-ProjectSetupContext $root } catch { '' }
     if ($setupText) { $full += "`n`n$setupText" }
     $tailwind = try { Test-TailwindProject $State.ProjectRoot } catch { $false }
-    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = "$($setup.build)"; Live = [bool]$setup.liveSource; Tailwind = $tailwind }
+    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = "$($setup.build)"; Live = [bool]$setup.liveSource; Tailwind = $tailwind; Root = $State.ProjectRoot }
 }
 
 function Format-ActionResults {
@@ -3612,9 +3612,25 @@ function Invoke-AgentTurn {
                     try { $kitSync = Update-KitIcons $State.ProjectRoot $State.AppRoot } catch { Write-CCBLogError agent 'kit icons' $_ }
                 }
                 # A PowerShell window app: the kit's WPF theme with the project's colours.
-                if (Test-UiKitOn $State.AppRoot) {
-                    try { foreach ($w in @(Update-KitWpf $State.ProjectRoot $State.AppRoot)) { Add-OwnChangeEvent $State 'write' $w 'StreamHub wrote the UI kit''s theme for the window app (WPF), with the project''s colours: merge it into the window''s resources.' } } catch { Write-CCBLogError agent 'WPF theme' $_ }
+                try { foreach ($w in @(Update-KitWpf $State.ProjectRoot $State.AppRoot -NoTheme:(-not (Test-UiKitOn $State.AppRoot)))) { Add-OwnChangeEvent $State 'write' $w $(if ($w -match 'KitWpf\.ps1$') { 'StreamHub wrote the helpers for the window app (KitWpf.ps1): dot-source it and use its functions.' } else { 'StreamHub wrote the UI kit''s theme for the window app, with the project''s colours (KitWpf.ps1 loads it).' }) } } catch { Write-CCBLogError agent 'window app kit' $_ }
+                # Window apps: the layout of panels marked Tag="row" / "actions" / "form" (and, without the
+                # kit's theme, one height for buttons and fields) written into the XAML itself, so the
+                # window lines up however it is loaded. Copilot is told: its next edits must match.
+                $laidOut = New-Object System.Collections.Generic.List[string]
+                foreach ($p in @($roundChanged | Where-Object { $_ -match '(?i)\.xaml$' -and $_ -notmatch '(?i)^styles/kit/' })) {
+                    try {
+                        $full = Resolve-ProjectPath $State.ProjectRoot $p
+                        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+                        $info = Read-TextFile $full
+                        $lay = Expand-XamlLayout $info.Text -Heights:(-not (Test-UiKitOn $State.AppRoot))
+                        if (-not @($lay.changes).Count) { continue }
+                        Write-TextFile $full $lay.text $info.Bom $info.Crlf $info.Encoding
+                        $rel = $p.Replace('\', '/')
+                        Add-OwnChangeEvent $State 'edit' $rel "StreamHub wrote the window's layout into the XAML: $(@($lay.changes) -join '; ')." @{ path = $rel; exists = $true; old = $info.Text; new = $lay.text }
+                        $laidOut.Add("${rel}: $(@($lay.changes) -join '; ')")
+                    } catch { Write-CCBLogError agent "Window layout $p" $_ }
                 }
+                if ($laidOut.Count) { $results.Add(@{ head = '### Window layout'; output = "The helper program wrote the layout values of the tagged panels into the XAML (Orientation, alignment, margins, grid rows and columns), so the window lines up however it is loaded. Read the lines again before you edit them:`n" + (($laidOut | ForEach-Object { "- $_" }) -join "`n") }) }
                 # One-file pages: their UI kit and data blocks follow what the page uses now.
                 $onePages = @(Sync-OneFilePages $State)
                 if ($onePages.Count) { $results.Add(@{ head = '### One-file page'; output = "The helper program filled the UI kit and data blocks (data-streamhub) of $($onePages -join ', ') with what the page uses now. Those lines are its own: they show as a note when you read the page; never edit them." }) }
@@ -3797,9 +3813,19 @@ function Invoke-AgentTurn {
                         if (-not $gr) { Complete-OwnRunCard $State $card $false 'the start test could not run'; continue }
                         if ($gr.skipped) { Complete-OwnRunCard $State $card $true "not started: $($gr.skipped)"; continue }
                         if ($gr.shot) { $State.PageShots = @($State.PageShots) + @($shotRel) }
-                        $okGui = $gr.opened -and -not @($gr.errors).Count
-                        Complete-OwnRunCard $State $card $okGui $(if ($okGui) { "the window '$($gr.title)' opened" } elseif ($gr.opened) { "the window opened, with errors" } else { 'no window opened' }) ((@($gr.errors) + @(if ($gr.shot) { "Picture: $shotRel" })) -join "`n")
-                        if (-not $okGui) { $guiProblems.Add("$($gs):`n" + ((@($gr.errors) | ForEach-Object { "- $_" }) -join "`n")) }
+                        # Must be fixed: errors at start and steps of NAME.guitest that failed. Said once:
+                        # controls without a name, too small or cut off, the launcher, a missing test.
+                        $fails = @(@($gr.errors) + @($gr.steps) | Where-Object { $_ })
+                        $notes = New-Object System.Collections.Generic.List[string]
+                        foreach ($a in @($gr.access) + @($gr.layout)) { if ($a) { $notes.Add($a) } }
+                        $launch = try { Test-GuiLauncher $State.ProjectRoot $gs } catch { '' }
+                        if ($launch) { $notes.Add($launch) }
+                        $testFile = [IO.Path]::ChangeExtension($gs, '.guitest')
+                        if ($gr.opened -and -not $gr.ranSteps -and -not (Test-Path -LiteralPath (Join-Path $State.ProjectRoot $testFile.Replace('/', '\')))) { $notes.Add("no test: add $testFile with the steps a person takes (click NAME, type NAME = TEXT, select NAME = ITEM, expect NAME = TEXT), so the helper program can check them") }
+                        $okGui = $gr.opened -and -not $fails.Count
+                        $sum = if (-not $gr.opened) { 'no window opened' } elseif ($fails.Count) { "the window opened; $($fails.Count) problem(s)" } else { "the window '$($gr.title)' opened$(if ($gr.ranSteps) { ", $($gr.ranSteps) test step(s) passed" })" }
+                        Complete-OwnRunCard $State $card $okGui $sum ((@($fails) + @($notes | ForEach-Object { "Note: $_" }) + @(if ($gr.shot) { "Picture: $shotRel" })) -join "`n")
+                        if ($fails.Count -or ($notes.Count -and $guiNudges -eq 0)) { $guiProblems.Add("$($gs):`n" + (((@($fails) + @($notes)) | ForEach-Object { "- $_" }) -join "`n")) }
                     }
                     if ($guiProblems.Count -and $enf.testTries -gt 0) {
                         $guiNudges++

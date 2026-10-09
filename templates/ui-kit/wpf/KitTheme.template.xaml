@@ -117,6 +117,7 @@
     <Setter Property="BorderBrush" Value="{StaticResource KitBorderStrong}"/>
     <Setter Property="Padding" Value="6,4"/>
     <Setter Property="MinHeight" Value="32"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
   </Style>
   <Style TargetType="ComboBox">
     <Setter Property="MinHeight" Value="32"/>
@@ -154,6 +155,111 @@
     <Setter Property="Padding" Value="8,6"/>
     <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
     <Setter Property="BorderThickness" Value="0,0,1,1"/>
+  </Style>
+
+  <Style TargetType="RadioButton">
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+    <Setter Property="Margin" Value="0,4"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+  </Style>
+  <Style TargetType="ComboBoxItem">
+    <Setter Property="Padding" Value="8,6"/>
+    <Setter Property="Background" Value="{StaticResource KitSurface}"/>
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+  </Style>
+  <Style TargetType="ListBox">
+    <Setter Property="Background" Value="{StaticResource KitSurface}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+  </Style>
+  <Style TargetType="ListBoxItem">
+    <Setter Property="Padding" Value="8,6"/>
+  </Style>
+  <Style TargetType="ListView">
+    <Setter Property="Background" Value="{StaticResource KitSurface}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+  </Style>
+  <Style TargetType="ListViewItem">
+    <Setter Property="Padding" Value="8,6"/>
+  </Style>
+  <Style TargetType="TabControl">
+    <Setter Property="Background" Value="{StaticResource KitSurface}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
+    <Setter Property="Padding" Value="12"/>
+  </Style>
+  <Style TargetType="TabItem">
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+    <Setter Property="Padding" Value="14,6"/>
+    <Setter Property="MinHeight" Value="32"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TabItem">
+          <Border x:Name="Tab" Background="Transparent" BorderThickness="0,0,0,2" BorderBrush="Transparent" Padding="{TemplateBinding Padding}">
+            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Tab" Property="BorderBrush" Value="{StaticResource KitAccent}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tab" Property="Background" Value="{StaticResource KitSurface2}"/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType="Menu">
+    <Setter Property="Background" Value="{StaticResource KitSurface}"/>
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+    <Setter Property="FontFamily" Value="{StaticResource KitFont}"/>
+  </Style>
+  <Style TargetType="MenuItem">
+    <Setter Property="Padding" Value="8,4"/>
+  </Style>
+  <Style TargetType="ContextMenu">
+    <Setter Property="Background" Value="{StaticResource KitSurface}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
+    <Setter Property="FontFamily" Value="{StaticResource KitFont}"/>
+  </Style>
+  <Style TargetType="ToolTip">
+    <Setter Property="Background" Value="{StaticResource KitSurface}"/>
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
+    <Setter Property="Padding" Value="8,4"/>
+    <Setter Property="FontFamily" Value="{StaticResource KitFont}"/>
+  </Style>
+  <Style TargetType="GroupBox">
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+    <Setter Property="Padding" Value="12"/>
+  </Style>
+  <Style TargetType="DatePicker">
+    <Setter Property="MinHeight" Value="32"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorderStrong}"/>
+    <Setter Property="Padding" Value="4,2"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+  </Style>
+  <Style TargetType="Expander">
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
+    <Setter Property="BorderThickness" Value="0,0,0,1"/>
+    <Setter Property="Padding" Value="0,6"/>
+  </Style>
+  <Style TargetType="TreeView">
+    <Setter Property="Background" Value="{StaticResource KitSurface}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+  </Style>
+  <Style TargetType="TreeViewItem">
+    <Setter Property="Padding" Value="4,3"/>
+  </Style>
+  <Style TargetType="ToolBar">
+    <Setter Property="Background" Value="{StaticResource KitSurface}"/>
+  </Style>
+  <Style TargetType="StatusBar">
+    <Setter Property="Background" Value="{StaticResource KitSurface2}"/>
+    <Setter Property="Foreground" Value="{StaticResource KitTextMuted}"/>
+  </Style>
+  <Style TargetType="Slider">
+    <Setter Property="Foreground" Value="{StaticResource KitAccent}"/>
   </Style>
 
   <Style TargetType="ProgressBar">

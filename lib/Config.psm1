@@ -248,6 +248,29 @@ function Test-DataImportOn([string]$AppRoot) {
     try { $v = (Get-CCBridgeConfig harness $AppRoot).dataImport; ($null -eq $v) -or [bool]$v } catch { $true }
 }
 
+$script:ScriptLanguage = @{}
+function Get-ScriptLanguageMode {
+    <# The language mode a script in this project folder runs in: FullLanguage, or ConstrainedLanguage
+       when the computer's policy (AppLocker, WDAC) limits scripts from user folders such as OneDrive;
+       then Add-Type and XamlReader are blocked and a WPF window app cannot run. Found once per folder by
+       running a one-line script from the project's .streamhub folder; '' when it cannot be found. #>
+    param([string]$ProjectRoot)
+    if (-not $ProjectRoot) { return '' }
+    if ($script:ScriptLanguage.ContainsKey($ProjectRoot)) { return $script:ScriptLanguage[$ProjectRoot] }
+    $mode = ''
+    try {
+        $dir = Join-Path $ProjectRoot '.streamhub'
+        $null = New-Item -ItemType Directory -Force -Path $dir
+        $probe = Join-Path $dir 'language-mode.ps1'
+        [IO.File]::WriteAllText($probe, '$ExecutionContext.SessionState.LanguageMode')
+        $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $mode = "$(& $exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probe 2>$null)".Trim()
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    } catch { $mode = '' }
+    $script:ScriptLanguage[$ProjectRoot] = $mode
+    $mode
+}
+
 function Test-UiKitPart([string]$Name, [string]$AppRoot) {
     <# Setting uiKitParts.NAME (interactive, charts, icons, data, sql, python, dashboard, extras, print, tailwind, pdf, react, designRules, slopChecks): on unless turned
        off. Read from disk, so every runspace sees a change at once. #>
@@ -311,4 +334,4 @@ function Get-CCBridgeEnvironment {
     }
 }
 
-Export-ModuleMember -Function Test-DataImportOn, Test-UiKitPart, Test-UiKitOn, Test-CheckSwitch, Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings
+Export-ModuleMember -Function Get-ScriptLanguageMode, Test-DataImportOn, Test-UiKitPart, Test-UiKitOn, Test-CheckSwitch, Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings

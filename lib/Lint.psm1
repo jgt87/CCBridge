@@ -1306,6 +1306,94 @@ function Find-PsGuiIssues {
     }
 }
 
+$script:FieldWidths = 120, 240, 360
+$script:XamlControls = 'Button', 'ToggleButton', 'TextBox', 'PasswordBox', 'ComboBox', 'DatePicker', 'ProgressBar', 'Slider', 'ListBox', 'CheckBox', 'RadioButton'
+
+function Find-XamlLayoutIssues {
+    <# Alignment mistakes in the XAML of a PowerShell window app (a .xaml file, or XAML in a script's
+       here-string), warnings: a control with a Width but no HorizontalAlignment where it gets the whole
+       width (it ends up centred while the rest starts at the left), controls placed by coordinates (on
+       a Canvas, or by a large Margin with Left/Top alignment: designer-style XAML that does not adapt),
+       buttons and single-line fields with their own Height, and field widths off the scale 120/240/360. "line N: ..." each, at most 4. #>
+    param([string]$Path, [string]$Text, [string]$ProjectRoot = '')
+    $xaml = $null; $offset = 0
+    $tagged = '\bTag\s*=\s*"(row|actions|form)"'
+    if ($Path -match '(?i)\.ps[md]?1$' -and $Path -notmatch '(?i)^styles/kit/' -and $Text -match 'XamlReader' -and $Text -notmatch '(?i)\b(New-KitWindow|Set-KitLayout)\b') {
+        # The helper program writes the layout of tagged panels into .xaml files (GuiTest Expand-XamlLayout);
+        # a window written inside the script only lines up when the helpers load it.
+        if ($Text -match $tagged) {
+            $at = [regex]::Match($Text, 'XamlReader')
+            return "line $(LineAt $Text $at.Index): the window inside this script marks panels with Tag=`"row`", `"actions`" or `"form`", but the script loads it with XamlReader itself, so nothing lines them up: move the window into MainWindow.xaml (the helper program then writes the layout into it), or load it with New-KitWindow"
+        }
+    }
+    if ($Path -match '(?i)\.xaml$') {
+        if ($Path -match '(?i)^styles/kit/') { return }
+        $xaml = $Text
+    } elseif ($Path -match '(?i)\.ps[md]?1$' -and $Text -match 'XamlReader') {
+        $h = [regex]::Match($Text, '(?s)@[''"]\s*\r?\n(\s*<(Window|UserControl|Page|Grid|StackPanel|DockPanel)\b.*?)\r?\n[''"]@')
+        if ($h.Success) { $xaml = $h.Groups[1].Value; $offset = $h.Groups[1].Index }
+    }
+    if (-not $xaml -or $xaml -notmatch '<(Window|UserControl|Page)\b|xmlns=') { return }
+    Add-Type -AssemblyName System.Xml.Linq
+    try { $doc = [System.Xml.Linq.XDocument]::Parse($xaml, [System.Xml.Linq.LoadOptions]::SetLineInfo) } catch { return }   # the file check reports broken XML
+    $first = LineAt $Text $offset
+    $attr = { param($el, [string]$name) $a = @($el.Attributes() | Where-Object { $_.Name.LocalName -eq $name }); if ($a.Count) { $a[0].Value } else { '' } }
+    $label = { param($el) $n = & $attr $el 'Name'; if ($n) { "the $($el.Name.LocalName) $n" } else { "a $($el.Name.LocalName)" } }
+    $at = { param($el) $first + ([System.Xml.IXmlLineInfo]$el).LineNumber - 1 }
+    $out = New-Object System.Collections.Generic.List[string]
+    $heights = New-Object System.Collections.Generic.List[object]
+    $widths = New-Object System.Collections.Generic.List[object]
+    $placed = $false
+    foreach ($el in $doc.Descendants()) {
+        if ($out.Count -ge 4) { break }
+        $kind = $el.Name.LocalName
+        $parent = $el.Parent
+        $pk = if ($parent) { $parent.Name.LocalName } else { '' }
+        if ($script:XamlControls -contains $kind) {
+            $width = & $attr $el 'Width'
+            if ($width -match '^\d' -and -not (& $attr $el 'HorizontalAlignment') -and $parent) {
+                # Where a fixed-width control is given the whole width, WPF centres it.
+                $wide = switch ($pk) {
+                    'StackPanel' { (& $attr $parent 'Orientation') -ne 'Horizontal' -and (& $attr $parent 'Tag') -notin 'row', 'actions' }
+                    'DockPanel' { (& $attr $el 'DockPanel.Dock') -notin 'Left', 'Right' }
+                    'Grid' {
+                        $cols = @($parent.Elements() | Where-Object { $_.Name.LocalName -eq 'Grid.ColumnDefinitions' } | ForEach-Object { $_.Elements() })
+                        $ci = 0; [void][int]::TryParse((& $attr $el 'Grid.Column'), [ref]$ci)
+                        (& $attr $parent 'Tag') -ne 'form' -and (-not $cols.Count -or ($ci -lt $cols.Count -and (& $attr $cols[$ci] 'Width') -notmatch '^(Auto|\d+(\.\d+)?)$'))
+                    }
+                    { $_ -in 'Border', 'ScrollViewer', 'GroupBox', 'Expander', 'TabItem', 'Window' } { $true }
+                    default { $false }
+                }
+                if ($wide) { $out.Add("line $(& $at $el): $(& $label $el) has a Width but no HorizontalAlignment, so it ends up centred while the rest starts at the left: add HorizontalAlignment=`"Left`", or put it in a StackPanel Tag=`"row`"") }
+            }
+            if (-not $placed) {
+                $m = (& $attr $el 'Margin') -split ','
+                $big = $m.Count -ge 2 -and ([double]::TryParse($m[0], [ref]$null)) -and ([double]$m[0] -ge 40 -or [double]$m[1] -ge 40)
+                if ($pk -eq 'Canvas' -or ($big -and (& $attr $el 'HorizontalAlignment') -eq 'Left' -and (& $attr $el 'VerticalAlignment') -eq 'Top')) {
+                    $placed = $true
+                    $out.Add("line $(& $at $el): $(& $label $el) is placed by coordinates ($(if ($pk -eq 'Canvas') { 'on a Canvas' } else { 'a large Margin with Left/Top' })), so nothing lines up or adapts to the window size: lay the window out with Grid, DockPanel and StackPanel Tag=`"row`" / Tag=`"actions`" / Grid Tag=`"form`"")
+                }
+            }
+        }
+        if ($kind -in 'Button', 'TextBox', 'PasswordBox', 'ComboBox', 'DatePicker' -and (& $attr $el 'Height') -match '^\d' -and -not ($kind -eq 'TextBox' -and ((& $attr $el 'AcceptsReturn') -eq 'True' -or (& $attr $el 'TextWrapping') -eq 'Wrap'))) {
+            $heights.Add(@((& $at $el), (& $label $el), (& $attr $el 'Height')))
+        }
+        if ($kind -in 'TextBox', 'PasswordBox', 'ComboBox', 'DatePicker' -and (& $attr $el 'Width') -match '^\d+(\.\d+)?$' -and $script:FieldWidths -notcontains [double](& $attr $el 'Width')) {
+            $widths.Add(@((& $at $el), (& $label $el), (& $attr $el 'Width')))
+        }
+    }
+    # Sizes, once each: fields and buttons in one height, field widths from one scale.
+    if ($heights.Count -and $out.Count -lt 4) {
+        $h = $heights[0]
+        $out.Add("line $($h[0]): $($h[1]) has its own Height ($($h[2]))$(if ($heights.Count -gt 1) { " and so do $($heights.Count - 1) more" }): leave it out so buttons, fields and lists share one height (32)")
+    }
+    if ($widths.Count -and $out.Count -lt 4) {
+        $w = $widths[0]
+        $out.Add("line $($w[0]): field widths $(@($widths | ForEach-Object { $_[2] } | Select-Object -Unique) -join ', ') are off the width scale: use 120 (a number, a date, a short choice), 240 (a name, a search, a choice) or 360 (long text), or let the fields fill a Grid Tag=`"form`" column, so fields of the same kind are the same width")
+    }
+    @($out)
+}
+
 function Get-NewFileIssues {
     <# Problems a change added: those in the new text that the old text did not have (compared
        without line numbers, so an existing problem that only moved is not reported again). #>
@@ -1317,7 +1405,8 @@ function Get-NewFileIssues {
             @(if ($Path -match '(?i)\.prisma$') { Test-PrismaEnv $text.Replace("`r`n", "`n") $Path $ProjectRoot }) +
             @(Find-UndefinedCssVars $text.Replace("`r`n", "`n") $Path $ProjectRoot) +
             @(Find-DataGlobalIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
-            @(Find-PsGuiIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) | Where-Object { $_ }
+            @(Find-PsGuiIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
+            @(Find-XamlLayoutIssues $Path $text.Replace("`r`n", "`n") $ProjectRoot) | Where-Object { $_ }
     }
     # The fixed rules; when they find nothing, the language's own syntax check (node, python, when
     # installed) for what they cannot see (one problem is not reported twice).
@@ -1337,4 +1426,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Find-PsGuiIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences

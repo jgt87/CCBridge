@@ -147,7 +147,9 @@ $verdict
 Manual check still needed: open https://m365.cloud.microsoft/chat, paste a very long
 text (e.g. 20,000 characters) and note where Copilot cuts it off or refuses it.
 "@
-$report = "CCBridge probe - $(Get-Date -Format s) - $env:COMPUTERNAME`r`n$table`r`n$footer"
+# The report is meant to be passed on: no account, computer or profile folder in it (Log Protect-LogText).
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\Log.psm1')
+$report = Protect-LogText "CCBridge probe - $(Get-Date -Format s)`r`n$table`r`n$footer"
 $report
 [IO.File]::WriteAllText($ReportPath, $report, (New-Object Text.UTF8Encoding($false)))
 Write-Host "Report written to $ReportPath"

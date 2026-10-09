@@ -127,10 +127,11 @@ function Get-TokenValues([string]$Css) {
 }
 
 function Get-WpfThemeText {
-    <# The kit's WPF theme (templates/ui-kit/wpf/KitTheme.template.xaml) with the project's colours,
-       font and corners from its tokens.css. #>
-    param([Parameter(Mandatory)][string]$AppRoot, [AllowEmptyString()][string]$TokensCss)
-    $t = [IO.File]::ReadAllText((Join-Path $AppRoot 'templates\ui-kit\wpf\KitTheme.template.xaml'))
+    <# A kit theme for window apps with the project's colours, font and corners from its tokens.css:
+       the WPF theme (templates/ui-kit/wpf/KitTheme.template.xaml), or with -Template the Windows Forms
+       one (winforms\KitTheme.template.ps1). #>
+    param([Parameter(Mandatory)][string]$AppRoot, [AllowEmptyString()][string]$TokensCss, [string]$Template = 'wpf\KitTheme.template.xaml')
+    $t = [IO.File]::ReadAllText((Join-Path $AppRoot ('templates\ui-kit\' + $Template)))
     $tok = Get-TokenValues $TokensCss
     $fallback = @{ bg = '#f5f5f6'; surface = '#ffffff'; 'surface-2' = '#edeeee'; text = '#000000'; 'text-muted' = '#5a5b5e'; border = '#d6d7d9'; 'border-strong' = '#5a5b5e'; accent = '#10069f'; 'accent-hover' = '#0e0587'; 'accent-soft' = '#e5f6fc'; 'on-accent' = '#ffffff'; ok = '#187623'; warn = '#a63b17'; error = '#c50e16'
         'chart-1' = '#10069f'; 'chart-2' = '#0089b7'; 'chart-3' = '#119d97'; 'chart-4' = '#d04a1e'; 'chart-5' = '#df1995'; 'chart-6' = '#8021a7' }
@@ -141,19 +142,21 @@ function Get-WpfThemeText {
     }
     $font = ("$($tok['font'])" -split ',')[0].Trim().Trim('"', "'")
     if (-not $font -or $font -match '^(system-ui|sans-serif)$') { $font = 'Arial' }
-    $t = $t.Replace('{{font}}', [Security.SecurityElement]::Escape($font))
+    $t = $t.Replace('{{font}}', $(if ($Template -match '\.ps1$') { $font.Replace("'", "''") } else { [Security.SecurityElement]::Escape($font) }))
     $px = { param($n, $d) $x = [regex]::Match("$($tok[$n])", '^(\d+(?:\.\d+)?)px$'); if ($x.Success) { $x.Groups[1].Value } else { $d } }
     $t.Replace('{{radius-lg}}', (& $px 'radius-lg' '10')).Replace('{{radius}}', (& $px 'radius' '6'))
 }
 
-function Test-PsGuiProject([string]$ProjectRoot) {
-    <# The project has a PowerShell window app: a script that loads WPF or Windows Forms, or a .xaml file. #>
+function Test-PsGuiProject([string]$ProjectRoot, [switch]$Forms) {
+    <# The project has a PowerShell window app: a script that loads WPF or Windows Forms, or a .xaml file
+       (-Forms: a script that uses Windows Forms). #>
     $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include *.ps1, *.psm1, *.xaml -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -notmatch '\\(node_modules|\.git|\.streamhub|Source|styles\\kit)\\' -and $_.Name -notmatch '(?i)\.Tests\.ps1$' -and $_.Length -lt 1MB } | Select-Object -First 200)
     foreach ($f in $files) {
-        if ($f.Extension -ieq '.xaml') { return $true }
+        if ($f.Extension -ieq '.xaml') { if ($Forms) { continue } else { return $true } }
         $t = try { [IO.File]::ReadAllText($f.FullName) } catch { '' }
-        if ($t -match '(?i)PresentationFramework|System\.Windows\.Forms|XamlReader') { return $true }
+        if ($Forms) { if ($t -match '(?i)System\.Windows\.Forms') { return $true } else { continue } }
+        if ($t -match '(?i)PresentationFramework|System\.Windows\.Forms|XamlReader|\bShow-KitWindow\b|KitWpf\.ps1') { return $true }
     }
     $false
 }
@@ -162,18 +165,30 @@ function Update-KitWpf {
     <# In a project with a PowerShell window app: styles/kit/wpf/KitTheme.xaml with the project's colours
        (written again when tokens.css or the kit's template changes; a file without the helper program's
        note is the project's own and stays). Returns the paths written. #>
-    param([string]$ProjectRoot, [string]$AppRoot)
+    param([string]$ProjectRoot, [string]$AppRoot, [switch]$NoTheme)
     if (-not (Test-PsGuiProject $ProjectRoot)) { return @() }
     $tokens = Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css')
     # The project's own colours, else those of the colour preset in Settings.
     $css = if (Test-Path -LiteralPath $tokens) { [IO.File]::ReadAllText($tokens) } else { [IO.File]::ReadAllText((Join-Path $AppRoot $(if ((Get-UiKitColors $AppRoot) -eq 'blue') { 'templates\ui-kit\tokens.css' } else { 'templates\ui-kit\tokens-neutral.css' }))) }
-    $new = Get-WpfThemeText $AppRoot $css
-    $dst = Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\wpf\KitTheme.xaml')
-    $old = if (Test-Path -LiteralPath $dst) { [IO.File]::ReadAllText($dst) } else { $null }
-    if ($old -eq $new -or ($null -ne $old -and $old -notmatch 'written by the helper program')) { return @() }
-    $null = New-Item -ItemType Directory -Force -Path (Split-Path $dst)
-    [IO.File]::WriteAllText($dst, $new, (New-Object Text.UTF8Encoding($false)))
-    @("$(Get-UiKitFolder)/wpf/KitTheme.xaml")
+    $written = New-Object System.Collections.Generic.List[string]
+    # The helpers always (KitWpf.ps1, copied as it is); the theme with the UI kit on (-NoTheme: off):
+    # WPF, and the Windows Forms version when a script uses Windows Forms.
+    $themes = @(@{ template = 'wpf\KitWpf.ps1'; rel = 'wpf/KitWpf.ps1'; copy = $true })
+    if (-not $NoTheme) {
+        $themes += @{ template = 'wpf\KitTheme.template.xaml'; rel = 'wpf/KitTheme.xaml' }
+        if (Test-PsGuiProject $ProjectRoot -Forms) { $themes += @{ template = 'winforms\KitTheme.template.ps1'; rel = 'winforms/KitTheme.ps1' } }
+    }
+    foreach ($th in $themes) {
+        $new = if ($th.copy) { [IO.File]::ReadAllText((Join-Path $AppRoot ('templates\ui-kit\' + $th.template))) } else { Get-WpfThemeText $AppRoot $css -Template $th.template }
+        $dst = Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\' + $th.rel.Replace('/', '\'))
+        $old = if (Test-Path -LiteralPath $dst) { [IO.File]::ReadAllText($dst) } else { $null }
+        if ($old -eq $new -or ($null -ne $old -and $old -notmatch 'written by the(\s|\r?\n\s*)helper program')) { continue }
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path $dst)
+        # A PowerShell file with a BOM (its text may hold non-ASCII once the font name does).
+        [IO.File]::WriteAllText($dst, $new, (New-Object Text.UTF8Encoding($th.rel -match '\.ps1$')))
+        $written.Add("$(Get-UiKitFolder)/$($th.rel)")
+    }
+    $written.ToArray()
 }
 
 function Get-UiKitParts([string]$AppRoot) {
@@ -209,7 +224,7 @@ $script:Companions = @{
 }
 # The kit's revision: raise it when the kit changes in a way projects should get (new classes, chart
 # options the rules name). Update-UiKitCatalog brings an older project catalogue up to date.
-$script:KitRevision = 8
+$script:KitRevision = 9
 $script:KitCssHeader = '/* Generated by the helper program from the UI kit (.streamhub/ui-kit/kit.css): the rules of the kit classes this project uses, nothing else.'
 
 function Get-UiKitFiles([string]$AppRoot) {

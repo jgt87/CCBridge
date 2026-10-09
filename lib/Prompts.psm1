@@ -303,6 +303,19 @@ function Get-PromptPart {
             if (-not (Test-UiKitPart 'react' $AppRoot)) { $text = $text -replace ' In a React project use styles/kit/react/ instead:[^\n]*', '' -replace '; React: Chart from styles/kit/react/', '' -replace ' React: Icon from styles/kit/react/\.', '' -replace ' React: useFileData from styles/kit/react/\.', '' -replace ' and React parts come the same way', ' come the same way' -replace ', or an import from styles/kit/react/', '' }
             return $text
         }
+        '^rules:psgui$' {
+            $g = Read-PromptPart $AppRoot 'rules\psgui.md'
+            # Without the UI kit: the Windows look (the helpers stay).
+            if (-not (Test-UiKitOn $AppRoot)) {
+                $g = (@($g.Split("`n") | Where-Object { $_ -notlike '- The look comes from the UI kit*' }) -join "`n")
+            }
+            # Scripts limited by the computer's policy: a WPF app cannot run in this project folder.
+            $lm = if ($Context -and $Context.Root) { Get-ScriptLanguageMode $Context.Root } else { '' }
+            if ($lm -eq 'ConstrainedLanguage') {
+                $g = $g.TrimEnd() + "`n- This computer runs scripts from this project folder in PowerShell's Constrained Language Mode (a company policy): Add-Type and XamlReader are blocked, so a WPF or Windows Forms window app cannot run here. Tell the person so before building one, and offer a web page with the UI kit instead (it opens in Edge from the same folder)."
+            }
+            return $g
+        }
         '^rules:design$' {
             # Light only (setting uiKitDarkMode): no dark mode unless the person asks for one.
             $d = Read-PromptPart $AppRoot 'rules\design.md'
