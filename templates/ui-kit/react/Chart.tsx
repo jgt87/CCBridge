@@ -25,8 +25,11 @@ declare global {
 
 /**
  * One chart. data follows kit-charts.js: bar/line/area { labels, series: [{ name, values }],
- * stacked (bar) }, ring { items: [{ label, value }], center, legend: "values" },
- * barlist { items: [{ label, value }], limit }, gauge { value, max, label },
+ * stacked (bar); a bar series with type: "line" (axis: "right") is a line over the bars },
+ * ring { items: [{ label, value, color }], center, legend: "values" },
+ * barlist { items: [{ label, value, color }], limit, share, total, base: "first" (a funnel) },
+ * where color is a meaning (ok, warn, error, muted, accent) or chart-1 ... chart-6,
+ * gauge { value, max, label },
  * heatmap { rows, cols, values }, sparkline { values }. For filtering: data.selectable,
  * data.selected (labels), data.selectedSeries (series names) and onSelect.
  * label describes the chart for screen readers.

@@ -320,3 +320,19 @@ describe("DataTools.load", () => {
     }
   });
 });
+
+describe("KitData.toCsv", () => {
+  it("writes a header row and quotes values with commas, quotes or line breaks", () => {
+    const rows = [
+      { name: "Ann", team: "Sales, North", note: 'Said "yes"', score: 7 },
+      { name: "Bob", team: "Support", note: "Line one\nline two", score: null },
+    ];
+    expect(KitData.toCsv(rows, [{ key: "name", label: "Name" }, { key: "team", label: "Team" }, { key: "note", label: "Note" }, "score"])).toBe(
+      'Name,Team,Note,score\r\nAnn,"Sales, North","Said ""yes""",7\r\nBob,Support,"Line one\nline two",',
+    );
+  });
+  it("takes the first row's keys when no columns are given, and gives only the header for no rows", () => {
+    expect(KitData.toCsv([{ a: 1, b: "x" }])).toBe("a,b\r\n1,x");
+    expect(KitData.toCsv([], ["a", "b"])).toBe("a,b");
+  });
+});

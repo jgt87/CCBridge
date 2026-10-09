@@ -184,6 +184,18 @@ Describe 'Find-UiSlop' {
         @(Find-KitBypass 'src/App.tsx' '' '<button className="kit-tab" onClick={() => go()}>Go</button><Button>Library part</Button>').Count | Should Be 0
         @(Find-KitBypass 'index.html' '<button>Old</button>' "<button>Old</button>`n<p>New text</p>").Count | Should Be 0   # already there
         @(Find-QualityIssues 'index.html' '' '<button>Go</button>').Count | Should Be 0   # only with the kit
+    }
+    It 'reports plain elements a script writes as markup, but not comparisons or classes put together from variables' {
+        $r = @(Find-KitBypass 'js/app.js' '' "list.innerHTML = '<button type=`"button`">Go</button>';`nhost.innerHTML = '<table><tr><td>1</td></tr></table>';")
+        $r.Count | Should Be 2
+        ($r -join ' ') | Should Match 'kit-btn.*kit-table'
+        @(Find-KitBypass 'js/app.js' '' "el.innerHTML = '<button class=`"kit-btn kit-btn--sm`" type=`"button`">Go</button>';").Count | Should Be 0
+        @(Find-KitBypass 'js/app.js' '' "for (var i = 0; i<input.length; i++) { if (a > b) go(); }").Count | Should Be 0
+        @(Find-KitBypass 'js/app.js' '' "if (n < select.size && m > 2) go();").Count | Should Be 0
+        @(Find-KitBypass 'js/app.js' '' "el.innerHTML = '<button class=`"' + cls + '`">Go</button>';").Count | Should Be 0
+        @(Find-KitBypass 'js/app.js' '' 'el.innerHTML = `<button class="${cls}">Go</button>`;').Count | Should Be 0
+        @(Find-KitBypass 'js/app.js' '' "el.innerHTML = [`n  '<div>',`n  '<select id=`"s`"></select>'`n].join('');").Count | Should Be 1
+        @(Find-KitBypass 'styles/kit/kit.js' '' "x.innerHTML = '<button>Go</button>';").Count | Should Be 0
         @(Find-QualityIssues 'index.html' '' '<button>Go</button>' -UseKit) -join ' ' | Should Match 'kit-btn'
     }
     It 'reports fonts, font sizes, shadows and corners written into styles instead of the kit''s tokens' {
@@ -231,6 +243,32 @@ Describe 'The kit charts' {
         foreach ($c in '.kit-barlist__row', '.kit-barlist__fill', '.kit-chart__legend--values', '.kit-chart__bar.is-off', '.kit-chart--ring', '.kit-chips', '.kit-chip', '.kit-panel--sticky', '.kit-grid--charts', '.kit-grid__wide', '.kit-header--band a') { $css.Contains($c) | Should Be $true }
         [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\react\Chart.tsx')) | Should Match 'onSelect'
     }
+    It 'colour bar list rows and ring parts by meaning, show shares, draw funnels and lines over bars' {
+        $js = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-charts.js'))
+        foreach ($w in 'function tone(', 'ok: "--kit-ok"', 'warn: "--kit-warn"', 'error: "--kit-error"', 'muted: "--kit-text-muted"', 'data.share', 'data.base === "first"', 'Number(data.total)', 'kit-barlist kit-barlist--share', 'tone(it.color', 'sr.type === "line"', 'sr.axis === "right"', 'opts.colors') { $js.Contains($w) | Should Be $true }
+        # Only kit tokens: a hard-coded colour in an item falls back to the series colour.
+        $js.Contains('/^var\(--kit-[\w-]+\)$/') | Should Be $true
+        @($js.ToCharArray() | Where-Object { [int]$_ -gt 127 }).Count | Should Be 0
+        $css = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
+        foreach ($c in '.kit-barlist--share .kit-barlist__row', '.kit-barlist__value b', '.kit-progress--ok .kit-progress__bar', '.kit-progress--warn .kit-progress__bar', '.kit-progress--error .kit-progress__bar', '.kit-figure__bar', '.kit-select.is-active', '.kit-header--band .kit-btn--ghost') { $css.Contains($c) | Should Be $true }
+        $css | Should Match '\.kit-panel__title \{ font-size: var\(--kit-text-md\)'
+        $ex = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-examples.html'))
+        foreach ($w in '"share":true', '"base":"first"', '"color":"ok"', '"color":"warn"', '"color":"error"', '"type":"line","axis":"right"', 'kit-progress kit-progress--ok kit-figure__bar', 'share: true') { $ex.Contains($w) | Should Be $true }
+        [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\react\Chart.tsx')) | Should Match 'base: "first"'
+    }
+    It 'leave the choice of chart to Copilot and give each choice its kit part and colours by meaning' {
+        $rule = [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md'))
+        $rule | Should Match '- Your choice, the kit''s look: which data to show, and as what, is yours to decide; the kit sets no limits on it'
+        $rule | Should Match '\(vertical, horizontal or stacked bars'
+        $rule | Should Match '- Dashboards: what a dashboard shows is your choice'
+        $rule | Should Match 'bar "horizontal": true'
+        $rule | Should Match 'Whatever you choose must look like the kit: draw it with the kit part for that form'
+        $rule | Should Not Match 'never a vertical bar chart'
+        $rule | Should Match '"base": "first"'
+        $rule | Should Match 'a bar series with "type": "line" \(and "axis": "right"'
+        $rule | Should Match '"color": "ok", "warn", "error", "muted" or "accent"'
+        $rule | Should Match 'kit-progress kit-figure__bar'
+    }
     It 'sort and page a table with kit.js, shown in the examples with an empty state' {
         $js = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.js'))
         foreach ($w in 'function setupTable', 'data-kit-sort', 'data-kit-pages', '"kit:sort"', '"kit:page"', 'data-kit-empty', 'kit-table__sort', 'kit-pager') { $js.Contains($w) | Should Be $true }
@@ -241,6 +279,26 @@ Describe 'The kit charts' {
         $ex | Should Match '<tr data-kit-empty><td colspan="\d+"><div class="kit-empty">'
         $rule = [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md'))
         foreach ($w in 'data-kit-sort', 'data-kit-pages', 'Never an emoji as an icon', 'var\(--kit-radius\)', 'empty state') { $rule | Should Match $w }
+    }
+    It 'leave thousands of rows to the page (data-kit-rows="external") and scroll a long table under its header' {
+        $js = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.js'))
+        foreach ($w in 'data-kit-rows', '"external"', 'data-kit-total', 'data-kit-page', 'attributeFilter: ["data-kit-total", "data-kit-page"]', 'key: th.getAttribute("data-key")', 'start: page * size') { $js.Contains($w) | Should Be $true }
+        $css = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
+        $css.Contains('.kit-table-wrap--scroll .kit-table thead th { position: sticky;') | Should Be $true
+        $ex = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-examples.html'))
+        $ex | Should Match '(?s)<!-- kit-part:interactive -->.*<section id="long-table">.*<!-- /kit-part:interactive -->'
+        $ex | Should Match '<table class="kit-table" id="kit-long" data-kit-sort data-kit-pages="50" data-kit-rows="external">'
+        $ex | Should Match 'KitData\.toCsv\(rows'
+        $rule = [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md'))
+        $rule | Should Match 'data-kit-rows="external" and data-key="FIELD"'
+        $rule | Should Match 'kit-table-wrap--scroll'
+        $rule | Should Match 'KitData\.download\("NAME\.csv", KitData\.toCsv'
+    }
+    It 'switch light and dark with data-kit-theme, following the computer until clicked' {
+        $js = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.js'))
+        foreach ($w in 'function setupTheme', '[data-kit-theme]', 'prefers-color-scheme: dark', '"kit:theme"', 'try { localStorage.setItem', 'try { return localStorage.getItem') { $js.Contains($w) | Should Be $true }
+        [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-examples.html')) | Should Match '(?s)<header class="kit-header kit-header--band">.*data-kit-theme.*</header>'
+        [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md')) | Should Match 'data-kit-theme.*never write your own'
     }
     It 'have a dashboard example with invented data that uses the selectable charts' {
         $ex = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-examples.html'))
@@ -257,6 +315,7 @@ Describe 'The kit charts' {
         $css = [IO.File]::ReadAllText((Join-Path $p 'styles\kit\kit.css'))
         $css | Should Match '\.kit-barlist__row \{'
         $css | Should Match '\.kit-chart__legend--values'
+        $css | Should Match '\.kit-barlist--share \.kit-barlist__row'
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
@@ -334,6 +393,33 @@ Describe 'Update-UiKitCatalog' {
         Get-KitCatalogRevision $cat | Should BeGreaterThan 1
         @(Update-UiKitCatalog $p $root).Count | Should Be 0
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    It 'makes a whole unchanged copy of the old catalogue''s kit.css generated again, and keeps one the project changed' {
+        foreach ($own in $false, $true) {
+            $p = Join-Path $env:TEMP ('ccb-kitold-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+            $null = Install-UiKit $p $root
+            $cat = Join-Path $p '.streamhub\ui-kit'
+            [IO.File]::WriteAllText((Join-Path $p 'index.html'), '<body class="kit-page"><div class="kit-panel"><h2 class="kit-panel__title">Totals</h2></div></body>')
+            # An older project: the whole old kit.css copied into styles/kit (no Generated line).
+            $oldCss = "/*`n  UI kit components (an older revision).`n*/`n.kit-panel__title { font-weight: 600; margin: 0; }`n.kit-old { color: var(--kit-text); }`n"
+            [IO.File]::WriteAllText((Join-Path $cat 'kit.css'), $oldCss)
+            [IO.File]::WriteAllText((Join-Path $cat 'VERSION.txt'), 'UI kit from StreamHub v0.1.109, copied 2026-10-08.')
+            $copy = Join-Path $p 'styles\kit\kit.css'
+            [IO.File]::WriteAllText($copy, $(if ($own) { $oldCss + '.mine { margin: 0; }' } else { $oldCss }))
+            $r = @(Update-UiKitCatalog $p $root)
+            $null = Update-UiKitProject $p $root
+            $css = [IO.File]::ReadAllText($copy)
+            if ($own) {
+                $r -contains 'styles/kit/kit.css' | Should Be $false
+                $css | Should Match '\.mine'
+            } else {
+                $r -contains 'styles/kit/kit.css' | Should Be $true
+                $css | Should Match '^/\* Generated by the helper program from the UI kit'
+                $css | Should Match '\.kit-panel__title \{ font-size: var\(--kit-text-md\)'
+                $css | Should Not Match '\.kit-old'
+            }
+            Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
     It 'does nothing for a project without a catalogue' {
         $p = Join-Path $env:TEMP ('ccb-kitn-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
@@ -418,7 +504,7 @@ Describe 'UI kit parts switched off (Settings > UI kit)' {
     It 'leaves out the dashboard line without the charts, and lets a chart library take the kit''s colours' {
         Mock -ModuleName Prompts Test-UiKitPart { $Name -ne 'charts' }
         $t = & (Get-Module Prompts) { param($r) Get-PromptPart $r 'rules:uikit' } $root
-        $t | Should Not Match 'Charts:|Dashboards:'
+        $t | Should Not Match 'Charts:|Dashboards:|Your choice, the kit'
         $t | Should Match 'A chart library gets these colours too'
         $t | Should Match 'kit-header--band'
     }
@@ -427,7 +513,15 @@ Describe 'UI kit parts switched off (Settings > UI kit)' {
         $t = & (Get-Module Prompts) { param($r) Get-PromptPart $r 'rules:uikit' } $root
         $t | Should Not Match 'Interactive parts'
         $t | Should Not Match 'styles/kit/react'
+        $t | Should Not Match 'data-kit-theme'
         $t | Should Match 'Charts:'
+        $t | Should Match 'Your choice, the kit'
+    }
+    It 'leaves out the export line without the file readers' {
+        Mock -ModuleName Prompts Test-UiKitPart { $Name -ne 'data' }
+        $t = & (Get-Module Prompts) { param($r) Get-PromptPart $r 'rules:uikit' } $root
+        $t | Should Not Match 'Export:|KitData'
+        $t | Should Match 'data-kit-theme'
     }
     It 'sends the design rules only while they are on' {
         Mock -ModuleName Prompts Test-UiKitPart { $Name -ne 'designRules' }

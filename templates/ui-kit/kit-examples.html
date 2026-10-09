@@ -11,7 +11,9 @@
 <body class="kit-page">
 <!-- kit-header kit-header--band: the gradient bar at the top of every app and dashboard page; its
      contents use kit-container, so they line up with the page content below. A plain kit-header
-     (no band) only for a page that sits inside another page. -->
+     (no band) only for a page that sits inside another page. The light/dark switch is a kit-btn
+     kit-btn--ghost kit-btn--icon with data-kit-theme (kit.js): it follows the computer's setting until
+     clicked, keeps the choice and sets its own icon and label; event kit:theme. -->
 <header class="kit-header kit-header--band">
   <div class="kit-container">
     <p class="kit-header__title">Example app</p>
@@ -19,6 +21,7 @@
       <a class="kit-link" href="#buttons">Components</a>
       <a class="kit-link" href="#charts">Charts</a>
       <a class="kit-link" href="#dashboard">Dashboard</a>
+      <!-- kit-part:interactive --><button class="kit-btn kit-btn--ghost kit-btn--icon" type="button" data-kit-theme aria-label="Switch the theme"><span data-kit-icon="moon" aria-hidden="true"></span></button><!-- /kit-part:interactive -->
     </nav>
   </div>
 </header>
@@ -150,10 +153,13 @@
   <div class="kit-split">
     <div class="kit-panel">
       <div class="kit-panel__head"><h3 class="kit-panel__title">Overview</h3><button class="kit-btn kit-btn--sm" type="button">Export</button></div>
-      <!-- kit-figures: key numbers as compact label + value, not big hero numbers -->
+      <!-- kit-figures: key numbers as compact label + value, not big hero numbers; a share as a bar
+           under it: kit-progress kit-figure__bar, with --ok, --warn or --error for what it means -->
       <div class="kit-figures">
         <div><div class="kit-figure__label">Items</div><div class="kit-figure__value">1,284</div><div class="kit-figure__note">this month</div></div>
         <div><div class="kit-figure__label">Open</div><div class="kit-figure__value">37</div><div class="kit-figure__note">12 overdue</div></div>
+        <div><div class="kit-figure__label">Done on time</div><div class="kit-figure__value">86%</div><div class="kit-figure__note">1,104 of 1,284</div>
+          <div class="kit-progress kit-progress--ok kit-figure__bar" role="progressbar" aria-label="Done on time" aria-valuemin="0" aria-valuemax="100" aria-valuenow="86"><div class="kit-progress__bar" style="width: 86%"></div></div></div>
         <div><div class="kit-figure__label">Average time</div><div class="kit-figure__value">2.4 days</div></div>
       </div>
     </div>
@@ -278,6 +284,26 @@
   </div>
 </section>
 
+<!-- Many rows (thousands): kit-table with data-kit-sort, data-kit-pages="N" and data-kit-rows="external"
+     in a kit-table-wrap kit-table-wrap--scroll (the header row stays in view). The page keeps the rows in
+     its data, sorts them on kit:sort (detail.key is the header's data-key), writes only the rows of the
+     page shown (kit:page detail.start to detail.end) and sets data-kit-total (and data-kit-page="1" after
+     a filter change). Export what is shown with KitData.toCsv and KitData.download (kit-data.js). -->
+<section id="long-table">
+  <h2 class="kit-h2">A long table</h2>
+  <div class="kit-toolbar">
+    <input class="kit-input" id="kit-long-search" type="search" aria-label="Search the people" placeholder="Search">
+    <span class="kit-toolbar__spacer"></span>
+    <!-- kit-part:data --><button class="kit-btn kit-btn--sm" type="button" id="kit-long-export"><span data-kit-icon="download" aria-hidden="true"></span>Export as CSV</button><!-- /kit-part:data -->
+  </div>
+  <div class="kit-table-wrap kit-table-wrap--scroll" style="--kit-table-height: 320px">
+    <table class="kit-table" id="kit-long" data-kit-sort data-kit-pages="50" data-kit-rows="external">
+      <thead><tr><th data-key="name">Name</th><th data-key="team">Team</th><th data-key="status">Status</th><th class="kit-num" data-key="score">Score</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
 <!-- /kit-part:interactive -->
 
 <!-- kit-part:icons -->
@@ -304,9 +330,47 @@
      KIND: bar, line, area, ring, gauge, heatmap, sparkline, barlist. From code: KitCharts.bar(element, data).
      Series take --kit-chart-1, -2 ... in order. Options: bar "stacked": true; ring "legend": "values";
      barlist "limit": N; "selectable": true with "selected" / "selectedSeries" for filtering (event
-     kit:select, see the dashboard below). -->
+     kit:select, see the dashboard below).
+     Which data to show and as what is the page's choice, without limits; whatever it is, it is drawn with
+     its kit part. For example: categories as a
+     barlist ("share": true) or bar ("horizontal": true for long names); dates as bar, line or area;
+     counts with a running total as bar with a series "type": "line", "axis": "right"; parts of a whole
+     as ring ("legend": "values"); the steps of a process as barlist "base": "first" (a funnel).
+     Colours by meaning: "color" on a barlist or ring item (ok, warn, error, muted, accent,
+     chart-1 ... chart-6), next to a label that says the same. -->
 <section id="charts">
   <h2 class="kit-h2">Charts</h2>
+  <div class="kit-grid kit-grid--charts">
+    <div class="kit-panel">
+      <div class="kit-panel__head"><h3 class="kit-panel__title">People per country</h3><span class="kit-help">largest first</span></div>
+      <div class="kit-chart" data-kit-chart="barlist" aria-label="People per country"
+        data-kit-data='{"share":true,"limit":5,"items":[{"label":"Country A","value":2436},{"label":"Country B","value":826},{"label":"Country C","value":519},{"label":"Country D","value":292},{"label":"Country E","value":220},{"label":"Country F","value":196},{"label":"Country G","value":53}]}'></div>
+    </div>
+    <div class="kit-panel">
+      <div class="kit-panel__head"><h3 class="kit-panel__title">From request to access</h3><span class="kit-help">share of all requests</span></div>
+      <div class="kit-chart" data-kit-chart="barlist" aria-label="Requests at each step, from request to access"
+        data-kit-data='{"share":true,"base":"first","items":[{"label":"Requested","value":4620},{"label":"Read the policy","value":4380},{"label":"Completed the training","value":3977},{"label":"Approved","value":3510},{"label":"Access given","value":3290,"color":"ok"}]}'></div>
+    </div>
+    <div class="kit-panel">
+      <div class="kit-panel__head"><h3 class="kit-panel__title">Still waiting: what is missing</h3><span class="kit-badge">688 people</span></div>
+      <div class="kit-chart" data-kit-chart="barlist" aria-label="People still waiting, by what is missing"
+        data-kit-data='{"share":true,"total":688,"items":[{"label":"Policy not acknowledged","value":641,"color":"warn"},{"label":"Training overdue","value":192,"color":"error"},{"label":"Not in the group","value":485,"color":"muted"},{"label":"Ready to approve","value":6,"color":"ok"}]}'></div>
+    </div>
+    <div class="kit-panel">
+      <div class="kit-panel__head"><h3 class="kit-panel__title">Training status</h3></div>
+      <div class="kit-chart" data-kit-chart="ring" aria-label="People by training status" data-kit-height="180"
+        data-kit-data='{"legend":"values","center":"95%","items":[{"label":"Completed","value":4383,"color":"ok"},{"label":"In progress","value":120,"color":"warn"},{"label":"Overdue","value":117,"color":"error"}]}'></div>
+    </div>
+  </div>
+  <div class="kit-panel" style="margin-top: var(--kit-space-4)">
+    <div class="kit-panel__head"><h3 class="kit-panel__title">Sign-ups per week</h3><span class="kit-help">with the running total on the right</span></div>
+    <div class="kit-chart" data-kit-chart="bar" aria-label="Sign-ups per week, with the running total"
+      data-kit-data='{"labels":["W1","W2","W3","W4","W5","W6","W7","W8"],"series":[{"name":"Sign-ups","values":[42,260,31,18,64,22,15,70]},{"name":"Running total","type":"line","axis":"right","values":[42,302,333,351,415,437,452,522]}]}'></div>
+  </div>
+</section>
+<!-- More charts: bar per month, area over time, ring, gauge, sparkline and heatmap. -->
+<section id="charts-more">
+  <h2 class="kit-h2">More charts</h2>
   <div class="kit-grid">
     <div class="kit-panel">
       <div class="kit-panel__head"><h3 class="kit-panel__title">Items per month</h3></div>
@@ -339,6 +403,8 @@
      then a filter bar (kit-panel kit-panel--sticky, kit-toolbar, kit-chips with a kit-chip per
      filter), key figures (kit-figures) and a grid of chart panels (kit-grid kit-grid--charts,
      kit-grid__wide for a chart across the row), each with a title that says what to see.
+     Key figures may carry their share as a bar (kit-progress kit-figure__bar); colours by meaning go
+     on barlist and ring items ("color": "ok" ...), never as colours of your own.
      Every chart is selectable: a click on a bar, ring part, list row or legend item sends kit:select;
      the page keeps the filters and draws every chart again with data.selected, each chart counting
      the rows that pass every filter but its own. Example data (invented city bike rentals). -->
@@ -378,6 +444,10 @@
         <div class="kit-panel__head"><h3 class="kit-panel__title">Trip length</h3></div>
         <div data-dim="length" id="kit-dash-lengths" aria-label="Rentals by trip length"></div>
       </div>
+      <div class="kit-panel">
+        <div class="kit-panel__head"><h3 class="kit-panel__title">How trips ended</h3><span class="kit-help">share of rentals</span></div>
+        <div data-dim="outcome" id="kit-dash-outcomes" aria-label="Rentals by how the trip ended"></div>
+      </div>
     </div>
   </div>
 </section>
@@ -399,7 +469,46 @@
 <!-- /kit-part:data -->
 
 </div>
-<!-- kit-part:interactive --><script src="kit.js"></script><!-- /kit-part:interactive -->
+<!-- kit-part:interactive --><script src="kit.js"></script>
+<script>
+  // The long table: 5,000 invented people; the kit draws the sort buttons and the pager, the page the rows.
+  (function () {
+    var table = document.getElementById("kit-long");
+    if (!table) return;
+    var TEAMS = ["Finance", "Operations", "Research", "Sales", "Support"], STATUS = [["Active", "ok"], ["Waiting", "warn"], ["Blocked", "error"]];
+    var all = [];
+    for (var i = 1; i <= 5000; i++) all.push({ name: "Person " + i, team: TEAMS[(i * 7) % 5], status: STATUS[(i * 13) % 7 < 5 ? 0 : (i % 2) + 1][0], score: (i * 37) % 101 });
+    var rows = all, key = "name", asc = true, start = 0, end = 50;
+    var kind = function (st) { for (var j = 0; j < STATUS.length; j++) if (STATUS[j][0] === st) return STATUS[j][1]; return ""; };
+    var esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+    function sort() {
+      rows.sort(function (a, b) {
+        var c = typeof a[key] === "number" ? a[key] - b[key] : String(a[key]).localeCompare(String(b[key]), undefined, { numeric: true });
+        return asc ? c : -c;
+      });
+    }
+    function draw() {
+      table.setAttribute("data-kit-total", String(rows.length));
+      table.tBodies[0].innerHTML = rows.slice(start, end).map(function (r) {
+        return "<tr><td>" + esc(r.name) + "</td><td>" + esc(r.team) + '</td><td><span class="kit-badge kit-badge--' + kind(r.status) + '">' + esc(r.status) + '</span></td><td class="kit-num">' + r.score + "</td></tr>";
+      }).join("") || '<tr data-kit-empty><td colspan="4"><div class="kit-empty"><p class="kit-empty__title">No one found</p>Change the search.</div></td></tr>';
+    }
+    table.addEventListener("kit:sort", function (e) { key = e.detail.key; asc = e.detail.ascending; start = e.detail.start; end = e.detail.end; sort(); draw(); });
+    table.addEventListener("kit:page", function (e) { start = e.detail.start; end = e.detail.end; draw(); });
+    document.getElementById("kit-long-search").addEventListener("input", function (e) {
+      var q = e.target.value.trim().toLowerCase();
+      rows = all.filter(function (r) { return !q || (r.name + " " + r.team + " " + r.status).toLowerCase().indexOf(q) >= 0; });
+      sort(); start = 0; end = 50;
+      table.setAttribute("data-kit-page", "1");
+      draw();
+    });
+    var exp = document.getElementById("kit-long-export");
+    if (exp) exp.addEventListener("click", function () {
+      if (window.KitData) KitData.download("people-" + rows.length + ".csv", KitData.toCsv(rows, [{ key: "name", label: "Name" }, { key: "team", label: "Team" }, { key: "status", label: "Status" }, { key: "score", label: "Score" }]));
+    });
+    sort(); draw();
+  })();
+</script><!-- /kit-part:interactive -->
 <!-- kit-part:charts --><script src="kit-charts.js"></script>
 <script>
   // The dashboard example: invented rentals, filtered by clicks on the charts (kit:select).
@@ -410,14 +519,15 @@
     var DIMS = {
       type: { label: "Bike type", names: ["City bike", "E-bike", "Cargo bike"] },
       station: { label: "Station", names: ["Harbour", "Central station", "Market square", "University", "Old town", "Riverside", "Park gate", "Museum quarter", "Ferry terminal"] },
-      length: { label: "Trip length", names: ["Under 15 min", "15 to 30 min", "30 to 60 min", "Over an hour"] }
+      length: { label: "Trip length", names: ["Under 15 min", "15 to 30 min", "30 to 60 min", "Over an hour"] },
+      outcome: { label: "Trip ended", names: ["Returned to a dock", "Left outside a dock", "Reported damaged"], colors: ["ok", "warn", "error"] }
     };
     var seed = 11;
     var rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
     var pick = function (n, skew) { return Math.min(n - 1, Math.floor(Math.pow(rnd(), skew) * n)); };
     var rows = [];
-    for (var i = 0; i < 1500; i++) rows.push({ month: pick(12, 0.7), type: rnd() < 0.55 ? 0 : rnd() < 0.8 ? 1 : 2, station: pick(9, 1.6), length: pick(4, 1.8) });
-    var filters = { type: [], station: [], length: [] }, months = 12;
+    for (var i = 0; i < 1500; i++) rows.push({ month: pick(12, 0.7), type: rnd() < 0.55 ? 0 : rnd() < 0.8 ? 1 : 2, station: pick(9, 1.6), length: pick(4, 1.8), outcome: pick(3, 3) });
+    var filters = { type: [], station: [], length: [], outcome: [] }, months = 12;
     var name = function (dim, r) { return DIMS[dim].names[r[dim]]; };
     // A row passes every filter but the one of the chart that counts it (skip).
     var passes = function (r, skip) {
@@ -427,7 +537,7 @@
     var counts = function (dim) {
       var n = DIMS[dim].names.map(function () { return 0; });
       rows.forEach(function (r) { if (passes(r, dim)) n[r[dim]]++; });
-      return DIMS[dim].names.map(function (l, i) { return { label: l, value: n[i] }; });
+      return DIMS[dim].names.map(function (l, i) { return { label: l, value: n[i], color: DIMS[dim].colors && DIMS[dim].colors[i] }; });
     };
     var el = function (id) { return document.getElementById(id); };
     function draw() {
@@ -442,12 +552,20 @@
       });
       KitCharts.ring(el("kit-dash-types"), { items: types, legend: "values", selectable: true, selected: filters.type, center: shown.length.toLocaleString() });
       KitCharts.barlist(el("kit-dash-stations"), { items: counts("station").sort(function (a, b) { return b.value - a.value; }), limit: 5, selectable: true, selected: filters.station });
-      KitCharts.barlist(el("kit-dash-lengths"), { items: counts("length"), selectable: true, selected: filters.length, color: "var(--kit-chart-2)" });
+      KitCharts.barlist(el("kit-dash-lengths"), { items: counts("length"), selectable: true, selected: filters.length, color: "chart-2" });
+      KitCharts.barlist(el("kit-dash-outcomes"), { items: counts("outcome"), share: true, selectable: true, selected: filters.outcome });
       var short = shown.filter(function (r) { return r.length === 0; }).length, ebike = shown.filter(function (r) { return r.type === 1; }).length;
-      var pct = function (a) { return shown.length ? Math.round((100 * a) / shown.length) + "%" : "-"; };
+      var docked = shown.filter(function (r) { return r.outcome === 0; }).length;
+      var share = function (a) { return shown.length ? Math.round((100 * a) / shown.length) : 0; };
+      var pct = function (a) { return shown.length ? share(a) + "%" : "-"; };
+      // A figure with its share as a bar under it (kit-progress kit-figure__bar, --ok for good news).
+      var bar = function (label, a, kind) {
+        return '<div class="kit-progress kit-figure__bar' + (kind ? " kit-progress--" + kind : "") + '" role="progressbar" aria-label="' + label + '" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + share(a) + '"><div class="kit-progress__bar" style="width: ' + share(a) + '%"></div></div>';
+      };
       el("kit-dash-figures").innerHTML = [["Rentals", shown.length.toLocaleString(), "of " + rows.length.toLocaleString() + " this year"],
-        ["E-bike share", pct(ebike), ebike.toLocaleString() + " rentals"], ["Short trips", pct(short), "under 15 minutes"], ["Months shown", String(months), MONTHS[first] + " to Dec"]]
-        .map(function (f) { return '<div><div class="kit-figure__label">' + f[0] + '</div><div class="kit-figure__value">' + f[1] + '</div><div class="kit-figure__note">' + f[2] + "</div></div>"; }).join("");
+        ["E-bike share", pct(ebike), ebike.toLocaleString() + " rentals", bar("E-bike share", ebike)], ["Returned to a dock", pct(docked), docked.toLocaleString() + " rentals", bar("Returned to a dock", docked, "ok")],
+        ["Short trips", pct(short), "under 15 minutes"], ["Months shown", String(months), MONTHS[first] + " to Dec"]]
+        .map(function (f) { return '<div><div class="kit-figure__label">' + f[0] + '</div><div class="kit-figure__value">' + f[1] + '</div><div class="kit-figure__note">' + f[2] + "</div>" + (f[3] || "") + "</div>"; }).join("");
       el("kit-dash-chips").innerHTML = Object.keys(filters).map(function (d) {
         return filters[d].map(function (v) { return '<button class="kit-chip" type="button" data-dim="' + d + '" data-value="' + v + '" aria-label="Remove filter ' + DIMS[d].label + ": " + v + '">' + DIMS[d].label + ": " + v + ' <span aria-hidden="true">&times;</span></button>'; }).join("");
       }).join("");

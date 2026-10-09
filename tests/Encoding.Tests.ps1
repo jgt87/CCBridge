@@ -105,7 +105,9 @@ Describe 'Test-EncodingFit' {
 
 Describe 'StreamHub''s own files' {
     It 'keeps all PowerShell files ASCII (Windows PowerShell 5.1 reads BOM-less files as ANSI)' {
-        $bad = foreach ($f in @(Get-ChildItem $root -Recurse -Include *.ps1, *.psm1, *.psd1 -File | Where-Object { $_.FullName -notmatch '\\(node_modules|dist|\.git)\\' })) {
+        # temp\ is git-ignored scratch space (test projects made with StreamHub), not StreamHub's own files.
+        $scratch = Join-Path $root 'temp\'
+        $bad = foreach ($f in @(Get-ChildItem $root -Recurse -Include *.ps1, *.psm1, *.psd1 -File | Where-Object { $_.FullName -notmatch '\\(node_modules|dist|\.git)\\' -and -not $_.FullName.StartsWith($scratch, [StringComparison]::OrdinalIgnoreCase) })) {
             $b = [IO.File]::ReadAllBytes($f.FullName)
             if (@($b | Where-Object { $_ -gt 127 }).Count) { $f.FullName.Substring($root.Length + 1) }
         }

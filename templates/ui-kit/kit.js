@@ -4,7 +4,8 @@
   and reports through a DOM event, so page code listens instead of editing this file.
   Behaviour adapted from kokonutui (MIT licence, see LICENSE-kokonutui.txt; https://kokonutui.com):
   hold-button, action-search-bar, file-upload, smooth-tab.
-  The sortable table with pages (data-kit-sort, data-kit-pages) is the kit's own.
+  The sortable table with pages (data-kit-sort, data-kit-pages, data-kit-rows="external") and the
+  theme switch (data-kit-theme) are the kit's own.
 */
 (function () {
   "use strict";
@@ -126,11 +127,17 @@
   // data-sort="VALUE" sorts by that value, for dates or formatted numbers); data-kit-pages="N"
   // shows N rows at a time with a kit-pager under the table. An empty-state row
   // (<tr data-kit-empty>) is never sorted or paged. When the page writes the rows again, they are
-  // sorted again and paging starts at the first page. Fires "kit:sort" { column, ascending } and
-  // "kit:page" { page, pages } on the table.
+  // sorted again and paging starts at the first page. Fires "kit:sort" { column, key, ascending }
+  // (key: the header's data-key) and "kit:page" { page, pages, start, end } on the table.
+  // Many rows (thousands): data-kit-rows="external" leaves the rows to the page. The kit only
+  // draws the sort buttons and the pager and sends the events; the page keeps all rows in its
+  // data, sorts them on kit:sort, writes only the rows from start to end (kit:page; start counts
+  // from 0, end not included) and sets data-kit-total="ROWS" (and data-kit-page="N" to go to a
+  // page, e.g. 1 after a filter change) on the table, which the pager follows.
   function setupTable(table) {
     var body = table.tBodies[0], headRow = table.tHead && table.tHead.rows[0];
     if (!body) return;
+    var external = table.getAttribute("data-kit-rows") === "external";
     var size = parseInt(table.getAttribute("data-kit-pages"), 10) || 0;
     var heads = headRow ? Array.prototype.slice.call(headRow.cells) : [];
     var col = -1, asc = true, page = 0, pager = null, info = null, prev = null, next = null, obs = null;
@@ -147,7 +154,24 @@
       else c = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
       return asc ? c : -c;
     }
+    function slice(pages) {
+      return { page: page + 1, pages: pages, start: page * size, end: size ? (page + 1) * size : Infinity };
+    }
     function apply() {
+      if (external) {
+        var total = Math.max(0, parseInt(table.getAttribute("data-kit-total"), 10) || 0);
+        var want = parseInt(table.getAttribute("data-kit-page"), 10);
+        var xpages = size ? Math.max(1, Math.ceil(total / size)) : 1;
+        if (want > 0) page = want - 1;
+        page = Math.max(0, Math.min(page, xpages - 1));
+        if (pager) {
+          pager.hidden = xpages < 2;
+          info.textContent = "Page " + (page + 1) + " of " + xpages + ", " + total.toLocaleString() + " rows";
+          prev.disabled = page === 0;
+          next.disabled = page >= xpages - 1;
+        }
+        return xpages;
+      }
       var list = rows();
       if (col >= 0) list.sort(compare).forEach(function (r) { body.appendChild(r); });
       var pages = size ? Math.max(1, Math.ceil(list.length / size)) : 1;
@@ -177,8 +201,9 @@
           heads.forEach(function (h) { if (h.hasAttribute("aria-sort")) h.setAttribute("aria-sort", "none"); });
           th.setAttribute("aria-sort", asc ? "ascending" : "descending");
           page = 0;
-          apply();
-          table.dispatchEvent(new CustomEvent("kit:sort", { bubbles: true, detail: { column: i, ascending: asc } }));
+          if (external) table.setAttribute("data-kit-page", "1");
+          var pages = apply();
+          table.dispatchEvent(new CustomEvent("kit:sort", { bubbles: true, detail: { column: i, key: th.getAttribute("data-key"), ascending: asc, page: 1, pages: pages, start: 0, end: size || Infinity } }));
         });
       });
     }
@@ -191,17 +216,54 @@
       wrap.parentNode.insertBefore(pager, wrap.nextSibling);
       var go = function (d) {
         page += d;
+        if (external) table.setAttribute("data-kit-page", String(page + 1));
         var pages = apply();
-        table.dispatchEvent(new CustomEvent("kit:page", { bubbles: true, detail: { page: page + 1, pages: pages } }));
+        table.dispatchEvent(new CustomEvent("kit:page", { bubbles: true, detail: slice(pages) }));
       };
       prev.addEventListener("click", function () { go(-1); });
       next.addEventListener("click", function () { go(1); });
     }
-    if (window.MutationObserver) {
+    if (window.MutationObserver && external) new MutationObserver(function () { apply(); }).observe(table, { attributes: true, attributeFilter: ["data-kit-total", "data-kit-page"] });
+    else if (window.MutationObserver) {
       obs = new MutationObserver(function () { page = 0; apply(); });
       obs.observe(body, { childList: true });
     }
     apply();
+  }
+
+  // Light and dark: <button class="kit-btn kit-btn--ghost kit-btn--icon" type="button" data-kit-theme>
+  // <span data-kit-icon="moon" aria-hidden="true"></span></button>. Follows the computer's setting
+  // until clicked; the choice is kept in this browser (when it may keep it) and set as data-theme
+  // on <html>, which tokens.css follows. Its icon shows what a click switches to (moon, sun), its
+  // label says so too. Fires "kit:theme" { theme: "light" | "dark" } on the button.
+  var THEME_KEY = "kit-theme";
+  function readTheme() { try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; } }
+  function isDark() {
+    var t = document.documentElement.getAttribute("data-theme");
+    if (t === "dark" || t === "light") return t === "dark";
+    return !!(window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+  }
+  var saved = readTheme();
+  if (saved === "dark" || saved === "light") document.documentElement.setAttribute("data-theme", saved);
+  function setupTheme(btn) {
+    function showTheme() {
+      var dark = isDark(), icon = btn.querySelector("[data-kit-icon]");
+      if (icon) icon.setAttribute("data-kit-icon", dark ? "sun" : "moon");
+      btn.setAttribute("aria-label", dark ? "Switch to the light theme" : "Switch to the dark theme");
+      btn.setAttribute("title", btn.getAttribute("aria-label"));
+    }
+    btn.addEventListener("click", function () {
+      var theme = isDark() ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", theme);
+      try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* not kept: private window or blocked storage */ }
+      showTheme();
+      btn.dispatchEvent(new CustomEvent("kit:theme", { bubbles: true, detail: { theme: theme } }));
+    });
+    if (window.matchMedia) {
+      var mq = matchMedia("(prefers-color-scheme: dark)");
+      if (mq.addEventListener) mq.addEventListener("change", showTheme);
+    }
+    showTheme();
   }
 
   function startKit() {
@@ -209,6 +271,7 @@
     Array.prototype.forEach.call(document.querySelectorAll("[data-kit-search]"), setupSearch);
     Array.prototype.forEach.call(document.querySelectorAll("[data-kit-drop]"), setupDrop);
     Array.prototype.forEach.call(document.querySelectorAll("table[data-kit-sort], table[data-kit-pages]"), setupTable);
+    Array.prototype.forEach.call(document.querySelectorAll("[data-kit-theme]"), setupTheme);
     Array.prototype.forEach.call(document.querySelectorAll(".kit-tabs--animated"), function (g) { setupSlider(g, ".kit-tab", "aria-selected", "kit-tabs__indicator"); });
     Array.prototype.forEach.call(document.querySelectorAll(".kit-segmented--animated"), function (g) { setupSlider(g, "button", "aria-pressed", "kit-segmented__indicator"); });
   }

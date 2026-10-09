@@ -5,7 +5,7 @@ DESIGN
 - Every action gets feedback: progress for anything that takes over a second, a quiet confirmation when it worked, and errors in plain words next to where they happened, with how to fix them. Design the empty, loading and error state of every list, table and chart.
 - Use a dialog only for a decision that blocks the work (confirm a deletion, unsaved changes); show details and edit in place or in a side panel instead.
 - Forms: labels above the fields, one column, sensible defaults, check a field when it is left, never clear what the user typed.
-- Tables for comparing records (numbers right-aligned, sortable when long), lists for scanning, charts only when the shape of the data matters, with a title that says what to see.
+- How data is shown (tables, lists, any kind of chart) is your choice. Whatever you choose: numbers in a table right-aligned and a long table sortable, and every chart with a title that says what to see.
 - Light and dark both work. Never show meaning by colour alone; add a word, icon or pattern.
 - Motion is short (100 to 300 ms), eases out, explains a change, and stops when the computer asks for reduced motion.
 - Accessible by default: everything works with the keyboard and shows where the focus is, click targets are at least 24 x 24 px (44 x 44 for touch), every image and icon-only button has a name, and text meets WCAG AA contrast.

@@ -14,6 +14,8 @@
     KitData.parseCsv(text, { delimiter })  -> { columns, rows } (typed like the table above)
     KitData.readXlsx / readDocx / readPptx / readPdf(arrayBuffer)
     KitData.accept                  the extensions it reads, for <input accept="...">
+    KitData.toCsv(rows, columns)    -> CSV text (columns: [{ key, label }] or key names)
+    KitData.download(name, text)    saves it as a file (an export of the filtered rows)
 
   Values in a table are typed per column, the same rules the helper program uses for data/NAME.json:
   a column is a number, true/false or a date only when every value in it is one; numbers with a
@@ -486,9 +488,38 @@
     });
   }
 
+  // Rows as CSV text: columns [{ key, label }] or key names (default: the first row's keys). Values
+  // with a comma, quote or line break are quoted; null and undefined are empty. Excel reads it as
+  // UTF-8 because of the byte order mark download() puts in front.
+  function toCsv(rows, columns) {
+    rows = rows || [];
+    var cols = (columns || Object.keys(rows[0] || {})).map(function (c) { return typeof c === "string" ? { key: c, label: c } : { key: c.key, label: c.label === undefined ? c.key : c.label }; });
+    var cell = function (v) {
+      var t = v === null || v === undefined ? "" : String(v);
+      return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+    };
+    var lines = [cols.map(function (c) { return cell(c.label); }).join(",")];
+    rows.forEach(function (r) { lines.push(cols.map(function (c) { return cell(r[c.key]); }).join(",")); });
+    return lines.join("\r\n");
+  }
+  // Saves text as a file in the person's downloads (nothing is uploaded). A .csv gets a byte order
+  // mark so Excel reads its accents.
+  function download(name, text, type) {
+    var csv = /\.csv$/i.test(name);
+    var blob = new Blob([(csv ? "\ufeff" : "") + text], { type: type || (csv ? "text/csv;charset=utf-8" : "text/plain;charset=utf-8") });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
+
   return {
     accept: ".csv,.tsv,.txt,.json,.xlsx,.xlsm,.docx,.pptx,.pdf",
     readFile: readFile, parseCsv: parseCsv, readXlsx: readXlsx, readDocx: readDocx, readPptx: readPptx, readPdf: readPdf,
+    toCsv: toCsv, download: download,
     _internal: { splitCsv: splitCsv, columnType: columnType, readZip: readZip, decodeText: decodeText, serialToText: serialToText }
   };
 });

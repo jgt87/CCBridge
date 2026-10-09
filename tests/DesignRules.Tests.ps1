@@ -17,6 +17,11 @@ Describe 'Design rules for Copilot' {
     It 'are StreamHub''s own short text' {
         foreach ($f in 'design.md', 'designreview.md') { ([IO.File]::ReadAllText((Join-Path $root "prompts\rules\$f"))).Length | Should BeLessThan 2200 }
     }
+    It 'leave the choice of tables, lists and charts to Copilot and only set how they look' {
+        $t = [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\design.md'))
+        $t | Should Match 'How data is shown \(tables, lists, any kind of chart\) is your choice'
+        $t | Should Not Match 'charts only when'
+    }
 }
 
 Describe 'Focus and motion checks' {

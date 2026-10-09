@@ -399,15 +399,26 @@ function Find-PageCopyScript {
 function Find-KitBypass {
     <# With the UI kit in the project: plain elements a change adds to markup without a kit class (a
        table, button, field, list box, text area or dialog), which drop out of the kit's look. One
-       finding per kind of element; any kit- class counts (kit-btn, kit-tab, kit-chip ...). #>
+       finding per kind of element; any kit- class counts (kit-btn, kit-tab, kit-chip ...). Plain
+       scripts count too: markup a page writes from a string ('<button ...>' for innerHTML); an
+       element whose attributes are put together from variables is left alone (its class is not known). #>
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
-    if ($Rel -notmatch '(?i)\.(html?|jsx|tsx|vue|svelte)$' -or $Rel -match '(?i)(^|/)(styles/kit/|\.streamhub/|node_modules/)') { return }
+    if ($Rel -notmatch '(?i)\.(html?|jsx|tsx|vue|svelte|m?js|cjs|ts)$' -or $Rel -match '(?i)(^|/)(styles/kit/|\.streamhub/|node_modules/)') { return }
+    $inScript = $Rel -match '(?i)\.(m?js|cjs|ts)$'
     if (-not (Test-UiKitPart 'slopChecks')) { return }
     $hits = {
         param($t)
         foreach ($m in [regex]::Matches("$t", '(?s)<(table|button|input|select|textarea|dialog)\b((?:\{(?:[^{}]|\{[^{}]*\})*\}|=>|[^>{])*)>')) {
             $tag = $m.Groups[1].Value.ToLowerInvariant(); $attrs = $m.Groups[2].Value
             if ($attrs -match '\{\s*\.\.\.' -or $attrs -match '(?i)\bclass(Name)?\s*=[^>]*?\bkit-') { continue }
+            if ($inScript) {
+                # Only markup in a string: right after a quote or another tag, or at the start of a line
+                # of a multi-line string (not a comparison such as i < input.length).
+                $lineStart = "$t".LastIndexOf("`n", [Math]::Max(0, $m.Index - 1)) + 1
+                $before = "$t".Substring($lineStart, $m.Index - $lineStart)
+                if ($before -notmatch '[''"`>]$' -and $before.Trim()) { continue }
+                if ($attrs -match '[''"`]\s*\+|\+\s*[''"`]|\$\{') { continue }
+            }
             if ($tag -eq 'input' -and $attrs -match '(?i)\btype\s*=\s*\{?\s*["'']?(hidden|checkbox|radio|range|color|file|submit|button|reset|image)\b') { continue }
             @{ key = $tag; line = (Get-LineIndex "$t" $m.Index); msg = $script:KitBypassHints[$tag] }
         }

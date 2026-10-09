@@ -233,14 +233,17 @@ function Get-PromptPart {
         '^rules:uikit$' {
             # Only the kit parts that are switched on (Settings > UI kit).
             $lines = @((Read-PromptPart $AppRoot 'rules\uikit.md').Split("`n"))
-            if (-not (Test-UiKitPart 'interactive' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Interactive parts*' }) }
+            if (-not (Test-UiKitPart 'interactive' $AppRoot)) {
+                $lines = @($lines | Where-Object { $_ -notlike '- Interactive parts*' })
+                $lines = @(foreach ($l in $lines) { if ($l -like '- Page header:*') { $l -replace ' A light/dark switch is .*$', '' } else { $l } })
+            }
             if (-not (Test-UiKitPart 'charts' $AppRoot)) {
                 # No kit charts: no dashboard example either, and a chart library gets the kit's colours.
-                $lines = @($lines | Where-Object { $_ -notlike '- Charts:*' -and $_ -notlike '- Dashboards:*' })
+                $lines = @($lines | Where-Object { $_ -notlike '- Charts:*' -and $_ -notlike '- Dashboards:*' -and $_ -notlike '- Your choice, the kit*' })
                 $lines = @(foreach ($l in $lines) { if ($l -like '- Anything a page draws itself*') { $l -replace 'No chart library \(they bring their own colours\) and no colours of your own\.', 'A chart library gets these colours too, never its own palette.' } else { $l } })
             }
             if (-not (Test-UiKitPart 'icons' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Icons (Lucide*' }) }
-            if (-not (Test-UiKitPart 'data' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Reading files*' }) }
+            if (-not (Test-UiKitPart 'data' $AppRoot)) { $lines = @($lines | Where-Object { $_ -notlike '- Reading files*' -and $_ -notlike '- Export:*' }) }
             elseif (-not (Test-UiKitPart 'pdf' $AppRoot)) { $lines = @(foreach ($l in $lines) { if ($l -like '- Reading files*') { $l -replace ' PDF: .*', ' PDF files cannot be read in the page (pdf.js is switched off).' } else { $l } }) }
             $text = $lines -join "`n"
             $colors = Get-UiKitColors $AppRoot

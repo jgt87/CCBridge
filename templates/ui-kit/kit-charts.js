@@ -17,6 +17,11 @@
   the label picked (a series name for a bar or line legend). Draw the chart again with
   data.selected (labels) and data.selectedSeries (series names) to show what is picked; the rest
   fades.
+
+  Colours by meaning (barlist and ring items, barlist data.color): "ok", "warn", "error", "muted",
+  "accent" or "chart-1" ... "chart-6", always kit tokens; a label still says what each one means.
+  Bar list extras: data.share (value and share), data.base "first" (a funnel). Bar chart: a series
+  with type "line" (and axis "right" for its own scale) is drawn as a line over the bars.
 */
 (function () {
   "use strict";
@@ -30,6 +35,17 @@
     return e;
   }
   function color(i) { return "var(--kit-chart-" + ((i % 6) + 1) + ")"; }
+  // A colour by meaning or by name: ok, warn, error, muted, accent, chart-1 ... chart-6, or a kit
+  // token as var(--kit-...). Anything else (a hard-coded colour) is not used: the fallback is.
+  var TONES = { ok: "--kit-ok", warn: "--kit-warn", error: "--kit-error", muted: "--kit-text-muted", accent: "--kit-accent" };
+  function tone(name, fallback) {
+    var n = String(name === undefined || name === null ? "" : name).trim(), m;
+    if (TONES[n]) return "var(" + TONES[n] + ")";
+    if ((m = /^chart-([1-6])$/.exec(n))) return "var(--kit-chart-" + m[1] + ")";
+    if (/^var\(--kit-[\w-]+\)$/.test(n)) return n;
+    return fallback;
+  }
+  function percent(v, total) { return total ? Math.round((v / total) * 1000) / 10 + "%" : "-"; }
   function fmt(v, opts) {
     if (opts && typeof opts.format === "function") return opts.format(v);
     var n = Number(v);
@@ -72,14 +88,15 @@
     el.addEventListener("click", fire);
     el.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fire(); } });
   }
-  // Legend under a chart. opts.pick(i) gives the kit:select detail of entry i, opts.off(i) fades it.
+  // Legend under a chart. opts.pick(i) gives the kit:select detail of entry i, opts.off(i) fades it,
+  // opts.colors[i] its colour (default: the series colours in order).
   function legend(host, names, onHover, data, opts) {
     if (names.length < 2) return;
     var ul = document.createElement("ul");
     ul.className = "kit-chart__legend";
     names.forEach(function (n, i) {
       var li = document.createElement("li");
-      li.innerHTML = '<span class="kit-chart__swatch" style="background:' + color(i) + '"></span>';
+      li.innerHTML = '<span class="kit-chart__swatch" style="background:' + (opts && opts.colors ? opts.colors[i] : color(i)) + '"></span>';
       li.appendChild(document.createTextNode(n));
       li.addEventListener("mouseenter", function () { onHover(i); });
       li.addEventListener("mouseleave", function () { onHover(-1); });
@@ -138,24 +155,38 @@
     var widest = Math.max.apply(null, [1].concat(labels.map(function (l) { return String(l).length; })));
     return Math.max(1, Math.ceil((labels.length * (widest * 7 + 10)) / Math.max(1, room)));
   }
-  function series(data) { return (data.series || []).map(function (sr) { return { name: sr.name || "", values: (sr.values || []).map(Number) }; }); }
+  function series(data) {
+    return (data.series || []).map(function (sr, i) {
+      return { name: sr.name || "", values: (sr.values || []).map(Number), i: i, line: sr.type === "line", right: sr.type === "line" && sr.axis === "right" };
+    });
+  }
 
   // Bar chart: grouped bars per label, or data.stacked for one bar per label with the series on
-  // top of each other; data.horizontal for bars to the right.
+  // top of each other; data.horizontal for bars to the right. A series with type "line" is drawn
+  // as a line over the bars (not with horizontal), on its own scale at the right with axis "right"
+  // (a running total next to the counts per day).
   function bar(host, data) {
     clear(host);
-    var sr = series(data), labels = data.labels || [], s = size(host), horizontal = !!data.horizontal;
-    if (!labels.length || !sr.length) { empty(host, data); return; }
+    var all = series(data), labels = data.labels || [], s = size(host), horizontal = !!data.horizontal;
+    var sr = all.filter(function (x) { return horizontal || !x.line; }), ln = horizontal ? [] : all.filter(function (x) { return x.line; });
+    if (!labels.length || !all.length) { empty(host, data); return; }
     var stacked = !!data.stacked && sr.length > 1;
     var total = function (li) { return sr.reduce(function (a, x) { return a + Math.max(0, x.values[li] || 0); }, 0); };
-    var max = stacked ? Math.max.apply(null, [0].concat(labels.map(function (l, li) { return total(li); })))
-      : Math.max.apply(null, [0].concat.apply([], sr.map(function (x) { return x.values; })));
-    var scale = niceMax(max, 4);
-    var tip = null, bars = [];
+    var maxOf = function (list) { return Math.max.apply(null, [0].concat.apply([], list.map(function (x) { return x.values; }))); };
+    var left = ln.filter(function (x) { return !x.right; }), right = ln.filter(function (x) { return x.right; });
+    var max = Math.max(stacked ? Math.max.apply(null, [0].concat(labels.map(function (l, li) { return total(li); }))) : maxOf(sr), maxOf(left));
+    var scale = niceMax(max, 4), rscale = right.length ? niceMax(maxOf(right), 4) : null;
+    var tip = null, bars = [], marks = [];
     var svg = frame(host, s, data.title);
-    var pad = horizontal ? { t: 8, r: 16, b: 24, l: 96 } : { t: 12, r: 12, b: 28, l: 44 };
+    var pad = horizontal ? { t: 8, r: 16, b: 24, l: 96 } : { t: 12, r: rscale ? 52 : 12, b: 28, l: 44 };
     var plotW = s.w - pad.l - pad.r, plotH = s.h - pad.t - pad.b;
     if (!horizontal) grid(svg, s, pad, scale, data);
+    if (rscale) for (var rv = 0; rv <= rscale.max + 1e-9; rv += rscale.step) {
+      var ry = pad.t + (s.h - pad.t - pad.b) * (1 - rv / rscale.max);
+      var rt = svgEl("text", { x: s.w - pad.r + 8, y: ry + 4, class: "kit-chart__label" }, svg);
+      rt.textContent = fmt(rv, data);
+      if (right.length === 1) rt.style.fill = color(right[0].i);
+    }
     var band = (horizontal ? plotH : plotW) / Math.max(1, labels.length);
     var lstep = horizontal ? 1 : labelStep(labels, plotW);
     var inner = band * 0.72, bw = stacked ? Math.max(1, inner) : Math.max(2, inner / Math.max(1, sr.length) - 2);
@@ -175,13 +206,14 @@
         } else if (horizontal) a = { x: pad.l, y: start + si * (bw + 2), width: Math.max(0, len), height: bw };
         else a = { x: start + si * (bw + 2), y: pad.t + plotH - len, width: bw, height: Math.max(0, len) };
         var r = stacked && si !== top ? 0 : Math.min(bw / 4, 4);
-        var rect = svgEl("path", { d: barPath(a, r, horizontal), fill: color(si), class: "kit-chart__bar" }, svg);
+        var rect = svgEl("path", { d: barPath(a, r, horizontal), fill: color(x.i), class: "kit-chart__bar" }, svg);
         if (isOff(data.selected, lab) || isOff(data.selectedSeries, x.name)) rect.classList.add("is-off");
         if (!reduce) rect.style.animation = (horizontal ? "kit-grow-x" : "kit-grow-y") + " 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
         if (!reduce) rect.style.transformOrigin = horizontal ? (pad.l + "px 0") : ("0 " + (pad.t + plotH) + "px");
         var text = stacked
           ? "<strong>" + esc(lab) + "</strong> &middot; " + esc(fmt(total(li), data)) + sr.map(function (y) { return (y.values[li] || 0) > 0 ? "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li], data)) : ""; }).join("")
           : "<strong>" + esc(lab) + "</strong><br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(v, data));
+        text += ln.map(function (y) { return "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li] || 0, data)); }).join("");
         var show = function () {
           bars.forEach(function (b) { b.el.classList.toggle("is-faded", stacked ? b.li !== li : b.el !== rect); });
           var box = rect.getBBox();
@@ -192,8 +224,8 @@
         var hide = function () { bars.forEach(function (b) { b.el.classList.remove("is-faded"); }); tip.hide(); };
         rect.addEventListener("mouseleave", hide);
         rect.addEventListener("blur", hide);
-        pickable(host, data, rect, { chart: "bar", part: "bar", value: lab, index: li, series: x.name, seriesIndex: si }, lab + (x.name ? ", " + x.name : "") + ": " + fmt(v, data));
-        bars.push({ el: rect, s: si, li: li });
+        pickable(host, data, rect, { chart: "bar", part: "bar", value: lab, index: li, series: x.name, seriesIndex: x.i }, lab + (x.name ? ", " + x.name : "") + ": " + fmt(v, data));
+        bars.push({ el: rect, s: x.i, li: li });
       });
       if (li % lstep) return;
       var t = horizontal
@@ -201,12 +233,26 @@
         : svgEl("text", { x: start + inner / 2, y: s.h - 8, "text-anchor": "middle", class: "kit-chart__label" }, svg);
       t.textContent = lab;
     });
-    tip = tooltip(host);
-    legend(host, sr.map(function (x) { return x.name; }), function (i) { bars.forEach(function (b) { b.el.classList.toggle("is-faded", i >= 0 && b.s !== i); }); }, data, {
-      off: function (i) { return isOff(data.selectedSeries, sr[i].name); },
-      pick: function (i) { return { chart: "bar", part: "legend", value: sr[i].name, index: i, series: sr[i].name, seriesIndex: i }; }
+    // Line series over the bars: through the middle of each label's band.
+    ln.forEach(function (x) {
+      var sc = x.right ? rscale : scale;
+      var px = function (i) { return pad.l + band * (i + 0.5); }, py = function (v) { return pad.t + plotH * (1 - Math.max(0, v) / sc.max); };
+      var d = labels.map(function (l, i) { return (i ? "L" : "M") + px(i).toFixed(1) + " " + py(x.values[i] || 0).toFixed(1); }).join(" ");
+      var p = svgEl("path", { d: d, fill: "none", stroke: color(x.i), "stroke-width": 2.25, "stroke-linejoin": "round", "stroke-linecap": "round", class: "kit-chart__path" }, svg);
+      if (isOff(data.selectedSeries, x.name)) p.classList.add("is-off");
+      if (!reduce && p.getTotalLength) { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
+      marks.push({ el: p, s: x.i });
+      if (labels.length <= 60) labels.forEach(function (l, i) { marks.push({ el: svgEl("circle", { cx: px(i), cy: py(x.values[i] || 0), r: 3, fill: color(x.i), class: "kit-chart__dot" }, svg), s: x.i }); });
     });
-    dataTable(host, [""].concat(sr.map(function (x) { return x.name || "Value"; })), labels.map(function (l, li) { return [l].concat(sr.map(function (x) { return fmt(x.values[li] || 0, data); })); }));
+    tip = tooltip(host);
+    legend(host, all.map(function (x) { return x.name + (x.right && rscale ? " (right axis)" : ""); }), function (i) {
+      bars.forEach(function (b) { b.el.classList.toggle("is-faded", i >= 0 && b.s !== i); });
+      marks.forEach(function (m) { m.el.classList.toggle("is-faded", i >= 0 && m.s !== i); });
+    }, data, {
+      off: function (i) { return isOff(data.selectedSeries, all[i].name); },
+      pick: function (i) { return { chart: "bar", part: "legend", value: all[i].name, index: i, series: all[i].name, seriesIndex: i }; }
+    });
+    dataTable(host, [""].concat(all.map(function (x) { return x.name || "Value"; })), labels.map(function (l, li) { return [l].concat(all.map(function (x) { return fmt(x.values[li] || 0, data); })); }));
   }
 
   // Line chart (data.area for a fading fill under each line).
@@ -268,12 +314,13 @@
 
   // Ring (donut): data.items [{ label, value }]; data.center for the text in the middle;
   // data.legend "values" for a legend with each value and its share (a list under the ring).
-  // Colours follow the items' order, also past an item at 0, so an item keeps its colour.
+  // Colours follow the items' order, also past an item at 0, so an item keeps its colour; an
+  // item's color (ok, warn, error, muted, accent, chart-N) gives it a colour by meaning instead.
   function ring(host, data) {
     clear(host);
-    var items = (data.items || []).map(function (it) { return { label: String(it.label), value: Math.max(0, Number(it.value) || 0) }; });
+    var items = (data.items || []).map(function (it, i) { return { label: String(it.label), value: Math.max(0, Number(it.value) || 0), color: tone(it.color, color(i)) }; });
     var sum = items.reduce(function (a, b) { return a + b.value; }, 0), total = sum || 1;
-    var share = function (v) { return sum ? Math.round((v / total) * 1000) / 10 + "%" : "-"; };
+    var share = function (v) { return sum ? percent(v, total) : "-"; };
     var s = size(host, Number(host.getAttribute("data-kit-height")) || 220), cx = s.h / 2, cy = s.h / 2, R = s.h / 2 - 8, w = Math.max(10, R * 0.22);
     host.classList.add("kit-chart--ring");
     var svg = frame(host, { w: s.h, h: s.h }, data.title), tip = tooltip(host), arcs = [];
@@ -285,11 +332,11 @@
       var a1 = a0 + (it.value / total) * Math.PI * 2;
       var s0 = a0 + gap / 2, s1 = Math.max(s0 + 0.001, a1 - gap / 2);
       var p;
-      if (shown === 1) p = svgEl("circle", { cx: cx, cy: cy, r: r, fill: "none", stroke: color(i), "stroke-width": w, class: "kit-chart__arc" }, svg);
+      if (shown === 1) p = svgEl("circle", { cx: cx, cy: cy, r: r, fill: "none", stroke: it.color, "stroke-width": w, class: "kit-chart__arc" }, svg);
       else {
         var large = s1 - s0 > Math.PI ? 1 : 0;
         var d = "M" + (cx + r * Math.cos(s0)) + " " + (cy + r * Math.sin(s0)) + " A" + r + " " + r + " 0 " + large + " 1 " + (cx + r * Math.cos(s1)) + " " + (cy + r * Math.sin(s1));
-        p = svgEl("path", { d: d, fill: "none", stroke: color(i), "stroke-width": w, "stroke-linecap": "butt", class: "kit-chart__arc" }, svg);
+        p = svgEl("path", { d: d, fill: "none", stroke: it.color, "stroke-width": w, "stroke-linecap": "butt", class: "kit-chart__arc" }, svg);
       }
       if (isOff(data.selected, it.label)) p.classList.add("is-off");
       var show = function () {
@@ -313,7 +360,7 @@
         var li = document.createElement("li");
         if (!it.value) li.classList.add("is-zero");
         if (isOff(data.selected, it.label)) li.classList.add("is-off");
-        li.innerHTML = '<span class="kit-chart__swatch" style="background:' + color(i) + '"></span><span class="kit-chart__legend-label">' + esc(it.label) +
+        li.innerHTML = '<span class="kit-chart__swatch" style="background:' + it.color + '"></span><span class="kit-chart__legend-label">' + esc(it.label) +
           '</span><span class="kit-chart__legend-value">' + esc(fmt(it.value, data)) + '</span><span class="kit-chart__legend-share">' + share(it.value) + "</span>";
         li.addEventListener("mouseenter", function () { hover(i); });
         li.addEventListener("mouseleave", function () { hover(-1); });
@@ -321,7 +368,7 @@
         ul.appendChild(li);
       });
       host.appendChild(ul);
-    } else legend(host, items.map(function (it) { return it.label; }), hover, data, { off: function (i) { return isOff(data.selected, items[i].label); }, pick: pick });
+    } else legend(host, items.map(function (it) { return it.label; }), hover, data, { off: function (i) { return isOff(data.selected, items[i].label); }, pick: pick, colors: items.map(function (it) { return it.color; }) });
     dataTable(host, ["", "Value", "Share"], items.map(function (it) { return [it.label, fmt(it.value, data), share(it.value)]; }));
   }
 
@@ -375,31 +422,41 @@
     svgEl("path", { d: d, fill: "none", stroke: data.color || color(0), "stroke-width": 1.75, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
   }
 
-  // Bar list: one row per item (label, bar, value) in the order given, for long category lists
-  // (top ten, per person, per place). data.items [{ label, value }]; data.limit shows that many
-  // rows with a Show all button (picked rows always show); data.color a kit colour (default
-  // --kit-chart-1); data.selectable makes each row a button.
+  // Bar list: one row per item (label, bar, value) in the order given, for categories (countries,
+  // departments, statuses: top ten, per person, per place) and for the steps of a process.
+  // data.items [{ label, value, color }]; data.limit shows that many rows with a Show all button
+  // (picked rows always show); data.color the colour of every bar and item.color one row's, by
+  // meaning (ok, warn, error, muted, accent) or series (chart-1 ... chart-6; default chart-1);
+  // data.share adds each value's share ("1,234 - 56.7%", with a middle dot) of data.total (default: the sum, or the
+  // first item with data.base "first"); data.base "first" is a funnel: every bar against the
+  // first item (the whole), so each step shows how many are left; data.selectable makes each row
+  // a button.
   function barlist(host, data) {
     clear(host);
-    var items = (data.items || []).map(function (it) { return { label: String(it.label), value: Number(it.value) || 0 }; });
+    var all = tone(data.color, color(0));
+    var items = (data.items || []).map(function (it) { return { label: String(it.label), value: Number(it.value) || 0, color: tone(it.color, all) }; });
     if (!items.length) { empty(host, data); return; }
     var limit = Number(data.limit) || 0, open = !!host.__kitOpen, sel = picked(data.selected);
     var shown = items.map(function (it, i) { return { it: it, i: i }; });
     if (limit && !open && items.length > limit) shown = shown.filter(function (x) { return x.i < limit || (sel && sel.indexOf(x.it.label) >= 0); });
-    var max = Math.max.apply(null, [0].concat(shown.map(function (x) { return x.it.value; }))) || 1;
+    var first = data.base === "first" ? Math.max(0, items[0].value) : 0;
+    var max = first || Math.max.apply(null, [0].concat(shown.map(function (x) { return x.it.value; }))) || 1;
+    var whole = Number(data.total) || first || items.reduce(function (a, it) { return a + Math.max(0, it.value); }, 0);
+    var text = function (v) { return fmt(v, data) + (data.share ? " \u00b7 " + percent(v, whole) : ""); };
     var list = document.createElement("div");
-    list.className = "kit-barlist";
+    list.className = data.share ? "kit-barlist kit-barlist--share" : "kit-barlist";
     if (!data.selectable) list.setAttribute("role", "list");
     list.setAttribute("aria-label", data.title || host.getAttribute("aria-label") || "Bar list");
     shown.forEach(function (x) {
       var it = x.it, row = document.createElement(data.selectable ? "button" : "div");
       if (data.selectable) row.type = "button"; else row.setAttribute("role", "listitem");
       row.className = "kit-barlist__row" + (sel ? (sel.indexOf(it.label) >= 0 ? " is-on" : " is-off") : "");
-      row.title = it.label + ": " + fmt(it.value, data);
+      row.title = it.label + ": " + text(it.value);
       row.innerHTML = '<span class="kit-barlist__label">' + esc(it.label) + '</span><span class="kit-barlist__track"><span class="kit-barlist__fill" style="width:' +
-        (100 * Math.max(0, it.value) / max).toFixed(1) + "%;background:" + (data.color || color(0)) + '"></span></span><span class="kit-barlist__value">' + esc(fmt(it.value, data)) + "</span>";
+        Math.min(100, 100 * Math.max(0, it.value) / max).toFixed(1) + "%;background:" + it.color + '"></span></span><span class="kit-barlist__value">' +
+        (data.share ? "<b>" + esc(fmt(it.value, data)) + "</b> \u00b7 " + percent(it.value, whole) : esc(fmt(it.value, data))) + "</span>";
       if (!reduce) row.querySelector(".kit-barlist__fill").style.animation = "kit-grow-x 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
-      pickable(host, data, row, { chart: "barlist", part: "row", value: it.label, index: x.i }, it.label + ": " + fmt(it.value, data));
+      pickable(host, data, row, { chart: "barlist", part: "row", value: it.label, index: x.i }, it.label + ": " + text(it.value));
       list.appendChild(row);
     });
     host.appendChild(list);
