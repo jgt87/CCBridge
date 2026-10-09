@@ -20,6 +20,7 @@ $script:BuildMarkers = 'package.json', 'tsconfig.json', 'pyproject.toml', 'setup
 
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Contrast.psm1')
+Import-Module (Join-Path $PSScriptRoot 'OneFile.psm1')
 
 function Test-GeneratedPath {
     <# Why a project path must not be written by hand, or $null. build/, out/, bin/, obj/ and
@@ -442,7 +443,9 @@ function Find-QualityIssues {
     <# The second batch, for the round's file check: what a change adds, as "line N: ..." or a
        whole-file note. #>
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit)
-    @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UiSlop $Rel $Old $New -UseKit:$UseKit) + @(if ($UseKit) { Find-KitBypass $Rel $Old $New }) | Where-Object { $_ }
+    # A one-file page: the helper program's kit and data blocks are not the change's own text.
+    if ($Rel -match '(?i)\.html?$') { $loads = Find-OneFileLoads $Rel $Old $New; $Old = Hide-GeneratedBlocks $Old; $New = Hide-GeneratedBlocks $New } else { $loads = $null }
+    @($loads) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UiSlop $Rel $Old $New -UseKit:$UseKit) + @(if ($UseKit) { Find-KitBypass $Rel $Old $New }) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {

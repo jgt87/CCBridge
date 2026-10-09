@@ -91,6 +91,24 @@ export interface PackageItem {
   error?: string;
 }
 
+/** How a project's pages are built (project setup, asked before a new project's first request). */
+export type BuildForm = "single" | "modular" | "copilot";
+
+/** One project setup question with its choices. */
+export interface SetupChoice {
+  id: string;
+  question: string;
+  options: { value: string; label: string; help: string }[] | { value: string; label: string; help: string };
+}
+
+/** The open project's setup: the build form and a live data file outside the project. */
+export interface ProjectSetup {
+  build: BuildForm | "";
+  live: { path: string; copy: string; found: boolean } | null;
+  chosenBy?: string;
+  chosenAt?: string;
+}
+
 export interface AgentEvent {
   seq: number;
   /** runbook-choice: the message the person sent, to send on to Copilot. */
@@ -135,7 +153,9 @@ export interface AgentEvent {
     /** Copilot ended a task that changed files without reporting it done; StreamHub checked the files anyway. */
     | "task-unfinished"
     /** Settings > Privacy > Clear chat history: the chat shows nothing from before it. */
-    | "history-cleared";
+    | "history-cleared"
+    /** A new project's first request builds a page without saying how: StreamHub asks first. */
+    | "setup-choice";
   time: string;
   text?: string;
   uncertain?: number;
@@ -182,6 +202,12 @@ export interface AgentEvent {
   path?: string;
   /** undo: per file what came back and what went. */
   changes?: UndoChange[] | UndoChange;
+  /** setup-choice: the questions, whether a live data file can be chosen, a path the request named,
+   * and whether the message went with Clarify first (the answer keeps it). */
+  choices?: SetupChoice[] | SetupChoice;
+  live?: boolean;
+  suggest?: string;
+  clarify?: boolean;
 }
 
 export interface AppState {
@@ -311,6 +337,8 @@ export interface ChatOptions {
   asCoding?: boolean;
   /** Send to Copilot without checking whether the message asks to run a runbook. */
   noRunbook?: boolean;
+  /** The answer to the project setup card: how the project is built, and a live data file. */
+  setup?: { build: BuildForm; liveSource?: string };
   clarify?: boolean;
   planFirst?: boolean;
   /** The original request, when the text adds answers or plan feedback to it. */
@@ -677,6 +705,10 @@ export const api = {
     })),
   createRunbook: (template: string, name: string) => call<{ ok: boolean; item: RunbookItem }>("POST", "/api/runbooks", { template, name }),
   runRunbook: (name: string) => call<{ ok: boolean }>("POST", "/api/runbooks/run", { name }),
+  /** The open project's setup (build form, live data file); null without a project. */
+  projectSetup: () => call<{ setup: ProjectSetup | null }>("GET", "/api/project-setup").then((r) => r.setup),
+  /** Changes the open project's setup: build form and/or live data file ('' removes it). */
+  saveProjectSetup: (b: { build?: BuildForm | ""; liveSource?: string }) => call<{ ok: boolean; setup: ProjectSetup }>("POST", "/api/project-setup", b),
   /** The project's package.json files and the packages not installed yet. */
   packages: () =>
     call<{ items: PackageItem[] | PackageItem; npm: boolean }>("GET", "/api/packages").then((r) => ({ npm: r.npm, items: Array.isArray(r.items) ? r.items : r.items ? [r.items] : [] })),

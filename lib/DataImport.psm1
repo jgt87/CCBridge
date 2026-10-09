@@ -412,14 +412,16 @@ function Format-DataImportNotes($Result) {
 
 function Format-DataImportContext {
     <# The project-context lines for the converted files: where they are, the global of the copy,
-       rows and columns with types. Empty when there are none. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [int]$MaxColumns = 40)
+       rows and columns with types. Empty when there are none. -OneFile (project setup "one file"):
+       how a one-file page takes the data (a data-streamhub block) instead of loading files. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [int]$MaxColumns = 40, [switch]$OneFile)
     $man = Read-DataImportManifest $ProjectRoot.TrimEnd('\')
     $lines = foreach ($k in @($man.Keys | Sort-Object)) {
         $it = $man[$k]
         if ($it.status -or $it.edited -or -not (Test-Path -LiteralPath (Join-Path $ProjectRoot $k.Replace('/', '\')))) { continue }
         $where = $k
-        if ($it.js) { $where += ' (copy for pages opened from disk: ' + $it.js + ', window.' + $it.global + ')' }
+        if ($OneFile) { $where += ' (in a one-file page: window.' + $(if ($it.global) { "$($it.global)" } else { Get-DataGlobalName ([IO.Path]::GetFileNameWithoutExtension($k)) }) + ')' }
+        elseif ($it.js) { $where += ' (copy for pages opened from disk: ' + $it.js + ', window.' + $it.global + ')' }
         $desc = foreach ($s in @($it.sheets)) {
             $cols = @($s.columns | Select-Object -First $MaxColumns | ForEach-Object { "$($_.name) ($($_.type))" })
             $more = @($s.columns).Count - $cols.Count
@@ -432,11 +434,15 @@ function Format-DataImportContext {
     if (-not @($lines).Count) { return '' }
     $tools = Join-Path $ProjectRoot 'data\data-tools.js'
     $load = (Test-Path -LiteralPath $tools) -and (Get-DataToolsVersion ([IO.File]::ReadAllText($tools))) -ge 2
-    if ($load) {
+    if ($OneFile) {
+        $first = "$(@($man.Values | Where-Object { -not $_.status -and -not $_.edited } | Select-Object -First 1).source)"
+        $lines = @($lines) + "- In the one-file page, put <script data-streamhub=`"data`" data-source=`"SOURCE PATH`"></script> (for example data-source=`"$first`") before your own script for each data file the page shows, written empty: the helper program fills it with window.NAME (the name above; data-global=`"NAME`" picks another) and keeps it up to date when the file changes. Never fetch the CSV or the JSON and never load the data/ files."
+        if (Test-Path -LiteralPath $tools) { $lines = @($lines) + "- DataTools (rows, where, sortBy, unique, sum, avg, min, max, count, groupBy, summarize, byMonth, toDate, formatNumber, formatDate, percent; its first comment in data/data-tools.js lists them) can be used in the one-file page: once your script calls DataTools, the helper program adds it to the page's kit script block. Use these for filtering, totals and grouping instead of writing your own." }
+    } elseif ($load) {
         $lines = @($lines) + "- In a web page, load the data with DataTools.load(`"SOURCE PATH`") (for example DataTools.load(`"$(@($man.Values | Where-Object { -not $_.status -and -not $_.edited } | Select-Object -First 1).source)`")): a promise of the rows, or of an object with the rows per sheet for a workbook. Include only <script src=`"data/data-tools.js`"></script> before your script (in a page in a subfolder, the right relative path to it). It reads the file itself when the page is served and the converted copy when the page is opened from disk, so the page keeps working both ways and follows the source file. Never fetch the CSV or the JSON yourself and never add the data/NAME.js copies to the page."
         $lines = @($lines) + "- data/data-tools.js (window.DataTools; its first comment lists the functions) also has rows(data, sheet), where, sortBy, unique, sum, avg, min, max, count, groupBy, summarize, byMonth, toDate, formatNumber, formatDate, percent. Use these for filtering, totals and grouping instead of writing your own."
     } elseif (Test-Path -LiteralPath $tools) { $lines = @($lines) + "- data/data-tools.js (window.DataTools; its first comment lists the functions): DataTools.rows(data, sheet), where, sortBy, unique, sum, avg, min, max, count, groupBy, summarize, byMonth, toDate, formatNumber, formatDate, percent. Use these for filtering, totals and grouping instead of writing your own." }
     "Data files ready to use (the helper program converted them; numbers, dates as yyyy-MM-dd and true/false are typed, empty cells are null). Never write a CSV or Excel parser for them; change the source file, not the converted files, since they are made again when it changes:`n" + (@($lines) -join "`n")
 }
 
-Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Update-DataImports, Format-DataImportNotes, Format-DataImportContext
+Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Read-DataImportManifest, Update-DataImports, Format-DataImportNotes, Format-DataImportContext

@@ -18,6 +18,7 @@ import { SchedulesList } from "./schedules-panel";
 import { BetaTag } from "./beta-tag";
 import { IssuesPanel } from "./issues-panel";
 import { openSection, PanelSection, SectionButton, SectionCount } from "./panel-section";
+import { ProjectSetupPanel } from "./project-setup";
 import { ReviewPanel } from "./review-panel";
 import type { Activity, QueueEntry, ScheduleItem } from "@/lib/api";
 import type { ScheduleTarget } from "./schedule-form";
@@ -311,6 +312,11 @@ function FilesPanel({
           upload={api.uploadSource}
         />
       </PanelSection>
+      {project && (
+        <PanelSection defaultOpen={false} id="files.setup" summary="How pages are built, and a live data file outside the project." title="Project setup">
+          <ProjectSetupPanel key={project.path} projectPath={project.path} />
+        </PanelSection>
+      )}
       {project && (
         <PanelSection
           actions={

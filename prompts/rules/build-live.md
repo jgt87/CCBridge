@@ -1,0 +1,3 @@
+LIVE DATA
+- The data comes from a file outside the project that changes over time (named in the project setup). The helper program copies it into Source/Live/ whenever it changes and converts it like the other data files (and fills it into a one-file page). Build the page on that data, so the page follows the file: show the rows as they come, with an empty state when the file has none, and never assume a fixed number of rows, a fixed set of values or fixed dates.
+- Never put the outside path in the page or read the file from there: a page opened from disk cannot read it, and the path is different on every computer.

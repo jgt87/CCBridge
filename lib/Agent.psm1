@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -825,6 +825,52 @@ function Publish-ProposalPlan {
     $true
 }
 
+function Publish-SetupQuestions {
+    <# Project setup questions (ProjectSetup.psm1 Get-SetupQuestions: a fixed rule on the request and
+       the project's files) before a new project's first request goes to Copilot: the message and a
+       'setup-choice' card; the answer sends the request again with task.setup. A build form the
+       request names itself is saved without asking. Returns whether the turn stops for the card. #>
+    param($State, $Task)
+    $root = $State.ProjectRoot
+    $setup = Get-ProjectSetup $root
+    if ($setup.build) { return $false }
+    $paths = @(Get-ProjectFiles $root | ForEach-Object { $_.path })
+    $stated = Get-StatedBuild $Task.text
+    if ($stated -and -not (Test-OwnCode $paths)) {
+        $null = Save-ProjectSetup $root @{ build = $stated; chosenBy = 'request' }
+        return $false
+    }
+    $q = Get-SetupQuestions $Task.text $paths $setup
+    if (-not $q) { return $false }
+    Add-AgentEvent $State 'user' @{ text = $Task.text }
+    Add-AgentEvent $State 'setup-choice' @{ request = $Task.text; choices = @($q.questions); live = [bool]$q.live; suggest = "$($q.suggest)"; clarify = [bool]$Task.clarify }
+    Write-CCBLog info agent 'Project setup asked' @{ live = [bool]$q.live }
+    $true
+}
+
+function Save-SetupAnswer {
+    <# The user's answer to the setup card (task.setup from the app page: build, liveSource): saved
+       for the project; a live data file is checked, copied in and gets Scripts/Refresh-Data.ps1. #>
+    param($State, $Setup)
+    $root = $State.ProjectRoot
+    if (-not $root -or -not $Setup) { return }
+    $changes = @{ chosenBy = 'user' }
+    if ("$($Setup.build)" -in 'single', 'modular', 'copilot') { $changes.build = "$($Setup.build)" }
+    $live = "$($Setup.liveSource)".Trim().Trim('"')
+    if ($live) {
+        $why = Test-LiveSourcePath $live $root
+        if ($why) { Add-AgentEvent $State 'status' @{ text = "The live data file was not set: $why. Set it later under Project setup in the Files tab." }; $live = '' }
+        else { $changes.liveSource = [IO.Path]::GetFullPath($live); $changes.liveStamp = '' }
+    }
+    $s = Save-ProjectSetup $root $changes
+    $form = switch ($s.build) { 'single' { 'one HTML file' } 'modular' { 'separate files' } 'copilot' { 'left to Copilot' } default { 'not chosen' } }
+    Add-AgentEvent $State 'status' @{ text = "Project setup saved: build form $form$(if ($changes.liveSource) { "; live data from $($changes.liveSource)" }). Change it under Project setup in the Files tab." }
+    if ($changes.liveSource) {
+        try { $w = Write-RefreshScript $root $State.AppRoot; if ($w) { Add-OwnChangeEvent $State 'write' $w 'StreamHub wrote the refresh script: it copies the live data file in and updates the pages, for when StreamHub is closed (run it by hand or from Windows Task Scheduler).' } } catch { Write-CCBLogError agent 'refresh script' $_ }
+        $null = Sync-LiveData $State
+    }
+}
+
 function Invoke-ClarifyStep {
     <# Clarify first: Copilot asks at most 5 questions (as JSON, with likely answers) before any
        work. The app shows them as a form; the answers come back as a plan-first task. With no
@@ -1136,12 +1182,53 @@ function Add-OwnChangeEvent {
     Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'ok'; summary = $Summary; output = (Limit-Text $out 4000); changed = $true }
 }
 
+function Sync-LiveData {
+    <# The project's live data file (project setup, ProjectSetup.psm1) copied into Source/Live/ when it
+       changed; said once when it cannot be found. Returns whether a new copy came in. #>
+    param($State)
+    if (-not $State.ProjectRoot) { return $false }
+    try {
+        $r = Sync-LiveSource $State.ProjectRoot
+        if (-not $r) { return $false }
+        if ($r.missing) {
+            if ($State.LiveMissingSaid -ne $r.source) {
+                $State.LiveMissingSaid = $r.source
+                Add-AgentEvent $State 'status' @{ text = "The live data file was not found: $($r.source). Is its folder still synced by OneDrive on this computer? The pages keep the last copy ($($r.rel))." }
+            }
+            return $false
+        }
+        $State.LiveMissingSaid = $null
+        if ($r.changed) { Add-AgentEvent $State 'status' @{ text = "Live data refreshed: $($r.rel) copied from $($r.source)." }; return $true }
+    } catch { Write-CCBLogError agent 'live data' $_ }
+    $false
+}
+
+function Sync-OneFilePages {
+    <# One-file pages (project setup "one file"): their UI kit and data blocks brought up to date
+       (Update-OneFilePages), each page an edit card and all of them one change set. Returns the
+       pages written. #>
+    param($State)
+    if (-not $State.ProjectRoot) { return @() }
+    try {
+        $r = Update-OneFilePages $State.ProjectRoot $State.AppRoot
+        foreach ($it in @($r.items)) { Add-OwnChangeEvent $State 'edit' "$($it.path) (UI kit and data blocks)" 'StreamHub filled the one-file page''s UI kit and data blocks with what the page uses now.' @{ path = $it.path; exists = $true; old = $it.old; new = $it.new } }
+        foreach ($n in @($r.notes)) { Add-AgentEvent $State 'status' @{ text = $n } }
+        if ($r.checkpoint -and $r.checkpoint.Files.Count) { Add-ChangeSetEvent $State $r.checkpoint 'One-file page brought up to date' }
+        return @($r.files)
+    } catch { Write-CCBLogError agent 'one-file pages' $_ }
+    @()
+}
+
 function Sync-DataImports {
     <# Data files (CSV, TSV, Excel; JSON in Source/) converted to data/NAME.json + data/NAME.js for
-       Copilot (setting dataImport): at task start, after each task and when a project opens.
-       Returns whether a file was written. #>
-    param($State)
-    if (-not $State.ProjectRoot -or -not (Test-DataImportOn $State.AppRoot)) { return $false }
+       Copilot (setting dataImport): at task start, after each task and when a project opens. The
+       live data file comes in first and one-file pages are filled after. Returns whether a file was
+       written. #>
+    param($State, [switch]$NoLive)
+    if (-not $State.ProjectRoot) { return $false }
+    if (-not $NoLive) { $null = Sync-LiveData $State }
+    if (-not (Test-DataImportOn $State.AppRoot)) { return (@(Sync-OneFilePages $State).Count -gt 0) }
+    $wrote = $false
     try {
         $r = Update-DataImports $State.ProjectRoot -JsCopy (Test-DataCopiesOn $State.AppRoot) -AppRoot $State.AppRoot
         $notes = @(Format-DataImportNotes $r)
@@ -1151,9 +1238,10 @@ function Sync-DataImports {
             if ($it.status -in 'created', 'updated', 'tools') { Add-OwnChangeEvent $State 'write' $(if ($it.source) { "$($it.output) (from $($it.source))" } else { $it.output }) $notes[$i] @{ path = $it.output; exists = ($null -ne $it.old); old = $it.old; new = $it.new } }
             elseif ($notes[$i]) { Add-AgentEvent $State 'status' @{ text = $notes[$i] } }
         }
-        if ($r.checkpoint -and $r.checkpoint.Files.Count) { Add-ChangeSetEvent $State $r.checkpoint 'Data files converted for Copilot'; return $true }
+        if ($r.checkpoint -and $r.checkpoint.Files.Count) { Add-ChangeSetEvent $State $r.checkpoint 'Data files converted for Copilot'; $wrote = $true }
     } catch { Write-CCBLogError agent 'data import' $_ }
-    $false
+    if (@(Sync-OneFilePages $State).Count) { $wrote = $true }
+    $wrote
 }
 
 function Sync-DataMirrors {
@@ -2380,7 +2468,7 @@ function Get-ProjectContext($State) {
     $guarded = @(Get-ProtectedPatterns $State.AppRoot)
     if ($guarded.Count) { $full += "`n`nRead-only (the user protected these; never write, edit, move or delete them): $($guarded -join ', ')" }
     if (Test-DataImportOn $State.AppRoot) {
-        $ready = try { Format-DataImportContext $root } catch { Write-CCBLogError agent 'data context' $_; '' }
+        $ready = try { Format-DataImportContext $root -OneFile:((Get-ProjectSetup $root).build -eq 'single') } catch { Write-CCBLogError agent 'data context' $_; '' }
         if ($ready) { $full += "`n`n$ready" }
     }
     # What the UI kit offers (where each part is), so every task can use it, not only interface requests.
@@ -2390,7 +2478,11 @@ function Get-ProjectContext($State) {
     }
     $traits = @(Get-ProjectTraits $paths)
     if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { $traits += 'nocommands' }
-    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths }
+    # Project setup (asked before the first request): the build form and a live data file.
+    $setup = try { Get-ProjectSetup $root } catch { Write-CCBLogError agent 'project setup' $_; @{ build = ''; liveSource = '' } }
+    $setupText = try { Format-ProjectSetupContext $root } catch { '' }
+    if ($setupText) { $full += "`n`n$setupText" }
+    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = "$($setup.build)"; Live = [bool]$setup.liveSource }
 }
 
 function Format-ActionResults {
@@ -3436,6 +3528,9 @@ function Invoke-AgentTurn {
                     # A project with the whole kit in styles/kit (from before the catalogue): only its icons.
                     try { $kitSync = Update-KitIcons $State.ProjectRoot $State.AppRoot } catch { Write-CCBLogError agent 'kit icons' $_ }
                 }
+                # One-file pages: their UI kit and data blocks follow what the page uses now.
+                $onePages = @(Sync-OneFilePages $State)
+                if ($onePages.Count) { $results.Add(@{ head = '### One-file page'; output = "The helper program filled the UI kit and data blocks (data-streamhub) of $($onePages -join ', ') with what the page uses now. Those lines are its own: they show as a note when you read the page; never edit them." }) }
                 # Every finding with its source, so it gets a level (CheckPolicy.psm1): errors break the
                 # file and "done" waits for them; warnings are likely mistakes, said once per task.
                 $found = New-Object System.Collections.Generic.List[object]
@@ -3869,6 +3964,12 @@ function Start-AgentWorker {
                 $State.Tasks.Enqueue(@{ kind = 'connect' })
             }
             Update-CopilotTheme $State   # idle: a theme just chosen in the app reaches the Copilot tab at once
+            # Live data (project setup): the outside file checked once a minute; a new version is
+            # copied in, converted and filled into one-file pages at once.
+            if ($State.ProjectRoot -and (-not $State.NextLiveCheck -or (Get-Date) -ge [datetime]$State.NextLiveCheck)) {
+                $State.NextLiveCheck = (Get-Date).AddMinutes(1).ToString('o')
+                try { if ((Get-ProjectSetup $State.ProjectRoot).liveSource -and (Sync-LiveData $State)) { $null = Sync-DataImports $State -NoLive } } catch { Write-CCBLogError agent 'live data' $_ }
+            }
             # Weekly (setting responseOptionsDays): what Copilot's response picker offers, while idle.
             if ($State.Copilot -eq 'ready' -and $script:Bridge -and (Test-ResponseOptionsDue $State)) { Update-ResponseOptions $State $script:Bridge }
             Start-Sleep -Milliseconds 150; continue
@@ -3923,9 +4024,13 @@ function Start-AgentWorker {
                         Add-AgentEvent $State 'user' @{ text = $task.text }
                         $which = if (@($runReq.names).Count) { 'Which runbook should run? Name one of: ' + (@($runReq.names) -join ', ') + '. Or press Run on it in the Fetch tab.' } else { 'This project has no runbooks yet. Create one with "New runbook from a template" in the Fetch tab (or ask Copilot to create one), then run it.' }
                         Add-AgentEvent $State 'status' @{ text = $which }
+                    } elseif (-not $task.setup -and (-not $task.source -or $task.source -eq 'user') -and -not $force -and -not $State.Headless -and $State.ProjectRoot -and (Publish-SetupQuestions $State $task)) {
+                        # Asked how the project should be built: the answer sends the request again.
                     } elseif ($task.clarify) {
+                        if ($task.setup) { Save-SetupAnswer $State $task.setup }
                         Invoke-ClarifyStep $State $task
                     } else {
+                        if ($task.setup) { Save-SetupAnswer $State $task.setup }
                         $State.IssueFix = $task.issueFix; $State.IssueFixHandled = $false; $State.IssueFixFromSeq = $fromSeq
                         if ($task.freshChat) { $State.NeedNewChat = $true }
                         try { Invoke-AgentTurn $State $task.text $force }
@@ -4018,4 +4123,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

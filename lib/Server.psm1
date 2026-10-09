@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -499,6 +499,39 @@ function Invoke-ApiRequest($Ctx, $State) {
             $p = New-HooksFile $State.ProjectRoot
             return Send-Json $Ctx @{ ok = $true; path = $p }
         }
+        '^GET /api/project-setup$' {
+            # Project setup (ProjectSetup.psm1): the build form and the live data file of the open project.
+            if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ setup = $null } }
+            $s = Get-ProjectSetup $State.ProjectRoot
+            $live = if ($s.liveSource) { @{ path = $s.liveSource; copy = (Get-LiveCopyRel $s.liveSource); found = (Test-Path -LiteralPath $s.liveSource -PathType Leaf) } } else { $null }
+            return Send-Json $Ctx @{ setup = @{ build = $s.build; live = $live; chosenBy = $s.chosenBy; chosenAt = $s.chosenAt } }
+        }
+        '^POST /api/project-setup$' {
+            if ($Ctx.Request.Headers['Origin'] -ne "http://localhost:$($State.Config.port)") { return Send-Json $Ctx @{ error = 'Only the StreamHub page can change the project setup.' } 403 }
+            if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ error = 'Open a project first.' } 400 }
+            $b = Read-JsonBody $Ctx
+            $changes = @{ chosenBy = 'user' }
+            if ($null -ne $b.build) {
+                if ("$($b.build)" -notin 'single', 'modular', 'copilot', '') { return Send-Json $Ctx @{ error = 'Unknown build form.' } 400 }
+                $changes.build = "$($b.build)"
+            }
+            if ($null -ne $b.liveSource) {
+                $p = "$($b.liveSource)".Trim().Trim('"')
+                if ($p) {
+                    $why = Test-LiveSourcePath $p $State.ProjectRoot
+                    if ($why) { return Send-Json $Ctx @{ error = "Not set: $why." } 400 }
+                    $changes.liveSource = [IO.Path]::GetFullPath($p)
+                } else { $changes.liveSource = '' }
+                $changes.liveStamp = ''
+            }
+            $null = Save-ProjectSetup $State.ProjectRoot $changes
+            if ($changes.liveSource) {
+                try { $null = Write-RefreshScript $State.ProjectRoot $State.AppRoot } catch { Write-CCBLogError server 'refresh script' $_ }
+                $State.NextLiveCheck = $null   # the worker copies it in at its next idle moment
+            }
+            $s = Get-ProjectSetup $State.ProjectRoot
+            return Send-Json $Ctx @{ ok = $true; setup = @{ build = $s.build; live = $(if ($s.liveSource) { @{ path = $s.liveSource; copy = (Get-LiveCopyRel $s.liveSource); found = $true } } else { $null }) } }
+        }
         '^GET /api/packages$' {
             # The project's package.json files and the packages node_modules does not have yet.
             if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ items = @(); npm = $false } }
@@ -586,6 +619,11 @@ function Invoke-ApiRequest($Ctx, $State) {
             }
             if ($b.asCoding) { $task.forceKind = 'coding' }
             if ($b.noRunbook) { $task.noRunbook = $true }   # "Send to Copilot" on a runbook choice: no runbook check
+            # The answer to the project setup card. Only the StreamHub page itself (its Origin) sets it:
+            # a live data file outside the project is the person's choice, never another program's.
+            if ($b.setup -and $Ctx.Request.Headers['Origin'] -eq "http://localhost:$($State.Config.port)") {
+                $task.setup = @{ build = [string]$b.setup.build; liveSource = [string]$b.setup.liveSource }
+            }
             if ($b.clarify) { $task.clarify = $true; $task.request = [string]$b.text }
             elseif ($b.planFirst) {
                 # Plan first: read-only turn that ends with a plan to approve in the app.
@@ -842,6 +880,9 @@ function Send-PreviewFile($Ctx, $State, [string]$RelPath) {
     try {
         if ($Ctx.Request.HttpMethod -ne 'GET' -or -not $State.ProjectRoot) { $res.StatusCode = 404; return }
         $rel = [Uri]::UnescapeDataString($RelPath); if (-not $rel) { $rel = 'index.html' }
+        # Live data (project setup): a served page that loads the copy of the outside file gets it as
+        # the file is now, so opening or reloading the page shows the current data.
+        if ($rel -match '(?i)^Source/Live/') { try { $null = Sync-LiveSource $State.ProjectRoot } catch { Write-CCBLogError server 'live data' $_ } }
         $full = Resolve-ProjectPath $State.ProjectRoot $rel
         if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { $res.StatusCode = 404; return }
         $bytes = [IO.File]::ReadAllBytes($full)

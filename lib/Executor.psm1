@@ -8,6 +8,7 @@ Import-Module (Join-Path $PSScriptRoot 'Guardrails.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Office.psm1')
 Import-Module (Join-Path $PSScriptRoot 'SecretFiles.psm1')
+Import-Module (Join-Path $PSScriptRoot 'OneFile.psm1')
 
 $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
 
@@ -1013,6 +1014,7 @@ function Invoke-ReadAction {
                 $full = Resolve-ProjectPath $ProjectRoot $op
                 if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $op`n(file not found)"; continue }
                 $text = (Read-TextFile $full).Text
+                if ($full -match '(?i)\.html?$') { $text = Hide-GeneratedBlocks $text }
                 $total = $text.Replace("`r`n", "`n").Split("`n").Length
                 $ol = @(Get-FileOutline $text $full)
                 "### $op (outline, $total lines)`n````n$(if ($ol.Count) { $ol -join "`n" } else { '(no structure found; read the file or a line range)' })`n````"
@@ -1033,6 +1035,7 @@ function Invoke-ReadAction {
             $info = Read-TextFile $full
             $raw = $info.Text.Replace("`r`n", "`n")
             if ($secret) { $raw = Hide-SecretValues $full $raw }
+            if ($full -match '(?i)\.html?$') { $raw = Hide-GeneratedBlocks $raw }   # one-file page: the helper program's blocks as a note
             $lines = $raw.Split("`n")
             $total = $lines.Length
             $from = [Math]::Min($r.From, [Math]::Max(1, $total)); $to = [Math]::Min($r.To, $total)
@@ -1117,13 +1120,17 @@ function Invoke-GrepAction {
     if ($FileGlob) { $re = ConvertTo-GlobRegex $FileGlob; $files = $files | Where-Object { $_.path -match $re } }
     $hits = New-Object System.Collections.Generic.List[string]
     foreach ($f in $files) {
-        if ($f.size -gt 2MB) { continue }
         $full = Resolve-ProjectPath $ProjectRoot $f.path
+        # A one-file page is large because of its data: searched without the helper program's blocks.
+        $page = $f.path -match '(?i)\.html?$'
+        if ($f.size -gt 2MB -and -not ($page -and $f.size -le 100MB)) { continue }
         if (Test-BinaryFile $full) { continue }
         $n = 0
         if ((Get-SecretFileKind $full) -eq 'key') { continue }
         $gt = (Read-TextFile $full).Text
         if (Get-SecretFileKind $full) { $gt = Hide-SecretValues $full $gt }   # keys can be found, values stay hidden
+        if ($page) { $gt = Hide-GeneratedBlocks $gt }
+        if ($f.size -gt 2MB -and $gt.Length -gt 2MB) { continue }
         foreach ($line in $gt.Split("`n")) {
             $n++
             if ($line -match $Pattern) {
@@ -1535,6 +1542,7 @@ function Get-ChangedView {
     <# After an edit: the changed lines as they are now, widened to whole blocks, so Copilot's next
        edit starts from the current text. At most $MaxLines lines. Returns the text or ''. #>
     param([string]$Old, [string]$New, [string]$Path, [string]$Shown, [int]$MaxLines = 80)
+    if ($Path -match '(?i)\.html?$') { $Old = Hide-GeneratedBlocks $Old; $New = Hide-GeneratedBlocks $New }
     $o = "$Old".Replace("`r`n", "`n").Split("`n"); $n = "$New".Replace("`r`n", "`n").Split("`n")
     $top = 0
     while ($top -lt $o.Length -and $top -lt $n.Length -and $o[$top] -ceq $n[$top]) { $top++ }
@@ -1742,7 +1750,10 @@ function Get-EditResult {
             if ($done.applied) { $applied.Add("pair ${n}: already applied - $($done.evidence)"); continue }
         }
         if ($hit.ambiguous) { return [pscustomobject]@{ ok = $false; ambiguous = $true; error = "pair $n`: $($hit.error). Nothing was changed." } }
-        if ($hit.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed. Read the file again and send a corrected edit block." } }
+        if ($hit.error) {
+            $blocksNote = if (Test-OneFileText $text) { ' Lines inside the helper program''s data-streamhub blocks are not shown and cannot be part of a SEARCH.' } else { '' }
+            return [pscustomobject]@{ ok = $false; error = "pair $n`: $($hit.error). Nothing was changed. Read the file again and send a corrected edit block.$blocksNote" }
+        }
         if ($hit.all) {
             foreach ($h in @($hit.hits | Sort-Object { $_.start } -Descending)) { $text = $text.Substring(0, $h.start) + $replace + $text.Substring($h.start + $h.length) }
             $notes.Add("pair ${n}: $($hit.note)")
@@ -1788,6 +1799,9 @@ function Get-EditResult {
     }
     $moveProblem = Test-MoveOrder $ProjectRoot $full $info.Text $text
     if ($moveProblem) { return [pscustomobject]@{ ok = $false; error = $moveProblem } }
+    # A one-file page: the UI kit and data blocks belong to the helper program.
+    $blockEdit = Find-BlockEdit $info.Text $text
+    if ($blockEdit) { return [pscustomobject]@{ ok = $false; error = "not written: $blockEdit." } }
     [pscustomobject]@{ ok = $true; full = $full; old = $info.Text; new = $text; bom = $info.Bom; crlf = $info.Crlf; encoding = $info.Encoding; pairs = $n; notes = @($notes)
         alreadyApplied = @($applied); unchanged = ($text -ceq $info.Text) }
 }

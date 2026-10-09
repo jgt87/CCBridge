@@ -9,6 +9,7 @@ import { followBottom } from "@/lib/stick-to-bottom";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
 import type { Activity, AgentEvent, CheckFinding, Preview, Reference, UndoChange } from "@/lib/api";
 import { ChecksCard } from "./checks-card";
+import { SetupChoiceCard, type SetupChoiceItem } from "./project-setup";
 import { UndoCard } from "./undo-card";
 import { stripActionBlocks } from "@/lib/diff";
 import { activityTexts, thinkingTexts } from "@/lib/thinking-texts";
@@ -22,6 +23,7 @@ export type TranscriptItem =
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[]; agent?: string }
   | { kind: "agentPlan"; seq: number; agent: string }
   | { kind: "runbookChoice"; seq: number; name: string; title: string; request: string; restored: boolean }
+  | SetupChoiceItem
   | { kind: "packages"; seq: number; folder: string; text: string; npm: boolean; restored: boolean }
   | { kind: "unfinished"; seq: number; text: string; findings: string[]; continueText: string; restored: boolean }
   | { kind: "action"; seq: number; item: ActionItem }
@@ -124,6 +126,17 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
     }),
   "packages-needed": (e, ctx) =>
     ctx.items.push({ kind: "packages", seq: e.seq, folder: e.folder ?? "", text: e.text ?? "", npm: e.npm !== false, restored: Boolean(e.restored) }),
+  "setup-choice": (e, ctx) =>
+    ctx.items.push({
+      kind: "setupChoice",
+      seq: e.seq,
+      request: e.request ?? "",
+      choices: Array.isArray(e.choices) ? e.choices : e.choices ? [e.choices] : [],
+      live: Boolean(e.live),
+      suggest: e.suggest ?? "",
+      clarify: Boolean(e.clarify),
+      restored: Boolean(e.restored),
+    }),
   "runbook-choice": (e, ctx) =>
     ctx.items.push({ kind: "runbookChoice", seq: e.seq, name: e.name ?? "", title: e.title ?? "", request: e.request ?? "", restored: Boolean(e.restored) }),
   // How the last message was sent (chat, project, coding, ...): shown under it.
@@ -447,6 +460,8 @@ function TranscriptRow({
       return onSend ? <AgentPlanCard agent={item.agent} onSend={onSend} /> : null;
     case "runbookChoice":
       return <RunbookChoiceCard item={item} onSend={onSend} />;
+    case "setupChoice":
+      return <SetupChoiceCard item={item} onSend={onSend} />;
     case "packages":
       return <PackagesCard item={item} />;
     case "unfinished":

@@ -129,6 +129,9 @@ function Get-PromptModules {
     # find and remember: only useful once the project has files.
     if (@($Context.Paths | Where-Object { $_ }).Count -or $traits -contains 'code') { $ids.Add('actions:project') }
     if ($web) { $ids.Add('rules:web') }
+    # Project setup (ProjectSetup.psm1): the build form the user chose, and live data.
+    switch ("$($Context.Build)") { 'single' { $ids.Add('rules:build-single') } 'modular' { $ids.Add('rules:build-modular') } }
+    if ($Context.Live) { $ids.Add('rules:build-live') }
     if ($web -or ($Text -match $script:MovePattern)) { $ids.Add('rules:moving') }
     if (($traits -contains 'python') -or ($Text -match $script:PythonPattern)) { $ids.Add('rules:python') }
     if (($traits -contains 'powershell') -or ($Text -match $script:PowerShellPattern)) { $ids.Add('rules:powershell') }
@@ -222,6 +225,12 @@ function Get-PromptPart {
         '^actions$'   { return Read-PromptPart $AppRoot 'actions.md' }
         '^rules$'     { return Read-PromptPart $AppRoot 'rules.md' }
         '^rules:environment$' { return Get-EnvironmentText }
+        '^rules:web$' {
+            $part = Read-PromptPart $AppRoot 'rules\web.md'
+            # One-file project: the one-file rules replace the lines about splitting into files.
+            if ("$($Context.Build)" -eq 'single') { $part = (@($part.Split("`n") | Where-Object { $_ -notlike '- Web apps: one part per file*' -and $_ -notlike '- Web folders*' -and $_ -notlike '- A page opened straight from disk*' }) -join "`n").Trim() }
+            return $part
+        }
         '^rules:runbook$' {
             # With the blank template, in a four-backtick fence (the template has ```json blocks).
             $tpl = Join-Path $AppRoot 'templates\runbooks\blank.runbook.md'
@@ -257,6 +266,8 @@ function Get-PromptPart {
                     else { $l }
                 }) -join "`n"
             }
+            # One-file project: the kit comes in through the page's own blocks, not through styles/kit/ files.
+            if ("$($Context.Build)" -eq 'single') { $text += "`n- One-file page: the kit reaches the page through its data-streamhub=`"kit`" blocks (see the one-file rules), never through link or script tags to styles/kit/. Use the kit's classes, scripts, charts and icons the same way; the helper program puts what the page uses in the blocks. Change colours and sizes in styles/kit/tokens.css." }
             if (-not (Test-UiKitPart 'react' $AppRoot)) { $text = $text -replace ' In a React project use styles/kit/react/ instead:[^\n]*', '' -replace '; React: Chart from styles/kit/react/', '' -replace ' React: Icon from styles/kit/react/\.', '' -replace ' React: useFileData from styles/kit/react/\.', '' -replace ' and React parts come the same way', ' come the same way' -replace ', or an import from styles/kit/react/', '' }
             return $text
         }

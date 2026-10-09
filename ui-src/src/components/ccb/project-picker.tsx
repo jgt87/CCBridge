@@ -1,15 +1,19 @@
-import { Cloud, FolderGit2, FolderOpen } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Cloud, FolderGit2, FolderOpen, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import { Input } from "@/components/ui/input";
 import { api, type ProjectInfo } from "@/lib/api";
 import { overviewText, projectsSignature } from "@/lib/project-overview";
+import { cn } from "@/lib/utils";
 
 export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
   const [root, setRoot] = useState("");
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  // The full load, also for the Refresh button (folders, sizes and types read again).
+  const loadRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   useEffect(() => {
     let shown = "";
@@ -22,6 +26,7 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
         setRoot(r.root);
         setProjects(r.projects);
       }, (e) => setError(String(e.message ?? e)));
+    loadRef.current = load;
     // A folder pasted into the projects folder (or one still being copied) shows without reopening the picker:
     // a quick look at names and times, the full list only when they changed.
     const check = async () => {
@@ -51,6 +56,16 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
     };
   }, []);
 
+  const refresh = async () => {
+    setError("");
+    setRefreshing(true);
+    try {
+      await loadRef.current();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const open = async (path: string) => {
     setError("");
     try {
@@ -75,9 +90,21 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
     <div className="mx-auto w-full max-w-xl space-y-6 px-4 py-10">
       <div className="space-y-1">
         <h2 className="font-semibold text-xl tracking-tight">Choose a project</h2>
-        <p className="flex items-center gap-1.5 text-muted-foreground text-sm">
-          <Cloud className="h-4 w-4" /> Projects live in your OneDrive: <span className="truncate font-mono text-xs">{root}</span>
-        </p>
+        <div className="flex items-center gap-1.5 text-muted-foreground text-sm">
+          <Cloud className="h-4 w-4 shrink-0" />
+          <span className="shrink-0">Projects live in your OneDrive:</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">{root}</span>
+          <button
+            aria-label="Refresh the project list"
+            className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 hover:text-foreground disabled:opacity-50 dark:hover:bg-white/5"
+            disabled={refreshing}
+            onClick={() => void refresh()}
+            title="Read the folders in the projects folder again (names, sizes and file types)"
+            type="button"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} /> Refresh
+          </button>
+        </div>
       </div>
 
       <form

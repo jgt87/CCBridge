@@ -5,6 +5,7 @@
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')   # Test-CheckSwitch: the check families can be turned off
+Import-Module (Join-Path $PSScriptRoot 'OneFile.psm1')   # one-file pages: the helper program's blocks are not checked
 
 function Hide([string]$Text, [string]$Pattern) {
     # Each match becomes spaces, line breaks kept (so line numbers stay right).
@@ -970,6 +971,8 @@ function Test-FileContent {
     <# The problems in a file's text, by its type: "line N: problem" (or a whole-file problem).
        Also for every code file: leftover edit or merge markers and ``` fence lines. #>
     param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text, [bool]$Crlf = $false)
+    # A one-file page: the UI kit and data blocks the helper program writes are not the page's own code.
+    if ($Path -match '(?i)\.html?$') { $Text = Hide-GeneratedBlocks $Text }
     $t = $Text.Replace("`r`n", "`n")
     $issues = New-Object System.Collections.Generic.List[string]
     $add = { param($x) foreach ($y in @($x)) { if ($y) { $issues.Add([string]$y) } } }
