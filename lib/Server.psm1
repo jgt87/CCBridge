@@ -515,7 +515,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ setup = $null } }
             $s = Get-ProjectSetup $State.ProjectRoot
             $live = if ($s.liveSource) { @{ path = $s.liveSource; copy = (Get-LiveCopyRel $s.liveSource); found = (Test-Path -LiteralPath $s.liveSource -PathType Leaf) } } else { $null }
-            return Send-Json $Ctx @{ setup = @{ build = $s.build; live = $live; chosenBy = $s.chosenBy; chosenAt = $s.chosenAt } }
+            return Send-Json $Ctx @{ setup = @{ build = $s.build; live = $live; chosenBy = $s.chosenBy; chosenAt = $s.chosenAt; answers = @(Get-SetupAnswerList $State.ProjectRoot) } }
         }
         '^POST /api/project-setup$' {
             if ($Ctx.Request.Headers['Origin'] -ne "http://localhost:$($State.Config.port)") { return Send-Json $Ctx @{ error = 'Only the StreamHub page can change the project setup.' } 403 }
@@ -526,6 +526,8 @@ function Invoke-ApiRequest($Ctx, $State) {
                 if ("$($b.build)" -notin 'single', 'modular', 'copilot', '') { return Send-Json $Ctx @{ error = 'Unknown build form.' } 400 }
                 $changes.build = "$($b.build)"
             }
+            # Forget one answered setup question: StreamHub asks it again when a request needs it.
+            if ($null -ne $b.forget -and "$($b.forget)" -match '^[a-z0-9]+$') { $changes.answers = @{ "$($b.forget)" = '' } }
             if ($null -ne $b.liveSource) {
                 $p = "$($b.liveSource)".Trim().Trim('"')
                 if ($p) {
@@ -633,7 +635,9 @@ function Invoke-ApiRequest($Ctx, $State) {
             # The answer to the project setup card. Only the StreamHub page itself (its Origin) sets it:
             # a live data file outside the project is the person's choice, never another program's.
             if ($b.setup -and $Ctx.Request.Headers['Origin'] -eq "http://localhost:$($State.Config.port)") {
-                $task.setup = @{ build = [string]$b.setup.build; liveSource = [string]$b.setup.liveSource }
+                $answers = @{}
+                if ($b.setup.answers) { foreach ($p in @($b.setup.answers.PSObject.Properties)) { $answers[$p.Name] = [string]$p.Value } }
+                $task.setup = @{ build = [string]$b.setup.build; liveSource = [string]$b.setup.liveSource; answers = $answers }
             }
             if ($b.clarify) { $task.clarify = $true; $task.request = [string]$b.text }
             elseif ($b.planFirst) {
@@ -731,7 +735,9 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^GET /api/sso$' {
             # Settings > Sign-in: work account on this PC, the profile switch, the Copilot tab.
-            $st = Get-SsoStatus -Port ([int]$State.Config.cdpPort)
+            # ?quick=1 (the app's prefetch at start) reads what it can without opening Edge's
+            # settings page in a tab; the full status comes when the Sign-in section is open.
+            $st = Get-SsoStatus -Port ([int]$State.Config.cdpPort) -NoPage:($req.QueryString['quick'] -eq '1')
             $st.signIn = $(if ("$($State.Config.signIn)" -eq 'private') { 'private' } else { 'single-sign-on' })
             return Send-Json $Ctx @{ status = $st }
         }

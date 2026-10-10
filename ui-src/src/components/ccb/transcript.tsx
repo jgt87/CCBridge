@@ -15,6 +15,7 @@ import { stripActionBlocks } from "@/lib/diff";
 import { activityTexts, thinkingTexts } from "@/lib/thinking-texts";
 import { cn } from "@/lib/utils";
 import { ActionCard, LiveConsole, type ActionItem } from "./action-card";
+import GradientButton from "@/components/kokonutui/gradient-button";
 
 type NoteTone = "info" | "error" | "done" | "undo" | "human";
 
@@ -283,14 +284,12 @@ function RunbookChoiceCard({ item, onSend }: { item: Extract<TranscriptItem, { k
     setChosen("copilot");
     onSend?.(item.request, { noRunbook: true });
   };
-  const btn = "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs hover:bg-black/10 dark:hover:bg-white/15";
+  const btn = "inline-flex h-10 items-center gap-1 rounded-md px-3 text-sm hover:bg-black/10 disabled:opacity-40 dark:hover:bg-white/15";
   return (
     <div className="space-y-2 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
       <div>Your message names runbook {label}. Run it now, or send the message to Copilot (for example to change the runbook)?</div>
-      <div className="flex gap-1.5">
-        <button className={cn(btn, "bg-black/5 dark:bg-white/10")} onClick={run} type="button">
-          Run it
-        </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <GradientButton className="h-10 min-w-44" label="Run it" onClick={run} variant="neutral" />
         <button className={btn} disabled={!onSend} onClick={toCopilot} type="button">
           Send to Copilot
         </button>
@@ -302,7 +301,6 @@ function RunbookChoiceCard({ item, onSend }: { item: Extract<TranscriptItem, { k
 /** A task that changed files ended without "done": what StreamHub's checks found, and Continue. */
 function UnfinishedCard({ item, onSend }: { item: Extract<TranscriptItem, { kind: "unfinished" }>; onSend?: (text: string, opts: ChatOptions) => void }) {
   const [sent, setSent] = useState(false);
-  const btn = "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs hover:bg-black/10 disabled:opacity-40 dark:hover:bg-white/15";
   return (
     <div className="space-y-2 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
       <div className="flex items-start gap-2">
@@ -319,10 +317,8 @@ function UnfinishedCard({ item, onSend }: { item: Extract<TranscriptItem, { kind
         </ul>
       )}
       {!item.restored && (
-        <div className="flex gap-1.5">
-          <button className={cn(btn, "bg-black/5 dark:bg-white/10")} disabled={sent || !onSend || !item.continueText} onClick={() => { setSent(true); onSend?.(item.continueText, {}); }} type="button">
-            {sent ? "Sent to Copilot" : "Continue"}
-          </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <GradientButton className="h-10 min-w-44" disabled={sent || !onSend || !item.continueText} label={sent ? "Sent to Copilot" : "Continue"} onClick={() => { setSent(true); onSend?.(item.continueText, {}); }} variant="neutral" />
         </div>
       )}
     </div>
@@ -394,16 +390,18 @@ function PackagesCard({ item }: { item: Extract<TranscriptItem, { kind: "package
       {node === "done" && <div className="text-muted-foreground text-xs">Node.js and npm are installed.</div>}
       {node === "failed" && <div className="text-rose-600 text-xs dark:text-rose-400">Node.js could not be installed. {nodeMessage}</div>}
       {state === "failed" && <div className="text-rose-600 text-xs dark:text-rose-400">npm install could not be started.</div>}
-      <div className="flex gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
         {!npm && node !== "done" && (
-          <button className={cn(btn, "bg-black/5 dark:bg-white/10")} disabled={node === "installing" || node === "pending"} onClick={installNode} type="button">
-            Install Node.js
+          <GradientButton className="h-10 min-w-44" disabled={node === "installing" || node === "pending"} label="Install Node.js" onClick={installNode} variant="neutral" />
+        )}
+        {npm ? (
+          <GradientButton className="h-10 min-w-44" label="Run npm install" onClick={install} variant="neutral" />
+        ) : (
+          <button className={cn(btn, "h-10 px-3 text-sm")} disabled type="button">
+            Run npm install
           </button>
         )}
-        <button className={cn(btn, npm ? "bg-black/5 dark:bg-white/10" : "")} disabled={!npm} onClick={install} type="button">
-          Run npm install
-        </button>
-        <button className={btn} onClick={() => setState("later")} type="button">
+        <button className={cn(btn, "h-10 px-3 text-sm")} onClick={() => setState("later")} type="button">
           Not now
         </button>
       </div>

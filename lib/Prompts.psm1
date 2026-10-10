@@ -206,6 +206,12 @@ function Get-PromptModules {
     # Runbook rules: for requests about runbooks, and for messages that name one of the project's runbooks.
     $namesRunbook = @($Context.Paths | Where-Object { "$_" -match '(?i)^Runbooks/([^/]+)\.runbook\.md$' -and $Text -match ('(?i)(^|[^\w-])' + [regex]::Escape($Matches[1]) + '($|[^\w-])') }).Count
     if ($Text -match $script:RunbookPattern -or $namesRunbook) { $ids.Add('rules:runbook') }
+    # The setup answers (ProjectSetup registry): the kind of app the user chose brings its rules.
+    $ans = $Context.Answers
+    if ($ans -is [hashtable]) {
+        if ("$($ans['appkind'])" -eq 'react' -and -not $ids.Contains('rules:react')) { $ids.Add('rules:react') }
+        if ("$($ans['appkind'])" -eq 'desktop' -and -not $ids.Contains('rules:psgui')) { $ids.Add('rules:psgui') }
+    }
     # Online information: how to use web sources, and the web action for the exact text of a page.
     if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }
     if (@(Get-M365Links $Text).Count) { $ids.Add('rules:m365links') }

@@ -26,10 +26,12 @@ export function rememberEdgeCache(info: EdgeCacheInfo | null) {
 
 export const loadSettings = () => api.settings().then((s) => (rememberSettings(s), s));
 export const loadSso = () => api.ssoStatus().then((s) => (rememberSso(s), s));
+/** The quick status for the prefetch: never opens a tab in Edge; the Sign-in section loads the full one when it opens. */
+export const loadSsoQuick = () => api.ssoStatusQuick().then((s) => (rememberSso(s), s));
 export const loadEdgeCache = () => api.edgeCache().then((i) => (rememberEdgeCache(i), i));
 export const loadTools = () => api.tools().then((t) => ((tools = t), t));
 
 /** All of them, failures ignored (the panel loads them again when it opens). */
 export function prefetchSettings() {
-  return Promise.allSettled([loadSettings(), loadEdgeCache(), loadSso(), loadTools()]);
+  return Promise.allSettled([loadSettings(), loadEdgeCache(), loadSsoQuick(), loadTools()]);
 }

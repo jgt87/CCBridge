@@ -9,6 +9,7 @@ Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
 Import-Module (Join-Path $root 'lib\Lint.psm1') -Force
 Import-Module (Join-Path $root 'lib\Protocol.psm1') -Force
+Import-Module (Join-Path $root 'lib\AutoFix.psm1') -Force
 
 Describe 'Find-DamagedHtmlLine' {
     $old = "<head>`n  <link rel=`"stylesheet`" href=`"styles.css`">`n</head>"
@@ -145,4 +146,47 @@ Describe 'An edit whose start marker was damaged or lost' {
         @(& (Get-Module Protocol) { param($t) Get-EditPairs $t } "a`n=======`nb`n=======`nc").Count | Should Be 0
     }
 }
+Describe 'Stylesheet and script tags stripped to their bare paths' {
+    $p = Join-Path $env:TEMP ('ccb-bare-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+    $damaged = "<!doctype html>`n<html lang=""en"">`n<head>`n<meta charset=""utf-8"">`n<title>Copilot usage dashboard</title>`nstyles/kit/tokens.css`nstyles/kit/kit.css`ncss/app.css`n</head>`n<body class=""kit-page"">`n<p>See js/app.js for details</p>`njs/app.js`n</body></html>"
+    It 'rebuilds the tags from bare path lines in page text, and leaves prose and code alone' {
+        $r = Repair-StrippedScriptTag $damaged
+        $r | Should Match '(?m)^<link rel="stylesheet" href="styles/kit/tokens\.css">$'
+        $r | Should Match '(?m)^<link rel="stylesheet" href="css/app\.css">$'
+        $r | Should Match '(?m)^<script src="js/app\.js"></script>$'
+        $r | Should Match '<p>See js/app\.js for details</p>'
+        Repair-StrippedScriptTag "const files = [`n  ""js/app.js"",`n];" | Should Not Match '<script'
+        Repair-CodeText 'index.html' "  styles/kit/kit.css`n" | Should Match '^  <link rel="stylesheet" href="styles/kit/kit\.css">'
+        Repair-CodeText 'notes.md' "styles/kit/kit.css`n" | Should Be "styles/kit/kit.css`n"
+        Test-DamagedTagText "<head>`nstyles/kit/kit.css`n</head>" | Should Be $true
+        Test-DamagedTagText "<head>`n<link rel=""stylesheet"" href=""styles/kit/kit.css"">`n</head>" | Should Be $false
+    }
+    It 'reports the bare paths in an existing page with their lines and writes the tags' {
+        $f = @(Find-LeakedMarkup 'index.html' $damaged | Where-Object { $_.kind -eq 'bare-path' })
+        ($f | ForEach-Object { $_.line }) -join ',' | Should Be '6,7,8,12'
+        $f[0].message | Should Match "^line 6: 'styles/kit/tokens.css' stands alone without its tag .*: write <link rel=""stylesheet"" href=""styles/kit/tokens.css"">"
+        $fix = Repair-MechanicalIssues 'index.html' $damaged
+        $fix.fixes -join ';' | Should Match '4 stylesheet or script path\(s\) that had lost their tag'
+        $fix.text | Should Match '(?m)^<link rel="stylesheet" href="styles/kit/kit\.css">$'
+        $fix.text | Should Match '(?m)^<script src="js/app\.js"></script>$'
+        @(Find-LeakedMarkup 'index.html' $fix.text).Count | Should Be 0
+        @(Test-FileContent 'index.html' $damaged) -join ';' | Should Match "line 6: 'styles/kit/tokens.css' stands alone"
+    }
+    It 'applies an edit whose REPLACE arrived stripped, and says so when an edit changes nothing' {
+        [IO.File]::WriteAllText((Join-Path $p 'index.html'), $damaged)
+        $cp = New-Checkpoint $p 'test'
+        $edits = @(@{ search = "styles/kit/tokens.css`nstyles/kit/kit.css`ncss/app.css"; replace = "styles/kit/tokens.css`nstyles/kit/kit.css`ncss/app.css" })
+        $r = "$(Invoke-EditAction $p 'index.html' $edits $cp)"
+        $r | Should Match '^edited index\.html'
+        $r | Should Not Match 'already contains these changes'
+        $now = [IO.File]::ReadAllText((Join-Path $p 'index.html'))
+        $now | Should Match '(?m)^<link rel="stylesheet" href="css/app\.css">$'
+        $now | Should Not Match '(?m)^css/app\.css$'
+        # A pair that truly changes nothing (the same words twice) is an error that says so, never "already applied".
+        $same = @(@{ search = '<title>Copilot usage dashboard</title>'; replace = '<title>Copilot usage dashboard</title>' })
+        "$(Invoke-EditAction $p 'index.html' $same $cp)" | Should Match 'nothing changed: every REPLACE is the same text as its SEARCH'
+    }
+    Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

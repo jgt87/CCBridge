@@ -1390,6 +1390,8 @@ function Test-DamagedTagText([AllowEmptyString()][string]$Text) {
        turns <script src="PATH.js"></script> into PATH.jsscript> while the page shows it intact): the
        end of a tag without its start, or a tag whose attribute quote never closes. #>
     if ($Text -match '(?i)\.(js|mjs|cjs|css|json)(script|link|style)>') { return $true }
+    # A stylesheet or script path alone on a line: a <link> or <script> tag stripped to its address.
+    if ($Text -match '(?m)^([ \t]*)((?:\.{1,2}/)?[\w~-][\w.~/-]*\.(?:css|m?js)(?:\?[\w=.&-]*)?)[ \t]*$') { return $true }
     foreach ($m in [regex]::Matches($Text, '<[A-Za-z][\w-]*(\s[^<>\n]*)?>')) {
         $attrs = $m.Groups[1].Value -replace '\{[^{}]*\}', ''
         if (([regex]::Matches($attrs, '"')).Count % 2 -eq 1) { return $true }

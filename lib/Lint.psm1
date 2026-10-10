@@ -1509,6 +1509,7 @@ function Get-LostTagEnd([string]$Pre, [System.Text.RegularExpressions.Match]$M) 
     $pos
 }
 
+$script:BareAssetLine = '(?m)^([ \t]*)((?:\.{1,2}/)?[\w~-][\w.~/-]*\.(?:css|m?js)(?:\?[\w=.&-]*)?)[ \t]*$'
 $script:LeakTextContent = '(?s)\.(textContent|innerText)\s*\+?=\s*(?:`[^`]*<[a-zA-Z][^`]*`|''[^''\r\n]*<[a-zA-Z][^''\r\n]*''|"[^"\r\n]*<[a-zA-Z][^"\r\n]*")|createTextNode\s*\(\s*(?:`[^`]*<[a-zA-Z][^`]*`|''[^''\r\n]*<[a-zA-Z][^''\r\n]*''|"[^"\r\n]*<[a-zA-Z][^"\r\n]*")'
 
 function Find-LeakedMarkup {
@@ -1523,6 +1524,9 @@ function Find-LeakedMarkup {
          show it as text (use innerHTML for the page's own markup, or build the elements);
        - broken-tag: a tag that lost its < on the way (div class="x">, /div>), left as text (AutoFix
          puts the < back);
+       - bare-path: a stylesheet or script path alone on a line (styles/kit/kit.css): the <link> or
+         <script> tag around it was stripped on the way, so nothing loads and the path shows as text
+         (AutoFix writes the tag);
        - lost-end: a tag that lost its > (<div class="x" followed by the next tag or a text line): the
          browser reads what follows, up to the next >, as attributes, so that text and tag vanish from
          the page (a script tag there never loads); reported on its own, since the other findings
@@ -1550,6 +1554,14 @@ function Find-LeakedMarkup {
                 message = "line $(LineAt $Text $at): the tag $($tag.Substring(0, [Math]::Min(40, $tag.Length))) is missing its <, so ${shown}: write <$($tag.Substring(0, [Math]::Min(20, $tag.Length)))" })
         }
         $pre = $mask.pretags
+        if ($isPage) {
+            foreach ($m in [regex]::Matches($pre, $script:BareAssetLine)) {
+                $p = $m.Groups[2].Value
+                $tag = if ($p -match '(?i)\.css(\?|$)') { "<link rel=""stylesheet"" href=""$p"">" } else { "<script src=""$p""></script>" }
+                $out.Add(@{ kind = 'bare-path'; index = $m.Groups[2].Index; length = $m.Groups[2].Length; line = (LineAt $Text $m.Index); text = $p; tag = $tag;
+                    message = "line $(LineAt $Text $m.Index): '$p' stands alone without its tag (the <link> or <script> tag around it was lost on the way), so the browser loads nothing there and shows the path as text: write $tag" })
+            }
+        }
         if ($Path -match '(?i)\.(vue|svelte)$') { $pre = [regex]::Replace($pre, '\{[^{}]*\}', [Text.RegularExpressions.MatchEvaluator] { param($x) ' ' * $x.Length }) }
         $swallow = if ($isPage) { 'the browser reads what follows, up to the next >, as attributes, and that text or tag is not on the page (a script tag there never loads)' }
             elseif ($Path -match '(?i)\.xaml$') { 'the window does not load (not valid XML)' }

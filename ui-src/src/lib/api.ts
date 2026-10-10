@@ -99,6 +99,18 @@ export interface SetupChoice {
   id: string;
   question: string;
   options: { value: string; label: string; help: string }[] | { value: string; label: string; help: string };
+  /** Several answers at once (checkboxes). */
+  multi?: boolean;
+  /** "project": asked once and saved for the project; "request": asked whenever a request triggers it. */
+  scope?: string;
+}
+
+/** A setup question answered for the project, as the Project setup section lists it. */
+export interface SetupAnswer {
+  id: string;
+  question: string;
+  value: string;
+  label: string;
 }
 
 /** The open project's setup: the build form and a live data file outside the project. */
@@ -107,6 +119,7 @@ export interface ProjectSetup {
   live: { path: string; copy: string; found: boolean } | null;
   chosenBy?: string;
   chosenAt?: string;
+  answers?: SetupAnswer[];
 }
 
 export interface AgentEvent {
@@ -339,8 +352,8 @@ export interface ChatOptions {
   asCoding?: boolean;
   /** Send to Copilot without checking whether the message asks to run a runbook. */
   noRunbook?: boolean;
-  /** The answer to the project setup card: how the project is built, and a live data file. */
-  setup?: { build: BuildForm; liveSource?: string };
+  /** The answer to the setup card: how the project is built, a live data file, and the other questions by id. */
+  setup?: { build?: BuildForm; liveSource?: string; answers?: Record<string, string> };
   clarify?: boolean;
   planFirst?: boolean;
   /** The original request, when the text adds answers or plan feedback to it. */
@@ -716,7 +729,7 @@ export const api = {
   /** The open project's setup (build form, live data file); null without a project. */
   projectSetup: () => call<{ setup: ProjectSetup | null }>("GET", "/api/project-setup").then((r) => r.setup),
   /** Changes the open project's setup: build form and/or live data file ('' removes it). */
-  saveProjectSetup: (b: { build?: BuildForm | ""; liveSource?: string }) => call<{ ok: boolean; setup: ProjectSetup }>("POST", "/api/project-setup", b),
+  saveProjectSetup: (b: { build?: BuildForm | ""; liveSource?: string; forget?: string }) => call<{ ok: boolean; setup: ProjectSetup }>("POST", "/api/project-setup", b),
   /** The project's package.json files and the packages not installed yet. */
   packages: () =>
     call<{ items: PackageItem[] | PackageItem; npm: boolean }>("GET", "/api/packages").then((r) => ({ npm: r.npm, items: Array.isArray(r.items) ? r.items : r.items ? [r.items] : [] })),
@@ -797,6 +810,8 @@ export const api = {
   setSetting: (key: string, value: Setting["value"]) =>
     call<{ ok: boolean; settings: Setting[] }>("POST", "/api/settings", { key, value }).then((r) => ({ ...r, settings: Array.isArray(r.settings) ? r.settings : [] })),
   ssoStatus: () => call<{ status: SsoStatus }>("GET", "/api/sso").then((r) => r.status),
+  /** The status without opening Edge's settings page (the profile switch stays "unknown"): for the prefetch at start. */
+  ssoStatusQuick: () => call<{ status: SsoStatus }>("GET", "/api/sso?quick=1").then((r) => r.status),
   setSso: (on: boolean) => call<{ ok: boolean; result: string; status: SsoStatus }>("POST", "/api/sso", { on }),
   ssoSetup: () => call<{ ok: boolean; result: string; logFile: string; status: SsoStatus }>("POST", "/api/sso/setup"),
   openSsoSettings: () => call<{ ok: boolean }>("POST", "/api/sso/open"),

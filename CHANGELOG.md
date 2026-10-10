@@ -6,6 +6,21 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.121] - 2026-10-10
+
+### Added
+- Edits by line range: Copilot can send `ACTION edit PATH:START-END` with the new lines, no SEARCH text, for lines it read in this task; StreamHub applies it only while the file is still as read and otherwise answers with the current lines, so a remembered line can no longer miss. A failed edit also says when the file changed since Copilot last saw it, and the second failure of the same edit on a small file brings the whole current file for one write block.
+- Setup questions that come only when a request calls for them, each a fixed rule on the request and the project, answered once per project (listed under Project setup in the Files tab, where one can be forgotten) or per request: the kind of app (web pages, React, a Windows desktop app, a script) for a new app without a stack; who opens it (only you from disk, colleagues from SharePoint or OneDrive, through StreamHub) when sharing comes up; where entered data stays (view only, the browser, a file) for apps that take input; how Microsoft 365 data reaches the app (a scheduled runbook, a file you export, Copilot once) when Outlook, Teams, SharePoint or the calendar are named; what to build with when there is no data file yet (sample data, wait, ask the columns); whether to show, mask or aggregate personal details when the data has such columns; the language of texts and formats for a Dutch request or dated data; extras for tables and reports (export, print view, theme switch); how to start a big request (at once, clarify first, plan first, remembered for the project); and per request: recurring work as a runbook or a one-off answer, where a new page goes, and what happens to the current files at a rebuild. An answer the request states itself is saved without asking; a card holds at most six questions under one hold-to-confirm button.
+
+### Changed
+- Every button a person must act on in the chat (Continue, Approve and build, Continue and build, Send answers, Run it, Install Node.js, Run npm install) is now the same tall button as the run approval; the secondary way beside it is as tall.
+- A message that is still building goes on past the round budget (Rounds per message, 12): while a round keeps changing files the loop continues, up to three times the budget, and stops after two rounds without a change. Before, a large build stopped at round 12 with "Send a message to continue".
+- The "Start building" button of the project setup question (one file, separate files, Copilot decides) is held like the run approval: the same button, size and fill, so a stray click starts nothing.
+
+### Fixed
+- A page whose `<link rel="stylesheet">` and `<script src>` tags arrived from Copilot stripped down to their bare paths (`styles/kit/kit.css` alone on a line, seen on a work tenant) was written like that, and the edit Copilot sent to repair it arrived with the same damage, so StreamHub answered "already contains these changes" three times and stopped. The tags are now rebuilt from such lines in replies and written files, the file check reports and repairs them in an existing page, and an edit that changes nothing says so.
+- A start could leave an Edge tab with the profile settings page open: the app's prefetch of the Settings data asked for the sign-in status, which opens that page in a hidden tab, and when the page did not show in Edge's debug list in time (a managed work PC) the tab stayed. The prefetch no longer opens any Edge page (the Sign-in section loads the full status when it is open), the hidden tab is closed on every failure path, and a close that fails is retried through the page itself.
+
 ## [v0.1.120] - 2026-10-10
 
 ### Added

@@ -124,15 +124,17 @@ function Repair-MechanicalIssues {
     # gets one before the code lines above it.
     if ($Path -match '(?i)\.(html?|xhtml|svg|xaml|vue|svelte|jsx|tsx)$') {
         $leaks = @(Find-LeakedMarkup $Path $t)
-        $ents = @($leaks | Where-Object { $_.kind -in 'entity', 'entity-code' })
+        $ents = @($leaks | Where-Object { $_.kind -in 'entity', 'entity-code', 'bare-path' })
         if ($ents.Count) {
             $sb = New-Object Text.StringBuilder $t
             foreach ($e in @($ents | Sort-Object { $_.index } -Descending)) {
-                $tag = if ($e.kind -eq 'entity-code') { $e.text.Replace('&lt;', '<').Replace('&gt;', '>') } else { $e.text -replace '^&lt;', '<' -replace '&gt;$', '>' -replace '&quot;', '"' -replace '&#39;', "'" -replace '&amp;', '&' }
+                $tag = if ($e.kind -eq 'bare-path') { $e.tag } elseif ($e.kind -eq 'entity-code') { $e.text.Replace('&lt;', '<').Replace('&gt;', '>') } else { $e.text -replace '^&lt;', '<' -replace '&gt;$', '>' -replace '&quot;', '"' -replace '&#39;', "'" -replace '&amp;', '&' }
                 [void]$sb.Remove($e.index, $e.length); [void]$sb.Insert($e.index, $tag)
             }
             $t = $sb.ToString()
-            $fixes.Add($(if ($Path -match '(?i)\.(jsx|tsx)$') { "$($ents.Count) piece(s) of code written with &lt; and &gt; written with < and >" } else { "$($ents.Count) tag(s) written with &lt; and &gt; in the page's text (shown as text) written as tags" }))
+            $bare = @($ents | Where-Object { $_.kind -eq 'bare-path' }).Count
+            if ($bare) { $fixes.Add("$bare stylesheet or script path(s) that had lost their tag (such as $(@($ents | Where-Object { $_.kind -eq 'bare-path' })[-1].text)) written as <link> or <script> tags") }
+            if ($ents.Count -gt $bare) { $fixes.Add($(if ($Path -match '(?i)\.(jsx|tsx)$') { "$($ents.Count - $bare) piece(s) of code written with &lt; and &gt; written with < and >" } else { "$($ents.Count - $bare) tag(s) written with &lt; and &gt; in the page's text (shown as text) written as tags" })) }
         }
         # A tag that lost its <: the < back, from the end of the file so earlier indexes hold.
         $broken = @($leaks | Where-Object { $_.kind -eq 'broken-tag' } | Sort-Object { $_.index } -Descending)

@@ -34,14 +34,16 @@ $script:OutsidePathPattern = '(?i)(?<![\w/])(?:[a-z]:\\|\\\\[\w.$-]+\\)[^"<>|?*\
 function Get-ProjectSetupPath([string]$ProjectRoot) { Join-Path $ProjectRoot $script:SetupRel.Replace('/', '\') }
 
 function Get-ProjectSetup([string]$ProjectRoot) {
-    <# The project's saved choices: @{ build ('' when not chosen); liveSource; liveStamp; chosenBy; chosenAt }. #>
-    $s = @{ build = ''; liveSource = ''; liveStamp = ''; chosenBy = ''; chosenAt = '' }
+    <# The project's saved choices: @{ build ('' when not chosen); liveSource; liveStamp; chosenBy; chosenAt;
+       answers = @{ id = value } (the setup questions answered for this project) }. #>
+    $s = @{ build = ''; liveSource = ''; liveStamp = ''; chosenBy = ''; chosenAt = ''; answers = @{} }
     if (-not $ProjectRoot) { return $s }
     $f = Get-ProjectSetupPath $ProjectRoot
     if (Test-Path -LiteralPath $f) {
         try {
             $j = [IO.File]::ReadAllText($f) | ConvertFrom-Json
-            foreach ($k in @($s.Keys)) { if ($null -ne $j.$k) { $s[$k] = "$($j.$k)" } }
+            foreach ($k in @($s.Keys)) { if ($k -ne 'answers' -and $null -ne $j.$k) { $s[$k] = "$($j.$k)" } }
+            if ($j.answers) { foreach ($p in @($j.answers.PSObject.Properties)) { if ("$($p.Value)" -ne '') { $s.answers[$p.Name] = "$($p.Value)" } } }
         } catch { Write-CCBLog info setup "project.json not read: $($_.Exception.Message)" }
     }
     if ($s.build -notin 'single', 'modular', 'copilot') { $s.build = '' }
@@ -49,15 +51,24 @@ function Get-ProjectSetup([string]$ProjectRoot) {
 }
 
 function Save-ProjectSetup {
-    <# Merges $Changes (build, liveSource, liveStamp, chosenBy) into the project's setup and saves it. #>
+    <# Merges $Changes (build, liveSource, liveStamp, chosenBy, and answers = @{ id = value }, where '' forgets
+       an answer) into the project's setup and saves it. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][hashtable]$Changes)
     $s = Get-ProjectSetup $ProjectRoot
-    foreach ($k in $Changes.Keys) { $s[$k] = "$($Changes[$k])" }
-    if ($Changes.ContainsKey('build') -or $Changes.ContainsKey('liveSource')) { $s.chosenAt = (Get-Date).ToString('s') }
+    foreach ($k in $Changes.Keys) {
+        if ($k -eq 'answers') {
+            foreach ($a in @($Changes.answers.Keys)) { $v = "$($Changes.answers[$a])"; if ($v) { $s.answers[$a] = $v } else { $s.answers.Remove($a) } }
+            continue
+        }
+        $s[$k] = "$($Changes[$k])"
+    }
+    if ($Changes.ContainsKey('build') -or $Changes.ContainsKey('liveSource') -or $Changes.ContainsKey('answers')) { $s.chosenAt = (Get-Date).ToString('s') }
     $f = Get-ProjectSetupPath $ProjectRoot
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $f)
     $o = [ordered]@{}; foreach ($k in 'build', 'liveSource', 'liveStamp', 'chosenBy', 'chosenAt') { $o[$k] = $s[$k] }
-    [IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject $o), (New-Object Text.UTF8Encoding($false)))
+    $ans = [ordered]@{}; foreach ($a in @($s.answers.Keys | Sort-Object)) { $ans[$a] = $s.answers[$a] }
+    $o.answers = $ans
+    [IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject $o -Depth 4), (New-Object Text.UTF8Encoding($false)))
     $s
 }
 
@@ -80,27 +91,42 @@ function Test-OwnCode([string[]]$Paths) {
 }
 
 function Get-SetupQuestions {
-    <# What to ask before the first request of a new project goes to Copilot: @() when nothing, else
-       questions @{ id; question; options = @(@{ value; label; help }) } plus 'live' (offer a data
-       file outside the project) and 'suggest' (a path the request named). Asked when the project has
-       no build form yet, no code of its own, and the request builds a page, dashboard, report or app
-       without saying how. $Setup from Get-ProjectSetup. #>
-    param([AllowEmptyString()][string]$Text, [string[]]$Paths, $Setup)
-    if ($Setup -and $Setup.build) { return $null }
-    if (Test-OwnCode $Paths) { return $null }
-    if ("$Text" -notmatch $script:BuildWords -or "$Text" -notmatch $script:PageWords) { return $null }
-    if (Get-StatedBuild $Text) { return $null }
-    $hasData = @($Paths | Where-Object { $_ -match '(?i)\.(csv|tsv|xlsx|xlsm)$' -or $_ -match '(?i)^Source/.+\.json$' }).Count -gt 0 -or "$Text" -match '(?i)\b(csv|tsv|excel|xlsx|spreadsheet|data ?file|sharepoint|onedrive)\b|\.(csv|tsv|xlsx|xlsm)\b'
-    @{
-        questions = @(@{
-            id = 'build'; question = 'How should this be built?'
+    <# What to ask before a request goes to Copilot: $null when nothing, else @{ questions = @(@{ id;
+       question; options = @(@{ value; label; help }); multi; scope }); live (offer a data file outside
+       the project); suggest (a path the request named); stated = @{ id = value } (project-scope answers
+       the request states itself, to save without asking); statedTurn (the same for this request only) }.
+       The build question (one file, separate files, Copilot) comes when the project has no build form
+       yet, no code of its own, and the request builds a page, dashboard, report or app without saying
+       how; every other question comes from the registry ($script:SetupQuestionDefs) when its trigger
+       fires: a project-scope one until it is answered, a request-scope one every time. At most
+       $script:MaxQuestionsPerCard per card (the rest at the next request that triggers them). #>
+    param([AllowEmptyString()][string]$Text, [string[]]$Paths, $Setup, [string]$ProjectRoot = '', [string]$AppRoot = '')
+    $info = Get-SetupInfo $Paths $Setup $ProjectRoot $AppRoot
+    $questions = New-Object System.Collections.Generic.List[object]
+    $askBuild = -not ($Setup -and $Setup.build) -and -not $info.hasCode -and "$Text" -match $script:BuildWords -and "$Text" -match $script:PageWords -and -not (Get-StatedBuild $Text)
+    if ($askBuild) {
+        $questions.Add(@{
+            id = 'build'; question = 'How should this be built?'; multi = $false; scope = 'project'
             options = @(
                 @{ value = 'single'; label = 'One file'; help = 'Everything in one HTML file (page, styles, scripts, UI kit and data), to share or post as it is.' },
                 @{ value = 'modular'; label = 'Separate files'; help = 'The page, styles, scripts and data in their own files and folders, easier to grow.' },
                 @{ value = 'copilot'; label = 'Let Copilot decide'; help = 'Copilot picks what fits the request.' })
         })
-        live = $hasData
-        suggest = (Get-NamedOutsideFile $Text)
+    }
+    $t = Get-TriggeredQuestions $Text $info
+    # The build form (one file, separate files) belongs to web pages: it waits while the kind of app is
+    # asked, and never comes for a React app, a desktop app or a script (stated now or saved).
+    $kind = if ($t.stated.ContainsKey('appkind')) { $t.stated.appkind } elseif ($Setup -and $Setup.answers -and $Setup.answers.ContainsKey('appkind')) { "$($Setup.answers.appkind)" } else { '' }
+    if ($questions.Count -and (@($t.questions | Where-Object { $_.id -eq 'appkind' }).Count -or $kind -in 'react', 'desktop', 'script')) { $questions.Clear() }
+    foreach ($q in @($t.questions)) { if ($questions.Count -lt $script:MaxQuestionsPerCard) { $questions.Add($q) } }
+    if (-not $questions.Count -and -not @($t.stated.Keys).Count -and -not @($t.statedTurn.Keys).Count) { return $null }
+    $hasData = $info.hasData -or "$Text" -match '(?i)\b(csv|tsv|excel|xlsx|spreadsheet|data ?file|sharepoint|onedrive)\b|\.(csv|tsv|xlsx|xlsm)\b'
+    @{
+        questions = $questions.ToArray()
+        live = ($askBuild -and $hasData)
+        suggest = $(if ($askBuild) { Get-NamedOutsideFile $Text } else { '' })
+        stated = $t.stated
+        statedTurn = $t.statedTurn
     }
 }
 
@@ -277,8 +303,8 @@ function Update-OneFilePages {
 }
 
 function Format-ProjectSetupContext {
-    <# The project-context lines for the saved setup ('' when nothing is chosen). #>
-    param([Parameter(Mandatory)][string]$ProjectRoot)
+    <# The project-context lines for the saved setup and this request's answers ('' when nothing is chosen). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [hashtable]$TurnAnswers = @{})
     $s = Get-ProjectSetup $ProjectRoot
     $lines = New-Object System.Collections.Generic.List[string]
     switch ($s.build) {
@@ -291,6 +317,7 @@ function Format-ProjectSetupContext {
         $lines.Add("- Live data: $rel is a copy of a file outside the project ($([IO.Path]::GetFileName($s.liveSource)), kept up to date by the helper program whenever it changes). Build on that data so the page follows the file; never put the outside path in the page or read the file from there.")
         if ($s.build -ne 'single') { $lines.Add("- Load it with DataTools.load(`"$rel`") (data/data-tools.js): when the user opens the page through the helper program, every load or reload reads the file as it is at that moment; opened from disk, the page reads the last converted copy.") }
     }
+    foreach ($l in @(Get-SetupAnswerContext $s.answers $TurnAnswers)) { $lines.Add($l) }
     if (-not $lines.Count) { return '' }
     "Project setup:`n" + ($lines -join "`n")
 }
@@ -341,5 +368,263 @@ function Invoke-LiveRefresh {
     "Live data $(if ($live.changed) { 'refreshed' } else { 'was already current' }) from $($live.source)$(if (@($pages.files).Count) { "; pages updated: $(@($pages.files) -join ', ')" })."
 }
 
-Export-ModuleMember -Function Get-ProjectSetup, Save-ProjectSetup, Get-StatedBuild, Get-NamedOutsideFile, Test-OwnCode, Get-SetupQuestions, Test-LiveSourcePath, Get-LiveCopyRel, Sync-LiveSource,
+# --- The setup questions ---------------------------------------------------------------------------
+# Every question is a fixed rule: a trigger on the request and the project (never on what Copilot
+# thinks), the answer the request already states (then nothing is asked), the choices, and the
+# context line each answer puts into every task. Project-scope questions are asked once per project
+# (the answer is saved in project.json "answers"; Project setup in the Files tab forgets one);
+# request-scope questions are asked whenever their trigger fires and apply to that request only.
+$script:AppWords = '(?i)\b(apps?|application|applicatie|tool|program|programma|utility|scripts?)\b'
+# Page words without the app words: a request for an app (kind unknown) is not a page request.
+$script:PageOnlyWords = '(?i)\b(dashboards?|reports?|overview|web ?pages?|pages?|websites?|sites?|web ?apps?|visuali[sz]ations?|charts?|graphs?|html|rapport(age)?s?|overzicht|pagina)\b'
+$script:DutchWords = '(?i)\b(een|het|maak|bouw|met|van|voor|niet|graag|pagina|overzicht|gegevens|bestand|toon|laat|nieuwe?|alle)\b'
+$script:PersonalColumn = '(?i)^(e-?mail|mail|phone|tel(efoon)?|mobile|mobiel|name|naam|full ?name|first ?name|last ?name|voornaam|achternaam|iban|bsn|ssn|address|adres|street|straat|postcode|zip|birth(day|date)?|geboorte(datum)?|salary|salaris)$'
+$script:BigRequestChars = 600
+$script:MaxQuestionsPerCard = 6
+
+$script:SetupQuestionDefs = @(
+    @{ id = 'appkind'; scope = 'project'; question = 'What kind of app is this?'
+       options = @(
+           @{ value = 'web'; label = 'Web pages'; help = 'HTML, CSS and JavaScript, opened from disk or served by the helper program.' },
+           @{ value = 'react'; label = 'React app'; help = 'A React app; the helper program builds it in Edge, no Node.js needed.' },
+           @{ value = 'desktop'; label = 'Windows desktop app'; help = 'A PowerShell window app (WPF) with the kit''s look.' },
+           @{ value = 'script'; label = 'Command-line script'; help = 'PowerShell or Python without a window.' })
+       trigger = { param($Text, $Info) (-not $Info.hasCode) -and $Text -match $script:BuildWords -and $Text -match $script:AppWords -and $Text -notmatch $script:PageOnlyWords }
+       stated = { param($Text)
+           if ($Text -match '(?i)\b(react|vite|next\.?js|tsx|jsx)\b') { 'react' }
+           elseif ($Text -match '(?i)\b(wpf|winforms|desktop app|windows app|window app|gui|venster)\b') { 'desktop' }
+           elseif ($Text -match '(?i)\b(scripts?|command[- ]line|cli|console app)\b') { 'script' }
+           elseif ($Text -match '(?i)\b(html|web ?pages?|websites?|web ?apps?|browser)\b') { 'web' } else { '' } }
+       context = { param($v) switch ($v) {
+           'web' { '- App kind: web pages (HTML, CSS, JavaScript), as the web rules say.' }
+           'react' { '- App kind: a React app (src/main.tsx or src/App.tsx); the helper program builds dist/ in Edge, no npm needed.' }
+           'desktop' { '- App kind: a Windows desktop app in PowerShell (WPF) with the kit''s look; see the window app rules.' }
+           'script' { '- App kind: a command-line script (PowerShell or Python), no interface.' } } }
+    },
+    @{ id = 'audience'; scope = 'project'; question = 'Who opens it, and from where?'
+       options = @(
+           @{ value = 'me'; label = 'Only me, from disk'; help = 'Opened from the project folder on this computer.' },
+           @{ value = 'shared'; label = 'Colleagues, from SharePoint or OneDrive'; help = 'Posted in a shared folder and opened from there; nothing may depend on this computer.' },
+           @{ value = 'served'; label = 'Through the helper program'; help = 'Opened with Open app while the helper program runs (local files and modules work).' })
+       trigger = { param($Text, $Info) $Text -match '(?i)\b(share|sharing|shared|colleagues?|collega''?s|delen|gedeeld|everyone|other users|publish(ed)?|publiceren|intranet|post(ed)? (on|to|in) (sharepoint|onedrive|teams)|for (the|my|our) (team|colleagues|department|afdeling))\b' -and ($Info.hasPages -or $Text -match $script:PageWords -or $Text -match $script:BuildWords) }
+       stated = { param($Text)
+           if ($Text -match '(?i)\b(only (for )?me|just me|myself|alleen (voor )?mij)\b') { 'me' }
+           elseif ($Text -match '(?i)\b(post(ed)? (on|to) (sharepoint|onedrive|teams)|shared? (via|on|through|in) (sharepoint|onedrive|teams)|publish(ed)? (on|to) (sharepoint|the intranet))\b') { 'shared' }
+           elseif ($Text -match '(?i)\b(served|localhost|on a server|through the helper program)\b') { 'served' } else { '' } }
+       context = { param($v) switch ($v) {
+           'me' { '- Audience: only the user, opened from disk (file://): no fetch of local files, no server; data through script tags or the one-file blocks.' }
+           'shared' { '- Audience: colleagues open it from a SharePoint or OneDrive folder, from disk (file://): no fetch of local files, no server, nothing that depends on this computer; one file travels best.' }
+           'served' { '- Audience: opened through the helper program (served on localhost): DataTools.load, module scripts and local data files work.' } } }
+    },
+    @{ id = 'persist'; scope = 'project'; question = 'Where does what people enter stay?'
+       options = @(
+           @{ value = 'none'; label = 'View only'; help = 'Nothing is entered or saved.' },
+           @{ value = 'browser'; label = 'In the browser'; help = 'localStorage, per person and per computer; lost in another browser.' },
+           @{ value = 'file'; label = 'As a file'; help = 'The user downloads a JSON file and loads it again; nothing stays in the page.' })
+       trigger = { param($Text, $Info) $Text -match '(?i)\b(save|saves|saving|store|remember|enter(ed|ing)?|input|forms?|tracks?|tracking|register|crud|view[- ]only|read[- ]only|invoer(en)?|opslaan|bewaren|bijhouden|formulier)\b|\b(add|edit|delete|remove) (new )?(records?|rows?|items?|entries|users?|tasks?|notes?)\b' -and ($Info.hasPages -or $Text -match $script:BuildWords) }
+       stated = { param($Text)
+           if ($Text -match '(?i)\b(localstorage|local storage|browser storage|in the browser)\b') { 'browser' }
+           elseif ($Text -match '(?i)\b(download(s|ed)?|export(s|ed)?) (it |the data |a )?(as |to )?(a )?(json|file)\b|\bupload\b') { 'file' }
+           elseif ($Text -match '(?i)\b(view[- ]only|read[- ]only|alleen (lezen|bekijken)|no (saving|input))\b') { 'none' } else { '' } }
+       context = { param($v) switch ($v) {
+           'none' { '- Entered data: none. The app only shows; no forms that save.' }
+           'browser' { '- Entered data stays in the browser (localStorage), per person and per computer: say so in the app, and offer an export so nothing is lost.' }
+           'file' { '- Entered data is saved as a file the user downloads (JSON) and loads again through a file input; nothing is kept in the page itself.' } } }
+    },
+    @{ id = 'm365data'; scope = 'project'; question = 'How does the app get the Microsoft 365 data?'
+       options = @(
+           @{ value = 'runbook'; label = 'A scheduled runbook'; help = 'The helper program runs it on a schedule and exports the data as JSON for the app.' },
+           @{ value = 'file'; label = 'A file I export myself'; help = 'From Outlook, Teams or SharePoint into the project''s Source folder.' },
+           @{ value = 'once'; label = 'Copilot gathers it once now'; help = 'Written as a data file in the project; the app reads that.' })
+       trigger = { param($Text, $Info) $Text -match '(?i)\b(outlook|teams|sharepoint( lists?)?|onedrive|calendar|agenda|e-?mails?|mailbox|inbox|meetings?|afspraken|planner|to ?do|microsoft 365|m365|graph api)\b' -and ($Info.hasPages -or $Text -match $script:PageWords -or $Text -match $script:BuildWords) }
+       stated = { param($Text)
+           if ($Text -match '(?i)\b(runbook|scheduled?|every (day|week|month)|daily|weekly|elke (dag|week))\b') { 'runbook' }
+           elseif ($Text -match '(?i)\b(export(ed)? (file|csv|excel)|from (a|the|an|my) (csv|excel|export)|uit (een|de) export)\b') { 'file' }
+           elseif ($Text -match '(?i)\b(once|one[- ]off|eenmalig|just now)\b') { 'once' } else { '' } }
+       context = { param($v) switch ($v) {
+           'runbook' { '- Microsoft 365 data: a runbook gathers it (Runbooks/NAME.runbook.md with output Runbooks/Exports/NAME.json, per the runbook rules), the helper program runs it on a schedule, and the app reads that JSON. The app itself never calls Microsoft 365 (a page cannot).' }
+           'file' { '- Microsoft 365 data: the user exports it into Source/ as a file; build on that file. The app itself never calls Microsoft 365.' }
+           'once' { '- Microsoft 365 data: gather it once now and write it as data/NAME.json; the app reads that file and never calls Microsoft 365 itself.' } } }
+    },
+    @{ id = 'sampledata'; scope = 'project'; question = 'There is no data file yet. Build with what?'
+       options = @(
+           @{ value = 'sample'; label = 'Made-up sample data'; help = 'Clearly marked, in a data file the real one replaces.' },
+           @{ value = 'wait'; label = 'Wait for my file'; help = 'I add the data file to the project first.' },
+           @{ value = 'columns'; label = 'Ask me the columns'; help = 'Copilot asks what the data holds, then builds with an empty state.' })
+       trigger = { param($Text, $Info) (-not $Info.hasData) -and $Text -match $script:BuildWords -and $Text -match '(?i)\b(dashboards?|reports?|charts?|graphs?|tables?|overview|rapport(age)?|overzicht|grafiek|tabel)\b' -and $Text -notmatch '(?i)\.(csv|tsv|xlsx|xlsm|json)\b' -and $Text -notmatch '(?i)\b(outlook|teams|sharepoint|onedrive|calendar|agenda|e-?mails?|meetings?)\b' }
+       stated = { param($Text) if ($Text -match '(?i)\b(sample|dummy|fake|example|voorbeeld|fictieve|test)[- ]?(data|gegevens|values|rows)\b') { 'sample' } else { '' } }
+       context = { param($v) switch ($v) {
+           'sample' { '- Data: there is no data file yet. Use clearly made-up sample data (a note on the page says so) in a data file the real one can replace without changes to the page.' }
+           'wait' { '- Data: the user adds a data file first. Build the structure to load data/NAME.json; invent nothing.' }
+           'columns' { '- Data: ask the user which columns and values the data holds (one list of questions) before building, then build with an empty state until the file arrives.' } } }
+    },
+    @{ id = 'personal'; scope = 'project'; question = 'The data has personal details (names, contact details). Show them?'
+       options = @(
+           @{ value = 'show'; label = 'Show as is'; help = 'Only people allowed to see the data open the app.' },
+           @{ value = 'mask'; label = 'Mask them'; help = 'Initials for names, hidden digits, no e-mail addresses.' },
+           @{ value = 'aggregate'; label = 'Totals only'; help = 'Counts and totals; no row about one person.' })
+       trigger = { param($Text, $Info) @($Info.columns | Where-Object { "$_" -match $script:PersonalColumn }).Count -gt 0 -and ($Info.hasPages -or $Text -match $script:PageWords -or $Text -match $script:BuildWords) }
+       stated = { param($Text)
+           if ($Text -match '(?i)\b(mask(ed)?|anonymi[sz]ed?|anonymous|initials|pseudonym|geanonimiseerd|initialen)\b') { 'mask' }
+           elseif ($Text -match '(?i)\b(totals only|aggregate(d)?|no names|geen namen|alleen totalen)\b') { 'aggregate' } else { '' } }
+       context = { param($v) switch ($v) {
+           'show' { '- Personal details in the data: shown as they are (the user decided only people allowed to see them open the app).' }
+           'mask' { '- Personal details in the data: masked everywhere they show: initials for names, digits hidden but the last two, no e-mail addresses or phone numbers.' }
+           'aggregate' { '- Personal details in the data: never show a row about one person; counts, totals and groups only.' } } }
+    },
+    @{ id = 'language'; scope = 'project'; question = 'Language of the texts, numbers and dates?'
+       options = @(
+           @{ value = 'nl'; label = 'Dutch'; help = '1.234,56 and 10-10-2026, labels in Dutch.' },
+           @{ value = 'en'; label = 'English'; help = '1,234.56 and 10 Oct 2026, labels in English.' })
+       trigger = { param($Text, $Info) ([regex]::Matches($Text, $script:DutchWords).Count -ge 2) -or ($Text -match $script:BuildWords -and @($Info.columns | Where-Object { "$_" -match '(?i)(date|datum|month|maand|year|jaar)' }).Count -gt 0) }
+       stated = { param($Text)
+           if ($Text -match '(?i)\b(in english|english (texts?|labels)|engels(talig)?)\b') { 'en' }
+           elseif ($Text -match '(?i)\b(in dutch|dutch (texts?|labels)|nederlands(talig)?|in het nederlands)\b') { 'nl' } else { '' } }
+       context = { param($v) switch ($v) {
+           'nl' { '- Language: texts, numbers and dates in Dutch: <html lang="nl">, 1.234,56, dates as dd-mm-yyyy, day and month names in Dutch (the kit''s format helpers follow lang).' }
+           'en' { '- Language: texts, numbers and dates in English: <html lang="en">, 1,234.56, dates as 10 Oct 2026 (the kit''s format helpers follow lang).' } } }
+    },
+    @{ id = 'extras'; scope = 'project'; multi = $true; question = 'Extras for tables and reports?'
+       options = @(
+           @{ value = 'export'; label = 'Export to CSV or Excel'; help = 'A button per table (the kit''s KitData.download).' },
+           @{ value = 'print'; label = 'A print view'; help = 'Fits the paper, hides buttons (the kit''s print part).' },
+           @{ value = 'theme'; label = 'A light/dark switch'; help = 'In the header (data-kit-theme).' })
+       trigger = { param($Text, $Info) $Info.kit -and $Text -match $script:BuildWords -and $Text -match '(?i)\b(tables?|tabel(len)?|lists?|lijst(en)?|reports?|rapport(age)?s?|overview|overzicht|dashboards?)\b' }
+       stated = { param($Text)
+           $v = @()
+           if ($Text -match '(?i)\b(export|csv|excel|xlsx|download)\b') { $v += 'export' }
+           if ($Text -match '(?i)\b(print(ing|able)?|afdrukken|pdf)\b') { $v += 'print' }
+           if ($Text -match '(?i)\b(dark mode|dark theme|theme switch|light/dark|donkere? (modus|thema))\b') { $v += 'theme' }
+           $v -join ',' }
+       context = { param($v)
+           $set = @("$v" -split ',' | Where-Object { $_ })
+           if (-not $set.Count) { return '- Extras: none asked for: no export buttons, print view or theme switch unless the user asks later.' }
+           $parts = @(foreach ($x in $set) { switch ($x) { 'export' { 'an export button per table (KitData.toCsv/download)' } 'print' { 'a print view (@media print, data-kit-print)' } 'theme' { 'a light/dark switch (data-kit-theme) in the header' } } })
+           "- Extras the user wants: $($parts -join '; ')." }
+    },
+    @{ id = 'bigtask'; scope = 'project'; question = 'This is a big request. How to start?'
+       options = @(
+           @{ value = 'build'; label = 'Build it at once'; help = 'Copilot starts right away.' },
+           @{ value = 'clarify'; label = 'Clarify first'; help = 'Copilot asks up to five questions, then plans and builds.' },
+           @{ value = 'plan'; label = 'Plan first'; help = 'A plan to approve before anything is built.' })
+       trigger = { param($Text, $Info) Test-BigRequest $Text }
+       stated = { param($Text) if ($Text -match '(?i)\b(clarify|ask (me )?(questions|first)|vraag (eerst|door))\b') { 'clarify' } elseif ($Text -match '(?i)\b(plan first|make a plan|plan it|eerst een plan)\b') { 'plan' } elseif ($Text -match '(?i)\b(start (right away|now|at once)|no questions|just build)\b') { 'build' } else { '' } }
+       context = { param($v) '' }
+    },
+    @{ id = 'recurring'; scope = 'request'; question = 'This sounds like recurring work.'
+       options = @(
+           @{ value = 'runbook'; label = 'Make it a runbook'; help = 'Repeatable and schedulable under Automation; the answer is saved each time.' },
+           @{ value = 'once'; label = 'A one-off answer'; help = 'Just this time.' })
+       trigger = { param($Text, $Info) $Text -match '(?i)\b(weekly|daily|monthly|every (day|week|month|monday|tuesday|wednesday|thursday|friday|morning|evening)|each (week|day|month)|wekelijks|dagelijks|maandelijks|elke (dag|week|maand|maandag|dinsdag|woensdag|donderdag|vrijdag|ochtend)|iedere (dag|week|maand))\b' -and $Text -notmatch '(?i)\brunbooks?\b' -and $Text -notmatch $script:BuildWords }
+       stated = { param($Text) if ($Text -match '(?i)\b(one[- ]off|once|only now|eenmalig|alleen nu)\b') { 'once' } else { '' } }
+       context = { param($v) if ($v -eq 'runbook') { '- The user wants this as a runbook (Runbooks/NAME.runbook.md per the runbook rules, with its output file), not as a one-off answer; the helper program can run it on a schedule.' } else { '' } }
+       textPrefix = { param($v) if ($v -eq 'runbook') { 'Make this a runbook (a Runbooks/NAME.runbook.md per the runbook rules), not a one-off answer: ' } else { '' } }
+    },
+    @{ id = 'addto'; scope = 'request'; question = 'Where does the new page go?'
+       options = @(
+           @{ value = 'existing'; label = 'Into the existing app'; help = 'Linked from its navigation, same look and data.' },
+           @{ value = 'separate'; label = 'A separate page'; help = 'Beside the existing ones, same styles and data, no navigation changes.' },
+           @{ value = 'project'; label = 'A new project'; help = 'I will create one in the project list first.' })
+       trigger = { param($Text, $Info) $Info.hasPages -and $Text -match '(?i)\b(new|another|extra|second|additional|nieuwe?|nog een|tweede) (page|report|dashboard|overview|view|tab|screen|pagina|rapport|overzicht|scherm)\b|\badd (a|an) (page|report|dashboard|view|tab|pagina)\b' }
+       stated = { param($Text) if ($Text -match '(?i)\b(in(to)? the (existing|current) app|to the (navigation|menu)|in the same app)\b') { 'existing' } elseif ($Text -match '(?i)\b(separate page|standalone page|losse pagina|aparte pagina)\b') { 'separate' } else { '' } }
+       context = { param($v) switch ($v) {
+           'existing' { '- The new page goes into the existing app: linked from its navigation (the shell or header the pages share), the same styles, kit and data.' }
+           'separate' { '- The new page is a separate page beside the existing ones: the same styles/kit and data, no change to the existing pages or their navigation.' } default { '' } } }
+    },
+    @{ id = 'rebuild'; scope = 'request'; question = 'Start over: what happens to the current files?'
+       options = @(
+           @{ value = 'replace'; label = 'Replace them'; help = 'The new version takes their place; the helper program keeps backups.' },
+           @{ value = 'alongside'; label = 'Keep them, build v2 alongside'; help = 'In a v2/ folder; the current files stay untouched.' })
+       trigger = { param($Text, $Info) $Info.hasCode -and $Text -match '(?i)\b(rebuild|redo|start (over|again|afresh|from scratch)|from scratch|begin again|scrap (it|everything|the current)|opnieuw (beginnen|bouwen|maken)|herbouw(en)?|vanaf nul)\b' }
+       stated = { param($Text) if ($Text -match '(?i)\b(replace (the|all|everything)|overwrite|delete the old|vervang)\b') { 'replace' } elseif ($Text -match '(?i)\b(alongside|next to the (old|current)|keep the (old|current)|v2|new folder|naast de (oude|huidige))\b') { 'alongside' } else { '' } }
+       context = { param($v) switch ($v) {
+           'replace' { '- Start over: replace the existing files of the app (the helper program keeps backups); delete what the new version does not need, so no dead files stay.' }
+           'alongside' { '- Start over in a new folder v2/ and leave every current file untouched; the old version keeps working.' } default { '' } } }
+    }
+)
+
+function Test-BigRequest([AllowEmptyString()][string]$Text) {
+    # A request large enough to clarify or plan first: long, or a whole app in one sentence.
+    "$Text".Length -gt $script:BigRequestChars -or "$Text" -match '(?i)\b(build|create|make|develop|bouw|maak) (?:(?:me|us|een|an?) )*(whole|complete|full|entire|hele|volledige) (app|application|system|tool|website|applicatie|systeem)\b'
+}
+
+function Get-SetupQuestionDef([string]$Id) { @($script:SetupQuestionDefs | Where-Object { $_.id -eq $Id }) | Select-Object -First 1 }
+
+function Get-SetupInfo {
+    # What the triggers look at: the project's files, its saved setup, and the data columns.
+    param([string[]]$Paths, $Setup, [string]$ProjectRoot = '', [string]$AppRoot = '')
+    $columns = @()
+    if ($ProjectRoot) {
+        try { foreach ($it in (Read-DataImportManifest $ProjectRoot).Values) { foreach ($sh in @($it.sheets)) { foreach ($c in @($sh.columns)) { if ($c.name) { $columns += "$($c.name)" } } } } } catch { }
+    }
+    @{
+        paths = @($Paths); setup = $Setup
+        hasCode = (Test-OwnCode $Paths)
+        hasPages = (@($Paths | Where-Object { $_ -match '(?i)\.html?$' -and $_ -notmatch '(?i)^(styles/kit|\.streamhub)/' }).Count -gt 0)
+        hasData = (@($Paths | Where-Object { $_ -match '(?i)\.(csv|tsv|xlsx|xlsm)$' -or $_ -match '(?i)^Source/.+\.json$' }).Count -gt 0)
+        columns = @($columns | Select-Object -Unique)
+        kit = $(if ($AppRoot) { try { [bool](Test-UiKitOn $AppRoot) } catch { $false } } else { $false })
+    }
+}
+
+function Get-TriggeredQuestions {
+    <# The registry questions a request triggers, with what the request states by itself:
+       @{ questions = @(@{ id; question; options; multi; scope }); stated = @{ id = value } (project scope,
+       to save); statedTurn = @{ id = value } (request scope, for this turn) }. A project-scope question
+       with a saved answer is never asked again. #>
+    param([AllowEmptyString()][string]$Text, $Info)
+    $questions = New-Object System.Collections.Generic.List[object]
+    $stated = @{}; $statedTurn = @{}
+    $answers = if ($Info.setup -and $Info.setup.answers) { $Info.setup.answers } else { @{} }
+    foreach ($d in $script:SetupQuestionDefs) {
+        if ($d.scope -eq 'project' -and $answers.ContainsKey($d.id) -and "$($answers[$d.id])" -ne '') { continue }
+        if (-not (& $d.trigger "$Text" $Info)) { continue }
+        $v = "$(& $d.stated "$Text")"
+        if ($v) { if ($d.scope -eq 'project') { $stated[$d.id] = $v } else { $statedTurn[$d.id] = $v }; continue }
+        $questions.Add(@{ id = $d.id; question = $d.question; options = @($d.options); multi = [bool]$d.multi; scope = $d.scope })
+    }
+    @{ questions = $questions.ToArray(); stated = $stated; statedTurn = $statedTurn }
+}
+
+function Get-SetupAnswerLabel([string]$Id, [string]$Value) {
+    # "Kind of app: Web pages" for the status line and the Project setup section.
+    $d = Get-SetupQuestionDef $Id
+    if (-not $d) { return "${Id}: $Value" }
+    $labels = @(foreach ($v in @("$Value" -split ',' | Where-Object { $_ })) { $o = @($d.options | Where-Object { $_.value -eq $v }) | Select-Object -First 1; if ($o) { $o.label } else { $v } })
+    "$($d.question.TrimEnd('?')): $(if ($labels.Count) { $labels -join ', ' } else { 'none' })"
+}
+
+function Get-SetupAnswerList([string]$ProjectRoot) {
+    # The saved project-scope answers with their labels, for the Project setup section.
+    $s = Get-ProjectSetup $ProjectRoot
+    @(foreach ($d in $script:SetupQuestionDefs) {
+        if ($d.scope -ne 'project' -or -not $s.answers.ContainsKey($d.id)) { continue }
+        [pscustomobject]@{ id = $d.id; question = $d.question; value = "$($s.answers[$d.id])"; label = (Get-SetupAnswerLabel $d.id "$($s.answers[$d.id])") }
+    })
+}
+
+function Get-SetupAnswerContext {
+    # The context lines of saved answers plus this turn's request-scope answers.
+    param([hashtable]$Saved, [hashtable]$Turn)
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($d in $script:SetupQuestionDefs) {
+        $v = $null
+        if ($Turn -and $Turn.ContainsKey($d.id)) { $v = "$($Turn[$d.id])" }
+        elseif ($Saved -and $Saved.ContainsKey($d.id) -and $d.scope -eq 'project') { $v = "$($Saved[$d.id])" }
+        if ($null -eq $v -or ($v -eq '' -and -not $d.multi)) { continue }
+        $line = "$(& $d.context $v)"
+        if ($line) { $lines.Add($line) }
+    }
+    $lines.ToArray()
+}
+
+function Get-SetupTextPrefix([hashtable]$Turn) {
+    # Words a request-scope answer puts before the request itself (a runbook instead of a one-off answer).
+    $out = ''
+    foreach ($d in $script:SetupQuestionDefs) { if ($d.textPrefix -and $Turn -and $Turn.ContainsKey($d.id)) { $out += "$(& $d.textPrefix "$($Turn[$d.id])")" } }
+    $out
+}
+
+Export-ModuleMember -Function Test-BigRequest, Get-SetupQuestionDef, Get-SetupInfo, Get-TriggeredQuestions, Get-SetupAnswerLabel, Get-SetupAnswerList, Get-SetupAnswerContext, Get-SetupTextPrefix,
+    Get-ProjectSetup, Save-ProjectSetup, Get-StatedBuild, Get-NamedOutsideFile, Test-OwnCode, Get-SetupQuestions, Test-LiveSourcePath, Get-LiveCopyRel, Sync-LiveSource,
     Get-DataBlockText, Get-KitBlockTexts, Get-OneFilePages, Update-OneFilePages, Format-ProjectSetupContext, Get-RefreshScriptText, Write-RefreshScript, Invoke-LiveRefresh

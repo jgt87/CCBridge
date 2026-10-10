@@ -108,25 +108,37 @@ function Get-ProfileAccount {
 }
 
 function Open-BackgroundTab([int]$Port, [string]$Url) {
-    # A tab that does not take focus from the tab the person is looking at.
+    # A tab that does not take focus from the tab the person is looking at. When the page never shows
+    # up in Edge's debug list (an edge:// page a policy keeps from debugging, a slow start), the tab
+    # that was made is closed again before the error goes up: a settings tab must never stay open.
     $ver = Invoke-RestMethod "http://127.0.0.1:$Port/json/version"
     $browser = Connect-Cdp $ver.webSocketDebuggerUrl
+    $targetId = $null
     try {
         $t = Invoke-Cdp $browser 'Target.createTarget' @{ url = $Url; background = $true }
+        $targetId = $t.targetId
         $page = $null
         for ($i = 0; $i -lt 20 -and -not $page; $i++) {
-            $page = @((Invoke-RestMethod "http://127.0.0.1:$Port/json/list") | Where-Object { $_.id -eq $t.targetId }) | Select-Object -First 1
+            $page = @((Invoke-RestMethod "http://127.0.0.1:$Port/json/list") | Where-Object { $_.id -eq $targetId }) | Select-Object -First 1
             if (-not $page) { Start-Sleep -Milliseconds 150 }
         }
         if (-not $page) { throw "Edge did not open $Url" }
-        [pscustomobject]@{ Browser = $browser; TargetId = $t.targetId; Session = (Connect-Cdp $page.webSocketDebuggerUrl) }
-    } catch { Disconnect-Cdp $browser; throw }
+        [pscustomobject]@{ Browser = $browser; TargetId = $targetId; Session = (Connect-Cdp $page.webSocketDebuggerUrl) }
+    } catch {
+        if ($targetId) { try { $null = Invoke-Cdp $browser 'Target.closeTarget' @{ targetId = $targetId } } catch { } }
+        Disconnect-Cdp $browser
+        throw
+    }
 }
 
 function Close-BackgroundTab($Tab) {
+    # The browser-level close first; when that fails, the page closes itself (Page.close), so the
+    # tab is gone either way.
     if (-not $Tab) { return }
+    $closed = $false
+    try { $null = Invoke-Cdp $Tab.Browser 'Target.closeTarget' @{ targetId = $Tab.TargetId }; $closed = $true } catch { }
+    if (-not $closed -and $Tab.Session) { try { $null = Invoke-Cdp $Tab.Session 'Page.close' @{} } catch { } }
     try { Disconnect-Cdp $Tab.Session } catch { }
-    try { $null = Invoke-Cdp $Tab.Browser 'Target.closeTarget' @{ targetId = $Tab.TargetId } } catch { }
     try { Disconnect-Cdp $Tab.Browser } catch { }
 }
 

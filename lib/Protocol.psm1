@@ -66,7 +66,18 @@ function Get-ActionBlocks {
         # The command of a run block belongs on the line after ACTION run; Copilot also puts it on the
         # ACTION line itself (ACTION run powershell.exe ...), which is the same command.
         if ($type -eq 'run' -and -not $action.body.Trim() -and $arg) { $action.body = $arg }
-        if ($type -eq 'edit') { $action.edits = @(Get-EditPairs $action.body) }
+        if ($type -eq 'edit') {
+            # ACTION edit PATH:START-END with the new lines as the body (no SEARCH): a line-range edit,
+            # valid for lines Copilot read in this task (Agent checks the read and that the file is
+            # unchanged since). A body with a SEARCH marker is an ordinary edit of the file.
+            $rm = [regex]::Match("$arg", '^(.+?):(\d+)-(\d+)$')
+            if ($rm.Success) {
+                $action.arg = $rm.Groups[1].Value
+                $plain = @("$($action.body)".Replace("`r`n", "`n").Split("`n") | Where-Object { (Get-EditMarker $_) -eq 'search' }).Count -eq 0
+                if ($plain) { $action.edits = @(@{ search = $null; replace = (Remove-RangeMarkers $action.body); range = @{ from = [int]$rm.Groups[2].Value; to = [int]$rm.Groups[3].Value } }) }
+                else { $action.edits = @(Get-EditPairs $action.body) }
+            } else { $action.edits = @(Get-EditPairs $action.body) }
+        }
         $actions.Add($action)
     }
     # Callers wrap the result in @(); returning the array unrolled keeps one level of nesting.
@@ -133,6 +144,17 @@ function Get-EditPairs([string]$Body) {
     }
     if ($state -eq 'replace') { $pairs.Add((New-EditPair $search $replace $hint)) }
     $pairs.ToArray()
+}
+
+function Remove-RangeMarkers([string]$Body) {
+    # The new lines of a line-range edit: a REPLACE marker at the top and an END marker at the bottom
+    # (Copilot keeps the habit) are not part of them.
+    $lines = @("$Body".Replace("`r`n", "`n").Split("`n"))
+    while ($lines.Count -and -not $lines[0].Trim()) { $lines = @($lines | Select-Object -Skip 1) }
+    if ($lines.Count -and (Get-EditMarker $lines[0]) -eq 'divider') { $lines = @($lines | Select-Object -Skip 1) }
+    while ($lines.Count -and -not $lines[-1].Trim()) { $lines = @($lines | Select-Object -First ($lines.Count - 1)) }
+    if ($lines.Count -and (Get-EditMarker $lines[-1]) -eq 'replace') { $lines = @($lines | Select-Object -First ($lines.Count - 1)) }
+    $lines -join "`n"
 }
 
 function New-EditPair($Search, $Replace, $Hint) {

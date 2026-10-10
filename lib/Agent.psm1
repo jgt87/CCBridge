@@ -37,6 +37,8 @@ function New-AgentState {
         ReviewByCaller = $false   # MCP tasks: the calling model checks the result, so no Copilot review round
         NextConnectAttempt = $null
         OpenSync = $null   # a project just opened: its data files are converted at the next idle moment
+        TurnAnswers = @{}   # request-scope setup answers (ProjectSetup) for the turn at hand
+        ReadStamps = @{}   # per file: the fingerprint at Copilot's last read (line-range edits) and the last it saw (the stale note)
         # Work IQ (Microsoft 365 data in Copilot): 'on', 'off' or 'leave' (do not touch the toggle).
         WorkIq = $(if ($Config.workIq) { [string]$Config.workIq } else { 'leave' }); WorkIqActual = $null; WorkIqWarned = $false
         # Issue cycle: what the worker is doing besides Copilot (shown like "waiting for Copilot"),
@@ -828,35 +830,58 @@ function Publish-ProposalPlan {
     $true
 }
 
+function Test-RoundsLeft([int]$Limit, [int]$Round, [int]$LastProgress) {
+    <# Whether a message's loop goes on after this round: within the budget always; past it only
+       while the work still changes files (this round or the one before), up to three times the budget
+       (at most 60). @{ go; extend (past the budget, still building); idle (stopped for two rounds
+       without a change); hard; reason }. #>
+    $hard = [Math]::Min(60, [Math]::Max($Limit, $Limit * 3))
+    if ($Round -lt $Limit) { return @{ go = $true; extend = $false; idle = $false; hard = $hard; reason = '' } }
+    $building = ($Round - $LastProgress) -le 1 -and $LastProgress -gt 0
+    if ($Round -lt $hard -and $building) { return @{ go = $true; extend = $true; idle = $false; hard = $hard; reason = '' } }
+    $reason = if ($Round -ge $hard) { "it reached the limit of $hard rounds" } else { "it reached the limit of $Limit rounds and the last rounds changed no files" }
+    @{ go = $false; extend = $false; idle = ($Round -lt $hard); hard = $hard; reason = $reason }
+}
+
 function Publish-SetupQuestions {
-    <# Project setup questions (ProjectSetup.psm1 Get-SetupQuestions: a fixed rule on the request and
-       the project's files) before a new project's first request goes to Copilot: the message and a
-       'setup-choice' card; the answer sends the request again with task.setup. A build form the
-       request names itself is saved without asking. Returns whether the turn stops for the card. #>
+    <# The setup questions (ProjectSetup.psm1 Get-SetupQuestions: fixed rules on the request and the
+       project's files) before a request goes to Copilot: the build form of a new project and every
+       registry question whose trigger fires (kind of app, audience, entered data, Microsoft 365 data,
+       sample data, personal details, language, extras, big request, recurring work, a new page, a
+       rebuild). The message and a 'setup-choice' card; the answer sends the request again with
+       task.setup. Answers the request states itself are saved (or set for this turn) without asking.
+       Returns whether the turn stops for the card. #>
     param($State, $Task)
     $root = $State.ProjectRoot
     $setup = Get-ProjectSetup $root
-    if ($setup.build) { return $false }
     $paths = @(Get-ProjectFiles $root | ForEach-Object { $_.path })
-    $stated = Get-StatedBuild $Task.text
-    if ($stated -and -not (Test-OwnCode $paths)) {
-        $null = Save-ProjectSetup $root @{ build = $stated; chosenBy = 'request' }
-        return $false
+    if (-not $setup.build) {
+        $stated = Get-StatedBuild $Task.text
+        if ($stated -and -not (Test-OwnCode $paths)) { $null = Save-ProjectSetup $root @{ build = $stated; chosenBy = 'request' }; $setup = Get-ProjectSetup $root }
     }
-    $q = Get-SetupQuestions $Task.text $paths $setup
+    $q = Get-SetupQuestions $Task.text $paths $setup $root $State.AppRoot
     if (-not $q) { return $false }
+    if (@($q.stated.Keys).Count) {
+        $null = Save-ProjectSetup $root @{ answers = $q.stated; chosenBy = 'request' }
+        Write-CCBLog info agent 'Setup answers stated by the request' @{ ids = @($q.stated.Keys) -join ',' }
+    }
+    if (@($q.statedTurn.Keys).Count) { foreach ($k in $q.statedTurn.Keys) { $State.TurnAnswers[$k] = $q.statedTurn[$k] } }
+    if (-not @($q.questions).Count) { return $false }
     Add-AgentEvent $State 'user' @{ text = $Task.text }
     Add-AgentEvent $State 'setup-choice' @{ request = $Task.text; choices = @($q.questions); live = [bool]$q.live; suggest = "$($q.suggest)"; clarify = [bool]$Task.clarify }
-    Write-CCBLog info agent 'Project setup asked' @{ live = [bool]$q.live }
+    Write-CCBLog info agent 'Setup questions asked' @{ ids = (@($q.questions | ForEach-Object { $_.id }) -join ','); live = [bool]$q.live }
     $true
 }
 
 function Save-SetupAnswer {
-    <# The user's answer to the setup card (task.setup from the app page: build, liveSource): saved
-       for the project; a live data file is checked, copied in and gets Scripts/Refresh-Data.ps1. #>
+    <# The user's answer to the setup card (task.setup from the app page: build, liveSource, answers =
+       @{ id = value }): project-scope answers are saved for the project, request-scope ones apply to
+       this turn ($State.TurnAnswers); a live data file is checked, copied in and gets
+       Scripts/Refresh-Data.ps1. Returns @{ textPrefix } (words a request-scope answer puts before the
+       request, such as making it a runbook). #>
     param($State, $Setup)
     $root = $State.ProjectRoot
-    if (-not $root -or -not $Setup) { return }
+    if (-not $root -or -not $Setup) { return @{ textPrefix = '' } }
     $changes = @{ chosenBy = 'user' }
     if ("$($Setup.build)" -in 'single', 'modular', 'copilot') { $changes.build = "$($Setup.build)" }
     $live = "$($Setup.liveSource)".Trim().Trim('"')
@@ -865,13 +890,48 @@ function Save-SetupAnswer {
         if ($why) { Add-AgentEvent $State 'status' @{ text = "The live data file was not set: $why. Set it later under Project setup in the Files tab." }; $live = '' }
         else { $changes.liveSource = [IO.Path]::GetFullPath($live); $changes.liveStamp = '' }
     }
+    $saved = @{}; $turn = @{}; $labels = New-Object System.Collections.Generic.List[string]
+    $answers = $Setup.answers
+    if ($answers) {
+        $keys = if ($answers -is [hashtable]) { @($answers.Keys) } else { @($answers.PSObject.Properties | ForEach-Object { $_.Name }) }
+        foreach ($k in $keys) {
+            $d = Get-SetupQuestionDef "$k"
+            if (-not $d) { continue }
+            $v = "$(if ($answers -is [hashtable]) { $answers[$k] } else { $answers.$k })".Trim()
+            $allowed = @($d.options | ForEach-Object { $_.value })
+            $v = @($v -split ',' | Where-Object { $_ -and $allowed -contains $_ }) -join ','
+            if (-not $v -and -not $d.multi) { continue }
+            if ($d.scope -eq 'project') { $saved["$k"] = $v } else { $turn["$k"] = $v }
+            $labels.Add((Get-SetupAnswerLabel "$k" $v))
+        }
+    }
+    if ($saved.Count) { $changes.answers = $saved }
+    foreach ($k in $turn.Keys) { $State.TurnAnswers[$k] = $turn[$k] }
     $s = Save-ProjectSetup $root $changes
-    $form = switch ($s.build) { 'single' { 'one HTML file' } 'modular' { 'separate files' } 'copilot' { 'left to Copilot' } default { 'not chosen' } }
-    Add-AgentEvent $State 'status' @{ text = "Project setup saved: build form $form$(if ($changes.liveSource) { "; live data from $($changes.liveSource)" }). Change it under Project setup in the Files tab." }
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($changes.build) { $parts.Add("build form $(switch ($s.build) { 'single' { 'one HTML file' } 'modular' { 'separate files' } 'copilot' { 'left to Copilot' } })") }
+    if ($changes.liveSource) { $parts.Add("live data from $($changes.liveSource)") }
+    foreach ($l in $labels) { $parts.Add($l.ToLowerInvariant().Substring(0, 1) + $l.Substring(1)) }
+    if ($parts.Count) { Add-AgentEvent $State 'status' @{ text = "Project setup saved: $($parts -join '; '). Change it under Project setup in the Files tab." } }
     if ($changes.liveSource) {
-        try { $w = Write-RefreshScript $root $State.AppRoot; if ($w) { Add-OwnChangeEvent $State 'write' $w 'StreamHub wrote the refresh script: it copies the live data file in and updates the pages, for when StreamHub is closed (run it by hand or from Windows Task Scheduler).' } } catch { Write-CCBLogError agent 'refresh script' $_ }
+        try { $w = Write-RefreshScript $root $State.AppRoot; if ($w) { Add-OwnChangeEvent $State 'write' $w 'StreamHub wrote the refresh script: it copies the live data file in and updates the pages, for when StreamHub is closed (Windows Task Scheduler can run it).' } } catch { Write-CCBLogError agent 'refresh script' $_ }
         $null = Sync-LiveData $State
     }
+    @{ textPrefix = (Get-SetupTextPrefix $turn) }
+}
+
+function Use-BigTaskPreference {
+    <# A project whose setup says big requests are clarified or planned first (question bigtask): a
+       big request that comes in plain becomes a Clarify first or Plan first task. #>
+    param($State, $Task)
+    $pref = "$((Get-ProjectSetup $State.ProjectRoot).answers['bigtask'])"
+    if ($pref -notin 'clarify', 'plan' -or $Task.clarify -or $Task.planFirst -or $Task.setup -or -not (Test-BigRequest "$($Task.text)")) { return }
+    if ($pref -eq 'clarify') { $Task.clarify = $true; $Task.request = $Task.text }
+    else {
+        $Task.planFirst = $true; $Task.mode = 'plan'; $State.Mode = 'plan'; $Task.forceKind = 'coding'; $Task.request = $Task.text
+        $Task.text = (Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + $Task.text
+    }
+    Add-AgentEvent $State 'status' @{ text = "A big request: $(if ($pref -eq 'clarify') { 'Copilot asks its questions first' } else { 'Copilot plans first' }), as chosen for this project (Project setup in the Files tab changes it)." }
 }
 
 function Invoke-ClarifyStep {
@@ -1988,6 +2048,77 @@ function New-ActionRetryMessage {
     ($parts -join "`n`n") + "`n`nTask: $Task"
 }
 
+function Register-ReadStamp {
+    <# Remembers the file as Copilot saw it: -Seen after its own edit or write (the changed lines went
+       back to it), else at a read. A line-range edit is valid only while the file is still as read;
+       the stale note fires when the file changed since Copilot last saw it. #>
+    param($State, [string]$ProjectRoot, [string]$Key, [switch]$Seen)
+    if ($null -eq $State.ReadStamps) { $State.ReadStamps = @{} }
+    $full = Resolve-ProjectPath $ProjectRoot $Key
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return }
+    $fp = Get-FileFingerprint $full
+    $old = $State.ReadStamps[$Key]
+    if ($Seen) { $State.ReadStamps[$Key] = @{ read = $(if ($old) { $old.read } else { '' }); seen = $fp } }
+    else { $State.ReadStamps[$Key] = @{ read = $fp; seen = $fp } }
+}
+
+function Test-RangeEditAllowed {
+    <# Why a line-range edit (pairs with a range) cannot be applied, or '': the lines must have been
+       read in this task (read PATH:START-END, or the whole file) and the file must be as it was read
+       (the fingerprint of that read), else the numbers mean other lines. The refusal shows the
+       current lines of the range. #>
+    param($State, [string]$ProjectRoot, [string]$Path, $Edits)
+    $ranges = @($Edits | Where-Object { $_ -is [hashtable] -and $_.range })
+    if (-not $ranges.Count) { return '' }
+    $key = "$Path".Replace('\', '/').TrimStart('/').ToLowerInvariant()
+    $st = if ($State.ReadStamps) { $State.ReadStamps[$key] } else { $null }
+    if (-not $st -or -not $st.read) { return "an edit by line numbers needs the lines read in this task first: read ${Path}:START-END (the numbers must come from that read), then send the edit again, or send a SEARCH/REPLACE edit. Nothing was changed." }
+    $full = Resolve-ProjectPath $ProjectRoot $Path
+    $fp = Get-FileFingerprint $full
+    $lines = (Read-TextFile $full).Text.Replace("`r`n", "`n").Split("`n")
+    $fence = '````'
+    foreach ($r in $ranges) {
+        $from = [int]$r.range.from; $to = [int]$r.range.to
+        if ($fp -ne $st.read) {
+            $a = [Math]::Max(1, $from); $z = [Math]::Min($lines.Length, [Math]::Max($to, $a))
+            $shown = if ($z -ge $a) { "`nCurrent lines $a-$z of ${Path} (line numbers are not part of the file):`n$fence`n" + (($lines[($a - 1)..($z - 1)]) -join "`n") + "`n$fence" } else { '' }
+            return "${Path} changed since your read (an edit, or a repair by the helper program), so lines $from-$to are stale.$shown`nRead the file again and send the edit with the numbers it shows, or send a SEARCH/REPLACE edit. Nothing was changed."
+        }
+        $covered = @($State.ReadRanges[$key] | Where-Object { $_ -and [int]$_.from -le $from -and [int]$_.to -ge $to }).Count -gt 0
+        if (-not $covered) { return "lines $from-$to of ${Path} were not among the lines you read this task: read ${Path}:$from-$to first, then send the edit again. Nothing was changed." }
+    }
+    ''
+}
+
+function Get-StaleReadNote {
+    # A line for a failed edit when the file changed since Copilot last saw it (a repair or another change by the helper program).
+    param($State, [string]$ProjectRoot, [string]$Path)
+    $key = "$Path".Replace('\', '/').TrimStart('/').ToLowerInvariant()
+    $st = if ($State.ReadStamps) { $State.ReadStamps[$key] } else { $null }
+    if (-not $st -or -not $st.seen) { return '' }
+    $full = try { Resolve-ProjectPath $ProjectRoot $Path } catch { return '' }
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return '' }
+    if ((Get-FileFingerprint $full) -eq $st.seen) { return '' }
+    "Note: ${Path} changed since you last saw it (the helper program repaired or rewrote lines after your read), so lines you remember may differ: go by the current lines shown above, or read the file again."
+}
+
+function Get-WholeFileFallback {
+    <# For the second failed edit of a small file: the whole file as it is now, so one write block
+       ends the loop. '' for a large file; a one-file page (blocks the helper program writes) gets a
+       pointer to line-range edits instead. #>
+    param([string]$ProjectRoot, [string]$Path, [int]$MaxLines = 400, [int]$MaxChars = 60000)
+    $full = Resolve-ProjectPath $ProjectRoot $Path
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return '' }
+    $info = Read-TextFile $full
+    if ($info.Encoding -eq 'office') { return '' }
+    $text = $info.Text.Replace("`r`n", "`n")
+    if (Test-OneFileText $text) { return "This page holds blocks the helper program writes (data-streamhub), so it cannot be rewritten whole: read the lines you want to change (read ${Path}:START-END) and send ACTION edit ${Path}:START-END with the new lines, or a SEARCH that copies the current lines exactly." }
+    $lines = $text.Split("`n")
+    if ($lines.Length -gt $MaxLines -or $text.Length -gt $MaxChars) { return '' }
+    $fence = '````'
+    "The whole file as it is now ($($lines.Length) lines) is below. Reply with one write block (ACTION write ${Path}) holding the complete new file, the change made:`n$fence`n$text`n$fence"
+}
+
 function Register-StepFailure {
     <# Counts how often the same step failed the same way in one message (same action, path and
        error, line numbers ignored). Returns the count. #>
@@ -2010,6 +2141,7 @@ function Get-StepFailureInfo {
         'half open|half closed' { @{ code = 'EDIT-HALF-BLOCK'; reasons = @('Copilot''s SEARCH covered only part of a block (for example the first lines of a <style> or <script> block, or a function without its closing brace).', 'Copilot shortened a long block without a line containing only ... between its first and last lines.'); next = "Nothing was changed. $copilotRetries" }; break }
         'matches \d+ places|matches more than once' { @{ code = 'EDIT-AMBIGUOUS'; reasons = @('The SEARCH text occurs more than once in the file (for example a repeated closing tag or line).', 'Copilot copied too few lines to point at one place.'); next = "Nothing was changed. $copilotRetries" }; break }
         'no SEARCH/REPLACE pairs' { @{ code = 'EDIT-FORMAT'; reasons = @('Copilot''s edit block had no ####### SEARCH / ####### REPLACE / ####### END markers (or they were not at the start of a line).', 'Copilot meant to replace the whole file; that needs a write block.'); next = "Nothing was changed. $copilotRetries" }; break }
+        'needs the lines read in this task|changed since your read|were not among the lines you read' { @{ code = 'EDIT-STALE'; reasons = @('Copilot sent an edit by line numbers (ACTION edit PATH:START-END) without reading those lines in this task, or the file changed since that read (an earlier edit, or a repair by the helper program).'); next = $copilotRetries } }
         'SEARCH text not found' { @{ code = 'EDIT-NOT-FOUND'; reasons = @('The file changed since Copilot read it: an earlier edit in this task, or you edited it.', 'Copilot''s SEARCH lines differ slightly from the file: spaces, quotes, or a line it remembered differently.', 'The change was already made earlier, but with different text.', 'Copilot shortened SEARCH without a line containing only ... (only its first lines were given).'); next = "Nothing was changed. Copilot gets the reason plus the file's closest current lines. $copilotRetries" }; break }
         'is in Source/|read-only' { @{ code = 'SOURCE-DATA'; reasons = @('The step tried to change a file in Source/, which holds your source data and is read-only.'); next = 'Nothing was changed. Copilot is told to write its result elsewhere (for example Work/ or output/).' }; break }
         'file not found|\(file not found\)' { @{ code = 'FILE-NOT-FOUND'; reasons = @('The path does not exist in the project: a typo, another folder, or a file that was never created.', 'For a new file Copilot should use a write block, not an edit.'); next = $copilotRetries }; break }
@@ -2571,10 +2703,11 @@ function Get-ProjectContext($State) {
     if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { $traits += 'nocommands' }
     # Project setup (asked before the first request): the build form and a live data file.
     $setup = try { Get-ProjectSetup $root } catch { Write-CCBLogError agent 'project setup' $_; @{ build = ''; liveSource = '' } }
-    $setupText = try { Format-ProjectSetupContext $root } catch { '' }
+    $turnAnswers = if ($State.TurnAnswers -is [hashtable]) { $State.TurnAnswers } else { @{} }
+    $setupText = try { Format-ProjectSetupContext $root $turnAnswers } catch { '' }
     if ($setupText) { $full += "`n`n$setupText" }
     $tailwind = try { Test-TailwindProject $State.ProjectRoot } catch { $false }
-    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = "$($setup.build)"; Live = [bool]$setup.liveSource; Tailwind = $tailwind; Root = $State.ProjectRoot }
+    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = "$($setup.build)"; Live = [bool]$setup.liveSource; Tailwind = $tailwind; Root = $State.ProjectRoot; Answers = $(if ($setup.answers -is [hashtable]) { $setup.answers } else { @{} }) }
 }
 
 function Format-ActionResults {
@@ -2666,8 +2799,14 @@ function Invoke-AgentAction {
             # Lines Copilot read in this task (PATH:START-END): a SEARCH that matches several places
             # takes the one among them (Find-EditTarget).
             if ($null -eq $State.ReadRanges) { $State.ReadRanges = @{} }
+            if ($null -eq $State.ReadStamps) { $State.ReadStamps = @{} }
             foreach ($rp in $paths) {
                 $rm = [regex]::Match("$rp", '^(.+?):(\d+)-(\d+)$')
+                $plainPath = if ($rm.Success) { $rm.Groups[1].Value } else { "$rp" }
+                $stampKey = $plainPath.Replace('\', '/').TrimStart('/').ToLowerInvariant()
+                # The file as read: a line-range edit is valid while it is unchanged since (Register-ReadStamp).
+                try { Register-ReadStamp $State $root $stampKey } catch { }
+                if (-not $rm.Success) { $State.ReadRanges[$stampKey] = @(@($State.ReadRanges[$stampKey] | Where-Object { $_ }) + @(@{ from = 1; to = 2000000000 })) }
                 if ($rm.Success) { $key = $rm.Groups[1].Value.Replace('\', '/').TrimStart('/').ToLowerInvariant(); $State.ReadRanges[$key] = @(@($State.ReadRanges[$key]) + @(@{ from = [int]$rm.Groups[2].Value; to = [int]$rm.Groups[3].Value }) | Where-Object { $_ }) }
             }
             $evt.target = $paths -join ', '; Add-AgentEvent $State 'action' $evt
@@ -2832,11 +2971,18 @@ function Invoke-AgentAction {
             $readKey = "$($Action.arg)".Replace('\', '/').TrimStart('/').ToLowerInvariant()
             $read = if ($State.ReadRanges) { @($State.ReadRanges[$readKey]) } else { @() }
             foreach ($pair in @($Action.edits)) { if ($pair -is [hashtable]) { $pair.readRanges = $read } }
+            # Line-range pairs: only for lines read in this task, and only while the file is as it was read.
+            $rangeProblem = Test-RangeEditAllowed $State $root $Action.arg $Action.edits
+            if ($rangeProblem) {
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = $rangeProblem })
+                return @{ ok = $false; summary = "edit $($Action.arg) failed"; output = "error: $rangeProblem" }
+            }
+            $staleNote = Get-StaleReadNote $State $root $Action.arg
             $er = Get-EditResult $root $Action.arg $Action.edits
             if (-not $er.ok) {
                 # Several matches and no way to tell: not broken, Copilot only has to point at one.
                 Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = $(if ($er.ambiguous) { 'ambiguous' } else { 'failed' }); error = $er.error })
-                return @{ ok = $false; summary = "edit $($Action.arg) failed"; output = "error: $($er.error)" }
+                return @{ ok = $false; summary = "edit $($Action.arg) failed"; output = "error: $($er.error)$(if ($staleNote) { "`n$staleNote" })" }
             }
             if ($er.unchanged) {
                 $out = Format-AlreadyApplied $Action.arg $er
@@ -3065,6 +3211,8 @@ function Invoke-AgentAction {
                 if (@($artNote).Count) { $out += '; ' + ($artNote -join '; ') }
                 # The changed lines as they are now, so the next edit starts from the current text.
                 $view = try { $now = (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text; Get-ChangedView $before $now (Resolve-ProjectPath $root $Action.arg) $Action.arg } catch { '' }
+                # Copilot saw this change (the lines above): no stale note for it; line numbers from its read are over.
+                try { Register-ReadStamp $State $root ("$($Action.arg)".Replace('\', '/').TrimStart('/').ToLowerInvariant()) -Seen } catch { }
                 try { Add-CheckpointCount $Checkpoint $Action.arg $before (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text } catch { Write-CCBLogError agent 'line counts' $_ }
                 return @{ ok = $true; summary = $out; output = $(if ($view) { "$out`n$view" } else { $out }); changed = $true; path = $Action.arg }
             }
@@ -3415,7 +3563,7 @@ function Get-LeakReport {
             if ($info.Encoding -eq 'office') { continue }
             $text = $info.Text
             $found = @(Find-LeakedMarkup $f.path $text)
-            if (@($found | Where-Object { $_.kind -in 'entity', 'entity-code', 'stray-close', 'broken-tag', 'lost-end' }).Count) {
+            if (@($found | Where-Object { $_.kind -in 'entity', 'entity-code', 'stray-close', 'broken-tag', 'lost-end', 'bare-path' }).Count) {
                 $fix = Repair-MechanicalIssues $f.path $text
                 $broke = @(Get-NewFileIssues $f.path $text $fix.text $info.Crlf $root | Where-Object { (Get-CheckLevel $_ 'file') -eq 'error' })
                 if (@($fix.fixes).Count -and -not $broke.Count) {
@@ -3562,7 +3710,12 @@ function Invoke-AgentTurn {
         $msgStart = [int]$State.MessagesSent
         $lastReply = ''; $doneText = ''   # for the suggested next steps after the turn
         $reviewed = $false   # the consistency review after a big change happens once per message
-        for ($round = 1; $round -le $State.Config.maxRounds; $round++) {
+        # Rounds: the budget (setting maxRounds) is against loops, not against work. A message whose
+        # rounds keep changing files goes on past it, up to three times the budget, and stops as soon
+        # as two rounds in a row change nothing (Test-RoundsLeft).
+        $round = 0; $lastProgress = 0; $extended = $false
+        while ($true) {
+            $round++
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
             $rolled = [bool](Invoke-RolloverIfNeeded $State)
             if (-not $State.ChatStarted -and ($round -gt 1 -or $rolled)) {
@@ -3676,6 +3829,8 @@ function Invoke-AgentTurn {
                     $times = Register-StepFailure $failSeen $a $out
                     if ($times -eq 2) {
                         $out += "`nThis is the second time this exact step failed in the same way. Do not send it again unchanged: read the lines it is about first and send a corrected step$(if ($a.type -eq 'edit') { ', or replace the whole file with a write block' })."
+                        # A small file: the whole current text goes along, so one write block ends it.
+                        if ($a.type -eq 'edit') { $whole = try { Get-WholeFileFallback $State.ProjectRoot $a.arg } catch { '' }; if ($whole) { $out += "`n$whole" } }
                     } elseif ($times -ge 3) {
                         $stopLoop = $true
                         Add-AgentEvent $State 'error' @{ text = "The same $($a.type) of $($a.arg) failed $times times in a row with: $(("$($res.output)" -split "`n")[0] -replace '^error:\s*', ''). Stopped this message so it does not loop."; code = 'STEP-LOOP'; hint = 'Ask Copilot to rewrite the whole file with a write block, or make this change by hand; then continue.' }
@@ -3689,6 +3844,7 @@ function Invoke-AgentTurn {
             # the next round, before more edits build on it. Only problems the task added count.
             if ($isDone) { Add-AgentEvent $State 'done' @{ text = $doneText } }
             $roundChanged = @($results | ForEach-Object { $_.changedPath } | Where-Object { $_ } | Select-Object -Unique)
+            if ($roundChanged.Count) { $lastProgress = $round }
             if ($null -ne $State.ChatFiles) { foreach ($f in @($results | ForEach-Object { @($_.readPaths) + @($_.changedPath) } | Where-Object { $_ })) { [void]$State.ChatFiles.Add("$f".Replace('\', '/')) } }
             if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
                 # The project's afterEdit hooks first (a formatter changes the files), so the checks
@@ -4106,7 +4262,9 @@ function Invoke-AgentTurn {
                 $doneFinished = $true
                 break
             }
-            if ($round -eq $State.Config.maxRounds) { $endReason = "it reached the limit of $($State.Config.maxRounds) rounds"; Add-AgentEvent $State 'status' @{ text = "Stopped after $($State.Config.maxRounds) rounds. Send a message to continue." }; break }
+            $left = Test-RoundsLeft ([int]$State.Config.maxRounds) $round $lastProgress
+            if ($left.extend -and -not $extended) { $extended = $true; Add-AgentEvent $State 'status' @{ text = "Past $($State.Config.maxRounds) rounds, but the last round still changed files: continuing while files keep changing (up to $($left.hard) rounds)." } }
+            if (-not $left.go) { $endReason = $left.reason; Add-AgentEvent $State 'status' @{ text = "Stopped after $round rounds$(if ($left.idle) { ' (the last two rounds changed no files)' }). Send a message to continue." }; break }
 
             $message = "Results:`n`n" + (Format-ActionResults $State $results) + "`n`nContinue. Use done when the task is finished."
         }
@@ -4321,6 +4479,8 @@ function Start-AgentWorker {
         $State.ReviewByCaller = [bool]$task.reviewByCaller
         $foreign = $task.source -and $task.source -ne 'user'
         if ($task.mode) { $State.Mode = $task.mode }
+        # A big request in a project that chose to clarify or plan first (setup question bigtask).
+        if ($State.ProjectRoot -and -not $State.Headless -and (-not $task.source -or $task.source -eq 'user')) { try { Use-BigTaskPreference $State $task } catch { Write-CCBLogError agent 'big task preference' $_ } }
         if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook', 'chain', 'script', 'review' -and $task.projectRoot -ne $State.ProjectRoot) {
             if (-not (Test-Path -LiteralPath $task.projectRoot -PathType Container)) { $task.missingProject = $true }
             else { $State.ProjectRoot = $task.projectRoot }
@@ -4357,14 +4517,15 @@ function Start-AgentWorker {
                     } elseif (-not $task.setup -and (-not $task.source -or $task.source -eq 'user') -and -not $force -and -not $State.Headless -and $State.ProjectRoot -and (Publish-SetupQuestions $State $task)) {
                         # Asked how the project should be built: the answer sends the request again.
                     } elseif ($task.clarify) {
-                        if ($task.setup) { Save-SetupAnswer $State $task.setup }
+                        if ($task.setup) { $null = Save-SetupAnswer $State $task.setup }
                         Invoke-ClarifyStep $State $task
                     } else {
-                        if ($task.setup) { Save-SetupAnswer $State $task.setup }
+                        if ($task.setup) { $sa = Save-SetupAnswer $State $task.setup; if ($sa.textPrefix) { $task.text = $sa.textPrefix + $task.text } }
                         $State.IssueFix = $task.issueFix; $State.IssueFixHandled = $false; $State.IssueFixFromSeq = $fromSeq
                         if ($task.freshChat) { $State.NeedNewChat = $true }
                         try { Invoke-AgentTurn $State $task.text $force }
                         finally {
+                            $State.TurnAnswers = @{}
                             $State.IssueFix = $null
                             # Stopped or failed before the rescan: its issues go back to open (no retry).
                             if ($task.issueFix -and -not $State.IssueFixHandled) { try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError agent 'issue fix reset' $_ } }
@@ -4453,4 +4614,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Test-RoundsLeft, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

@@ -284,8 +284,10 @@ Describe 'Asking in the chat (Agent Publish-SetupQuestions, Save-SetupAnswer)' {
         $p = New-SetupProject -WithData
         try {
             $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
-            Publish-SetupQuestions $s @{ kind = 'chat'; text = 'Build a dashboard as a single html file' } | Should Be $false
+            # The build form is saved from the request itself; other questions the data triggers (personal details) may still come, never the build one.
+            $asked = Publish-SetupQuestions $s @{ kind = 'chat'; text = 'Build a dashboard as a single html file' }
             (Get-ProjectSetup $p).build | Should Be 'single'
+            if ($asked) { @(@(@($s.Events) | Where-Object { $_.type -eq 'setup-choice' })[-1].choices | Where-Object { $_.id -eq 'build' }).Count | Should Be 0 }
             (Get-ProjectSetup $p).chosenBy | Should Be 'request'
             Save-SetupAnswer $s @{ build = 'modular'; liveSource = 'C:\nowhere\gone.csv' }
             (Get-ProjectSetup $p).liveSource | Should Be ''

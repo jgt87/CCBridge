@@ -34,6 +34,12 @@ NEW LINES
 ````
 changes part of a file (several SEARCH/REPLACE/END groups may follow each other)
 
+````text
+ACTION edit PATH:START-END
+NEW LINES
+````
+replaces lines START-END with the new lines, no SEARCH needed: only for lines you read in this task (read PATH:START-END) and only while the file is unchanged since that read
+
 ```text
 ACTION done
 SUMMARY

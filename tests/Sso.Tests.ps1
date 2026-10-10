@@ -56,3 +56,24 @@ Describe 'Get-CopilotSignInState' {
         Get-CopilotSignInState -Pages @((& $page 'https://www.microsoft365.com/chat'), (& $page 'https://login.live.com/x')) | Should Be 'sign-in page'
     }
 }
+
+Describe 'A hidden settings tab never stays open' {
+    It 'closes the tab it made when the page never shows in the debug list, and reports the failure' {
+        $global:ssoCalls = New-Object System.Collections.Generic.List[string]
+        Mock -ModuleName Sso Invoke-RestMethod { param($Uri) if ("$Uri" -match 'version') { [pscustomobject]@{ webSocketDebuggerUrl = 'ws://x' } } else { @() } }
+        Mock -ModuleName Sso Connect-Cdp { [pscustomobject]@{ NextId = 0 } }
+        Mock -ModuleName Sso Disconnect-Cdp { }
+        Mock -ModuleName Sso Start-Sleep { }
+        Mock -ModuleName Sso Invoke-Cdp { param($Session, $Method, $Params) $global:ssoCalls.Add($Method); if ($Method -eq 'Target.createTarget') { [pscustomobject]@{ targetId = 'T1' } } }
+        { & (Get-Module Sso) { Open-BackgroundTab 9333 'edge://settings/x' } } | Should Throw 'did not open'
+        ($global:ssoCalls -join ',') | Should Be 'Target.createTarget,Target.closeTarget'
+    }
+    It 'closes the page itself when the browser-level close fails' {
+        $global:ssoCalls = New-Object System.Collections.Generic.List[string]
+        Mock -ModuleName Sso Disconnect-Cdp { }
+        Mock -ModuleName Sso Invoke-Cdp { param($Session, $Method, $Params) $global:ssoCalls.Add($Method); if ($Method -eq 'Target.closeTarget') { throw 'gone' } }
+        & (Get-Module Sso) { param($t) Close-BackgroundTab $t } ([pscustomobject]@{ Browser = 1; Session = 2; TargetId = 'T1' })
+        ($global:ssoCalls -join ',') | Should Be 'Target.closeTarget,Page.close'
+        Remove-Variable -Name ssoCalls -Scope Global
+    }
+}

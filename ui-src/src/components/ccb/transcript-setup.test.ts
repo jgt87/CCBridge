@@ -30,6 +30,18 @@ describe("the project setup card", () => {
     expect(card?.kind === "setupChoice" && card.restored).toBe(true);
     expect(card?.kind === "setupChoice" && card.live).toBe(false);
   });
+  it("keeps every question of a card, the build one and the registry ones with their scope and multi flag", () => {
+    const more = [
+      { id: "appkind", question: "What kind of app is this?", options: [{ value: "web", label: "Web pages", help: "" }], scope: "project" },
+      { id: "extras", question: "Extras for tables and reports?", options: [{ value: "export", label: "Export", help: "" }], multi: true, scope: "project" },
+      { id: "recurring", question: "This sounds like recurring work.", options: [{ value: "runbook", label: "Make it a runbook", help: "" }], scope: "request" },
+    ];
+    const items = buildTranscript([ev(1, "setup-choice", { request: "Build an app", choices: [question, ...more] })]);
+    const card = items.find((i) => i.kind === "setupChoice");
+    expect(card?.kind === "setupChoice" && card.choices.map((c) => c.id)).toEqual(["build", "appkind", "extras", "recurring"]);
+    expect(card?.kind === "setupChoice" && card.choices[2].multi).toBe(true);
+    expect(card?.kind === "setupChoice" && card.choices[3].scope).toBe("request");
+  });
   it("offers the same three forms in the card and in the Project setup section", () => {
     expect(BUILD_FORMS.map((f) => f.value)).toEqual(["single", "modular", "copilot"]);
   });

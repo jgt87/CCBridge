@@ -205,11 +205,18 @@ function Test-LongPowerShellCommand([AllowEmptyString()][string]$Command, [int]$
     "a PowerShell command line of $($body.Length) characters (more than $MaxChars)"
 }
 
+$script:BareAssetLine = '(?m)^([ \t]*)((?:\.{1,2}/)?[\w~-][\w.~/-]*\.(?:css|m?js)(?:\?[\w=.&-]*)?)[ \t]*$'
+
 function Repair-StrippedScriptTag([AllowEmptyString()][string]$Text) {
     <# Some Copilot routes strip a script tag down to its address and the end of the closing tag:
-       <script src="PATH.js"></script> arrives as PATH.jsscript>. That text never occurs in real
-       HTML, so the tag is put back (attributes like defer or type are lost on the way). #>
-    [regex]::Replace($Text, '(?m)(?<=^|[\s>])([\w.~/-]+\.(?:m?js))script>', '<script src="$1"></script>')
+       <script src="PATH.js"></script> arrives as PATH.jsscript>; another route strips
+       <link rel="stylesheet" href="PATH.css"> and <script src="PATH.js"></script> down to the bare
+       path on a line of its own. Neither text occurs in real HTML, so the tag is put back (a
+       stylesheet link for .css, a script tag for .js; attributes like defer or type are lost on the way). #>
+    $t = [regex]::Replace($Text, '(?m)(?<=^|[\s>])([\w.~/-]+\.(?:m?js))script>', '<script src="$1"></script>')
+    [regex]::Replace($t, $script:BareAssetLine, [Text.RegularExpressions.MatchEvaluator] { param($m)
+        $p = $m.Groups[2].Value
+        $m.Groups[1].Value + $(if ($p -match '(?i)\.css(\?|$)') { "<link rel=""stylesheet"" href=""$p"">" } else { "<script src=""$p""></script>" }) })
 }
 
 function Close-LoneScriptTag([string]$Path, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New) {
@@ -1854,6 +1861,30 @@ function Get-EditResult {
     $n = 0
     $after = -1   # end of the previous change: a SEARCH that matches several places takes the next one
     $notes = New-Object System.Collections.Generic.List[string]
+    # Line-range pairs (ACTION edit PATH:START-END) go first, from the bottom up, so every range still
+    # means the lines of the file as it was read; the SEARCH pairs follow on the result.
+    $ranges = @($Edits | Where-Object { $_ -is [hashtable] -and $_.range })
+    if ($ranges.Count) {
+        $lines = $text.Replace("`r`n", "`n").Split("`n")
+        $seenRanges = @()
+        foreach ($e in $ranges) {
+            $from = [int]$e.range.from; $to = [int]$e.range.to
+            if ($from -lt 1 -or $to -lt $from -or $to -gt $lines.Length) { return [pscustomobject]@{ ok = $false; error = "lines $from-$to are not in the file ($($lines.Length) lines): read the file again and send the edit with the numbers it shows. Nothing was changed." } }
+            foreach ($s in $seenRanges) { if ($from -le $s.to -and $to -ge $s.from) { return [pscustomobject]@{ ok = $false; error = "lines $from-$to overlap another range of this edit ($($s.from)-$($s.to)): send them as one range. Nothing was changed." } } }
+            $seenRanges += @{ from = $from; to = $to }
+        }
+        $nl = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+        foreach ($e in @($ranges | Sort-Object { [int]$_.range.from } -Descending)) {
+            $n++
+            $from = [int]$e.range.from; $to = [int]$e.range.to
+            $replace = Repair-CodeText $full "$($e.replace)".Replace("`r`n", "`n")
+            $new = @($lines[0..($from - 1)] | Select-Object -First ($from - 1)) + @($(if ($replace -ne '') { $replace.Split("`n") })) + @($(if ($to -lt $lines.Length) { $lines[$to..($lines.Length - 1)] }))
+            $lines = [string[]]$new
+            $notes.Add("pair ${n}: lines $from-$to replaced by line range")
+        }
+        $text = $lines -join $nl
+        $Edits = @($Edits | Where-Object { -not ($_ -is [hashtable] -and $_.range) })
+    }
     $applied = New-Object System.Collections.Generic.List[string]   # pairs found already made
     foreach ($e in $Edits) {
         $n++
@@ -1935,6 +1966,7 @@ function Invoke-EditAction {
     $r = Get-EditResult $ProjectRoot $Path $Edits
     if (-not $r.ok) { throw $r.error }
     $rel = ConvertTo-RelativePath $ProjectRoot $r.full
+    if ($r.unchanged -and -not @($r.alreadyApplied).Count) { return "error: nothing changed: every REPLACE is the same text as its SEARCH, so the edit does nothing. If your REPLACE had tags (<link>, <script>), they were lost on the way: write those lines with a write block of the whole file, or put the tag text in a way that survives (one tag per line)." }
     if ($r.unchanged) { return Format-AlreadyApplied $rel $r }
     if ($Checkpoint) { Save-CheckpointFile $Checkpoint $ProjectRoot $r.full }
     Write-TextFile $r.full $r.new $r.bom $r.crlf $r.encoding

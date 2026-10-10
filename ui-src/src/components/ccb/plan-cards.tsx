@@ -1,10 +1,14 @@
 import { ClipboardCheck, FileText, MessageCircleQuestion } from "lucide-react";
 import { useState } from "react";
+import GradientButton from "@/components/kokonutui/gradient-button";
 import type { ChatOptions } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+// Every button a person must act on is as visible as the run approval: a tall primary button
+// (GradientButton, h-10) for the main action, a tall flat one beside it for the other way.
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "inline-flex h-10 items-center gap-1 rounded-md px-3 text-sm hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+const primary = "h-10 min-w-44";
 const field =
   "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
 
@@ -35,9 +39,7 @@ export function AgentPlanCard({ agent, onSend }: { agent: string; onSend: (text:
         <button className={flatButton} disabled={sent} onClick={() => go("Proceed with your best assumptions and list them at the start of the report.")} type="button">
           Go ahead with its assumptions
         </button>
-        <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={sent || !answer.trim()} onClick={() => go(answer.trim())} type="button">
-          {sent ? "Sent" : "Send answer"}
-        </button>
+        <GradientButton className={primary} disabled={sent || !answer.trim()} label={sent ? "Sent" : "Send answer"} onClick={() => go(answer.trim())} variant="neutral" />
       </div>
     </div>
   );
@@ -121,9 +123,7 @@ export function ClarifyCard({
         <button className={flatButton} disabled={sent} onClick={() => submit(false)} title="Plan with Copilot's own assumptions" type="button">
           Skip questions
         </button>
-        <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={sent} onClick={() => submit(true)} type="button">
-          {sent ? "Sent" : "Send answers and plan"}
-        </button>
+        <GradientButton className={primary} disabled={sent} label={sent ? "Sent" : "Send answers and plan"} onClick={() => submit(true)} variant="neutral" />
       </div>
     </div>
   );
@@ -192,9 +192,7 @@ export function PlanCard({
             Change the plan
           </button>
         )}
-        <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={Boolean(sent)} onClick={build} type="button">
-          {sent === "build" ? "Building..." : PLAN_TEXT[variant].build}
-        </button>
+        <GradientButton className={primary} disabled={Boolean(sent)} label={sent === "build" ? "Building..." : PLAN_TEXT[variant].build} onClick={build} variant="neutral" />
       </div>
     </div>
   );
