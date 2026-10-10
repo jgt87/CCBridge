@@ -238,7 +238,13 @@ function Repair-CodeText([string]$Path, [string]$Text) {
     }
     if ($Path -match '(?i)\.ps[md]?1$') { $Text = Repair-EscapedTypeName $Text }
     if ($Path -match '(?i)\.(html?|xhtml|vue|svelte|jsx|tsx|php|aspx|cshtml)$') { $Text = Repair-StrippedScriptTag $Text }
-    if (Test-MarkupFile $Path) { return $Text }
+    if (Test-MarkupFile $Path) {
+        # A page part with tags written as &lt;div&gt; throughout and not one real < or >: the chat's
+        # escaping of the prompt copied back, which the browser would show as text (not in Markdown,
+        # where an entity is a way to show a tag).
+        if ($Path -match '(?i)\.(html?|xhtml|vue|svelte|svg|xml|xaml)$' -and $Text -notmatch '[<>]' -and $Text -match '&lt;/?[a-zA-Z][\w-]*(\s[^&]*)?/?&gt;') { return ConvertFrom-AngleEntities $Text }
+        return $Text
+    }
     ConvertFrom-AngleEntities $Text
 }
 
@@ -1319,7 +1325,8 @@ function Get-ClosestLines([string]$Text, [string]$Search) {
     $from = [Math]::Max(0, $best - 2); $to = [Math]::Min($fileLines.Length - 1, $best + $span + 2)
     $snippet = ($fileLines[$from..$to] -join "`n")
     if ($snippet.Length -gt 3000) { $snippet = $snippet.Substring(0, 3000) }
-    "The closest place is lines $($from + 1)-$($to + 1); their exact current text is:`n````n$snippet`n````"
+    $fence = '```'
+    "The closest place is lines $($from + 1)-$($to + 1); their exact current text is:`n$fence`n$snippet`n$fence"
 }
 
 $script:EllipsisLine = '^\s*(\.\.\.|\u2026|/\*\s*(\.\.\.|\u2026)\s*\*/|<!--\s*(\.\.\.|\u2026)\s*-->|//\s*(\.\.\.|\u2026)|#\s*(\.\.\.|\u2026))\s*$'
@@ -1945,9 +1952,11 @@ function Test-DeleteScope {
        no .., no variables, no changing folders first, no encoded commands. Deleting code inside
        python -c / node -e / -Command text, and in project scripts the command runs, is checked
        the same way (its quoted paths). #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command, [int]$Depth = 0)
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command, [int]$Depth = 0, [switch]$CodeOnly)
     if ($Command -match $script:EncodedCommandPattern) { return 'it contains an encoded command, which cannot be checked' }
-    $groups = @(Split-CommandGroups $Command)
+    # The text of a JavaScript or Python script ($CodeOnly) is code, not a command line: "remove" is
+    # a DOM method there and "//" a comment, so only the code patterns below count.
+    $groups = @(if ($CodeOnly) { } else { Split-CommandGroups $Command })
     $all = @($groups | ForEach-Object { $_ })
     $deletes = $false
     foreach ($g in $groups) {
@@ -1996,7 +2005,7 @@ function Test-DeleteScope {
             if ($p -notmatch $script:ScriptExt) { continue }
             $full = try { Resolve-ProjectPath $ProjectRoot $p } catch { $null }
             if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf) -or (Get-Item -LiteralPath $full).Length -gt 500000) { continue }
-            $why = Test-DeleteScope $ProjectRoot ([IO.File]::ReadAllText($full)) ($Depth + 1)
+            $why = Test-DeleteScope $ProjectRoot ([IO.File]::ReadAllText($full)) ($Depth + 1) -CodeOnly:($p -match '(?i)\.(py|pyw|js|mjs|cjs)$')
             if ($why) { return "the script $p $why" -replace "the script $([regex]::Escape($p)) it ", "the script $p " }
         }
     }

@@ -52,6 +52,15 @@ Describe 'A script tag stripped to PATH.jsscript> is put back' {
         Repair-CodeText 'web/index.html' 'x/a.jsscript>' | Should Be '<script src="x/a.js"></script>'
         Repair-CodeText 'docs/notes.md' 'x/a.jsscript>' | Should Be 'x/a.jsscript>'
     }
+    It 'turns a page part written only as entities back into tags, and leaves real entities and Markdown alone' {
+        $esc = "&lt;div class=""kit-panel""&gt;`n  &lt;h2 class=""kit-panel__title""&gt;Users&lt;/h2&gt;`n  &lt;div id=""chart""&gt;&lt;/div&gt;`n&lt;/div&gt;"
+        Repair-CodeText 'index.html' $esc | Should Be "<div class=""kit-panel"">`n  <h2 class=""kit-panel__title"">Users</h2>`n  <div id=""chart""></div>`n</div>"
+        # A real tag in the text: the entities are content (a code sample).
+        Repair-CodeText 'index.html' '<code>&lt;div&gt;</code>' | Should Be '<code>&lt;div&gt;</code>'
+        # Entities that are not tags, and Markdown, stay.
+        Repair-CodeText 'index.html' 'a &lt; b &gt; c' | Should Be 'a &lt; b &gt; c'
+        Repair-CodeText 'README.md' '&lt;div&gt;' | Should Be '&lt;div&gt;'
+    }
     It 'fixes the damaged line in the file through an edit whose REPLACE arrived stripped' {
         $p = Join-Path $env:TEMP ('ccb-strip-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
         $file = Join-Path $p 'index.html'

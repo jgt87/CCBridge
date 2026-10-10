@@ -97,6 +97,8 @@ Describe 'SEARCH text that is not in the file as written' {
         $err | Should Match 'SEARCH text not found in the file\. The closest place is lines 2-'
         $err | Should Match '<title>Calendar</title>'
         $err | Should Match 'Nothing was changed'
+        $err | Should Match ("text is:`n" + '```' + "`n<head>")   # a real code fence, not backticks and an n
+        $err | Should Not Match '`n<head>'
     }
     Remove-Item $proj -Recurse -Force
 }

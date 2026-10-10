@@ -1220,7 +1220,9 @@ function Add-OwnChangeEvent {
     $evt = @{ id = $id; action = $Action; target = $Target; status = 'running'; by = 'streamhub' }
     if ($Preview) { $evt.preview = @{ path = $Preview.path; exists = [bool]$Preview.exists; old = (Get-PreviewText $Preview.old); new = (Get-PreviewText $Preview.new) } }
     Add-AgentEvent $State 'action' $evt
-    $out = $(if ($Output) { "$Summary`n$Output" } else { $Summary })
+    # The card shows the summary as its own line; the output holds the details (or the summary
+    # when there is nothing else, so the card can open).
+    $out = $(if ($Output) { $Output } elseif ($Preview) { '' } else { $Summary })
     Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'ok'; summary = $Summary; output = (Limit-Text $out 4000); changed = $true }
 }
 
@@ -2086,7 +2088,7 @@ function Test-WebPageCore {
                         if ([int]$m.params.response.status -ge 400 -and "$($m.params.response.url)" -notmatch '/favicon\.ico(\?|$)') { $problems.Add("$page loads $(& $rel $m.params.response.url): HTTP $($m.params.response.status)$(if ($m.params.response.status -eq 404) { ' (file not found)' })") }
                     }
                     'Network.loadingFailed' {
-                        if (-not $m.params.canceled) { $problems.Add("$page could not load $(& $rel $urls["$($m.params.requestId)"]): $($m.params.errorText)") }
+                        if (-not $m.params.canceled -and "$($urls["$($m.params.requestId)"])" -notmatch '/favicon\.ico(\?|$)') { $problems.Add("$page could not load $(& $rel $urls["$($m.params.requestId)"]): $($m.params.errorText)") }
                     }
                     'Runtime.exceptionThrown' {
                         $d = $m.params.exceptionDetails
@@ -4184,6 +4186,17 @@ function Start-AgentWorker {
                     $live = try { [bool](Get-ProjectSetup $openRoot).liveSource } catch { $false }
                     $prev = if ($live) { Enter-Activity $State 'index' 'Bringing in the live data file' } else { $null }
                     try { Sync-DataMirrors $State -Import:$live } catch { Write-CCBLogError agent 'data at project open' $_ } finally { if ($prev) { Exit-Activity $State $prev } }
+                    # A project from an older kit: the catalogue, the kit files the pages use and the
+                    # project's tokens brought to this version's kit right at open, so a newer
+                    # StreamHub's additions are there before the first task.
+                    try {
+                        $kitNewer = @(Update-UiKitCatalog $openRoot $State.AppRoot)
+                        if ($kitNewer.Count) {
+                            Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub updated the project's UI kit to its newer version: the catalogue in $(Get-UiKitCatalog)/, new tokens in tokens.css (your own colours stay) and the kit files the pages use that the project had not changed ($($kitNewer -join ', ')). Kit files the project changed stay as they are." -Output ($kitNewer -join "`n")
+                            $u = Update-UiKitProject $openRoot $State.AppRoot
+                            foreach ($f in @($u.updated) + @($u.added)) { if ($f) { Add-OwnChangeEvent $State 'write' $f 'StreamHub wrote this kit file again from the newer kit.' } }
+                        }
+                    } catch { Write-CCBLogError agent 'UI kit at project open' $_ }
                 }
             }
             # Live data (project setup): the outside file checked once a minute; a new version is

@@ -38,7 +38,7 @@ Describe 'New-PromptMessage' {
         $m | Should Match 'OneDrive > CCBridge > budget tracker'
         $m | Should Match 'Request: Fix the build$'
         $m | Should Not Match 'app\.py|hello\.py|dotnet build|CCBridge sends'
-        $m.Length -lt 4050 | Should Be $true     # includes the folder rules, the work method, what the computer has installed and that commands get no terminal
+        $m.Length -lt 4200 | Should Be $true     # includes the folder rules, the work method, what the computer has installed, that commands get no terminal and that syntax checks are the helper program's
     }
 
     It 'gives assistant tasks only the role, the read-only rule, saving and the location' {
@@ -291,6 +291,8 @@ Describe 'Get-TaskKind in a project with code' {
     It 'treats change requests, app parts, problems and code questions as coding' {
         foreach ($t in @(
             'make the header sticky',
+            'can you apply the latest UI Kit changes to this project',
+            'upgrade the kit on the dashboard',
             'the save knop moet groter',
             'the total is wrong when I add two items',
             'clicking it does nothing',

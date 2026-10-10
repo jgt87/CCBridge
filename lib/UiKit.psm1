@@ -341,8 +341,77 @@ function Update-UiKitCatalog {
             $replaced.Add("$(Get-UiKitFolder)/$f")
         }
     }
+    # The project's tokens.css: new tokens added, defaults the project never changed brought to the
+    # new defaults, the project's own values kept (the old template is the catalogue's copy).
+    $projTokens = Join-Path $kit 'tokens.css'; $catTokens = Join-Path $cat 'tokens.css'
+    if (Test-Path -LiteralPath $projTokens) {
+        $cur = [IO.File]::ReadAllText($projTokens)
+        $preset = if ($cur -match '--kit-palette-blue\b') { 'tokens.css' } else { 'tokens-neutral.css' }
+        $newT = [IO.File]::ReadAllText((Join-Path $src $preset))
+        $oldT = if (Test-Path -LiteralPath $catTokens) { [IO.File]::ReadAllText($catTokens) } else { '' }
+        $merged = Update-KitTokens $cur $oldT $newT
+        if ($merged -ne $cur) { [IO.File]::WriteAllText($projTokens, $merged, $utf8); $replaced.Add("$(Get-UiKitFolder)/tokens.css") }
+        [IO.File]::WriteAllText($catTokens, $newT, $utf8)
+    }
     Write-KitCatalogVersion $cat $AppRoot 'updated'
     @($replaced)
+}
+
+function Get-TokenBlockSpans([string]$Css) {
+    <# The three blocks of a tokens file as @{ name; open; close } (indexes of their braces): light (the
+       first :root), darkMedia (:root:not([data-theme="light"]) inside the dark media query) and
+       darkAttr (:root[data-theme="dark"]). Only the blocks the file has. #>
+    $out = New-Object System.Collections.Generic.List[object]
+    $heads = @(@{ name = 'light'; re = '(?m)^:root\s*\{' }, @{ name = 'darkMedia'; re = '(?m)^\s*:root:not\(\[data-theme="light"\]\)\s*\{' }, @{ name = 'darkAttr'; re = '(?m)^:root\[data-theme="dark"\]\s*\{' })
+    foreach ($h in $heads) {
+        $m = [regex]::Match($Css, $h.re)
+        if (-not $m.Success) { continue }
+        $open = $Css.IndexOf([char]'{', [int]$m.Index); $depth = 0; $close = -1
+        for ($i = $open; $i -lt $Css.Length; $i++) { $ch = [string]$Css[$i]; if ($ch -eq '{') { $depth++ } elseif ($ch -eq '}') { $depth--; if ($depth -eq 0) { $close = $i; break } } }
+        if ($close -gt $open) { $out.Add(@{ name = $h.name; open = $open; close = $close }) }
+    }
+    $out.ToArray()
+}
+
+function Get-BlockTokens([string]$Css, $Span) {
+    # name -> value of the --kit-* tokens inside a block (in order).
+    $o = [ordered]@{}
+    $body = $Css.Substring($Span.open + 1, $Span.close - $Span.open - 1)
+    foreach ($m in [regex]::Matches($body, '(--kit-[\w-]+)\s*:\s*([^;]+);')) { $o[$m.Groups[1].Value] = $m.Groups[2].Value.Trim() }
+    $o
+}
+
+function Update-KitTokens([AllowEmptyString()][string]$Current, [AllowEmptyString()][string]$OldTemplate, [AllowEmptyString()][string]$NewTemplate) {
+    <# A project's tokens.css brought to a newer kit, block by block (light, the two dark blocks; a
+       block the file does not have, light-only, is not added): a token the new template has and the
+       file lacks is added at the end of the block; a value still equal to the old template's default
+       takes the new default; a value the project changed stays. The text, unchanged when there is
+       nothing to do. #>
+    if (-not $Current -or -not $NewTemplate) { return $Current }
+    $text = $Current
+    $newSpans = @(Get-TokenBlockSpans $NewTemplate); $oldSpans = @(Get-TokenBlockSpans $OldTemplate)
+    foreach ($name in 'darkAttr', 'darkMedia', 'light') {   # from the end of the file, so earlier indexes stay right
+        $cs = @(Get-TokenBlockSpans $text | Where-Object { $_.name -eq $name })
+        $ns = @($newSpans | Where-Object { $_.name -eq $name })
+        if (-not $cs.Count -or -not $ns.Count) { continue }
+        $cur = Get-BlockTokens $text $cs[0]; $new = Get-BlockTokens $NewTemplate $ns[0]
+        $os = @($oldSpans | Where-Object { $_.name -eq $name }); $old = if ($os.Count) { Get-BlockTokens $OldTemplate $os[0] } else { [ordered]@{} }
+        $body = $text.Substring($cs[0].open + 1, $cs[0].close - $cs[0].open - 1)
+        $indent = if ($name -eq 'darkMedia') { '    ' } else { '  ' }
+        # Defaults the project never changed follow the new default.
+        $sb = New-Object Text.StringBuilder; $pos = 0
+        foreach ($m in [regex]::Matches($body, '(--kit-[\w-]+)(\s*:\s*)([^;]+);')) {
+            $null = $sb.Append($body.Substring($pos, $m.Index - $pos)); $pos = $m.Index + $m.Length
+            $k = $m.Groups[1].Value; $v = $m.Groups[3].Value.Trim()
+            if ($new.Contains($k) -and $old.Contains($k) -and $v -eq [string]$old[$k] -and [string]$new[$k] -ne $v) { $null = $sb.Append("$k$($m.Groups[2].Value)$($new[$k]);") } else { $null = $sb.Append($m.Value) }
+        }
+        $null = $sb.Append($body.Substring($pos)); $body = $sb.ToString()
+        # Tokens the file lacks.
+        $add = @(foreach ($k in $new.Keys) { if (-not $cur.Contains($k)) { "$indent${k}: $($new[$k]);" } })
+        if ($add.Count) { $body = $body.TrimEnd() + "`n" + ($add -join "`n") + "`n" }
+        $text = $text.Substring(0, $cs[0].open + 1) + $body + $text.Substring($cs[0].close)
+    }
+    $text
 }
 
 function Get-KitExamplesIndex([string]$Text) {
@@ -931,4 +1000,4 @@ function Test-UiKitInProject([string]$ProjectRoot) {
     Test-Path -LiteralPath (Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css'))
 }
 
-Export-ModuleMember -Function Get-KitScanFiles, Clear-KitScanCache, Set-KitScanHold, Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder
+Export-ModuleMember -Function Get-KitScanFiles, Clear-KitScanCache, Set-KitScanHold, Update-KitTokens, Get-TokenBlockSpans, Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder

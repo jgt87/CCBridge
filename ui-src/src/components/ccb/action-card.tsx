@@ -321,7 +321,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
               </button>
             </div>
           )}
-          {(item.status === "ok" || item.status === "already applied") && item.summary && (
+          {(item.status === "ok" || item.status === "already applied") && item.summary && item.summary !== item.output && (
             <div className="flex items-center gap-1 text-muted-foreground text-xs">
               <Check className="h-3.5 w-3.5" /> {item.summary}
             </div>

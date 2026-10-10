@@ -12,6 +12,9 @@ $null = New-Item -ItemType Directory -Force -Path (Join-Path $proj 'build'), (Jo
 [IO.File]::WriteAllText((Join-Path $proj 'clean-ok.ps1'), "Remove-Item build -Recurse -Force`n")
 [IO.File]::WriteAllText((Join-Path $proj 'clean-bad.ps1'), "Write-Host 'cleaning'`nRemove-Item ..\outside -Recurse -Force`n")
 [IO.File]::WriteAllText((Join-Path $proj 'tidy.py'), "import shutil`nshutil.rmtree('C:/Users/someone/Documents')`n")
+# A browser script: "remove" is a DOM method and "//" starts a comment; nothing in it touches files.
+[IO.File]::WriteAllText((Join-Path $proj 'kit.js'), "// the kit`nfunction clear(el) { el.querySelectorAll('.old').forEach(n => n.remove()); }`nconst sep = '//'; const path = 'a/b';`nmove(1, 2);`n")
+[IO.File]::WriteAllText((Join-Path $proj 'wipe.js'), "const fs = require('fs');`nfs.rmSync('../outside', { recursive: true });`n")
 $null = New-Item -ItemType Junction -Path (Join-Path $proj 'link') -Target $outside
 $null = New-Item -ItemType Junction -Path (Join-Path $proj 'innerlink') -Target (Join-Path $proj 'inner')
 
@@ -30,7 +33,9 @@ Describe 'Test-DeleteScope: allowed inside the project' {
         "python -c ""import os; os.remove('build/x.txt')""",
         "Remove-Item ""$proj\build\x.txt""",
         'Remove-Item innerlink\x.txt',
-        'powershell -File clean-ok.ps1'
+        'powershell -File clean-ok.ps1',
+        'node --check kit.js',
+        'node kit.js'
     )
     foreach ($c in $ok) {
         It "allows: $c" { Test-DeleteScope $proj $c | Should BeNullOrEmpty }
@@ -40,6 +45,7 @@ Describe 'Test-DeleteScope: allowed inside the project' {
 Describe 'Test-DeleteScope: refused outside the project' {
     $bad = @{
         'del ..\x.txt' = 'outside the project'
+        'node wipe.js' = 'outside the project'
         'rd /s /q C:\Users' = 'outside the project'
         'move a.txt ..\a.txt' = 'outside the project'
         'robocopy src C:\backup /MIR' = 'outside the project'

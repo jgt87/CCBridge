@@ -6,6 +6,23 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.119] - 2026-10-10
+
+### Added
+- A project from an older kit gets the newer kit at open, not only at its next kit task: the catalogue, the kit files the pages use that the project had not changed, and its `styles/kit/tokens.css`: tokens the file lacks are added, a value still equal to the old default takes the new default, a value you changed yourself stays (light-only files get no dark block). Both as StreamHub change cards.
+
+### Changed
+- "Apply the UI kit" and "upgrade the kit" count as coding tasks in a project with code (apply and upgrade are change words, the UI kit a part of the app).
+- The run instruction tells Copilot never to run syntax checks such as `node --check`: StreamHub checks every changed file itself.
+- The changelog link in the app's bottom-left corner always opens the changelog on the main branch, so it also shows releases newer than the build.
+- A StreamHub change card shows its summary once: the summary is the card's own line, the details are the output.
+
+### Fixed
+- The page check reported the browser's own request for `/favicon.ico` as a problem of the page when the load failed outright, which sent Copilot into adding an icon link and a failing edit loop.
+- The "SEARCH text not found" error printed its closest current lines after two backticks and an "n" instead of a code fence.
+- `node --check styles/kit/kit.js` (or any run of a JavaScript or Python script) was refused as deleting files: the script's text was read as a command line, where a DOM `remove()` looked like a delete and `//` like a path. Scripts are checked as code only; a script that really deletes outside the project is still refused.
+- A page part Copilot wrote with its tags as entities (`&lt;div&gt;` throughout, not one real tag), copied from the escaped prompt, was written as is and the browser showed the markup as text. It is turned back into tags; real entities in a code sample and Markdown are left alone.
+
 ## [v0.1.118] - 2026-10-10
 
 ### Added

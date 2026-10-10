@@ -389,7 +389,7 @@ Describe 'Update-UiKitCatalog' {
         [IO.File]::ReadAllText((Join-Path $cat 'kit-charts.js')) | Should Match 'function barlist'
         [IO.File]::ReadAllText((Join-Path $p 'styles\kit\kit-charts.js')) | Should Match 'function barlist'
         [IO.File]::ReadAllText((Join-Path $p 'styles\kit\kit.js')) | Should Be '/* the project''s own change */'
-        [IO.File]::ReadAllText((Join-Path $cat 'tokens.css')) | Should Match '#224466'
+        [IO.File]::ReadAllText((Join-Path $cat 'tokens.css')) | Should Match '--kit-palette-blue'   # the catalogue's tokens.css is the new template now (the project's own tokens.css was already current, so it stays)
         Get-KitCatalogRevision $cat | Should BeGreaterThan 1
         @(Update-UiKitCatalog $p $root).Count | Should Be 0
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue

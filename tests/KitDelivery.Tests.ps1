@@ -153,3 +153,44 @@ Describe 'Table header rows are one piece' {
         Get-CheckLevel $r[0] 'quality' | Should Be 'warning'
     }
 }
+
+Describe 'A project from an older kit gets the new tokens' {
+    It 'adds missing tokens, updates untouched defaults and keeps the project''s own values, block by block' {
+        $old = ":root {`n  --kit-accent: #10069f;`n  --kit-focus: 0 0 0 3px rgba(0, 163, 224, 0.45);`n  --kit-chart-1: #10069f;`n}`n@media (prefers-color-scheme: dark) {`n  :root:not([data-theme=`"light`"]) {`n    --kit-accent: #00a3e0;`n    --kit-focus: 0 0 0 3px rgba(0, 163, 224, 0.5);`n  }`n}`n:root[data-theme=`"dark`"] {`n  --kit-accent: #00a3e0;`n}`n"
+        $new = ":root {`n  --kit-accent: #10069f;`n  --kit-title: #10069f;`n  --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);`n  --kit-chart-1: #019adc;`n}`n@media (prefers-color-scheme: dark) {`n  :root:not([data-theme=`"light`"]) {`n    --kit-accent: #00a3e0;`n    --kit-title: #ffffff;`n    --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);`n  }`n}`n:root[data-theme=`"dark`"] {`n  --kit-accent: #00a3e0;`n  --kit-title: #ffffff;`n}`n"
+        $mine = $old.Replace('--kit-accent: #10069f;', '--kit-accent: #224466;')   # the project chose its own accent
+        $r = Update-KitTokens $mine $old $new
+        $r | Should Match '(?m)^  --kit-accent: #224466;'                                                # kept
+        $r | Should Match '(?m)^  --kit-focus: 0 0 0 2px var\(--kit-surface\), 0 0 0 4px var\(--kit-accent\);'   # the untouched default follows
+        $r | Should Match '(?m)^  --kit-chart-1: #019adc;'
+        $r | Should Match '(?m)^  --kit-title: #10069f;'                                                # added to the light block
+        $r | Should Match '(?m)^    --kit-title: #ffffff;'                                              # and to the dark media block
+        @([regex]::Matches($r, '--kit-title:')).Count | Should Be 3
+        (Update-KitTokens $r $old $new) | Should Be $r                                                    # nothing left to do
+        # Light only: a file without dark blocks gets no dark block.
+        $lightOnly = ":root {`n  --kit-accent: #10069f;`n}`n"
+        $l = Update-KitTokens $lightOnly $old $new
+        $l | Should Match '--kit-title: #10069f;'
+        $l | Should Not Match 'prefers-color-scheme'
+    }
+    It 'brings tokens.css up at a catalogue update, and keeps a value the project set' {
+        $p = New-KitProject
+        try {
+            $null = Install-UiKit $p $root
+            $cat = Join-Path $p '.streamhub\ui-kit'
+            $tokens = Join-Path $p 'styles\kit\tokens.css'
+            # Pretend the project came from the kit before --kit-title existed, with its own accent.
+            $oldTemplate = [IO.File]::ReadAllText($tokens) -replace '(?m)^\s*--kit-title: [^;]+;\r?\n', '' -replace '(?m)^\s*--kit-icon: [^;]+;\r?\n', ''
+            [IO.File]::WriteAllText((Join-Path $cat 'tokens.css'), $oldTemplate)
+            [IO.File]::WriteAllText($tokens, $oldTemplate.Replace('--kit-accent: #10069f;', '--kit-accent: #224466;'))
+            [IO.File]::WriteAllText((Join-Path $cat 'VERSION.txt'), 'Kit revision 9')
+            $r = @(Update-UiKitCatalog $p $root)
+            $r -contains 'styles/kit/tokens.css' | Should Be $true
+            $now = [IO.File]::ReadAllText($tokens)
+            $now | Should Match '--kit-title: #10069f;'
+            $now | Should Match '--kit-accent: #224466;'
+            [IO.File]::ReadAllText((Join-Path $cat 'tokens.css')) | Should Match '--kit-title:'
+            @(Update-UiKitCatalog $p $root).Count | Should Be 0   # up to date now
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+}

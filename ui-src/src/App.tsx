@@ -55,8 +55,8 @@ const EMPTY_STATE: AppState = {
   workIq: "leave", workIqActual: null, workIqAvailable: false, logLevel: "info", version: "",
 };
 
-/** The changelog on GitHub as it was at this build's commit. */
-const changelogUrl = (commit: string) => `https://github.com/jgt87/CCBridge/blob/${encodeURIComponent(commit)}/CHANGELOG.md`;
+/** The changelog on GitHub, always the current one on main (newer entries than this build included). */
+const changelogUrl = () => "https://github.com/jgt87/CCBridge/blob/main/CHANGELOG.md";
 
 export default function App() {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
@@ -596,11 +596,11 @@ export default function App() {
                     <span aria-hidden className="h-3 w-px bg-black/15 dark:bg-white/20" />
                     <a
                       className="font-mono underline-offset-2 hover:text-foreground hover:underline"
-                      href={changelogUrl(state.commit)}
+                      href={changelogUrl()}
                       onClick={openExternal}
                       rel="noopener noreferrer"
                       target="_blank"
-                      title="What changed: the changelog on GitHub, as of this commit"
+                      title="What changed: the changelog on GitHub (this build's commit shown)"
                     >
                       {state.commit}
                     </a>
