@@ -347,7 +347,7 @@ function Update-DataImports {
     # The data tools (loading, grouping, totals, sorting, dates) next to the converted files: added
     # with the first conversion, replaced by a newer version (never one someone made themselves).
     $tools = Join-Path $root 'data\data-tools.js'
-    $from = if ($AppRoot) { Join-Path $AppRoot 'templates\data\data-tools.js' } else { '' }
+    $from = Get-DataToolsSource $root $AppRoot
     $hasTools = Test-Path -LiteralPath $tools
     $made = @($results | Where-Object { $_.status -in 'created', 'updated' })
     if ($from -and (Test-Path -LiteralPath $from) -and (($made.Count -and -not $hasTools) -or ($hasTools -and (Get-DataToolsVersion ([IO.File]::ReadAllText($tools))) -lt (Get-DataToolsVersion ([IO.File]::ReadAllText($from)))))) {
@@ -375,6 +375,19 @@ function Update-DataImports {
     if ($changed) { Save-DataImportManifest $root $man }
     if ($results.Count) { Write-CCBLog info dataimport 'Data files converted' @{ made = @($results | Where-Object { $_.status -in 'created', 'updated' }).Count; problems = @($results | Where-Object { $_.status -in 'failed', 'too-large' }).Count } }
     [pscustomobject]@{ items = $results.ToArray(); checkpoint = $cp }
+}
+
+function Get-DataToolsSource([string]$ProjectRoot, [string]$AppRoot) {
+    <# The data-tools.js projects get: the shared library's copy (shared/data/data-tools.js beside the
+       projects, the organisation's version) when it is at least as new as this StreamHub's template
+       (its "Data tools vN" line), else the template. '' without either. #>
+    $tpl = if ($AppRoot) { Join-Path $AppRoot 'templates\data\data-tools.js' } else { '' }
+    $hasTpl = $tpl -and (Test-Path -LiteralPath $tpl)
+    $shared = Get-SharedRoot $ProjectRoot
+    $own = if ($shared) { Join-Path $shared 'data\data-tools.js' } else { '' }
+    if ($own -and (Test-Path -LiteralPath $own) -and (-not $hasTpl -or (Get-DataToolsVersion ([IO.File]::ReadAllText($own))) -ge (Get-DataToolsVersion ([IO.File]::ReadAllText($tpl))))) { return $own }
+    if ($hasTpl) { return $tpl }
+    ''
 }
 
 function Get-DataToolsVersion([string]$Text) {
@@ -450,4 +463,4 @@ function Format-DataImportContext {
     "Data files ready to use (the helper program converted them; numbers, dates as yyyy-MM-dd and true/false are typed, empty cells are null). Never write a CSV or Excel parser for them; change the source file, not the converted files, since they are made again when it changes:`n" + (@($lines) -join "`n")
 }
 
-Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Read-DataImportManifest, Update-DataImports, Format-DataImportNotes, Format-DataImportContext
+Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Read-DataImportManifest, Update-DataImports, Format-DataImportNotes, Format-DataImportContext, Get-DataToolsSource

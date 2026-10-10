@@ -25,13 +25,20 @@ export interface RunbookRow {
   /** Text runbooks: the prompt and its header fields in short. */
   detail?: string;
   extra?: string;
+  /** From the library beside the projects: every project in the folder can run it; edited there. */
+  shared?: boolean;
+}
+
+/** Where a runbook, chain or script file is edited: the project folder, or the library beside the projects. */
+export function editPlace(file: string, shared?: boolean): string {
+  return shared || /^(shared|library|shared-library)\//i.test(file) ? "shared by every project in this folder; edit it in the .streamhub folder beside the projects" : "edit it in the project folder";
 }
 
 /** Both kinds in one list, by title. */
 export function runbookRows(runbooks: RunbookItem[], texts: FetchItem[]): RunbookRow[] {
   const rows: RunbookRow[] = [
-    ...runbooks.map((r) => ({ kind: "json" as const, name: r.name, title: r.title, file: r.path, output: r.output, lastRun: r.lastRun })),
-    ...texts.map((t) => ({ kind: "text" as const, name: t.name, title: t.name, file: t.promptPath, output: t.output, lastRun: t.fetchedAt, detail: t.prompt, extra: webSummary(t) || undefined })),
+    ...runbooks.map((r) => ({ kind: "json" as const, name: r.name, title: r.title, file: r.path, output: r.output, lastRun: r.lastRun, shared: r.shared })),
+    ...texts.map((t) => ({ kind: "text" as const, name: t.name, title: t.name, file: t.promptPath, output: t.output, lastRun: t.fetchedAt, detail: t.prompt, extra: webSummary(t) || undefined, shared: t.shared })),
   ];
   return rows.sort((a, b) => a.title.localeCompare(b.title));
 }
@@ -147,6 +154,11 @@ export function RunbooksPanel({
             <span className="shrink-0 rounded-full border border-black/15 px-1.5 text-[10px] text-muted-foreground dark:border-white/20" title={r.kind === "json" ? "Saves JSON checked against the runbook's shape" : "Saves Copilot's answer as Markdown"}>
               {r.kind === "json" ? "JSON" : "text"}
             </span>
+            {r.shared && (
+              <span className="shrink-0 rounded-full border border-black/15 px-1.5 text-[10px] text-muted-foreground dark:border-white/20" title="From the library beside the projects: every project in this folder can run it">
+                shared
+              </span>
+            )}
             <span className="ml-auto shrink-0 text-muted-foreground text-xs" title={r.lastRun ? new Date(r.lastRun).toLocaleString() : undefined}>
               {r.lastRun ? fetchedAge(r.lastRun).replace("fetched", "run") : "never run"}
             </span>
@@ -169,7 +181,7 @@ export function RunbooksPanel({
                 <CalendarClock className="h-3 w-3" /> Schedule
               </button>
             )}
-            <button className={flatButton} onClick={() => onOpen(r.file)} title={`View the runbook (${r.file}); edit it in the project folder`} type="button">
+            <button className={flatButton} onClick={() => onOpen(r.file)} title={`View the runbook (${r.file}); ${editPlace(r.file, r.shared)}`} type="button">
               <FileCode2 className="h-3 w-3" /> View
             </button>
             <button className={flatButton} disabled={!r.lastRun} onClick={() => onOpen(r.output)} title={r.lastRun ? `View the latest result (${r.output})` : "Not run yet"} type="button">

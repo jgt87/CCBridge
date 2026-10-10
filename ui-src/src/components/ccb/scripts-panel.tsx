@@ -1,4 +1,5 @@
 import { InfoNote } from "./info-note";
+import { editPlace } from "./runbooks-panel";
 import { CalendarClock, FileCode2, Play } from "lucide-react";
 
 const flatButton =
@@ -51,7 +52,7 @@ export function ScriptsPanel({
                 <CalendarClock className="h-3 w-3" /> Schedule
               </button>
             )}
-            <button className={flatButton} onClick={() => onOpen(path)} title={`View the script (${path}); edit it in the project folder`} type="button">
+            <button className={flatButton} onClick={() => onOpen(path)} title={`View the script (${path}); ${editPlace(path)}`} type="button">
               <FileCode2 className="h-3 w-3" /> View
             </button>
           </div>

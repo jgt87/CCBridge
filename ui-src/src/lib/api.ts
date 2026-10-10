@@ -518,6 +518,8 @@ export interface RunbookItem {
   path: string;
   output: string;
   lastRun: string | null;
+  /** From the library beside the projects (shared/Runbooks/), usable by every project in the folder. */
+  shared?: boolean;
 }
 
 /** One step of a chain. */
@@ -539,6 +541,8 @@ export interface ChainItem {
   steps: ChainStep[];
   /** Why it cannot run now (unknown runbook, missing script...). */
   problems: string[];
+  /** From the library beside the projects (shared/Runbooks/). */
+  shared?: boolean;
 }
 
 export interface RunbookTemplate {
@@ -598,6 +602,8 @@ export interface FetchItem {
   output: string;
   fetchedAt: string | null;
   outputSize: number;
+  /** From the library beside the projects (shared/Runbooks/). */
+  shared?: boolean;
   /** Optional header: web, work or both; the only websites to use; pages read and added as data. */
   sources?: string;
   sites?: string;

@@ -567,7 +567,7 @@ function Test-Csv([string]$Text, [string]$Path) {
     }
 }
 
-$script:CodeExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|psd1|css|scss|less|json|ya?ml|toml|ini|sh|bash|cmd|bat|sql|html?|xml|csproj|config|xaml|svg|prisma)$'
+$script:CodeExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|psd1|css|scss|less|json|ya?ml|toml|ini|sh|bash|cmd|bat|sql|html?|xml|csproj|config|xaml|svg|prisma|phtml|ejs|erb|jsp|aspx?|cshtml|razor|hbs|handlebars|mustache|njk|twig|liquid|j2|jinja2?|tmpl|gotmpl|gohtml|tpl|astro|vb|vbs|bas|frm|lua|rb|tex|mk|cmake|tf|hcl|gradle|groovy|xsl|xslt|xsd)$'
 # Program code where a repeated block or a second definition is a mistake (not data or markup).
 $script:ProgramExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|cs|java|kt|go|rs|php|swift|dart|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|sh|bash)$'
 
@@ -1061,6 +1061,288 @@ function Test-TextEncoding {
     }
 }
 
+# --- Opening and closing delimiters per language --------------------------------------------------
+# Brackets, strings and HTML tags are checked above by file type. Template and block languages have
+# pairs of their own, which a damaged reply breaks just as easily: Test-Delimiters checks them and
+# names the line of the first problem of each kind. PHP <?php ?>, EJS/ERB/JSP/ASP <% %>, mustaches
+# {{ }}, Jinja/Twig/Nunjucks/Liquid/Django {% %} with {% if %}...{% endif %}, Handlebars/Mustache
+# {{#x}}...{{/x}}, Go templates {{if}}...{{end}}, Smarty {if}...{/if}, Svelte {#if}...{/if}, Blade
+# @if...@endif, Angular @if (...) { }, Razor @{ } code blocks, JSX <>...</> fragments, the tag balance
+# of Vue, Svelte and Astro files, Visual Basic Sub...End Sub, Lua function...end, Ruby def...end,
+# LaTeX \begin...\end, Makefile ifeq...endif, CMake if()...endif(), Terraform braces.
+
+$script:TemplateExt = '(?i)\.(php|phtml|ejs|erb|jsp|aspx?|cshtml|razor|hbs|handlebars|mustache|njk|nunjucks|twig|liquid|j2|jinja2?|tmpl|gotmpl|gohtml|tpl|astro|vue|svelte|jsx|tsx|tf|tfvars|hcl)$'
+
+function Test-PairedTags([string]$Masked, [string]$Open, [string]$Close, [string]$OpenName, [string]$CloseName, [switch]$OpenEndOk) {
+    # Every $Open is closed by $Close before the next $Open, and every $Close has an $Open before it.
+    # The first problem; -OpenEndOk for a language whose last block may run to the end (PHP).
+    $openAt = -1
+    foreach ($m in [regex]::Matches($Masked, "(?<o>$Open)|(?<c>$Close)")) {
+        if ($m.Groups['o'].Success) {
+            if ($openAt -ge 0) { return "line $(LineAt $Masked $openAt): $OpenName is never closed with $CloseName (the next $OpenName starts at line $(LineAt $Masked $m.Index))" }
+            $openAt = $m.Index
+        } elseif ($openAt -lt 0) { return "line $(LineAt $Masked $m.Index): $CloseName closes nothing (no $OpenName before it)" }
+        else { $openAt = -1 }
+    }
+    if ($openAt -ge 0 -and -not $OpenEndOk) { "line $(LineAt $Masked $openAt): $OpenName is never closed with $CloseName" }
+}
+
+function Test-BlockTags([string]$Masked, [string]$Pattern, [scriptblock]$ShowOpen, [scriptblock]$ShowClose, [hashtable]$Closes = @{}) {
+    <# Blocks that open and close by name. $Pattern has the groups open (the name of the block it
+       opens) and close (the name it closes; empty for a closer that fits every block). $Closes maps a
+       closer name to the open names it may close when they differ (until -> repeat). $ShowOpen and
+       $ShowClose render a block's opener and closer from its name for the message. First problem. #>
+    $stack = New-Object System.Collections.Generic.List[object]
+    foreach ($m in [regex]::Matches($Masked, $Pattern)) {
+        $line = LineAt $Masked $m.Index
+        if ($m.Groups['open'].Success) { $stack.Add(@($m.Groups['open'].Value, $line)); continue }
+        $token = ($m.Value -replace '\s+', ' ').Trim()
+        $name = $m.Groups['close'].Value
+        if (-not $stack.Count) { return "line ${line}: '$token' closes nothing (no open block before it)" }
+        $top = $stack[$stack.Count - 1]; $stack.RemoveAt($stack.Count - 1)
+        $fits = (-not $name) -or ($top[0] -ieq $name) -or ($Closes.ContainsKey($name) -and $top[0] -match "^(?i)($($Closes[$name]))$")
+        if (-not $fits) { return "line ${line}: '$token' arrives while the '$(& $ShowOpen $top[0])' from line $($top[1]) is still open: that one needs '$(& $ShowClose $top[0])' first" }
+    }
+    if ($stack.Count) { $top = $stack[$stack.Count - 1]; "line $($top[1]): '$(& $ShowOpen $top[0])' is never closed with '$(& $ShowClose $top[0])'" }
+}
+
+function Test-JinjaTags([string]$Masked) {
+    # Jinja, Twig, Nunjucks, Liquid and Django: {% %} and {{ }} pairs, and the blocks {% X %}...{% endX %}
+    # (the usual block names, plus every name the file closes with an endX).
+    $m = Hide $Masked '\{#[\s\S]*?#\}|\{%-?\s*(raw|verbatim|comment)\s*-?%\}[\s\S]*?\{%-?\s*end\1\s*-?%\}'
+    Test-PairedTags $m '\{%' '%\}' '{%' '%}'
+    Test-PairedTags $m '\{\{' '\}\}' '{{' '}}'
+    $ends = @(foreach ($e in [regex]::Matches($m, '\{%-?\s*end(\w+)')) { $e.Groups[1].Value })
+    $openers = @(@('if', 'for', 'block', 'macro', 'with', 'unless', 'case', 'capture', 'tablerow', 'autoescape', 'filter', 'call', 'trans', 'blocktrans', 'blocktranslate', 'spaceless', 'embed', 'apply', 'paginate', 'form', 'schema', 'javascript', 'stylesheet', 'style', 'while', 'ifchanged', 'localize', 'cache') + $ends |
+        Where-Object { $_ -and $_ -notmatch '^(else|elif|elsif|when|empty|set|raw|verbatim|comment)$' } | Sort-Object -Unique)
+    $alt = @($openers | ForEach-Object { [regex]::Escape($_) }) -join '|'
+    Test-BlockTags $m "\{%-?\s*(?:end(?<close>\w+)\b[^%]*%\}|(?<open>set)\b(?![^%]*=)|(?<open>$alt)\b[^%]*%\})" { param($n) "{% $n %}" } { param($n) "{% end$n %}" }
+}
+
+function Test-MustacheTags([string]$Masked) {
+    # Handlebars and Mustache: {{ }} (also {{{ }}}) pairs and the blocks {{#x}}, {{^x}} ... {{/x}}.
+    $m = Hide $Masked '\{\{!--[\s\S]*?--\}\}|\{\{![\s\S]*?\}\}|\{\{\{\{(\w+)[^}]*\}\}\}\}[\s\S]*?\{\{\{\{/\1\}\}\}\}'
+    Test-PairedTags $m '\{\{\{?' '\}\}\}?' '{{' '}}'
+    Test-BlockTags $m '\{\{~?(?:#[>*]?\s*(?<open>[\w.-]+)|\^\s*(?<open>[\w.-]+)|/\s*(?<close>[\w.-]+)\s*\}\})' { param($n) "{{#$n}}" } { param($n) "{{/$n}}" }
+}
+
+function Test-GoTemplateTags([string]$Masked) {
+    # Go templates: {{ }} pairs and {{if}}, {{range}}, {{with}}, {{define}}, {{block}} ... {{end}}.
+    $m = Hide $Masked '\{\{-?\s*/\*[\s\S]*?\*/\s*-?\}\}'
+    Test-PairedTags $m '\{\{' '\}\}' '{{' '}}'
+    Test-BlockTags $m '\{\{-?\s*(?:(?<open>if|range|with|define|block)\b|(?<close>)end\b)' { param($n) "{{$n}}" } { param($n) '{{end}}' }
+}
+
+function Test-TemplateHtml([string]$Text) {
+    # The tag balance of a Svelte or Astro file: the template's own {...} expressions blanked
+    # (innermost first), then the HTML check.
+    $m = $Text
+    for ($i = 0; $i -lt 3; $i++) { $m = Hide $m '\{[^{}]*\}' }
+    Test-Html $m
+}
+
+function Test-JsxFragments([string]$Masked) {
+    # <> ... </> fragments in JSX/TSX (and Astro) must pair, like tags.
+    $openAt = New-Object System.Collections.Generic.List[int]
+    foreach ($m in [regex]::Matches($Masked, '<(/?)>')) {
+        if (-not $m.Groups[1].Value) { $openAt.Add($m.Index); continue }
+        if (-not $openAt.Count) { return "line $(LineAt $Masked $m.Index): </> closes no <> fragment" }
+        $openAt.RemoveAt($openAt.Count - 1)
+    }
+    if ($openAt.Count) { "line $(LineAt $Masked $openAt[$openAt.Count - 1]): the <> fragment is never closed with </>" }
+}
+
+function Get-VbCloser([string]$Kind) {
+    switch -Regex ($Kind) { '^For$' { 'Next' } '^Do$' { 'Loop' } '^While$' { 'Wend (or End While)' } default { "End $Kind" } }
+}
+
+function Test-VisualBasic([string]$Text, [bool]$DotNet) {
+    <# Visual Basic (VBA, VBScript, VB.NET): every block statement and its closer, by kind: Sub,
+       Function, Operator, Class, Module, Structure, Enum, Interface, Namespace, Type and Property
+       Get/Let/Set (VBA) with End X; If ... Then (alone at the end of its line) with End If; For with
+       Next; Do with Loop; While with Wend or End While; Select Case with End Select; With, Try,
+       SyncLock and Using with End X. Lines ending in _ continue on the next, statements split at :,
+       strings and comments are blanked, labels and line numbers are skipped. VB.NET properties are
+       left alone (an auto-property has no End Property). #>
+    $m = Hide $Text '"(?:[^"\n]|"")*"'
+    $m = Hide $m "(?m)'[^\n]*|^\s*Rem\b[^\n]*"
+    $raw = $m.Split("`n")
+    $stack = New-Object System.Collections.Generic.List[object]
+    $mods = '(?:(?:Public|Private|Friend|Protected|Shared|Static|Overrides|Overridable|Overloads|NotOverridable|Default|Partial|Async|Iterator|ReadOnly|WriteOnly|MustInherit|NotInheritable|WithEvents|Shadows)\s+)*'
+    $i = 0
+    while ($i -lt $raw.Length) {
+        $start = $i; $l = $raw[$i]
+        while ($l.TrimEnd() -match '\s_$' -and $i + 1 -lt $raw.Length) { $i++; $l = $l.TrimEnd().TrimEnd('_') + ' ' + $raw[$i] }
+        $i++
+        $line = $start + 1
+        $stmts = @(($l.Trim() -replace '^(\d+|[A-Za-z_]\w*:)\s+', '') -split ':(?!=)' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        for ($n = 0; $n -lt $stmts.Count; $n++) {
+            $s = $stmts[$n]
+            if ($s -match '^(#|Attribute\b|VERSION\b|BEGIN\b|End\s*$|Option\b|Declare\b|Delegate\b|Imports\b|Exit\b|Else\b|ElseIf\b|Case\b|Catch\b|Finally\b)') { continue }
+            $kind = $null; $close = $null
+            if ($s -match "^$mods(Sub|Function|Operator)\b" -and $s -notmatch '\bMustOverride\b') { $kind = $Matches[1] }
+            elseif ($s -match "^$mods(Class|Module|Structure|Enum|Interface|Namespace)\s+\w") { $kind = $Matches[1] }
+            elseif ($s -match "^$mods(Type)\s+\w+\s*$") { $kind = 'Type' }
+            elseif (-not $DotNet -and $s -match "^$mods(Property)\s+(Get|Let|Set)\b") { $kind = 'Property' }
+            elseif ($n -eq $stmts.Count - 1 -and $s -match '^If\b.*\bThen\s*$') { $kind = 'If' }
+            elseif ($s -match '^(For|Do|While|With|Try|SyncLock|Using)\b') { $kind = $Matches[1] }
+            elseif ($s -match '^Select\s+Case\b') { $kind = 'Select' }
+            elseif ($s -match '^End\s+(Sub|Function|Operator|Class|Module|Structure|Enum|Interface|Namespace|Type|Property|If|Select|With|Try|SyncLock|Using|While)\b') { $close = $Matches[1] }
+            elseif ($s -match '^Next\b') { $close = 'For' }
+            elseif ($s -match '^Loop\b') { $close = 'Do' }
+            elseif ($s -match '^Wend\b') { $close = 'While' }
+            if ($kind) {
+                $k = (Get-Culture).TextInfo.ToTitleCase($kind.ToLowerInvariant())
+                if ($k -eq 'Synclock') { $k = 'SyncLock' }
+                $stack.Add(@($k, $line)); continue
+            }
+            if (-not $close -or ($DotNet -and $close -ieq 'Property')) { continue }
+            $token = if ($s -match '^(End\s+\w+|\w+)') { $Matches[1] -replace '\s+', ' ' } else { $s }
+            if (-not $stack.Count) { return "line ${line}: '$token' closes nothing (no open block before it)" }
+            $top = $stack[$stack.Count - 1]; $stack.RemoveAt($stack.Count - 1)
+            if ($top[0] -ine $close) { return "line ${line}: '$token' arrives while the '$($top[0])' from line $($top[1]) is still open: that one needs '$(Get-VbCloser $top[0])' first" }
+        }
+    }
+    if ($stack.Count) { $top = $stack[$stack.Count - 1]; "line $($top[1]): '$($top[0])' is never closed with '$(Get-VbCloser $top[0])'" }
+}
+
+function Test-Lua([string]$Text) {
+    $m = Hide $Text '--\[(=*)\[[\s\S]*?\]\1\]|--[^\n]*|\[(=*)\[[\s\S]*?\]\2\]|"(?:[^"\\\n]|\\.)*"|''(?:[^''\\\n]|\\.)*'''
+    Test-Brackets $m
+    Test-BlockTags $m '(?<![\w.:])(?:(?<open>function|if|do|repeat)|(?<close>end|until))\b' { param($n) $n } { param($n) if ($n -eq 'repeat') { 'until' } else { 'end' } } @{ end = 'function|if|do'; until = 'repeat' }
+}
+
+function Test-Ruby([string]$Text) {
+    <# def, class, module, begin, case, while, until, for, if and unless at the start of a line (or
+       after = ( , | & or return), do at any place but in a while/until/for line, each closed by end;
+       a one-line "def x = ..." has no end. Modifier forms (x if y) are not blocks. #>
+    $m = Hide $Text '(?m)^=begin[\s\S]*?^=end[^\n]*|<<[~-]?([''"]?)([A-Z_]\w*)\1[^\n]*\n[\s\S]*?\n\s*\2\b|"(?:[^"\\\n]|\\.)*"|''(?:[^''\\\n]|\\.)*''|(?<![$\\])#[^\n]*'
+    Test-Brackets $m
+    $sb = New-Object Text.StringBuilder
+    foreach ($l in $m.Split("`n")) {
+        $x = $l
+        if ($x -match '^\s*def\s+[\w.?!]+(\([^)]*\))?\s*=') { $x = ' ' * $x.Length }                      # endless method
+        elseif ($x -match '^\s*(while|until|for)\b') { $x = [regex]::Replace($x, '(?<![\w.:@$])do\b', '  ') }   # the loop's own do
+        [void]$sb.Append($x).Append("`n")
+    }
+    $x = $sb.ToString()
+    Test-BlockTags $x '(?m)^\s*(?<open>def|class|module|begin|case|while|until|for|unless|if)\b|(?<=[=(,|&]\s{0,12})(?<open>if|unless|case|begin|while|until)\b|(?<=\breturn\s{1,12})(?<open>if|unless|case)\b|(?<![\w.:@$])(?<open>do)\b|(?<![\w.:@$])(?<close>)end\b(?!\s*:)' { param($n) $n } { param($n) 'end' }
+}
+
+function Test-Latex([string]$Text) {
+    $m = Hide $Text '(?<!\\)%[^\n]*|\\begin\{(verbatim\*?|lstlisting|minted|comment)\}[\s\S]*?\\end\{\1\}|\\verb(.)[^\n]*?\2'
+    Test-BlockTags $m '\\(?:begin\s*\{(?<open>[^}\s]+)\}|end\s*\{(?<close>[^}\s]+)\})' { param($n) "\begin{$n}" } { param($n) "\end{$n}" }
+    $b = Test-Brackets (($m -replace '\\[{}()\[\]]', '  ') -replace '[()\[\]]', ' ')
+    if ($b) { "$b (the braces of LaTeX commands)" }
+}
+
+function Test-Makefile([string]$Text) {
+    $m = Hide $Text '(?<!\\)#[^\n]*'
+    Test-BlockTags $m '(?m)^\s*(?:(?<open>ifeq|ifneq|ifdef|ifndef)\b|(?<close>endif)\b|(?<open>define)\b|(?<close>endef)\b)' { param($n) $n } { param($n) if ($n -eq 'define') { 'endef' } else { 'endif' } } @{ endif = 'ifeq|ifneq|ifdef|ifndef'; endef = 'define' }
+}
+
+function Test-CMake([string]$Text) {
+    $m = Hide $Text '#\[(=*)\[[\s\S]*?\]\1\]|#[^\n]*|"(?:[^"\\]|\\.)*"'
+    Test-BlockTags $m '(?mi)^\s*(?:(?<open>if|foreach|while|function|macro|block)\s*\(|end(?<close>if|foreach|while|function|macro|block)\s*\()' { param($n) "$n()" } { param($n) "end$n()" }
+    Test-Brackets ($m -replace '[\[\]{}]', ' ')
+}
+
+function Test-Delimiters {
+    # The delimiter problems of a file, without the empty results of the checks it runs.
+    param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text)
+    @(Test-DelimitersCore $Path $Text) | Where-Object { "$_" }
+}
+
+function Test-DelimitersCore {
+    <# The opening and closing delimiters of template and block languages, by file type (and by
+       content for .html, which may hold Jinja, Handlebars, Go, Vue or Angular syntax): "line N:
+       problem" lines, the first of each kind. Razor and Ruby findings are worded for the warning
+       level (their rules read the code without running it). #>
+    param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text)
+    if (-not $Text) { return }
+    $t = $Text.Replace("`r`n", "`n")
+    $name = [IO.Path]::GetFileName($Path)
+    $isMakefile = $name -match '(?i)^(GNU)?makefile$|\.mk$'
+    $isCMake = $name -match '(?i)^CMakeLists\.txt$|\.cmake$'
+    $isRuby = $Path -match '(?i)\.(rb|rake|gemspec)$' -or $name -match '^(Gemfile|Rakefile)$'
+    $isVb = $Path -match '(?i)\.(vb|vbs|bas|frm)$' -or ($Path -match '(?i)\.cls$' -and $t -match '(?m)^\s*(VERSION \d+(\.\d+)? CLASS|Attribute VB_Name)')
+    $isTex = $Path -match '(?i)\.(tex|sty)$' -or ($Path -match '(?i)\.cls$' -and $t -match '\\(ProvidesClass|NeedsTeXFormat|LoadClass)')
+    if ($isMakefile) { Test-Makefile $t; return }
+    if ($isCMake) { Test-CMake $t; return }
+    if ($isRuby) { foreach ($r in @(Test-Ruby $t | Where-Object { "$_" })) { "$r (Ruby blocks)" }; return }
+    if ($isVb) { Test-VisualBasic $t ($Path -match '(?i)\.vb$'); return }
+    if ($isTex) { Test-Latex $t; return }
+    if ($Path -match '(?i)\.lua$') { Test-Lua $t; return }
+    $sl = '"(?:[^"\\\n]|\\.)*"|''(?:[^''\\\n]|\\.)*'''   # single-line strings
+    switch -Regex ($Path) {
+        '(?i)\.blade\.php$' {
+            $m = Hide (Get-LeakMask $t).pretags '\{\{--[\s\S]*?--\}\}|(?<![\w@])@verbatim\b[\s\S]*?@endverbatim\b|(?<![\w@])@php\b(?!\s*\()[\s\S]*?@endphp\b'
+            Test-PairedTags $m '\{\{' '\}\}' '{{' '}}'
+            Test-PairedTags $m '\{!!' '!!\}' '{!!' '!!}'
+            Test-BlockTags $m '(?<![\w@])@(?:end(?<close>\w+)\b|(?<close>)(?:stop|show|overwrite|append)\b|(?<open>section)\s*\(\s*(?:''[^'']*''|"[^"]*")\s*\)|(?<open>empty)\s*\(|(?<open>php)\b(?!\s*\()|(?<open>if|foreach|forelse|for|while|unless|isset|auth|guest|pushOnce|push|prepend|once|component|slot|canany|cannot|can|switch|env|production|error|fragment|hasSection|sectionMissing)\b)' { param($n) "@$n" } { param($n) if ($n -match '^(hasSection|sectionMissing)$') { '@endif' } else { "@end$n" } } @{ 'if' = 'if|hasSection|sectionMissing' }
+            break
+        }
+        '(?i)\.(php|phtml)$' {
+            Test-PairedTags (Hide $t "/\*[\s\S]*?\*/|$sl") '<\?(?:php\b|=)' '\?>' '<?php' '?>' -OpenEndOk
+            break
+        }
+        '(?i)\.(ejs|erb|jsp|aspx?)$' {
+            Test-PairedTags (Hide $t "<%--[\s\S]*?--%>|/\*[\s\S]*?\*/|$sl") '<%(?!%)' '(?<!%)%>' '<%' '%>'
+            break
+        }
+        '(?i)\.(njk|nunjucks|twig|liquid|j2|jinja2?)$' { Test-JinjaTags (Get-LeakMask $t).pretags; break }
+        '(?i)\.(hbs|handlebars|mustache)$' { Test-MustacheTags (Get-LeakMask $t).pretags; break }
+        '(?i)\.(tmpl|gotmpl|gohtml)$' { Test-GoTemplateTags (Get-LeakMask $t).pretags; break }
+        '(?i)\.tpl$' {
+            $m = Hide (Get-LeakMask $t).pretags '\{\*[\s\S]*?\*\}|\{literal\}[\s\S]*?\{/literal\}'
+            Test-BlockTags $m '\{(?:(?<open>if|foreach|section|block|capture|function|while|for|strip|nocache|setfilter)\b|/(?<close>if|foreach|section|block|capture|function|while|for|strip|nocache|setfilter)\})' { param($n) "{$n}" } { param($n) "{/$n}" }
+            break
+        }
+        '(?i)\.svelte$' {
+            $m = (Get-LeakMask $t -KeepTemplate).pretags
+            Test-BlockTags $m '\{(?:#(?<open>if|each|await|key|snippet)\b|/(?<close>if|each|await|key|snippet)\s*\})' { param($n) "{#$n}" } { param($n) "{/$n}" }
+            Test-TemplateHtml $t
+            break
+        }
+        '(?i)\.vue$' {
+            Test-PairedTags (Get-LeakMask $t -KeepTemplate).pretags '\{\{' '\}\}' '{{' '}}'
+            Test-Html (Hide $t '\{\{[\s\S]*?\}\}')
+            break
+        }
+        '(?i)\.astro$' {
+            $body = Hide $t '\A---[ \t]*\n[\s\S]*?\n---[ \t]*(\n|\z)'
+            if ($t -match '\A---' -and $body -match '\A---') { 'line 1: the --- frontmatter is never closed with a --- line'; $body = Hide $t '\A---[ \t]*\n' }
+            Test-JsxFragments (Get-JsMask $body).masked
+            Test-TemplateHtml $body
+            break
+        }
+        '(?i)\.(jsx|tsx)$' { Test-JsxFragments (Get-JsMask $t).masked; break }
+        '(?i)\.(cshtml|razor)$' {
+            $m = [regex]::Replace($t, '(?is)(<(script|style)\b[^>]*>)(.*?)(</\2\s*>)', [Text.RegularExpressions.MatchEvaluator] { param($x) $x.Groups[1].Value + [regex]::Replace($x.Groups[3].Value, '[^\n]', ' ') + $x.Groups[4].Value })
+            $m = Hide $m ('<!--[\s\S]*?-->|@\*[\s\S]*?\*@|@"(?:[^"]|"")*"|' + $script:MaskCLike)
+            $m = Hide $m '<[a-zA-Z/!][^<>]*>'
+            $b = Test-Brackets ($m -replace '[()\[\]]', ' ')
+            if ($b) { "$b in the Razor code blocks: the braces of @{ }, @if, @foreach, @code and @functions must match" }
+            break
+        }
+        '(?i)\.(tf|tfvars|hcl)$' { Test-Brackets (Hide $t '<<-?(\w+)\n[\s\S]*?\n\s*\1\b|"(?:[^"\\\n]|\\.)*"|#[^\n]*|//[^\n]*|/\*[\s\S]*?\*/'); break }
+        '(?i)\.html?$' {
+            $m = (Get-LeakMask $t).pretags
+            if ($m -match '\{%') { Test-JinjaTags $m }
+            elseif ($m -match '\{\{\s*[#/^]') { Test-MustacheTags $m }
+            elseif ($m -match '\{\{-?\s*(end|if|range)\b') { Test-GoTemplateTags $m }
+            elseif ($m -match '\{\{') { Test-PairedTags (Hide $m '\{\{!--[\s\S]*?--\}\}') '\{\{\{?' '\}\}\}?' '{{' '}}' }
+            if ($m -match '<%(?!%)') { Test-PairedTags (Hide $m "<%--[\s\S]*?--%>|$sl") '<%(?!%)' '(?<!%)%>' '<%' '%>' }
+            if ($m -match '(?<![\w@])@(if|for|switch|defer)\s*[({]|(?<![\w@])@else\b') {
+                $a = Hide (Hide $m '\{\{[\s\S]*?\}\}') '<[a-zA-Z/!][^<>]*>'
+                $b = Test-Brackets ($a -replace '[()\[\]]', ' ')
+                if ($b) { "$b in the Angular @if, @for, @switch and @defer blocks: their braces must match" }
+            }
+            break
+        }
+    }
+}
+
 function Test-FileContent {
     <# The problems in a file's text, by its type: "line N: problem" (or a whole-file problem).
        Also for every code file: leftover edit or merge markers and ``` fence lines. #>
@@ -1082,14 +1364,14 @@ function Test-FileContent {
     }
     $hasCrlf = $Crlf -or $Text.Contains("`r`n")
     switch -Regex ($Path) {
-        '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp)$' { & $add (Test-CLike $t $Path); break }
+        '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp|gradle|groovy)$' { & $add (Test-CLike $t $Path); break }
         '(?i)\.pyw?$' { & $add (Test-Python $t); break }
         '(?i)\.ps[md]?1$' { & $add (Test-PowerShell $t); break }
         '(?i)\.ya?ml$' { & $add (Test-Yaml $t); break }
         '(?i)\.jsonc?$' { & $add (Test-Json $t $Path); if ($Path -match '(?i)(^|/)(tsconfig|jsconfig|\.vscode/|devcontainer|\.eslintrc|settings|launch|tasks|extensions)|\.jsonc$') { & $add (Test-Brackets (Hide $t '"(?:[^"\\\n]|\\.)*"|//[^\n]*|/\*[\s\S]*?\*/')) }; break }
         '(?i)\.html?$' { & $add (Test-Html $t); break }
         '(?i)\.(css|scss|less)$' { & $add (Test-Css $t); break }
-        '(?i)\.(xml|csproj|vbproj|fsproj|props|targets|config|xaml|svg|resx|nuspec|plist)$' { & $add (Test-Xml $Text.Trim()); break }
+        '(?i)\.(xml|csproj|vbproj|fsproj|props|targets|config|xaml|svg|resx|nuspec|plist|xsl|xslt|xsd|wsdl|xhtml|axaml|wxs|wxi|wxl|appxmanifest|vsixmanifest|pubxml|ruleset|runsettings|edmx|rdl|rdlc|xlf|xliff|opml|rss|atom|vcxproj|wapproj|sqlproj|storyboard|xib)$' { & $add (Test-Xml $Text.Trim()); break }
         '(?i)\.(md|markdown)$' { & $add (Test-Markdown $t); break }
         '(?i)\.(sh|bash)$' { & $add (Test-Shell $t $hasCrlf); break }
         '(?i)\.(cmd|bat)$' { & $add (Test-Batch $t (-not $hasCrlf -and $t.Contains("`n"))); break }
@@ -1098,12 +1380,15 @@ function Test-FileContent {
         '(?i)\.prisma$' { & $add (Test-Prisma $t); break }
         '(?i)\.(csv|tsv)$' { & $add (Test-Csv $t $Path); break }
     }
+    & $add (Test-Delimiters $Path $t)
     # A whole tag written escaped inside JavaScript (a .js file or a page's <script>): the page shows it as text.
     $esc = @(Find-EscapedScriptTags $Path $t)
     if ($esc.Count) { & $add "line $(LineAt $t $esc[0].index): $($esc.Count) HTML tag(s) written escaped in a script ($($esc[0].text.Substring(0, [Math]::Min(40, $esc[0].text.Length)))): in JavaScript that stays text, so the page shows the tag instead of making it; write < and >" }
     & $add (Test-Duplicates $t $Path)
     & $add (Test-TextEncoding $Path $t)
     & $add (Find-PlaceholderMarkup $Path $t)
+    # Markup or script the page shows as text (tags written as entities, a stray </script>, code outside a script, markup given to textContent).
+    foreach ($lk in @(Find-LeakedMarkup $Path $t | Select-Object -First 3)) { & $add $lk.message }
     & $add (Find-GeneratedCodeIssues $Path $t)
     & $add (Find-LanguagePitfalls $Path $t ($Text.Contains("`r`n") -and [regex]::IsMatch($Text, '(?<!\r)\n')))
     $issues.ToArray()
@@ -1165,6 +1450,160 @@ function Find-EscapedScriptTags([string]$Path, [string]$Text) {
     foreach ($s in $spans) {
         foreach ($m in [regex]::Matches($s.text, $script:EscapedTag)) { @{ index = $s.start + $m.Index; length = $m.Length; text = $m.Value } }
     }
+}
+
+function Get-LeakMask([string]$Text, [switch]$KeepTemplate) {
+    <# A page's text with everything that is not shown as text blanked (same length, so indexes
+       hold): comments, the contents of script, style, pre, code, textarea, xmp, title and template
+       (paired), and every tag itself. Returned with the stray closing script tags found before the
+       tags were blanked and the text as it was then (pretags, for tags that are not whole):
+       @{ text; strays = @(@{ index; length }); pretags }. -KeepTemplate for Vue and Svelte, where
+       the template is the page. #>
+    $blank = { param($s, $m) $s.Remove($m.Index, $m.Length).Insert($m.Index, (' ' * $m.Length)) }
+    $t = $Text
+    foreach ($m in @([regex]::Matches($t, '(?s)<!--.*?-->') | Sort-Object Index -Descending)) { $t = & $blank $t $m }
+    $inert = if ($KeepTemplate) { 'script|style|pre|code|textarea|xmp|title' } else { 'script|style|pre|code|textarea|xmp|title|template' }
+    foreach ($m in @([regex]::Matches($t, "(?is)<($inert)\b[^>]*>.*?</\1\s*>") | Sort-Object Index -Descending)) { $t = & $blank $t $m }
+    $strays = @(foreach ($m in [regex]::Matches($t, '(?i)</script\s*>')) { @{ index = $m.Index; length = $m.Length } })
+    $pre = $t
+    foreach ($m in @([regex]::Matches($t, '(?s)<[a-zA-Z/!][^>]*>') | Sort-Object Index -Descending)) { $t = & $blank $t $m }
+    @{ text = $t; strays = $strays; pretags = $pre }
+}
+
+$script:LeakCodeLine = '(?x) \b(document|window)\.\w+ \s* \( | \.addEventListener\s*\( | \.querySelector(All)?\s*\( | \.getElementById\s*\( | \bfunction\s*\w*\s*\([^)]*\)\s*\{ | =>\s*\{ | ^\s*(const|let|var)\s+\w+\s*= | ^\s*\}\s*\)\s*;?\s*$'
+# JSX/TSX code with entities: a generic (no space after &lt;, a type name, closed by &gt;), an arrow
+# function, a comparison inside parentheses, a component tag on a line with no real tag.
+$script:LeakJsxCode = '(?m)\w&lt;[A-Za-z_][\w\[\]., |&;]*?&gt;(?=[\s(=;,)>\]]|$)|=&gt;|\([^()\r\n]*?\w\s*&(lt|gt);=?\s*[\w(][^()\r\n]*?\)|^[^<>\r\n]*&lt;/?[A-Z][\w.]*(\s[^&<>\r\n]*)?/?&gt;'
+$script:KnownTagNames = 'a|abbr|article|aside|b|body|br|button|canvas|caption|code|col|colgroup|dd|details|dialog|div|dl|dt|em|fieldset|figcaption|figure|footer|form|h[1-6]|head|header|hr|html|i|iframe|img|input|label|legend|li|link|main|meta|nav|ol|optgroup|option|p|pre|script|section|select|small|span|strong|style|summary|svg|table|tbody|td|template|textarea|tfoot|th|thead|title|tr|u|ul|video|path|g|rect|circle|line|text|Button|TextBlock|TextBox|StackPanel|Grid|Border|Label|ListBox|ComboBox|CheckBox|DataGrid|Window'
+# A known name bare (div>, /div>, br/>), a known name whose first attribute has a value, or any name
+# with name="value" attributes; never a space between a bare name and its >, so prose like "a > b" is not one.
+$script:BrokenTagLine = "(?m)(?:^[ \t]*|(?<=\s))(?:/(?:$script:KnownTagNames)>|(?:$script:KnownTagNames)/?>|(?:$script:KnownTagNames)\s+[\w:.-]+\s*=\s*(?:""[^""\r\n]*""|'[^'\r\n]*'|[^\s""'>]+)(?:\s+[\w:.-]+(?:\s*=\s*(?:""[^""\r\n]*""|'[^'\r\n]*'|[^\s""'>]+))?)*\s*/?>|[A-Za-z][\w-]*(?:\s+[\w:.-]+\s*=\s*(?:""[^""\r\n]*""|'[^'\r\n]*'))+\s*/?>)"
+# A tag that lost its >: a name, well-formed attributes, then the next < instead of the >. The browser
+# reads everything up to the next > as attributes, so the text and the tag after it vanish.
+# The attribute run is an atomic group, so a tag start that does not end this way is given up at once
+# (no backtracking through the attributes of every tag on a large page).
+$script:TagAttrRun = '(?>((?:\s+[\w:.@#-]+(?:\s*=\s*(?:"[^"]*"|''[^'']*''|\{(?:[^{}]|\{[^{}]*\})*\}|[^\s"''<>]+)?)?)*))'
+$script:LostTagEnd = "<([A-Za-z][\w:.-]*)$script:TagAttrRun\s*/?\s*(?=<)"
+# In JSX/TSX (where a < b is code) only a tag start whose attributes sit on its own line, with
+# complete values, followed by a line that starts a tag.
+$script:LostTagEndLine = '<([A-Za-z][\w:.-]*)(?>((?:[ \t]+[\w:.@#-]+(?:=(?:"[^"\n]*"|''[^''\n]*''|\{(?:[^{}\n]|\{[^{}\n]*\})*\}))?)*))[ \t]*/?[ \t]*\n(?:[ \t]*\n)*[ \t]*(?=<)'
+$script:BooleanAttr = '^(hidden|disabled|checked|selected|readonly|required|multiple|autofocus|autoplay|controls|loop|muted|open|async|defer|novalidate|nomodule|reversed|inert|download|allowfullscreen|playsinline|itemscope|contenteditable|draggable|data-[\w-]*)$'
+
+function Get-LostTagEnd([string]$Pre, [System.Text.RegularExpressions.Match]$M) {
+    # Where the > of a tag that lost it belongs: after the last attribute with a value, and after the
+    # bare attributes that are booleans or stand on that same line; a bare word on a new line, or one
+    # glued to the next <, is text the browser swallowed. A / right there (br/) stays inside the tag.
+    $attrs = $M.Groups[2]
+    $pos = $attrs.Index
+    foreach ($a in [regex]::Matches($attrs.Value, '\s+([\w:.@#-]+)(\s*=\s*(?:"[^"]*"|''[^'']*''|\{(?:[^{}]|\{[^{}]*\})*\}|[^\s"''<>]+)?)?')) {
+        $start = $attrs.Index + $a.Index
+        $end = $start + $a.Length
+        $glued = ($end -eq $M.Index + $M.Length)
+        $sameLine = -not $Pre.Substring($pos, $start - $pos).Contains("`n")
+        if ($a.Groups[2].Value -or $a.Groups[1].Value -match $script:BooleanAttr) { $pos = $end }
+        elseif ($sameLine -and -not $glued) { $pos = $end }
+        else { break }
+    }
+    $slash = [regex]::Match($Pre.Substring($pos), '^[ \t]*/')
+    if ($slash.Success) { $pos += $slash.Length }
+    $pos
+}
+
+$script:LeakTextContent = '(?s)\.(textContent|innerText)\s*\+?=\s*(?:`[^`]*<[a-zA-Z][^`]*`|''[^''\r\n]*<[a-zA-Z][^''\r\n]*''|"[^"\r\n]*<[a-zA-Z][^"\r\n]*")|createTextNode\s*\(\s*(?:`[^`]*<[a-zA-Z][^`]*`|''[^''\r\n]*<[a-zA-Z][^''\r\n]*''|"[^"\r\n]*<[a-zA-Z][^"\r\n]*")'
+
+function Find-LeakedMarkup {
+    <# Markup or script that a page shows as text, with the line and what to do, as @{ kind; index;
+       length; line; text; message }:
+       - entity: a tag written as &lt;div ...&gt; in the page's own text (not in pre, code, textarea
+         or a script), shown as "<div ...>" by the browser (fixed by AutoFix: the tag itself);
+       - stray-close: a </script> with no <script> before it, so the code above it is page text
+         (AutoFix puts <script> before that code when the lines above are code);
+       - code-text: script code outside any <script> block;
+       - text-content: in a script, markup given to textContent, innerText or createTextNode, which
+         show it as text (use innerHTML for the page's own markup, or build the elements);
+       - broken-tag: a tag that lost its < on the way (div class="x">, /div>), left as text (AutoFix
+         puts the < back);
+       - lost-end: a tag that lost its > (<div class="x" followed by the next tag or a text line): the
+         browser reads what follows, up to the next >, as attributes, so that text and tag vanish from
+         the page (a script tag there never loads); reported on its own, since the other findings
+         would follow from it (AutoFix closes the tag: index is where the > belongs);
+       - entity-code: in JSX/TSX, code written with entities (a generic such as useState&lt;string&gt;,
+         an arrow =&gt;, a comparison in parentheses), which other code files get decoded on write but
+         a file that is markup too does not (AutoFix decodes it).
+       Pages, SVG, XAML, Vue and Svelte files for the tags, scripts and JSX/TSX; nothing for other files. #>
+    param([string]$Path, [string]$Text)
+    if (-not $Text) { return }
+    $out = New-Object System.Collections.Generic.List[object]
+    $isPage = $Path -match '(?i)\.(html?|xhtml)$'
+    if ($isPage -or $Path -match '(?i)\.(svg|xaml|vue|svelte)$') {
+        $mask = Get-LeakMask $Text -KeepTemplate:($Path -match '(?i)\.(vue|svelte)$')
+        $mt = $mask.text
+        $shown = if ($isPage) { 'the browser shows it as text' } elseif ($Path -match '(?i)\.xaml$') { 'the window shows it as text' } else { 'it is shown as text' }
+        foreach ($m in [regex]::Matches($mt, $script:EscapedTag)) {
+            $out.Add(@{ kind = 'entity'; index = $m.Index; length = $m.Length; line = (LineAt $Text $m.Index); text = $m.Value;
+                message = "line $(LineAt $Text $m.Index): the tag $($m.Value.Substring(0, [Math]::Min(40, $m.Length))) is written with &lt; and &gt;, so $shown instead of making it: write the tag itself (< and >)" })
+        }
+        foreach ($m in [regex]::Matches($mt, $script:BrokenTagLine)) {
+            $tag = $m.Value.TrimStart(" `t")
+            $at = $m.Index + ($m.Length - $tag.Length)
+            $out.Add(@{ kind = 'broken-tag'; index = $at; length = 0; line = (LineAt $Text $at); text = $tag;
+                message = "line $(LineAt $Text $at): the tag $($tag.Substring(0, [Math]::Min(40, $tag.Length))) is missing its <, so ${shown}: write <$($tag.Substring(0, [Math]::Min(20, $tag.Length)))" })
+        }
+        $pre = $mask.pretags
+        if ($Path -match '(?i)\.(vue|svelte)$') { $pre = [regex]::Replace($pre, '\{[^{}]*\}', [Text.RegularExpressions.MatchEvaluator] { param($x) ' ' * $x.Length }) }
+        $swallow = if ($isPage) { 'the browser reads what follows, up to the next >, as attributes, and that text or tag is not on the page (a script tag there never loads)' }
+            elseif ($Path -match '(?i)\.xaml$') { 'the window does not load (not valid XML)' }
+            elseif ($Path -match '(?i)\.svg$') { 'the image does not show (not valid XML)' } else { 'the template does not compile' }
+        $lostEnds = @(foreach ($m in [regex]::Matches($pre, $script:LostTagEnd)) {
+            $at = Get-LostTagEnd $pre $m
+            $tag = ($m.Value -split '\r?\n')[0].TrimEnd()
+            $from = [Math]::Max($m.Index, $at - 30)
+            $tail = $pre.Substring($from, $at - $from).Trim(); if ($from -gt $m.Index) { $tail = "...$tail" }
+            @{ kind = 'lost-end'; index = $at; length = 0; line = (LineAt $Text $m.Index); text = $tag;
+                message = "line $(LineAt $Text $m.Index): the tag $($tag.Substring(0, [Math]::Min(40, $tag.Length))) has no >, so ${swallow}: close it with > after $tail" }
+        })
+        foreach ($l in $lostEnds) { $out.Add($l) }
+        if ($lostEnds.Count) { return $out.ToArray() }
+        if (-not $isPage) { return $out.ToArray() }
+        foreach ($s in $mask.strays) {
+            $out.Add(@{ kind = 'stray-close'; index = $s.index; length = $s.length; line = (LineAt $Text $s.index); text = '</script>';
+                message = "line $(LineAt $Text $s.index): </script> without a <script> before it: the opening tag is missing or damaged, so the code above this line is shown on the page as text; put <script> before that code" })
+        }
+        # Script code in the page's text: lines that are code, outside every script block.
+        $lines = $mt.Replace("`r`n", "`n").Split("`n"); $pos = 0; $first = $null; $n = 0
+        $nl = if ($Text.Contains("`r`n")) { 2 } else { 1 }
+        for ($i = 0; $i -lt $lines.Length; $i++) {
+            if ($lines[$i].Trim() -and $lines[$i] -match $script:LeakCodeLine) { $n++; if ($null -eq $first) { $first = @{ index = $pos; line = $i + 1; text = $lines[$i].Trim() } } }
+            $pos += $lines[$i].Length + $nl
+        }
+        if ($first -and -not @($mask.strays).Count) {
+            $out.Add(@{ kind = 'code-text'; index = $first.index; length = 0; line = $first.line; text = $first.text;
+                message = "line $($first.line): script code outside any <script> block ($n line(s), first: $($first.text.Substring(0, [Math]::Min(50, $first.text.Length)))), which the browser shows as text: put it inside <script> ... </script>, or in the page's script file" })
+        }
+        # Scripts in the page: markup given to textContent.
+        foreach ($m in [regex]::Matches($Text, '(?is)<script\b(?![^>]*\bsrc\s*=)[^>]*>(.*?)</script\s*>')) {
+            foreach ($f in @(Find-LeakedMarkup 'inline.js' $m.Groups[1].Value)) { $f.index += $m.Groups[1].Index; $f.line = LineAt $Text $f.index; $f.message = $f.message -replace '^line \d+:', "line $($f.line):"; $out.Add($f) }
+        }
+    } elseif ($Path -match '(?i)\.(jsx|tsx)$') {
+        foreach ($m in [regex]::Matches($Text, $script:LeakJsxCode)) {
+            $out.Add(@{ kind = 'entity-code'; index = $m.Index; length = $m.Length; line = (LineAt $Text $m.Index); text = $m.Value;
+                message = "line $(LineAt $Text $m.Index): code written with &lt; or &gt; ($($m.Value.Substring(0, [Math]::Min(40, $m.Length)))): write < and > themselves" })
+        }
+        $pre = (Get-JsMask $Text).masked
+        foreach ($m in [regex]::Matches($pre, $script:LostTagEndLine)) {
+            $at = Get-LostTagEnd $pre $m
+            $tag = ($m.Value -split '\r?\n')[0].TrimEnd()
+            $out.Add(@{ kind = 'lost-end'; index = $at; length = 0; line = (LineAt $Text $m.Index); text = $tag;
+                message = "line $(LineAt $Text $m.Index): the tag $($tag.Substring(0, [Math]::Min(40, $tag.Length))) has no > (the next line starts a tag), so the file does not compile: close it with >" })
+        }
+    } elseif ($Path -match '(?i)\.(m?js|cjs)$') {
+        foreach ($m in [regex]::Matches($Text, $script:LeakTextContent)) {
+            $what = if ($m.Value -match '^createTextNode') { 'createTextNode' } else { $m.Groups[1].Value }
+            $out.Add(@{ kind = 'text-content'; index = $m.Index; length = $m.Length; line = (LineAt $Text $m.Index); text = $m.Value;
+                message = "line $(LineAt $Text $m.Index): markup given to $what ($($m.Value.Substring(0, [Math]::Min(50, $m.Length)).Replace("`n", ' '))...) is shown as text, tags included: use innerHTML for the page's own markup (never for data from outside), or build the elements with createElement" })
+        }
+    }
+    $out.ToArray()
 }
 
 function Get-BracketMask([string]$Path, [string]$Text) {
@@ -1426,4 +1865,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Find-LeakedMarkup, Test-Delimiters, Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences

@@ -48,27 +48,37 @@ function Split-FetchPrompt {
 }
 
 function Get-FetchPrompts {
-    <# The project's saved fetch prompts with the state of their answer files. #>
+    <# The project's saved fetch prompts with the state of their answer files, then the shared ones
+       (shared/Runbooks/ beside the projects, shared = $true; a project prompt of the same name wins),
+       whose answers go to this project's Runbooks/Exports/. #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
-    $dir = Join-Path $ProjectRoot $script:FetchDir
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return }
-    foreach ($f in Get-ChildItem -LiteralPath $dir -Filter '*.prompt.md' -File | Sort-Object Name) {
-        $name = $f.Name.Substring(0, $f.Name.Length - '.prompt.md'.Length)
-        $out = Join-Path $ProjectRoot ("$($script:AnswerDir)/$name.md".Replace('/', '\'))
-        $at = Get-FetchedAt $out
-        $sp = Split-FetchPrompt ([IO.File]::ReadAllText($f.FullName))
-        [pscustomobject]@{
-            name = $name
-            prompt = $sp.body
-            sources = "$($sp.meta['sources'])"
-            sites = "$($sp.meta['sites'])"
-            pages = "$($sp.meta['pages'])"
-            agent = "$($sp.meta['agent'])"
-            files = "$($sp.meta['files'])"
-            promptPath = "$($script:FetchDir)/$name.prompt.md"
-            output = "$($script:AnswerDir)/$name.md"
-            fetchedAt = $(if ($at) { $at.ToString('s') } else { $null })
-            outputSize = $(if (Test-Path -LiteralPath $out) { (Get-Item -LiteralPath $out).Length } else { 0 })
+    $seen = @{}
+    $places = @(@{ dir = (Join-Path $ProjectRoot $script:FetchDir); prefix = $script:FetchDir; shared = $false })
+    $shared = Get-SharedRoot $ProjectRoot
+    if ($shared) { $places += @{ dir = (Join-Path $shared $script:FetchDir); prefix = "$(Get-SharedPrefix $ProjectRoot)/$($script:FetchDir)"; shared = $true } }
+    foreach ($pl in $places) {
+        if (-not (Test-Path -LiteralPath $pl.dir -PathType Container)) { continue }
+        foreach ($f in Get-ChildItem -LiteralPath $pl.dir -Filter '*.prompt.md' -File | Sort-Object Name) {
+            $name = $f.Name.Substring(0, $f.Name.Length - '.prompt.md'.Length)
+            if ($seen.ContainsKey($name)) { continue }
+            $seen[$name] = $true
+            $out = Join-Path $ProjectRoot ("$($script:AnswerDir)/$name.md".Replace('/', '\'))
+            $at = Get-FetchedAt $out
+            $sp = Split-FetchPrompt ([IO.File]::ReadAllText($f.FullName))
+            [pscustomobject]@{
+                name = $name
+                prompt = $sp.body
+                sources = "$($sp.meta['sources'])"
+                sites = "$($sp.meta['sites'])"
+                pages = "$($sp.meta['pages'])"
+                agent = "$($sp.meta['agent'])"
+                files = "$($sp.meta['files'])"
+                promptPath = "$($pl.prefix)/$name.prompt.md"
+                output = "$($script:AnswerDir)/$name.md"
+                fetchedAt = $(if ($at) { $at.ToString('s') } else { $null })
+                outputSize = $(if (Test-Path -LiteralPath $out) { (Get-Item -LiteralPath $out).Length } else { 0 })
+                shared = $pl.shared
+            }
         }
     }
 }

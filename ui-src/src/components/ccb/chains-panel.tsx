@@ -1,4 +1,5 @@
 import { InfoNote } from "./info-note";
+import { editPlace } from "./runbooks-panel";
 import { AlertTriangle, ArrowDown, ArrowUp, CalendarClock, FileCode2, Play, Plus, X } from "lucide-react";
 import { useState } from "react";
 import type { ChainItem, ChainStep } from "@/lib/api";
@@ -103,6 +104,11 @@ export function ChainsPanel({
             <span className="truncate font-medium text-sm" title={c.path}>
               {c.title}
             </span>
+            {c.shared && (
+              <span className="shrink-0 rounded-full border border-black/15 px-1.5 text-[10px] text-muted-foreground dark:border-white/20" title="From the library beside the projects: every project in this folder can run it">
+                shared
+              </span>
+            )}
             <span className="ml-auto shrink-0 text-muted-foreground text-xs">
               {c.steps.length} step{c.steps.length === 1 ? "" : "s"}
             </span>
@@ -153,7 +159,7 @@ export function ChainsPanel({
                 <CalendarClock className="h-3 w-3" /> Schedule
               </button>
             )}
-            <button className={flatButton} onClick={() => onOpen(c.path)} title={`View the chain (${c.path}); edit it in the project folder`} type="button">
+            <button className={flatButton} onClick={() => onOpen(c.path)} title={`View the chain (${c.path}); ${editPlace(c.path, c.shared)}`} type="button">
               <FileCode2 className="h-3 w-3" /> View
             </button>
           </div>

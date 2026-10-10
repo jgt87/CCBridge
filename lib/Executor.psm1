@@ -1109,10 +1109,18 @@ function ConvertTo-GlobRegex([string]$Glob) {
 }
 
 function Get-SearchableFiles([string]$ProjectRoot) {
-    <# The files glob and grep look through: the project's files plus the UI kit's catalogue
-       (.streamhub/ui-kit/, read-only), so a search for a kit class finds its example. The rest of
-       .streamhub/ (StreamHub's own records) stays out. #>
+    <# The files glob and grep look through: the project's files plus the shared library beside the
+       projects as shared/... (the UI kit's catalogue, instructions, runbooks, scripts; read-only) or,
+       without one, the project's own kit catalogue (.streamhub/ui-kit/), so a search for a kit class
+       finds its example. The rest of .streamhub/ (StreamHub's own records) stays out. #>
     $files = @(Get-ProjectFiles $ProjectRoot)
+    $shared = Get-SharedRoot $ProjectRoot
+    if ($shared) {
+        $s = $shared.TrimEnd('\'); $prefix = Get-SharedPrefix $ProjectRoot
+        $files += @(Get-ChildItem -LiteralPath $s -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\\.pristine\\' } | Select-Object -First 3000 | ForEach-Object {
+            [pscustomobject]@{ path = "$prefix/" + $_.FullName.Substring($s.Length + 1).Replace('\', '/'); size = $_.Length } } | Sort-Object path)
+        return $files
+    }
     $cat = Join-Path $ProjectRoot '.streamhub/ui-kit'
     if (Test-Path -LiteralPath $cat -PathType Container) {
         $root = $ProjectRoot.TrimEnd('\', '/')
@@ -1141,7 +1149,7 @@ function Invoke-GrepAction {
         $Pattern = [regex]::Escape($Pattern)
     }
     # The kit's bundled third-party builds (pdf.js) are one-line megabytes: not worth searching.
-    $files = @(Get-SearchableFiles $ProjectRoot | Where-Object { $_.path -notmatch '^\.streamhub/ui-kit/vendor/' })
+    $files = @(Get-SearchableFiles $ProjectRoot | Where-Object { $_.path -notmatch '^(\.streamhub|shared|library|shared-library)/ui-kit/vendor/' })
     if ($FileGlob) { $re = ConvertTo-GlobRegex $FileGlob; $files = $files | Where-Object { $_.path -match $re } }
     $hits = New-Object System.Collections.Generic.List[string]
     foreach ($f in $files) {
@@ -1172,6 +1180,9 @@ function Assert-Writable([string]$ProjectRoot, [string]$Path) {
     <# Returns the full path, or throws when the path is user source data (read-only). #>
     $full = Resolve-ProjectPath $ProjectRoot $Path
     $rel = (ConvertTo-RelativePath $ProjectRoot $full)
+    if ((Get-SharedRoot $ProjectRoot) -and $rel -match "(?i)^$([regex]::Escape((Get-SharedPrefix $ProjectRoot)))/") {
+        throw "$Path is in $(Get-SharedPrefix $ProjectRoot)/, the library every project in this folder shares (the UI kit's catalogue, the shared instructions, runbooks, scripts), read-only from a project. It is the .streamhub folder beside the projects; a change to it is made there, by a person."
+    }
     if ($rel -match '(?i)^\.streamhub(/|$)') {
         throw "$Path is in .streamhub/, which holds the helper program's own records (issues, schedules, evidence, reviews, plans, earlier data versions). Do not write there; put your file elsewhere in the project."
     }
@@ -1299,6 +1310,69 @@ function Test-AlreadyApplied([string]$Text, [string]$Search, [string]$Replace) {
     @{ applied = $true; evidence = "the new text is already at lines $from-$to and none of the old lines are in the file" }
 }
 
+function ConvertTo-LooseLine([AllowEmptyString()][string]$Line) {
+    <# A line as the eye reads it: no invisible characters, typographic quotes and dashes as the
+       plain ones, HTML entities decoded, runs of whitespace as one space, trimmed. Two lines that
+       are loosely equal differ only in what a chat page or an editor changes on the way. #>
+    if ($null -eq $Line) { return '' }
+    $s = [regex]::Replace($Line, $script:Invisible, '')
+    $s = [regex]::Replace($s, $script:OddSpace, ' ')
+    $s = $s.Replace([string][char]0x201C, '"').Replace([string][char]0x201D, '"').Replace([string][char]0x2018, "'").Replace([string][char]0x2019, "'").Replace([string][char]0x2013, '-').Replace([string][char]0x2014, '-')
+    $s = $s.Replace('&lt;', '<').Replace('&gt;', '>').Replace('&quot;', '"').Replace('&#39;', "'").Replace('&amp;', '&')
+    [regex]::Replace($s, '\s+', ' ').Trim()
+}
+
+function Show-HiddenChars([AllowEmptyString()][string]$Line) {
+    <# A line with the characters a person cannot see, or tell apart, named: [NBSP], [U+200B],
+       [curly quote], [tab]. #>
+    if ($null -eq $Line) { return '' }
+    $s = $Line.Replace([string][char]0x00A0, '[NBSP]').Replace([string][char]0x202F, '[NBSP]').Replace([string][char]0x2007, '[NBSP]').Replace("`t", '[tab]')
+    $s = [regex]::Replace($s, $script:Invisible, { param($m) '[U+' + ([int][char]$m.Value).ToString('X4') + ']' })
+    foreach ($c in 0x201C, 0x201D, 0x2018, 0x2019) { $s = $s.Replace([string][char]$c, "[curly quote $([char]$c)]") }
+    foreach ($c in 0x2013, 0x2014) { $s = $s.Replace([string][char]$c, "[long dash $([char]$c)]") }
+    $s
+}
+
+function Get-LineDifference([string]$SearchLine, [string]$FileLine) {
+    <# Why a SEARCH line is not the file's line, or '' when they are the same: the hidden
+       characters named, or both lines quoted. #>
+    if ($SearchLine -eq $FileLine) { return '' }
+    if ($SearchLine.Trim() -eq $FileLine.Trim()) { return 'only the indentation differs' }
+    if ((ConvertTo-LooseLine $SearchLine) -eq (ConvertTo-LooseLine $FileLine)) {
+        return "the same to the eye, but not the same characters: SEARCH has '$(Show-HiddenChars $SearchLine.Trim())', the file has '$(Show-HiddenChars $FileLine.Trim())'"
+    }
+    "SEARCH has '$(Show-HiddenChars $SearchLine.Trim())', the file has '$(Show-HiddenChars $FileLine.Trim())'"
+}
+
+function Find-LooseTarget([string]$Text, [string]$Search) {
+    <# The one place where $Search is in $Text when both are read loosely (ConvertTo-LooseLine per
+       line): @{ start; length; note } with what differed, or $null when there is none or more than
+       one. The hit covers the file's own lines, so the file text is what gets replaced. #>
+    $sLines = @($Search.Replace("`r`n", "`n").Split("`n"))
+    while ($sLines.Count -and -not $sLines[0].Trim()) { $sLines = @($sLines | Select-Object -Skip 1) }
+    while ($sLines.Count -and -not $sLines[-1].Trim()) { $sLines = @($sLines | Select-Object -First ($sLines.Count - 1)) }
+    if (-not $sLines.Count) { return $null }
+    $sLoose = @($sLines | ForEach-Object { ConvertTo-LooseLine $_ })
+    if (-not ($sLoose | Where-Object { $_.Length -ge 3 })) { return $null }   # nothing distinctive to match on
+    $fLines = @($Text.Split("`n"))
+    $fLoose = @($fLines | ForEach-Object { ConvertTo-LooseLine $_ })
+    $hits = @()
+    for ($i = 0; $i -le $fLines.Count - $sLines.Count; $i++) {
+        $ok = $true
+        for ($k = 0; $k -lt $sLines.Count; $k++) { if ($fLoose[$i + $k] -ne $sLoose[$k]) { $ok = $false; break } }
+        if ($ok) { $hits += $i }
+    }
+    if ($hits.Count -ne 1) { return $null }
+    $i = $hits[0]
+    $start = 0; for ($k = 0; $k -lt $i; $k++) { $start += $fLines[$k].Length + 1 }
+    $end = $start; for ($k = 0; $k -lt $sLines.Count; $k++) { $end += $fLines[$i + $k].Length + 1 }
+    $end--   # not the newline after the last line
+    if ($fLines[$i + $sLines.Count - 1].EndsWith("`r")) { $end-- }
+    $diffs = @(for ($k = 0; $k -lt $sLines.Count; $k++) { $d = Get-LineDifference $sLines[$k] $fLines[$i + $k].TrimEnd("`r"); if ($d) { "SEARCH line $($k + 1) (file line $($i + $k + 1)): $d" } })
+    $what = if ($diffs.Count) { ' (' + (($diffs | Select-Object -First 2) -join '; ') + ')' } else { '' }
+    @{ start = $start; length = ($end - $start); loose = $true; note = "matched the file's lines $($i + 1)-$($i + $sLines.Count) ignoring hidden characters, quote style and spacing$what" }
+}
+
 function Get-ClosestLines([string]$Text, [string]$Search) {
     <# The file's current lines where $Search most likely belongs (most SEARCH lines found nearby),
        for Copilot to copy exactly in its next try. #>
@@ -1326,7 +1400,19 @@ function Get-ClosestLines([string]$Text, [string]$Search) {
     $snippet = ($fileLines[$from..$to] -join "`n")
     if ($snippet.Length -gt 3000) { $snippet = $snippet.Substring(0, 3000) }
     $fence = '```'
-    "The closest place is lines $($from + 1)-$($to + 1); their exact current text is:`n$fence`n$snippet`n$fence"
+    # What differs, line by line, from the first SEARCH line that is at the closest place on: the
+    # hidden characters named, so a difference the eye cannot see is still a known one.
+    $sLines = @($Search.Split("`n") | ForEach-Object { $_.TrimEnd("`r") })
+    $firstAt = -1; for ($k = 0; $k -lt $sLines.Count -and $firstAt -lt 0; $k++) { if ($sLines[$k].Trim() -and $sLines[$k].Trim() -eq $fileLines[$best].Trim()) { $firstAt = $k } }
+    if ($firstAt -lt 0) { $firstAt = 0 }
+    $diffs = @(for ($k = 0; $k -lt $sLines.Count; $k++) {
+        $f = $best - $firstAt + $k
+        if ($f -lt 0 -or $f -ge $fileLines.Length -or -not $sLines[$k].Trim()) { continue }
+        $d = Get-LineDifference $sLines[$k] $fileLines[$f]
+        if ($d -and $d -ne 'only the indentation differs') { "SEARCH line $($k + 1) is not file line $($f + 1): $d" }
+    })
+    $why = if ($diffs.Count) { "`nWhat differs: " + (($diffs | Select-Object -First 3) -join '; ') + '.' } else { '' }
+    "The closest place is lines $($from + 1)-$($to + 1); their exact current text is:`n$fence`n$snippet`n$fence$why"
 }
 
 $script:EllipsisLine = '^\s*(\.\.\.|\u2026|/\*\s*(\.\.\.|\u2026)\s*\*/|<!--\s*(\.\.\.|\u2026)\s*-->|//\s*(\.\.\.|\u2026)|#\s*(\.\.\.|\u2026))\s*$'
@@ -1718,6 +1804,12 @@ function Find-EditTarget([string]$Text, [string]$Search, [int]$After = -1, [int]
         foreach ($m in [regex]::Matches($Text, $pattern)) { $hits.Add(@{ start = $m.Index; length = $m.Length }) }
         if ($hits.Count) { $note = 'matched ignoring indentation' }
     }
+    if (-not $hits.Count -and $Search.Trim()) {
+        # The same lines to the eye: hidden characters, typographic quotes, entities or spacing differ
+        # (what a chat page changes on the way). One such place: taken, and the difference named.
+        $loose = Find-LooseTarget $Text $Search
+        if ($loose) { return $loose }
+    }
     if ($hits.Count -eq 1) { if ($note) { $hits[0].note = $note }; return $hits[0] }
     if (-not $hits.Count) { return @{ error = "SEARCH text not found in the file. $(Get-ClosestLines $Text $Search)" } }
     $lines = @($hits | ForEach-Object { Get-LineNumber $Text $_.start })
@@ -1787,11 +1879,11 @@ function Get-EditResult {
             continue
         }
 
-        if ($hit.note -eq 'matched ignoring indentation') {
+        if ($hit.note -eq 'matched ignoring indentation' -or $hit.loose) {
             $fix = Set-EditIndent $search $text.Substring($hit.start, $hit.length) $replace $full
             if ($fix.error) { return [pscustomobject]@{ ok = $false; error = "pair $n`: $($fix.error). Nothing was changed. Read the file again and send a corrected edit block." } }
             $replace = $fix.text
-            $hit.note = 'matched ignoring indentation; the new lines were re-indented to match the file'
+            $hit.note = if ($hit.loose) { "$($hit.note); the new lines were re-indented to match the file" } else { 'matched ignoring indentation; the new lines were re-indented to match the file' }
         }
         if ($hit.note) { $notes.Add("pair ${n}: $($hit.note)") }
         $text = $text.Substring(0, $hit.start) + $replace + $text.Substring($hit.start + $hit.length)

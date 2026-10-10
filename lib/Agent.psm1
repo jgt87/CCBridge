@@ -2547,6 +2547,9 @@ function Get-ProjectContext($State) {
     $files = if ($paths.Count) { "Files:`n" + (Format-ProjectTree $root -MaxChars $budget) } else { 'The folder is empty.' }
     $notes = Get-ProjectNotes $root
     $full = "$location`n$files" + $(if ($notes) { "`n`nProject notes (AGENTS.md):`n$notes" } else { '' })
+    # The shared instructions of every project in this folder (shared/AGENTS.md beside the projects).
+    $sharedNotes = try { Get-SharedNotes $root } catch { '' }
+    if ($sharedNotes) { $full += "`n`nShared notes for every project in this folder ($(Get-SharedPrefix $root)/AGENTS.md, read-only here):`n$sharedNotes" }
     # A code map within its budget (setting repoMapChars), for work on the project's code.
     $mapChars = $(if ($null -ne $State.Config.repoMapChars) { [int]$State.Config.repoMapChars } else { 4000 })
     if ($mapChars -gt 0 -and $paths.Count) {
@@ -3392,6 +3395,89 @@ function Invoke-FinalChecks {
     Add-AgentEvent $State 'task-unfinished' @{ text = "Copilot did not finish this task ($Reason). StreamHub checked the changed files: $(if ($found.Count) { "$($found.Count) problem(s) found" } else { 'no problems found' })."; findings = @($list); continueText = $continue }
 }
 
+function Get-LeakReport {
+    <# What the helper program finds when the person reports markup or script shown as text on a
+       page (Prompts Test-LeakReport), before the message goes to Copilot: the file check (Lint
+       Find-LeakedMarkup) over the project's pages and scripts, the mechanical fixes applied as own
+       changes (tags written with entities, a stray closing script tag), the root page as shown in a
+       browser tab when the app can serve one, and each sample the page shows traced to the file
+       line that holds it. Returns the text block for Copilot; a status line tells the person. #>
+    param($State)
+    $root = $State.ProjectRoot
+    $files = @(Get-ProjectFiles $root | Where-Object { $_.path -match '(?i)\.(html?|xhtml|m?js|cjs|jsx|tsx|vue|svelte|svg|xaml)$' -and $_.path -notmatch '(?i)^(Source|\.streamhub|node_modules|dist|build|out|vendor|styles/kit|data)/|/(node_modules|dist|build|out|vendor)/|\.min\.js$' -and [int64]$_.size -le 2MB } | Select-Object -First 300)
+    $fixed = New-Object System.Collections.Generic.List[string]
+    $left = New-Object System.Collections.Generic.List[string]
+    $texts = @{}
+    foreach ($f in $files) {
+        try {
+            $full = Join-Path $root ($f.path.Replace('/', '\'))
+            $info = Read-TextFile $full
+            if ($info.Encoding -eq 'office') { continue }
+            $text = $info.Text
+            $found = @(Find-LeakedMarkup $f.path $text)
+            if (@($found | Where-Object { $_.kind -in 'entity', 'entity-code', 'stray-close', 'broken-tag', 'lost-end' }).Count) {
+                $fix = Repair-MechanicalIssues $f.path $text
+                $broke = @(Get-NewFileIssues $f.path $text $fix.text $info.Crlf $root | Where-Object { (Get-CheckLevel $_ 'file') -eq 'error' })
+                if (@($fix.fixes).Count -and -not $broke.Count) {
+                    Write-TextFile $full $fix.text $info.Bom $info.Crlf $info.Encoding
+                    Add-OwnChangeEvent $State 'edit' $f.path "Fixed automatically: $(@($fix.fixes) -join '; ')." @{ path = $f.path; exists = $true; old = $text; new = $fix.text }
+                    $fixed.Add("$($f.path): $(@($fix.fixes) -join '; ')")
+                    $text = $fix.text
+                    $found = @(Find-LeakedMarkup $f.path $text)
+                }
+            }
+            $texts[$f.path] = $text
+            foreach ($x in @($found | Select-Object -First 3)) { $left.Add("$($f.path) $($x.message)") }
+        } catch { Write-CCBLogError agent "leak check $($f.path)" $_ }
+    }
+    # The page as shown: the root page in a browser tab, each sample traced to the file that holds it.
+    $shown = New-Object System.Collections.Generic.List[string]
+    if ("$($State.Config.pageCheck)" -ne 'off' -and $State.PreviewPort -and -not $State.Headless) {
+        $page = if (Test-Path -LiteralPath (Join-Path $root 'index.html')) { 'index.html' } else { @($files | Where-Object { $_.path -match '(?i)^[^/]+\.html?$' } | Select-Object -First 1 | ForEach-Object { $_.path }) }
+        if ($page) {
+            try {
+                foreach ($pi in @(Test-WebPage $State @($page) | Where-Object { $_ -match 'as plain text' })) {
+                    $line = "$pi"
+                    $sample = [regex]::Match($pi, "as plain text: '([^']{8,})").Groups[1].Value
+                    $at = Find-TextInFiles $texts $sample
+                    if ($at) { $line += " -> this text is written in $at" }
+                    $shown.Add($line)
+                }
+            } catch { Write-CCBLogError agent 'leak page check' $_ }
+        }
+    }
+    $n = @($files).Count
+    Add-AgentEvent $State 'status' @{ text = "StreamHub checked $n page and script file(s) for markup or script shown as text: $($fixed.Count) file(s) fixed, $($left.Count) place(s) left for Copilot$(if ($shown.Count) { ", $($shown.Count) seen on the page" })." }
+    if (-not $fixed.Count -and -not $left.Count -and -not $shown.Count) {
+        return "THE HELPER PROGRAM CHECKED FOR MARKUP OR SCRIPT SHOWN AS TEXT`nIt read the text of $n page and script file(s) apart from their tags and found no tag written with entities, no script outside a script block and no markup given to textContent. If the page still shows code, it is written at run time by a script or comes from the data: read the script that fills that part of the page, not the page."
+    }
+    $out = 'THE HELPER PROGRAM CHECKED FOR MARKUP OR SCRIPT SHOWN AS TEXT'
+    if ($fixed.Count) { $out += "`nFixed already (read a file again before you edit it):`n" + (($fixed | ForEach-Object { "- $_" }) -join "`n") }
+    if ($left.Count) { $out += "`nStill to fix, at these lines:`n" + (($left | Select-Object -First 8 | ForEach-Object { "- $_" }) -join "`n") }
+    if ($shown.Count) { $out += "`nWhat the page shows now:`n" + (($shown | ForEach-Object { "- $_" }) -join "`n") }
+    $out
+}
+
+function Find-TextInFiles($Texts, [string]$Sample) {
+    <# The file and line where a sample of a page's shown text is written ("FILE line N"), or $null:
+       the sample's first words, in any spacing, as written or with its tags as entities, and with
+       the quotes a script string escapes. #>
+    if (-not $Sample) { return $null }
+    $probe = $Sample.Substring(0, [Math]::Min(40, $Sample.Length)).Trim()
+    $words = @($probe -split '\s+' | Where-Object { $_ })
+    if ($words.Count -gt 1) { $words = @($words | Select-Object -First ($words.Count - 1)) }   # the last word may be cut
+    if (-not $words.Count) { return $null }
+    $forms = @(($words -join ' '), (($words -join ' ').Replace('<', '&lt;').Replace('>', '&gt;')))
+    foreach ($k in @($Texts.Keys | Sort-Object)) {
+        foreach ($form in $forms) {
+            $re = (@($form -split ' ' | ForEach-Object { [regex]::Escape($_).Replace('"', '\\?"').Replace("'", "\\?'") }) -join '\s+')
+            $m = [regex]::Match($Texts[$k], $re)
+            if ($m.Success) { return "$k line $(($Texts[$k].Substring(0, $m.Index) -split "`n").Count)" }
+        }
+    }
+    $null
+}
+
 function Invoke-AgentTurn {
     param($State, [string]$Text, [string]$ForceKind = '')
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; $State.Busy = $false; return }
@@ -3427,15 +3513,22 @@ function Invoke-AgentTurn {
         Add-AgentEvent $State 'kind' @{ taskKind = $kind }
         $summary = $State.Summary; $State.Summary = $null
         $partsBefore = $State.SentParts.Count
-        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $Text -Sent $State.SentParts -Context $ctx -Summary $summary
+        # A report that a page shows markup or script as text: the helper program checks the pages
+        # itself first, fixes what has one right answer, and names the lines for Copilot.
+        $sendText = $Text
+        if ($kind -ne 'chat' -and (Test-LeakReport $Text)) {
+            $rep = try { Get-LeakReport $State } catch { Write-CCBLogError agent 'leak report' $_; '' }
+            if ($rep) { $sendText = "$Text`n`n$rep" }
+        }
+        $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $sendText -Sent $State.SentParts -Context $ctx -Summary $summary
         # The UI kit rules go out: the kit must be in the project (added once, never overwritten).
         if ($State.ProjectRoot -and $State.SentParts.Contains('rules:uikit')) {
             try {
                 # A catalogue from an older kit revision first, so the rules and the kit files match.
                 $kitNewer = @(Update-UiKitCatalog $State.ProjectRoot $State.AppRoot)
-                if ($kitNewer.Count) { Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub updated the project's UI kit to its newer version: the catalogue in $(Get-UiKitCatalog)/ and the kit files the pages use that the project had not changed ($($kitNewer -join ', ')). Kit files the project changed stay as they are." -Output ($kitNewer -join "`n") }
+                if ($kitNewer.Count) { Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub updated the project's UI kit to its newer version: the catalogue in $(Get-UiKitCatalog $State.ProjectRoot)/ and the kit files the pages use that the project had not changed ($($kitNewer -join ', ')). Kit files the project changed stay as they are." -Output ($kitNewer -join "`n") }
                 $kitAdded = @(Install-UiKit $State.ProjectRoot $State.AppRoot)
-                if ($kitAdded.Count) { Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub added its UI kit to the project: the whole kit as a catalogue in $(Get-UiKitCatalog)/, and in $(Get-UiKitFolder)/ only what the pages use ($($kitAdded -join ', ')); a kit class, script or React part a page uses is added after each change. Settings > UI kit turns this off." -Output ($kitAdded -join "`n") }
+                if ($kitAdded.Count) { Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub added its UI kit to the project: the whole kit as a catalogue in $(Get-UiKitCatalog $State.ProjectRoot)/, and in $(Get-UiKitFolder)/ only what the pages use ($($kitAdded -join ', ')); a kit class, script or React part a page uses is added after each change. Settings > UI kit turns this off." -Output ($kitAdded -join "`n") }
             } catch { Write-CCBLogError agent 'UI kit' $_ }
         }
         if ($State.SentParts.Count -gt $partsBefore -and $State.SentParts.Contains('actions')) { $State.FollowUps = 0 }
@@ -3654,7 +3747,7 @@ function Invoke-AgentTurn {
                 # kit classes into styles/kit/kit.css, kit scripts and React parts a page refers to, the
                 # icons), before the file checks look for missing files.
                 $kitSync = $null
-                if ((Test-UiKitOn $State.AppRoot) -and (Test-Path -LiteralPath (Join-Path $State.ProjectRoot ((Get-UiKitCatalog).Replace('/', '\') + '\kit.css')))) {
+                if ((Test-UiKitOn $State.AppRoot) -and (Test-Path -LiteralPath (Join-Path (Get-UiKitCatalogPath $State.ProjectRoot) 'kit.css'))) {
                     try {
                         $kitSync = Update-UiKitProject $State.ProjectRoot $State.AppRoot
                         $kitFiles = @(@($kitSync.added) + @($kitSync.updated))
@@ -3723,7 +3816,7 @@ function Invoke-AgentTurn {
                 try { foreach ($i in @(Update-ImportsAfterRound $State.ProjectRoot $roundChanged)) { $found.Add((& $other $i 'imports')) } } catch { Write-CCBLogError agent 'import index' $_ }
                 # Pages that use the UI kit's tokens without loading tokens.css; changes to the kit's own files.
                 try { foreach ($i in @(Find-UnlinkedKitTokens $State.ProjectRoot $roundChanged)) { $found.Add((& $other $i 'quality')) } } catch { Write-CCBLogError agent 'kit tokens check' $_ }
-                if (Test-Path -LiteralPath (Join-Path $State.ProjectRoot ((Get-UiKitCatalog).Replace('/', '\')))) {
+                if (Test-Path -LiteralPath (Get-UiKitCatalogPath $State.ProjectRoot)) {
                     foreach ($p in @($roundChanged | ForEach-Object { "$_".Replace('\', '/') } | Where-Object { $_ -match '(?i)^styles/kit/' -and $_ -notmatch '(?i)^styles/kit/(tokens\.css|kit\.css|kit-icons\.js)$' })) {
                         if ($ev.kitEdits -notcontains $p) { $ev.kitEdits = @($ev.kitEdits) + $p }
                         $found.Add((ConvertTo-CheckFinding $p 'this is one of the UI kit''s own files: change how the kit looks through styles/kit/tokens.css, your own stylesheet or the component''s options and data attributes instead. Edit a kit file only when there is no other way, and say why in the done summary' 'quality'))
@@ -4190,9 +4283,11 @@ function Start-AgentWorker {
                     # project's tokens brought to this version's kit right at open, so a newer
                     # StreamHub's additions are there before the first task.
                     try {
+                        # The shared library beside the projects (one kit, shared notes, runbooks for all): made at the first open.
+                        $null = Get-SharedRoot $openRoot -Create
                         $kitNewer = @(Update-UiKitCatalog $openRoot $State.AppRoot)
                         if ($kitNewer.Count) {
-                            Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub updated the project's UI kit to its newer version: the catalogue in $(Get-UiKitCatalog)/, new tokens in tokens.css (your own colours stay) and the kit files the pages use that the project had not changed ($($kitNewer -join ', ')). Kit files the project changed stay as they are." -Output ($kitNewer -join "`n")
+                            Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub updated the project's UI kit to its newer version: the catalogue in $(Get-UiKitCatalog $State.ProjectRoot)/, new tokens in tokens.css (your own colours stay) and the kit files the pages use that the project had not changed ($($kitNewer -join ', ')). Kit files the project changed stay as they are." -Output ($kitNewer -join "`n")
                             $u = Update-UiKitProject $openRoot $State.AppRoot
                             foreach ($f in @($u.updated) + @($u.added)) { if ($f) { Add-OwnChangeEvent $State 'write' $f 'StreamHub wrote this kit file again from the newer kit.' } }
                         }
@@ -4358,4 +4453,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

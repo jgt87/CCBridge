@@ -173,7 +173,7 @@ function Get-KitBlockTexts {
        its kit scripts use; the kit scripts the page uses (icons, kit.js, charts, file readers) and the
        data tools when it calls them. $null without a catalogue. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string]$PageText)
-    $cat = Join-Path $ProjectRoot (Get-UiKitCatalog).Replace('/', '\')
+    $cat = Get-UiKitCatalogPath $ProjectRoot
     $kitCss = Join-Path $cat 'kit.css'
     $page = Hide-GeneratedBlocks $PageText
     $js = New-Object System.Collections.Generic.List[string]

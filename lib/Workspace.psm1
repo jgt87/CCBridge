@@ -19,6 +19,56 @@ function Get-ProjectsRoot {
     $root
 }
 
+$script:SharedDirName = '.streamhub'
+
+function Get-SharedRoot {
+    <# The library every project in one folder shares: <parent of the project>\.streamhub (the UI kit
+       catalogue, a shared AGENTS.md, Runbooks, Scripts, data tools), when that folder exists, or when
+       -Create is given and the parent is a top-level OneDrive folder (the projects folder). Copilot
+       reads it as shared/... (Resolve-ProjectPath) and never writes it. $null for a project without one. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [switch]$Create)
+    $parent = Split-Path -Parent $ProjectRoot.TrimEnd('\')
+    if (-not $parent) { return $null }
+    $dir = Join-Path $parent $script:SharedDirName
+    if (Test-Path -LiteralPath $dir -PathType Container) { return $dir }
+    if (-not $Create) { return $null }
+    $od = try { Get-OneDriveRoot } catch { $null }
+    if (-not $od -or (Split-Path -Parent $parent.TrimEnd('\')) -ne $od) { return $null }
+    $null = New-Item -ItemType Directory -Force -Path $dir
+    Initialize-SharedRoot $dir
+    $dir
+}
+
+function Get-SharedPrefix([string]$ProjectRoot) {
+    <# The name Copilot reads the shared library under: shared/, or library/ when the project has a
+       folder named shared of its own (shared-library/ when it has both), so a project's own folders
+       always keep their names. The library itself is Get-SharedRoot. #>
+    foreach ($name in 'shared', 'library', 'shared-library') {
+        if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot $name) -PathType Container)) { return $name }
+    }
+    'shared-library'
+}
+
+function Initialize-SharedRoot([string]$Dir) {
+    # The shared instructions file, with a header that says what it is (dropped from what Copilot gets).
+    $notes = Join-Path $Dir 'AGENTS.md'
+    if (-not (Test-Path -LiteralPath $notes)) {
+        [IO.File]::WriteAllText($notes, "# Shared instructions`n`nInstructions for every project in this folder. The helper program sends them with each project's own AGENTS.md at the start of a chat.`nDescribe here what every project must follow: the organisation's conventions, naming, languages, the look, what to avoid.`n", (New-Object Text.UTF8Encoding($false)))
+    }
+}
+
+function Get-SharedNotes([string]$ProjectRoot) {
+    <# The shared AGENTS.md without its template lines; '' without one, or while nobody filled it in. #>
+    $shared = Get-SharedRoot $ProjectRoot
+    if (-not $shared) { return '' }
+    $f = Join-Path $shared 'AGENTS.md'
+    if (-not (Test-Path -LiteralPath $f)) { return '' }
+    $lines = @([IO.File]::ReadAllText($f).Replace("`r`n", "`n").Split("`n") | Where-Object { $_ -notmatch '^(Instructions for every project in this folder|Describe here what every project must follow)' })
+    $meaningful = @($lines | Where-Object { $_.Trim() -and $_ -notmatch '^\s*#' })
+    if (-not $meaningful.Count) { return '' }
+    ($lines -join "`n").Trim()
+}
+
 function Test-UnderOneDrive([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     $od = Get-OneDriveRoot
@@ -55,7 +105,7 @@ function Get-ProjectOverview {
 function Get-CCBridgeProjects {
     param([string]$FolderName = 'CCBridge')
     $root = Get-ProjectsRoot $FolderName
-    @(Get-ChildItem -Directory $root | Sort-Object LastWriteTime -Descending | ForEach-Object {
+    @(Get-ChildItem -Directory $root | Where-Object { -not $_.Name.StartsWith('.') } | Sort-Object LastWriteTime -Descending | ForEach-Object {
         [pscustomobject]@{ name = $_.Name; path = $_.FullName; modified = $_.LastWriteTime.ToString('s') }
     })
 }
@@ -115,6 +165,18 @@ function Resolve-ProjectPath {
     $rel = $RelativePath.Trim().Trim('"', "'", '`').Replace('/', '\').TrimStart('\')
     if (-not $rel -or [IO.Path]::IsPathRooted($rel)) { throw "Path must be relative to the project: '$RelativePath'" }
     $root = $ProjectRoot.TrimEnd('\')
+    # shared/... (library/ when the project has a shared folder of its own: Get-SharedPrefix) is the
+    # library beside the projects (Get-SharedRoot).
+    $prefix = Get-SharedPrefix $ProjectRoot
+    if ($rel -match "^$([regex]::Escape($prefix))(\\|$)") {
+        $shared = Get-SharedRoot $ProjectRoot
+        if (-not $shared) { throw "There is no shared library beside this project ($prefix/ is the .streamhub folder next to the projects): '$RelativePath'" }
+        $sroot = $shared.TrimEnd('\')
+        $sfull = [IO.Path]::GetFullPath((Join-Path $sroot $rel.Substring($prefix.Length).TrimStart('\')))
+        if ($sfull -ne $sroot -and -not $sfull.StartsWith($sroot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw "Path is outside the shared library: '$RelativePath'" }
+        Assert-NoOutsideLink $sroot $sfull $RelativePath
+        return $sfull
+    }
     $full = [IO.Path]::GetFullPath((Join-Path $root $rel))
     if (-not $full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw "Path is outside the project: '$RelativePath'" }
     Assert-NoOutsideLink $root $full $RelativePath
@@ -148,7 +210,12 @@ function Assert-NoOutsideLink {
 }
 
 function ConvertTo-RelativePath([string]$ProjectRoot, [string]$FullPath) {
-    $FullPath.Substring($ProjectRoot.TrimEnd('\').Length + 1).Replace('\', '/')
+    # A path in the project as PATH; one in the shared library beside the projects as shared/PATH.
+    $root = $ProjectRoot.TrimEnd('\')
+    if ($FullPath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { return $FullPath.Substring($root.Length + 1).Replace('\', '/') }
+    $shared = Get-SharedRoot $ProjectRoot
+    if ($shared -and $FullPath.StartsWith($shared.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return "$(Get-SharedPrefix $ProjectRoot)/" + $FullPath.Substring($shared.TrimEnd('\').Length + 1).Replace('\', '/') }
+    $FullPath.Substring($root.Length + 1).Replace('\', '/')
 }
 
 function Get-GitIgnoreMatchers([string]$ProjectRoot) {
@@ -410,4 +477,4 @@ function Save-SourceFile {
 
 Export-ModuleMember -Function Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
-    Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile
+    Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile, Get-SharedRoot, Get-SharedPrefix, Initialize-SharedRoot, Get-SharedNotes

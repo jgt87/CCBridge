@@ -151,17 +151,26 @@ function Get-RunbookTemplates {
 }
 
 function Get-Runbooks {
-    <# The project's runbooks with their output file and when it was last written. #>
+    <# The project's runbooks with their output file and when it was last written, then the shared
+       ones (shared/Runbooks/ in the library beside the projects, shared = $true; a project runbook of
+       the same name wins), whose output goes to this project's Runbooks/Exports/. #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
-    $dir = Join-Path $ProjectRoot $script:RunbookDir
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return }
-    foreach ($f in Get-ChildItem -LiteralPath $dir -Filter '*.runbook.md' -File | Sort-Object Name) {
-        $name = $f.Name.Substring(0, $f.Name.Length - '.runbook.md'.Length)
-        $rb = Read-Runbook ([IO.File]::ReadAllText($f.FullName))
-        $out = if ($rb.meta.output) { $rb.meta.output } else { "$($script:ExportDir)/$name.json" }
-        $outFull = try { Resolve-ProjectPath $ProjectRoot $out } catch { $null }
-        $last = if ($outFull -and (Test-Path -LiteralPath $outFull)) { (Get-Item -LiteralPath $outFull).LastWriteTime.ToString('s') } else { $null }
-        [pscustomobject]@{ name = $name; title = $(if ($rb.meta.title) { $rb.meta.title } else { $name }); path = "$($script:RunbookDir)/$($f.Name)"; output = $out; lastRun = $last }
+    $seen = @{}
+    $places = @(@{ dir = (Join-Path $ProjectRoot $script:RunbookDir); prefix = $script:RunbookDir; shared = $false })
+    $shared = Get-SharedRoot $ProjectRoot
+    if ($shared) { $places += @{ dir = (Join-Path $shared $script:RunbookDir); prefix = "$(Get-SharedPrefix $ProjectRoot)/$($script:RunbookDir)"; shared = $true } }
+    foreach ($pl in $places) {
+        if (-not (Test-Path -LiteralPath $pl.dir -PathType Container)) { continue }
+        foreach ($f in Get-ChildItem -LiteralPath $pl.dir -Filter '*.runbook.md' -File | Sort-Object Name) {
+            $name = $f.Name.Substring(0, $f.Name.Length - '.runbook.md'.Length)
+            if ($seen.ContainsKey($name)) { continue }
+            $seen[$name] = $true
+            $rb = Read-Runbook ([IO.File]::ReadAllText($f.FullName))
+            $out = if ($rb.meta.output) { $rb.meta.output } else { "$($script:ExportDir)/$name.json" }
+            $outFull = try { Resolve-ProjectPath $ProjectRoot $out } catch { $null }
+            $last = if ($outFull -and (Test-Path -LiteralPath $outFull)) { (Get-Item -LiteralPath $outFull).LastWriteTime.ToString('s') } else { $null }
+            [pscustomobject]@{ name = $name; title = $(if ($rb.meta.title) { $rb.meta.title } else { $name }); path = "$($pl.prefix)/$($f.Name)"; output = $out; lastRun = $last; shared = $pl.shared }
+        }
     }
 }
 

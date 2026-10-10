@@ -118,6 +118,60 @@ function Repair-MechanicalIssues {
             $fixes.Add('the escaped page (&lt;html&gt;...) written as tags')
         }
     }
+    # Markup shown as text: a tag written with &lt; and &gt; in a page's (SVG's, XAML's, Vue's,
+    # Svelte's) own text becomes the tag, as does code written with entities in JSX/TSX; a tag that
+    # lost its < gets it back, one that lost its > is closed; a </script> with no <script> before it
+    # gets one before the code lines above it.
+    if ($Path -match '(?i)\.(html?|xhtml|svg|xaml|vue|svelte|jsx|tsx)$') {
+        $leaks = @(Find-LeakedMarkup $Path $t)
+        $ents = @($leaks | Where-Object { $_.kind -in 'entity', 'entity-code' })
+        if ($ents.Count) {
+            $sb = New-Object Text.StringBuilder $t
+            foreach ($e in @($ents | Sort-Object { $_.index } -Descending)) {
+                $tag = if ($e.kind -eq 'entity-code') { $e.text.Replace('&lt;', '<').Replace('&gt;', '>') } else { $e.text -replace '^&lt;', '<' -replace '&gt;$', '>' -replace '&quot;', '"' -replace '&#39;', "'" -replace '&amp;', '&' }
+                [void]$sb.Remove($e.index, $e.length); [void]$sb.Insert($e.index, $tag)
+            }
+            $t = $sb.ToString()
+            $fixes.Add($(if ($Path -match '(?i)\.(jsx|tsx)$') { "$($ents.Count) piece(s) of code written with &lt; and &gt; written with < and >" } else { "$($ents.Count) tag(s) written with &lt; and &gt; in the page's text (shown as text) written as tags" }))
+        }
+        # A tag that lost its <: the < back, from the end of the file so earlier indexes hold.
+        $broken = @($leaks | Where-Object { $_.kind -eq 'broken-tag' } | Sort-Object { $_.index } -Descending)
+        if ($broken.Count) {
+            foreach ($b in $broken) { $t = $t.Insert($b.index, '<') }
+            $fixes.Add("$($broken.Count) tag(s) that had lost their < (such as $($broken[-1].text.Substring(0, [Math]::Min(20, $broken[-1].text.Length)))) written whole")
+            $leaks = @(Find-LeakedMarkup $Path $t)
+        }
+        # A tag that lost its > (the browser read the next text or tag as its attributes): closed where
+        # its attributes end, from the end of the file so earlier indexes hold.
+        $lost = @($leaks | Where-Object { $_.kind -eq 'lost-end' } | Sort-Object { $_.index } -Descending)
+        if ($lost.Count) {
+            foreach ($l in $lost) { $t = $t.Insert($l.index, '>') }
+            $fixes.Add("$($lost.Count) tag(s) that had lost their > (such as $($lost[-1].text.Substring(0, [Math]::Min(30, $lost[-1].text.Length)))) closed")
+            $leaks = @(Find-LeakedMarkup $Path $t)
+        }
+        $strays = @($leaks | Where-Object { $_.kind -eq 'stray-close' } | Sort-Object { $_.index } -Descending)
+        $put = 0
+        foreach ($s in $strays) {
+            # The code above the stray </script>: lines up to the previous tag line, when at least one of
+            # them is code (a ; { } = or call), get <script> in front.
+            $before = $t.Substring(0, $s.index)
+            $lines = $before.Replace("`r`n", "`n").Split("`n")
+            $start = $lines.Length - 1; $code = $false
+            for ($i = $lines.Length - 2; $i -ge 0; $i--) {
+                if ($lines[$i] -match '<[a-zA-Z/!]') { break }
+                if ($lines[$i] -match '[;{}=]|\w\(') { $code = $true }
+                $start = $i
+            }
+            if (-not $code -or $start -ge $lines.Length - 1) { continue }
+            $nl = if ($t.Contains("`r`n")) { "`r`n" } else { "`n" }
+            $indent = [regex]::Match($lines[$lines.Length - 1], '^[ \t]*').Value
+            $at = 0
+            for ($i = 0; $i -lt $start; $i++) { $at += $lines[$i].Length + $nl.Length }
+            $t = $t.Insert($at, "$indent<script>$nl")
+            $put++
+        }
+        if ($put) { $fixes.Add("$put <script> tag(s) put before code that stood on the page as text (its </script> had no opening tag)") }
+    }
     # A web page without a charset: <meta charset="utf-8"> first in <head>, so Edge reads the page
     # and its scripts as UTF-8 when it is opened from disk.
     if ($Path -match '(?i)\.html?$') {

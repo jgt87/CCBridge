@@ -237,3 +237,41 @@ Describe 'Get-NextSteps' {
         @(Get-NextSteps $list).Count | Should Be 5
     }
 }
+
+Describe 'SEARCH text that differs from the file only in what the eye cannot see (Find-LooseTarget)' {
+    $proj = Join-Path $env:TEMP ('ccb-loose-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $proj | Out-Null
+    $f = Join-Path $proj 'index.html'
+    $nbsp = [string][char]0x00A0; $zw = [string][char]0x200B; $lq = [string][char]0x201C; $rq = [string][char]0x201D
+    $file = "<html>`n<head>`n  <meta charset=""utf-8"">`n  <meta name=""viewport"" content=""width=device-width, initial-scale=1"">`n  <title>Copilot usage dashboard</title>`n  <link rel=""stylesheet"" href=""styles/kit/tokens.css"">`n</head>`n<body></body>`n</html>"
+    It 'applies an edit whose SEARCH has a non-breaking space, a zero-width character and curly quotes, and says what differed' {
+        [IO.File]::WriteAllText($f, $file)
+        $search = "<meta name=""viewport"" content=""width=device-width,${nbsp}initial-scale=1"">`n<title>Copilot${zw} usage dashboard</title>`n<link rel=${lq}stylesheet${rq} href=""styles/kit/tokens.css"">"
+        $replace = "<meta name=""viewport"" content=""width=device-width, initial-scale=1"">`n<title>Copilot usage dashboard</title>`n<link rel=""icon"" href=""data:,"">`n<link rel=""stylesheet"" href=""styles/kit/tokens.css"">"
+        $r = Invoke-EditAction $proj 'index.html' @(@{ search = $search; replace = $replace }) $null
+        $t = [IO.File]::ReadAllText($f)
+        $t | Should Match '  <link rel="icon" href="data:,">\n  <link rel="stylesheet" href="styles/kit/tokens.css">'
+        $t | Should Not Match $nbsp
+        "$r" | Should Match 'ignoring hidden characters, quote style and spacing'
+        "$r" | Should Match 'SEARCH line 1 \(file line 4\): the same to the eye, but not the same characters: SEARCH has .*\[NBSP\]'
+    }
+    It 'applies a SEARCH with entities and doubled spaces the same way, but not one that is in the file twice' {
+        [IO.File]::WriteAllText($f, $file)
+        $r = Invoke-EditAction $proj 'index.html' @(@{ search = "&lt;title&gt;Copilot  usage dashboard&lt;/title&gt;"; replace = "<title>Usage</title>" }) $null
+        [IO.File]::ReadAllText($f) | Should Match '  <title>Usage</title>'
+        [IO.File]::WriteAllText($f, "a`n  x = 1;`nb`n  x = 1;`nc")
+        $err = $null
+        try { Invoke-EditAction $proj 'index.html' @(@{ search = "x${nbsp}= 1;"; replace = 'y' }) $null } catch { $err = $_.Exception.Message }
+        $err | Should Match 'SEARCH text not found'
+        [IO.File]::ReadAllText($f) | Should Be "a`n  x = 1;`nb`n  x = 1;`nc"
+    }
+    It 'names the differing line, with hidden characters shown, when the text is still not there' {
+        [IO.File]::WriteAllText($f, $file)
+        $err = $null
+        try { Invoke-EditAction $proj 'index.html' @(@{ search = "<title>Copilot usage dashboard</title>`n<link rel=""stylesheet"" href=""styles/kit/tokens.css"">`n<link rel=""stylesheet"" href=""css/dashboard.css"">"; replace = 'x' }) $null } catch { $err = $_.Exception.Message }
+        $err | Should Match 'SEARCH text not found'
+        $err | Should Match "What differs: SEARCH line 3 is not file line 7: SEARCH has '<link rel=""stylesheet"" href=""css/dashboard.css"">', the file has '</head>'"
+        try { Invoke-EditAction $proj 'index.html' @(@{ search = "<title>Copilot usage dashboard</title>`n<link rel=""stylesheet"" href=""styles/kit/tokens.css"">`n<link rel=""stylesheet"" href=""css/dashboard.css"">`n<script${nbsp}src=""a.js""></script>"; replace = 'x' }) $null } catch { $err = $_.Exception.Message }
+        $err | Should Match 'SEARCH line 4 is not file line 8: SEARCH has ''<script\[NBSP\]src="a.js"></script>'''
+    }
+    Remove-Item $proj -Recurse -Force -ErrorAction SilentlyContinue
+}

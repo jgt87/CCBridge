@@ -1,0 +1,1 @@
+import"./chunk-NGNAAXSQ-DqoPQk1a.js";import{M as e}from"./mermaid-parser.core-6KFww7th.js";export{e as createArchitectureServices};

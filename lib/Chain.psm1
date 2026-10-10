@@ -6,7 +6,8 @@
 #       4. fetch: team-news
 #       5. download: https://TENANT.sharepoint.com/sites/SITE/Shared%20Documents/sales.csv to Downloads/sales.csv
 # A runbook step can take files from earlier steps ("with PATH, PATH"): their contents go with the
-# runbook's prompt as data. Scripts must be in the project's Scripts/ folder; the agent job
+# runbook's prompt as data. Scripts must be in the project's Scripts/ folder (or shared/Scripts/ in
+# the library beside the projects); the agent job
 # (Invoke-ChainJob in Agent.psm1) runs them with the same safety checks as Copilot's commands and
 # asks before a script runs for the first time or after it changed (setting chainScripts).
 # A download step saves a SharePoint or OneDrive file into the project through StreamHub's Edge
@@ -72,19 +73,22 @@ function Test-ScriptArgs([string]$ArgText) {
 
 function Resolve-ChainScript {
     <# Checks a script step and returns @{ path; full; command; error }. The script must be a .ps1,
-       .cmd, .bat or .py file inside the project's Scripts/ folder. #>
+       .cmd, .bat or .py file inside the project's Scripts/ folder, or in shared/Scripts/ (the library
+       beside the projects; run by its full path, since the command runs in the project). #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Path, [string]$ArgText = '')
     $rel = $Path.Replace('\', '/').TrimStart('/')
     $fail = { param($why) [pscustomobject]@{ path = $rel; full = $null; command = $null; error = $why } }
     if ($rel -match '(^|/)\.\.(/|$)' -or $rel -match '^[A-Za-z]:' -or $rel.StartsWith('//')) { return & $fail 'a script step names a path inside the project, without ..' }
-    if (-not $rel.StartsWith("$($script:ScriptDir)/", [StringComparison]::OrdinalIgnoreCase)) { return & $fail "scripts must be in the project's $($script:ScriptDir)/ folder" }
+    $prefix = Get-SharedPrefix $ProjectRoot
+    $isShared = $rel.StartsWith("$prefix/$($script:ScriptDir)/", [StringComparison]::OrdinalIgnoreCase)
+    if (-not $isShared -and -not $rel.StartsWith("$($script:ScriptDir)/", [StringComparison]::OrdinalIgnoreCase)) { return & $fail "scripts must be in the project's $($script:ScriptDir)/ folder (or in $prefix/$($script:ScriptDir)/, the library beside the projects)" }
     $ext = [IO.Path]::GetExtension($rel).ToLowerInvariant()
     if ($script:ScriptTypes -notcontains $ext) { return & $fail "a script step runs .ps1, .cmd, .bat or .py files, not '$ext'" }
     $why = Test-ScriptArgs $ArgText
     if ($why) { return & $fail $why }
     $full = try { Resolve-ProjectPath $ProjectRoot $rel } catch { return & $fail $_.Exception.Message }
     if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return & $fail "there is no file $rel" }
-    $win = $rel.Replace('/', '\')
+    $win = if ($isShared) { $full } else { $rel.Replace('/', '\') }
     $cmd = switch ($ext) {
         '.ps1' { "powershell -NoProfile -ExecutionPolicy Bypass -File `"$win`"" }
         '.py' { "python `"$win`"" }
@@ -120,17 +124,25 @@ function Test-ChainSteps {
 }
 
 function Get-Chains {
-    <# The project's chains with their steps and any problems. #>
+    <# The project's chains with their steps and any problems, then the shared ones (shared/Runbooks/
+       beside the projects, shared = $true; a project chain of the same name wins). #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
-    $dir = Join-Path $ProjectRoot $script:ChainDir
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return }
-    foreach ($f in Get-ChildItem -LiteralPath $dir -Filter '*.chain.md' -File | Sort-Object Name) {
-        $name = $f.Name.Substring(0, $f.Name.Length - '.chain.md'.Length)
-        $c = Read-Chain ([IO.File]::ReadAllText($f.FullName))
-        $steps = @($c.steps | ForEach-Object { [pscustomobject]@{ kind = $_.kind; target = $_.target; with = @($_.with); args = $_.args } })
-        [pscustomobject]@{
-            name = $name; title = $(if ($c.title) { $c.title } else { $name }); path = "$($script:ChainDir)/$($f.Name)"
-            stopOnError = $c.stopOnError; steps = $steps; problems = @(Test-ChainSteps $ProjectRoot $c.steps)
+    $seen = @{}
+    $places = @(@{ dir = (Join-Path $ProjectRoot $script:ChainDir); prefix = $script:ChainDir; shared = $false })
+    $shared = Get-SharedRoot $ProjectRoot
+    if ($shared) { $places += @{ dir = (Join-Path $shared $script:ChainDir); prefix = "$(Get-SharedPrefix $ProjectRoot)/$($script:ChainDir)"; shared = $true } }
+    foreach ($pl in $places) {
+        if (-not (Test-Path -LiteralPath $pl.dir -PathType Container)) { continue }
+        foreach ($f in Get-ChildItem -LiteralPath $pl.dir -Filter '*.chain.md' -File | Sort-Object Name) {
+            $name = $f.Name.Substring(0, $f.Name.Length - '.chain.md'.Length)
+            if ($seen.ContainsKey($name)) { continue }
+            $seen[$name] = $true
+            $c = Read-Chain ([IO.File]::ReadAllText($f.FullName))
+            $steps = @($c.steps | ForEach-Object { [pscustomobject]@{ kind = $_.kind; target = $_.target; with = @($_.with); args = $_.args } })
+            [pscustomobject]@{
+                name = $name; title = $(if ($c.title) { $c.title } else { $name }); path = "$($pl.prefix)/$($f.Name)"
+                stopOnError = $c.stopOnError; steps = $steps; problems = @(Test-ChainSteps $ProjectRoot $c.steps); shared = $pl.shared
+            }
         }
     }
 }
@@ -228,12 +240,17 @@ function Set-ChainSteps {
 }
 
 function Get-ProjectScripts {
-    <# Script files a chain can run: .ps1, .cmd, .bat and .py in the project's Scripts/ folder. #>
+    <# Script files a chain can run: .ps1, .cmd, .bat and .py in the project's Scripts/ folder, then
+       in shared/Scripts/ (the library beside the projects). #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
-    $dir = Join-Path $ProjectRoot $script:ScriptDir
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return }
-    foreach ($f in Get-ChildItem -LiteralPath $dir -File -Recurse | Where-Object { $script:ScriptTypes -contains $_.Extension.ToLowerInvariant() } | Sort-Object FullName) {
-        "$($script:ScriptDir)/" + $f.FullName.Substring($dir.Length).TrimStart('\').Replace('\', '/')
+    $places = @(@{ dir = (Join-Path $ProjectRoot $script:ScriptDir); prefix = $script:ScriptDir })
+    $shared = Get-SharedRoot $ProjectRoot
+    if ($shared) { $places += @{ dir = (Join-Path $shared $script:ScriptDir); prefix = "$(Get-SharedPrefix $ProjectRoot)/$($script:ScriptDir)" } }
+    foreach ($pl in $places) {
+        if (-not (Test-Path -LiteralPath $pl.dir -PathType Container)) { continue }
+        foreach ($f in Get-ChildItem -LiteralPath $pl.dir -File -Recurse | Where-Object { $script:ScriptTypes -contains $_.Extension.ToLowerInvariant() } | Sort-Object FullName) {
+            "$($pl.prefix)/" + $f.FullName.Substring($pl.dir.Length).TrimStart('\').Replace('\', '/')
+        }
     }
 }
 

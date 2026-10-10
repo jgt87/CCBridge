@@ -181,3 +181,102 @@ Describe 'A command that ends with exit code 0 but printed PowerShell errors' {
         Get-HiddenErrorNote "Generated index.html." | Should Be ''
     }
 }
+
+Describe 'Markup or script a page shows as text (Find-LeakedMarkup, AutoFix)' {
+    $page = "<!doctype html>`n<html><head><meta charset=""utf-8""><title>T</title></head>`n<body class=""kit-page"">`n<div class=""kit-panel"">`n&lt;div class=""kit-panel__head""&gt;`n  &lt;h2 class=""kit-panel__title""&gt;Users&lt;/h2&gt;`n&lt;/div&gt;`n<pre><code>&lt;b&gt;sample&lt;/b&gt;</code></pre>`n<p>a &lt; b</p>`n</div>`n<script src=""x.js""></script>`n</body></html>"
+    It 'names the line of a tag written with entities in the page text, not in a code sample, and writes the tag' {
+        $f = @(Find-LeakedMarkup 'index.html' $page)
+        $f.Count | Should Be 4
+        $f[0].kind | Should Be 'entity'
+        $f[0].message | Should Match '^line 5: the tag &lt;div class="kit-panel__head"&gt; is written with &lt; and &gt;, so the browser shows it as text'
+        @(Test-FileContent 'index.html' $page | Where-Object { $_ -match 'written with &lt;' }).Count | Should Be 3   # the first three per file
+        $r = Repair-MechanicalIssues 'index.html' $page
+        $r.fixes -join ';' | Should Match '4 tag\(s\) written with &lt; and &gt;'
+        $r.text | Should Match '(?m)^<div class="kit-panel__head">$'
+        $r.text | Should Match '<pre><code>&lt;b&gt;sample&lt;/b&gt;</code></pre>'   # a code sample stays
+        $r.text | Should Match '<p>a &lt; b</p>'                                      # a real entity stays
+        @(Find-LeakedMarkup 'index.html' $r.text).Count | Should Be 0
+    }
+    It 'reports a </script> without its opening tag and puts <script> before the code above it' {
+        $p = "<html><body>`n<div id=""app""></div>`n  const el = document.getElementById(""app"");`n  el.addEventListener(""click"", () => { go(); });`n</script>`n</body></html>"
+        $f = @(Find-LeakedMarkup 'index.html' $p)
+        $f.Count | Should Be 1
+        $f[0].message | Should Match '^line 5: </script> without a <script> before it'
+        $r = Repair-MechanicalIssues 'index.html' $p
+        $r.fixes -join ';' | Should Match '1 <script> tag\(s\) put before code'
+        $r.text | Should Match "<div id=""app""></div>`n<script>`n  const el"
+        @(Find-LeakedMarkup 'index.html' $r.text).Count | Should Be 0
+    }
+    It 'reports script code outside any script block, and markup given to textContent in a script' {
+        $p = "<html><body>`n<div id=""app""></div>`n<p>Click the button</p>`ndocument.getElementById(""app"").textContent = ""hi"";`n</body></html>"
+        @(Find-LeakedMarkup 'index.html' $p)[0].message | Should Match '^line 4: script code outside any <script> block \(1 line\(s\), first: document\.getElementById'
+        $js = "const p = document.getElementById(""x"");`np.textContent = ""<div class=\""a\"">"" + name + ""</div>"";`nq.innerHTML = ""<b>"" + n + ""</b>"";`nr.innerText = `"`<span>`${n}</span>`"`;`n"
+        $f = @(Find-LeakedMarkup 'app.js' $js)
+        $f.Count | Should Be 2
+        $f[0].message | Should Match '^line 2: markup given to textContent'
+        $f[1].message | Should Match '^line 4: markup given to innerText'
+        @(Find-LeakedMarkup 'index.html' "<html><body><script>`nel.innerText = ""<b>x</b>"";`n</script></body></html>")[0].message | Should Match '^line 2: markup given to innerText'
+        (Repair-MechanicalIssues 'app.js' $js).text | Should Be $js   # not a mechanical fix: Copilot chooses innerHTML or elements
+    }
+    It 'decodes code written with entities in JSX/TSX (generics, arrows, comparisons, component tags) and leaves JSX prose' {
+        $tsx = "import { useState } from ""react"";`nexport function App() {`n  const [n, setN] = useState&lt;number&gt;(0);`n  const items = list.map((x) =&gt; x.id);`n  if (n &lt; 3) { go(); }`n  return (<div>`n    <p>Use &lt;b&gt; for bold</p>`n    &lt;Card title=""x"" /&gt;`n  </div>);`n}`n"
+        $f = @(Find-LeakedMarkup 'App.tsx' $tsx)
+        ($f | ForEach-Object { $_.line }) -join ',' | Should Be '3,4,5,8'
+        $r = Repair-MechanicalIssues 'App.tsx' $tsx
+        $r.text | Should Match 'useState<number>\(0\)'
+        $r.text | Should Match '\(x\) => x\.id'
+        $r.text | Should Match 'if \(n < 3\)'
+        $r.text | Should Match '<Card title="x" />'
+        $r.text | Should Match '<p>Use &lt;b&gt; for bold</p>'
+    }
+    It 'treats a tag written with entities in XAML, SVG, Vue and Svelte the same way, and leaves XML data alone' {
+        $xaml = "<Window xmlns=""x""><StackPanel>`n&lt;Button Content=""Go""/&gt;`n<TextBlock Text=""a &lt; b""/>`n</StackPanel></Window>"
+        @(Find-LeakedMarkup 'MainWindow.xaml' $xaml)[0].message | Should Match '^line 2: .* so the window shows it as text'
+        (Repair-MechanicalIssues 'MainWindow.xaml' $xaml).text | Should Match "`n<Button Content=""Go""/>`n<TextBlock Text=""a &lt; b""/>"
+        @(Find-LeakedMarkup 'App.vue' "<template>`n  &lt;Card /&gt;`n</template>`n<script>`nconst a = 1;`n</script>").Count | Should Be 1
+        @(Find-LeakedMarkup 'feed.xml' "<rss><item><description>&lt;p&gt;html in data&lt;/p&gt;</description></item></rss>").Count | Should Be 0
+    }
+    It 'reports nothing for the kit examples page, the kit scripts and the React parts' {
+        @(Find-LeakedMarkup 'kit-examples.html' ([IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-examples.html')))).Count | Should Be 0
+        @(Find-LeakedMarkup 'kit.js' ([IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.js')))).Count | Should Be 0
+        foreach ($f in Get-ChildItem (Join-Path $root 'templates\ui-kit\react') -Filter *.tsx) { @(Find-LeakedMarkup $f.Name ([IO.File]::ReadAllText($f.FullName))).Count | Should Be 0 }
+    }
+    It 'reports a tag that lost its < and puts it back, but not prose with a > in it' {
+        $p = "<!doctype html>`n<html><body>`n<div class=""kit-panel"">`ndiv class=""kit-panel__head"">`n  h2 class=""kit-panel__title"">Users /h2>`n/div>`n<p>if a > b then c</p>`n<p>Totals: x > y</p>`nscript src=""js/app.js""></script>`n</div>`n</body></html>"
+        $f = @(Find-LeakedMarkup 'index.html' $p)
+        ($f | Where-Object { $_.kind -eq 'broken-tag' } | ForEach-Object { $_.line }) -join ',' | Should Be '4,5,5,6,9'
+        @($f | Where-Object { $_.kind -eq 'stray-close' }).Count | Should Be 1   # the script's end tag, with its start gone
+        $f[0].message | Should Match '^line 4: the tag div class="kit-panel__head"> is missing its <, so the browser shows it as text: write <div class='
+        $r = Repair-MechanicalIssues 'index.html' $p
+        $r.fixes -join ';' | Should Match '5 tag\(s\) that had lost their <'
+        $r.text | Should Match "(?m)^<div class=""kit-panel__head"">`n  <h2 class=""kit-panel__title"">Users </h2>`n</div>$"
+        $r.text | Should Match '<script src="js/app.js"></script>'
+        $r.text | Should Match '<p>if a > b then c</p>'
+        @(Find-LeakedMarkup 'index.html' $r.text).Count | Should Be 0
+        @(Find-LeakedMarkup 'MainWindow.xaml' "<Window><StackPanel>`nButton Content=""Go""/>`n</StackPanel></Window>")[0].message | Should Match '^line 2: the tag Button Content="Go"/> is missing its <, so the window shows it as text'
+    }
+    It 'reports a tag that lost its > with its line and closes it, leaving multi-line tags and prose alone' {
+        $p = "<!doctype html>`n<html><head><meta charset=""utf-8""></head><body>`n<div class=""kit-panel"">`n<div class=""kit-panel__head""`n  <h2 class=""kit-panel__title"">Users</h2>`n</div>`n<a`n  href=""x.html""`n  class=""kit-btn"">Open</a>`n<p>if a < b then c</p>`n<input type=""text"" disabled`n<img src=""a.png"" alt=""A""`n<script src=""js/app.js""></script>`n<br/`n<div class=""x""`nUsers</div>`n</div>`n</body></html>"
+        $f = @(Find-LeakedMarkup 'index.html' $p)
+        ($f | ForEach-Object { "$($_.kind):$($_.line)" }) -join ',' | Should Be 'lost-end:4,lost-end:11,lost-end:12,lost-end:14,lost-end:15'
+        $f[0].message | Should Match '^line 4: the tag <div class="kit-panel__head" has no >, so the browser reads what follows, up to the next >, as attributes, and that text or tag is not on the page \(a script tag there never loads\): close it with > after <div class="kit-panel__head"$'
+        $r = Repair-MechanicalIssues 'index.html' $p
+        $r.fixes -join ';' | Should Match '5 tag\(s\) that had lost their > \(such as <div class="kit-panel__head"\) closed'
+        $r.text | Should Match "(?m)^<div class=""kit-panel__head"">`n  <h2 class=""kit-panel__title"">Users</h2>$"
+        $r.text | Should Match "(?m)^<input type=""text"" disabled>`n<img src=""a.png"" alt=""A"">`n<script src=""js/app.js""></script>`n<br/>`n<div class=""x"">`nUsers</div>$"
+        $r.text | Should Match "(?m)^<a`n  href=""x.html""`n  class=""kit-btn"">Open</a>$"
+        $r.text | Should Match '<p>if a < b then c</p>'
+        @(Find-LeakedMarkup 'index.html' $r.text).Count | Should Be 0
+        @(Test-FileContent 'index.html' $r.text).Count | Should Be 0
+        @(Find-LeakedMarkup 'MainWindow.xaml' "<Window><StackPanel>`n<Button Content=""Go""`n<TextBlock Text=""Hi""/>`n</StackPanel></Window>")[0].message | Should Match '^line 2: the tag <Button Content="Go" has no >, so the window does not load \(not valid XML\)'
+        @(Find-LeakedMarkup 'App.svelte' "<script>let a = 1;</script>`n{#if a <b}`n<p on:click={() => a < 3} class=""x"">x</p>`n{/if}").Count | Should Be 0
+        @(Find-LeakedMarkup 'index.html' "<html><body>`n<p>Use <b>bold</b> and <code>a <b</code></p>`n<script>if (a <b) { x(); }</script>`n</body></html>").Count | Should Be 0
+    }
+    It 'has the page-side check for markup and script shown as text' {
+        $js = Get-PageContentScript
+        $js | Should Match 'kind: "leak"'
+        $js | Should Match 'shows HTML markup as plain text'
+        $js | Should Match 'shows script code as plain text'
+        $js | Should Match 'has no >: the browser read what followed it'
+    }
+}

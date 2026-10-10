@@ -6,6 +6,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.120] - 2026-10-10
+
+### Added
+- One shared library beside the projects: the `.streamhub` folder next to the project folders (`OneDrive\CCBridge\.streamhub`), made at the first project open, holds what every project in that folder shares and is read by Copilot as `shared/...` (never written from a project): one central UI kit catalogue in `shared/ui-kit/` that projects pull only what their pages use from, shared instructions in `shared/AGENTS.md` sent with every project's own notes, runbooks, fetch prompts and chains in `shared/Runbooks/` and scripts in `shared/Scripts/` that any project can run (a project file of the same name wins; outputs stay in the project), and your own `data/data-tools.js`. A kit file changed centrally stays yours through kit updates, is named to Copilot as the organisation's version, and reaches every project whose copy was still the kit's; a central token change reaches projects wherever a value was still the default. An older project's own catalogue moves into the central one at its next open. When a project has a `shared` folder of its own, the library is read as `library/`. The Runbooks, Chains and Scripts panels mark shared items and say where they are edited.
+- Each language's own opening and closing pairs are checked, with the line of the first problem: PHP `<?php ?>`, EJS/ERB/JSP/ASP `<% %>`, `{{ }}`, Jinja/Twig/Nunjucks/Liquid/Django `{% if %}...{% endif %}`, Handlebars/Mustache `{{#x}}...{{/x}}`, Go templates `{{if}}...{{end}}`, Smarty, Svelte `{#if}...{/if}`, Blade `@if...@endif`, Angular `@if { }` braces, Razor code braces, JSX `<>...</>` fragments, the tag balance of Vue, Svelte and Astro files and Astro's frontmatter, Visual Basic (VBA, VBScript, VB.NET) block statements by kind, Lua, Ruby, LaTeX, Makefile, CMake and Terraform; HTML files by the template syntax they hold. Razor and Ruby findings are warnings.
+- A tag that lost its `>` (`<div class="x"` followed by the next tag or a text line) is reported with its line and closed where its attributes end; the browser would otherwise read the text and the next tag as attributes, so they vanish and a script tag there never loads. Also in JSX/TSX when the next line starts a tag, and on the page: an element whose attribute names hold a `<`.
+- Markup or script a page shows as text is found in the files with the exact line and repaired where there is one right answer: a tag written as `&lt;div&gt;` in a page, SVG, XAML, Vue or Svelte file, a tag that lost its `<` (`div class="x">`, `/div>`), a `</script>` with no `<script>` before it, script code outside any script block, markup given to `textContent`, and JSX code written with entities. The page check reports visible text that holds a tag or a line of code, naming the element.
+- When you tell StreamHub that a page shows script or markup as text, it checks every page and script itself before the message goes to Copilot, fixes what it can (as StreamHub change cards), opens the root page and traces what it still sees to the file and line that writes it, and sends Copilot a block with what was fixed, what is left at which line and what the page shows, instead of letting Copilot hunt for three rounds.
+- An edit whose SEARCH text is not in the file exactly is matched loosely as a last resort (hidden characters, typographic quotes and dashes, entities, spacing): exactly one such place is edited, with a note naming the difference per line; the not-found error ends with "What differs" per line, hidden characters named, so a difference the eye cannot see never loops.
+
+### Changed
+- More file types count as code for the marker and fence checks and as XML for the structure check (XSLT, XSD, WSDL, WiX, project files); Gradle and Groovy get the brace check.
+
 ## [v0.1.119] - 2026-10-10
 
 ### Added

@@ -125,6 +125,25 @@ function Get-EnvironmentText {
 $script:LookWords = '(?i)(\b(colou?rs?|kleur(en)?|background|achtergrond|fonts?|lettertype|bold|vet(ter)?|italic|cursief|bigger|larger|smaller|wider|narrower|taller|groter|kleiner|breder|smaller|rounded|round(er)?|ronde?r?|square|vierkant|corners?|hoeken|radius|shadows?|schaduw|borders?|randen?|gradient|verloop|darker|lighter|brighter|donkerder|lichter|feller|spacing|padding|margins?|ruimte|thicker|thinner|dikker|dunner|style|stijl|look|uiterlijk|theme|thema|dark mode|donkere modus|light mode|opacity|transparant|transparent|underlined?|onderstreept|uppercase|hoofdletters|size|grootte|blue|red|green|yellow|orange|purple|pink|grey|gray|black|white|navy|teal|blauw|rood|groen|geel|oranje|paars|roze|grijs|zwart|wit)\b|#[0-9a-f]{3,8}\b)'
 $script:LookVerbs = '(?i)\b(make|change|set|use|turn|give|should be|switch|replace|want|instead|more|less|maak|verander|wijzig|zet|gebruik|moet|liever|in plaats van|meer|minder)\b'
 
+# A report that a page shows its markup or script as text (English and Dutch): the helper program
+# then checks the pages itself before the message goes to Copilot (Agent Get-LeakReport).
+$script:LeakReportPattern = '(?ix) \b(script|scripts|code|javascript|html|markup|tags?)\b .{0,40} \b(as|like|in)\s(plain\s|raw\s)?text\b
+    | \b(shows?|showing|shown|displays?|displayed|visible|appears?|appearing|prints?|printed|renders?|rendered|leak\w*|dumps?|dumped)\b .{0,40} \b(script|scripts|code|javascript|html|markup|tags?)\b
+    | \b(script|scripts|code|javascript|html|markup|tags?)\b .{0,40} \b(leak\w*|visible|shown|showing|appears?|appearing|printed|displayed|dumped|readable|on\sthe\s(page|screen|site|dashboard))\b
+    | \b(raw|literal|escaped)\s(html|markup|script|code|tags?)\b
+    | \b(script|code|html|markup|tags?)\b .{0,40} \b(als\s(platte\s)?tekst|zichtbaar|getoond|te\szien|leesbaar)\b'
+# A request about code (add, show me, export ...) with no sign of a leak is not a report.
+$script:LeakReportNot = '(?i)\b(add|write|create|make|show me|give me|export|generate|maak|schrijf|voeg|toon mij|laat .{0,12} zien)\b.{0,30}\b(script|code|html|markup|tags?)\b'
+$script:LeakReportSign = '(?i)\b(leak\w*|as (plain |raw )?text|als (platte )?tekst|raw|literal|escaped|visible|shown|showing|appears?|appearing|printed|displayed|dumped|readable|zichtbaar|getoond|te zien|leesbaar)\b'
+
+function Test-LeakReport([AllowEmptyString()][string]$Text) {
+    <# Whether a message reports that a page shows markup or script as text (not a request to add,
+       show or export code). #>
+    if (-not $Text) { return $false }
+    if ($Text -notmatch $script:LeakReportPattern) { return $false }
+    -not ($Text -match $script:LeakReportNot -and $Text -notmatch $script:LeakReportSign)
+}
+
 function Test-LookRequest {
     <# The message asks to change how something looks (a fixed rule on its words): then the person's
        look wins over the UI kit's for this change (rules/userlook.md, and the kit's look checks rest). #>
@@ -287,6 +306,8 @@ function Get-PromptPart {
             if ($dark -eq 'light-only') { $lines += '- Light only: pages are light, with no dark mode and no light/dark switch, unless the person asks for one; then copy the dark values from .streamhub/ui-kit/tokens.css into styles/kit/tokens.css and add a light/dark switch' + $(if (Test-UiKitPart 'interactive' $AppRoot) { ' (<button class="kit-btn kit-btn--ghost kit-btn--icon" type="button" data-kit-theme aria-label="Switch the theme"><span data-kit-icon="moon" aria-hidden="true"></span></button>, kit.js)' }) + '.' }
             elseif ($dark -eq 'follow-system') { $lines += '- Dark mode follows the computer by itself (tokens.css); no light/dark switch unless the person asks for one.' }
             $text = $lines -join "`n"
+            # The catalogue is the shared one beside the projects when the project has it (shared/ui-kit).
+            if ("$($Context.Root)") { $catRel = Get-UiKitCatalog "$($Context.Root)"; if ($catRel -ne '.streamhub/ui-kit') { $text = $text.Replace('.streamhub/ui-kit', $catRel) } }
             $colors = Get-UiKitColors $AppRoot
             if ($colors -ne 'blue') { $text = $text -replace ' With the blue palette the named colours are[^.]*\.[^.]*\.', '' }
             if ($colors -eq 'none') {
@@ -430,4 +451,4 @@ function Get-AutoAgent {
     @{ agent = ''; why = '' }
 }
 
-Export-ModuleMember -Function Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage
+Export-ModuleMember -Function Test-LeakReport, Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage

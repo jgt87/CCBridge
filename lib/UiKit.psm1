@@ -3,6 +3,7 @@
 # files are then the project's own, and nothing in them is overwritten later.
 
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')   # Get-SharedRoot: the library beside the projects
 
 # The files of each part (Settings > UI kit). The base is always there with the kit.
 $script:KitParts = [ordered]@{
@@ -214,7 +215,120 @@ function Get-KitExamplesText([string]$Text, [string[]]$Parts) {
 
 function Get-UiKitFolder { 'styles/kit' }
 
-function Get-UiKitCatalog { '.streamhub/ui-kit' }
+function Get-UiKitCatalog([string]$ProjectRoot = '') {
+    # Where the kit's catalogue is, as Copilot addresses it: shared/ui-kit when the project has the
+    # shared library beside it (Workspace Get-SharedRoot: one central kit for every project in that
+    # folder), else the project's own .streamhub/ui-kit.
+    if ($ProjectRoot -and (Get-SharedRoot $ProjectRoot)) { "$(Get-SharedPrefix $ProjectRoot)/ui-kit" } else { '.streamhub/ui-kit' }
+}
+
+function Get-UiKitCatalogPath([string]$ProjectRoot) {
+    # The catalogue folder on disk (see Get-UiKitCatalog).
+    $s = Get-SharedRoot $ProjectRoot
+    if ($s) { Join-Path $s 'ui-kit' } else { Join-Path $ProjectRoot '.streamhub\ui-kit' }
+}
+
+function Get-FileSha([string]$Path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { -join ($sha.ComputeHash([IO.File]::ReadAllBytes($Path)) | ForEach-Object { $_.ToString('x2') }) } finally { $sha.Dispose() }
+}
+
+function Read-ShaRecord([string]$File) {
+    if (-not (Test-Path -LiteralPath $File)) { return $null }
+    try {
+        $j = [IO.File]::ReadAllText($File) | ConvertFrom-Json
+        $files = @{}; foreach ($p in @($j.files.PSObject.Properties)) { $files[$p.Name] = "$($p.Value)" }
+        @{ revision = [int]$j.revision; files = $files }
+    } catch { $null }
+}
+
+function Write-ShaRecord([string]$File, $Record) {
+    $o = [ordered]@{ revision = [int]$Record.revision; files = [ordered]@{} }
+    foreach ($k in @($Record.files.Keys | Sort-Object)) { $o.files[$k] = $Record.files[$k] }
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $File)
+    [IO.File]::WriteAllText($File, (($o | ConvertTo-Json -Depth 4) + "`n"), (New-Object Text.UTF8Encoding($false)))
+}
+
+function Get-KitManifest([string]$Catalog) {
+    # What the helper program itself wrote into the catalogue: @{ revision; files = @{ 'kit.js' = sha256 } }.
+    # $null for a catalogue from before manifests (every file in it is StreamHub's then).
+    Read-ShaRecord (Join-Path $Catalog 'manifest.json')
+}
+function Save-KitManifest([string]$Catalog, $Manifest) { Write-ShaRecord (Join-Path $Catalog 'manifest.json') $Manifest }
+
+function Get-KitCustomFiles([string]$Catalog) {
+    # Catalogue files the organisation changed after StreamHub wrote them (their hash differs from the manifest's).
+    $m = Get-KitManifest $Catalog
+    if (-not $m) { return @() }
+    $keys = [string[]]@($m.files.Keys); [Array]::Sort($keys, [StringComparer]::Ordinal)
+    @(foreach ($k in $keys) { $p = Join-Path $Catalog $k.Replace('/', '\'); if ((Test-Path -LiteralPath $p -PathType Leaf) -and (Get-FileSha $p) -ne $m.files[$k]) { $k } })
+}
+
+function Get-KitCopyRecord([string]$ProjectRoot) {
+    # The kit files copied into styles/kit/ as StreamHub wrote them: @{ revision; files = @{ 'styles/kit/kit.js' = sha256 } }; $null before the first record.
+    Read-ShaRecord (Join-Path $ProjectRoot '.streamhub\kit-copies.json')
+}
+function Save-KitCopyRecord([string]$ProjectRoot, $Record) { Write-ShaRecord (Join-Path $ProjectRoot '.streamhub\kit-copies.json') $Record }
+
+function Register-KitCopies([string]$ProjectRoot, [string]$Catalog) {
+    <# Every file in styles/kit/ that is the catalogue's file unchanged and not in the record yet is
+       recorded as StreamHub's copy (so it follows the catalogue; an older project, or a file copied
+       by hand); a whole copy of the catalogue's kit.css gets the Generated line (so Update-UiKitProject
+       writes it again; returned as styles/kit/kit.css); the catalogue's tokens.css becomes the
+       project's token base (what its tokens.css was taken from) when there is none. #>
+    $kit = Join-Path $ProjectRoot (Get-UiKitFolder).Replace('/', '\')
+    $rec = Get-KitCopyRecord $ProjectRoot
+    if (-not $rec) { $rec = @{ revision = (Get-KitCatalogRevision $Catalog); files = @{} } }
+    $marked = New-Object System.Collections.Generic.List[string]
+    if (Test-Path -LiteralPath $kit -PathType Container) {
+        foreach ($f in Get-ChildItem -LiteralPath $kit -Recurse -File) {
+            $rel = $f.FullName.Substring($kit.Length + 1).Replace('\', '/')
+            if ($rel -in 'tokens.css', 'kit-icons.js' -or $rel -match '^(tailwind|wpf|winforms)/') { continue }
+            $src = Join-Path $Catalog $rel.Replace('/', '\')
+            if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
+            if ($rel -eq 'kit.css') {
+                $first = try { Get-Content -LiteralPath $f.FullName -TotalCount 1 } catch { '' }
+                if (-not "$first".StartsWith('/* Generated by the helper program from the UI kit') -and [IO.File]::ReadAllText($f.FullName) -eq [IO.File]::ReadAllText($src)) {
+                    [IO.File]::WriteAllText($f.FullName, $script:KitCssHeader + " */`n" + [IO.File]::ReadAllText($src), (New-Object Text.UTF8Encoding($false)))
+                    $marked.Add("$(Get-UiKitFolder)/kit.css")
+                }
+                continue
+            }
+            $key = "$(Get-UiKitFolder)/$rel"
+            if ($rec.files.ContainsKey($key)) { continue }
+            $sha = Get-FileSha $src
+            if ((Get-FileSha $f.FullName) -eq $sha) { $rec.files[$key] = $sha }
+        }
+    }
+    Save-KitCopyRecord $ProjectRoot $rec
+    $base = Join-Path $ProjectRoot '.streamhub\kit-tokens-base.css'; $catTokens = Join-Path $Catalog 'tokens.css'
+    if (-not (Test-Path -LiteralPath $base) -and (Test-Path -LiteralPath $catTokens)) { Copy-Item -LiteralPath $catTokens -Destination $base }
+    $marked.ToArray()
+}
+
+function Sync-KitCopies([string]$ProjectRoot, [string]$Catalog) {
+    <# Copies in styles/kit/ still as StreamHub wrote them (their hash is the record's) follow the
+       catalogue's file when that changed (a newer kit, or a central change); a copy the project
+       changed stays. Returns the styles/kit paths written. #>
+    $rec = Get-KitCopyRecord $ProjectRoot
+    if (-not $rec) { return @() }
+    $kit = Join-Path $ProjectRoot (Get-UiKitFolder).Replace('/', '\'); $prefix = "$(Get-UiKitFolder)/"
+    $out = New-Object System.Collections.Generic.List[string]; $changed = $false
+    foreach ($k in @($rec.files.Keys)) {
+        if (-not $k.StartsWith($prefix)) { continue }
+        $rel = $k.Substring($prefix.Length)
+        $copy = Join-Path $kit $rel.Replace('/', '\'); $src = Join-Path $Catalog $rel.Replace('/', '\')
+        if (-not (Test-Path -LiteralPath $copy -PathType Leaf) -or -not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
+        if ((Get-FileSha $copy) -ne $rec.files[$k]) { continue }   # the project changed it: its own now
+        $srcSha = Get-FileSha $src
+        if ($srcSha -eq $rec.files[$k]) { continue }
+        Copy-Item -LiteralPath $src -Destination $copy -Force
+        $rec.files[$k] = $srcSha; $changed = $true; $out.Add($k)
+    }
+    $rev = Get-KitCatalogRevision $Catalog
+    if ($changed -or $rec.revision -ne $rev) { $rec.revision = $rev; Save-KitCopyRecord $ProjectRoot $rec }
+    $out.ToArray()
+}
 
 # Files that go with a kit file: its licence (the parts adapted from other projects keep their notice).
 $script:Companions = @{
@@ -271,7 +385,7 @@ function Set-KitScanHold([bool]$On) {
     Clear-KitScanCache
     $script:ScanHold = $On
 }
-$script:KitCssHeader = '/* Generated by the helper program from the UI kit (.streamhub/ui-kit/kit.css): the rules of the kit classes this project uses, nothing else.'
+$script:KitCssHeader = '/* Generated by the helper program from the UI kit (the catalogue''s kit.css): the rules of the kit classes this project uses, nothing else.'
 
 function Get-UiKitFiles([string]$AppRoot) {
     # The kit files of the parts that are switched on, as paths inside templates/ui-kit.
@@ -297,64 +411,105 @@ function Write-KitCatalogVersion([string]$Catalog, [string]$AppRoot, [string]$Ve
     [IO.File]::WriteAllText((Join-Path $Catalog 'VERSION.txt'), "UI kit from StreamHub $v, $Verb $((Get-Date).ToString('yyyy-MM-dd')). Kit revision $($script:KitRevision). The helper program takes what the pages use from here into styles/kit/.`n")
 }
 
-function Update-UiKitCatalog {
-    <# A project catalogue from an older kit revision: StreamHub's kit files in .streamhub/ui-kit/
-       replaced by this version's (tokens.css stays: the project's colours), and every copy in
-       styles/kit/ that is still the old catalogue file unchanged is replaced too; a copy the project
-       changed stays. kit.css in styles/kit follows at the next Update-UiKitProject (a whole unchanged
-       copy of the old catalogue's kit.css is marked generated first, so that one follows too). Returns the
-       styles/kit paths replaced. Nothing without a catalogue. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$AppRoot)
-    $cat = Join-Path $ProjectRoot (Get-UiKitCatalog).Replace('/', '\')
-    if (-not (Test-Path -LiteralPath $cat -PathType Container)) { return @() }
-    if ((Get-KitCatalogRevision $cat) -ge $script:KitRevision) { return @() }
+function Update-KitCatalogFiles([string]$Catalog, [string]$AppRoot, [switch]$Shared) {
+    <# The catalogue brought to this StreamHub's kit revision: every file StreamHub wrote (its hash is
+       the manifest's; without a manifest every file counts as StreamHub's) is replaced by this
+       version's; in the shared catalogue (-Shared) a file the organisation changed stays (tokens.css
+       gets the new tokens merged in, its own values kept; the template it came from is kept in
+       .pristine/), while a project's own hidden catalogue is StreamHub's throughout. Returns
+       @{ replaced; custom }. #>
     $src = Join-Path $AppRoot 'templates\ui-kit'
-    $kit = Join-Path $ProjectRoot (Get-UiKitFolder).Replace('/', '\')
     $parts = @(Get-UiKitParts $AppRoot)
     $utf8 = New-Object Text.UTF8Encoding($false)
+    $man = Get-KitManifest $Catalog
+    $files = if ($man) { $man.files } else { @{} }
     $replaced = New-Object System.Collections.Generic.List[string]
+    $custom = New-Object System.Collections.Generic.List[string]
+    $pristineDir = Join-Path $Catalog '.pristine'
     foreach ($f in Get-UiKitFiles $AppRoot) {
-        if ($f -eq 'tokens.css') { continue }
         $from = Join-Path $src $f.Replace('/', '\')
         if (-not (Test-Path -LiteralPath $from)) { continue }
-        $to = Join-Path $cat $f.Replace('/', '\')
-        $old = if (Test-Path -LiteralPath $to) { [IO.File]::ReadAllText($to) } else { $null }
-        $new = if ($f -eq 'kit-examples.html') { Get-KitExamplesText ([IO.File]::ReadAllText($from)) $parts } else { [IO.File]::ReadAllText($from) }
-        if ($old -ne $new) {
-            $null = New-Item -ItemType Directory -Force -Path (Split-Path $to)
-            if ($f -eq 'kit-examples.html') { [IO.File]::WriteAllText($to, $new, $utf8) } else { Copy-Item -LiteralPath $from -Destination $to -Force }
-        }
-        if ($f -eq 'kit.css' -and $null -ne $old) {
-            # A whole copy of the old catalogue's kit.css (from before kit.css was generated) is
-            # StreamHub's, not the project's: mark it generated, so Update-UiKitProject writes it.
-            $copy = Join-Path $kit 'kit.css'
-            if ((Test-Path -LiteralPath $copy) -and [IO.File]::ReadAllText($copy) -eq $old) {
-                [IO.File]::WriteAllText($copy, $script:KitCssHeader + " */`n" + [IO.File]::ReadAllText($from), $utf8)
-                $replaced.Add("$(Get-UiKitFolder)/kit.css")
+        $to = Join-Path $Catalog $f.Replace('/', '\')
+        $exists = Test-Path -LiteralPath $to -PathType Leaf
+        $ownWrite = (-not $Shared) -or (-not $exists) -or (-not $man) -or ($files.ContainsKey($f) -and (Get-FileSha $to) -eq $files[$f])
+        if ($f -eq 'tokens.css') {
+            # The palette the catalogue was made with (the template it came from, else its own file); the organisation's own values stay through a merge.
+            $pristine = Join-Path $pristineDir 'tokens.css'
+            $probe = if (Test-Path -LiteralPath $pristine) { [IO.File]::ReadAllText($pristine) } elseif ($exists) { [IO.File]::ReadAllText($to) } else { '' }
+            $preset = if ($probe -and $probe -notmatch '--kit-palette-blue\b') { 'tokens-neutral.css' } else { 'tokens.css' }
+            $newT = [IO.File]::ReadAllText((Join-Path $src $preset))
+            if ($ownWrite) { if (-not $exists -or [IO.File]::ReadAllText($to) -ne $newT) { [IO.File]::WriteAllText($to, $newT, $utf8); $replaced.Add($f) } }
+            else {
+                $oldT = if (Test-Path -LiteralPath $pristine) { [IO.File]::ReadAllText($pristine) } else { '' }
+                $cur = [IO.File]::ReadAllText($to)
+                $merged = Update-KitTokens $cur $oldT $newT
+                if ($merged -ne $cur) { [IO.File]::WriteAllText($to, $merged, $utf8); $replaced.Add("$f (the organisation's values kept, new tokens added)") }
+                $custom.Add($f)
             }
+            $null = New-Item -ItemType Directory -Force -Path $pristineDir
+            [IO.File]::WriteAllText($pristine, $newT, $utf8)
+            $files[$f] = Get-FileSha $pristine
             continue
         }
-        if ($f -eq 'kit-examples.html' -or $null -eq $old -or $old -eq $new) { continue }
-        $copy = Join-Path $kit $f.Replace('/', '\')
-        if ((Test-Path -LiteralPath $copy) -and [IO.File]::ReadAllText($copy) -eq $old) {
-            Copy-Item -LiteralPath $from -Destination $copy -Force
-            $replaced.Add("$(Get-UiKitFolder)/$f")
+        if (-not $ownWrite) { $custom.Add($f); continue }
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path $to)
+        if ($f -eq 'kit-examples.html') {
+            $new = Get-KitExamplesText ([IO.File]::ReadAllText($from)) $parts
+            if (-not $exists -or [IO.File]::ReadAllText($to) -ne $new) { [IO.File]::WriteAllText($to, $new, $utf8); $replaced.Add($f) }
+        } elseif (-not $exists -or (Get-FileSha $to) -ne (Get-FileSha $from)) { Copy-Item -LiteralPath $from -Destination $to -Force; $replaced.Add($f) }
+        $files[$f] = Get-FileSha $to
+    }
+    Write-KitCatalogVersion $Catalog $AppRoot 'updated'
+    Save-KitManifest $Catalog @{ revision = (Get-KitCatalogRevision $Catalog); files = $files }
+    @{ replaced = $replaced.ToArray(); custom = $custom.ToArray() }
+}
+
+function Update-UiKitCatalog {
+    <# A project's kit brought to this StreamHub's kit revision and to the central catalogue: an older
+       project's own catalogue (.streamhub/ui-kit) moves into the shared one beside the projects when
+       there is one (what styles/kit/ holds unchanged from it is recorded as StreamHub's copy first);
+       the catalogue's files StreamHub wrote are replaced by this version's (Update-KitCatalogFiles:
+       files the organisation changed stay, tokens merged); the project's tokens.css gets the new
+       tokens, with defaults it never changed following the catalogue's values (central changes too)
+       and its own values kept; and copies in styles/kit/ still as StreamHub wrote them follow the
+       catalogue (Sync-KitCopies). kit.css follows at the next Update-UiKitProject. Returns the
+       styles/kit paths written (and a note when the catalogue moved). Nothing without a catalogue. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$AppRoot)
+    $cat = Get-UiKitCatalogPath $ProjectRoot
+    $local = Join-Path $ProjectRoot '.streamhub\ui-kit'
+    $out = New-Object System.Collections.Generic.List[string]
+    $utf8 = New-Object Text.UTF8Encoding($false)
+    if ($cat -ne $local -and (Test-Path -LiteralPath $local -PathType Container)) {
+        $null = Register-KitCopies $ProjectRoot $local
+        if (-not (Test-Path -LiteralPath $cat -PathType Container)) {
+            # The first project with a kit brings the shared catalogue.
+            $null = New-Item -ItemType Directory -Force -Path (Split-Path $cat)
+            Copy-Item -LiteralPath $local -Destination $cat -Recurse -Force
+        }
+        Remove-Item -LiteralPath $local -Recurse -Force
+        $out.Add("(the project's own kit catalogue .streamhub/ui-kit/ moved to the shared $(Get-UiKitCatalog $ProjectRoot)/ beside the projects)")
+    }
+    if (-not (Test-Path -LiteralPath $cat -PathType Container)) { return @($out) }
+    # Copies equal to the catalogue's files are StreamHub's (recorded now, before the catalogue changes).
+    if (Test-UiKitInProject $ProjectRoot) { foreach ($m in @(Register-KitCopies $ProjectRoot $cat)) { $out.Add($m) } }
+    if ((Get-KitCatalogRevision $cat) -lt $script:KitRevision) { $null = Update-KitCatalogFiles $cat $AppRoot -Shared:($cat -ne $local) }
+    # The project's tokens.css: new tokens added, defaults the project never changed brought to the
+    # catalogue's values, the project's own values kept (the base is what it last took from the catalogue).
+    $kit = Join-Path $ProjectRoot (Get-UiKitFolder).Replace('/', '\')
+    $projTokens = Join-Path $kit 'tokens.css'; $catTokens = Join-Path $cat 'tokens.css'; $base = Join-Path $ProjectRoot '.streamhub\kit-tokens-base.css'
+    if ((Test-Path -LiteralPath $projTokens) -and (Test-Path -LiteralPath $catTokens)) {
+        $newT = [IO.File]::ReadAllText($catTokens)
+        $oldT = if (Test-Path -LiteralPath $base) { [IO.File]::ReadAllText($base) } else { '' }
+        if ($oldT -ne $newT) {
+            $cur = [IO.File]::ReadAllText($projTokens)
+            $merged = Update-KitTokens $cur $oldT $newT
+            if ($merged -ne $cur) { [IO.File]::WriteAllText($projTokens, $merged, $utf8); $out.Add("$(Get-UiKitFolder)/tokens.css") }
+            $null = New-Item -ItemType Directory -Force -Path (Split-Path $base)
+            [IO.File]::WriteAllText($base, $newT, $utf8)
         }
     }
-    # The project's tokens.css: new tokens added, defaults the project never changed brought to the
-    # new defaults, the project's own values kept (the old template is the catalogue's copy).
-    $projTokens = Join-Path $kit 'tokens.css'; $catTokens = Join-Path $cat 'tokens.css'
-    if (Test-Path -LiteralPath $projTokens) {
-        $cur = [IO.File]::ReadAllText($projTokens)
-        $preset = if ($cur -match '--kit-palette-blue\b') { 'tokens.css' } else { 'tokens-neutral.css' }
-        $newT = [IO.File]::ReadAllText((Join-Path $src $preset))
-        $oldT = if (Test-Path -LiteralPath $catTokens) { [IO.File]::ReadAllText($catTokens) } else { '' }
-        $merged = Update-KitTokens $cur $oldT $newT
-        if ($merged -ne $cur) { [IO.File]::WriteAllText($projTokens, $merged, $utf8); $replaced.Add("$(Get-UiKitFolder)/tokens.css") }
-        [IO.File]::WriteAllText($catTokens, $newT, $utf8)
-    }
-    Write-KitCatalogVersion $cat $AppRoot 'updated'
-    @($replaced)
+    foreach ($p in Sync-KitCopies $ProjectRoot $cat) { $out.Add($p) }
+    @($out)
 }
 
 function Get-TokenBlockSpans([string]$Css) {
@@ -462,12 +617,15 @@ function Format-UiKitContext {
        catalogue is, its examples page part by part with lines (for a ranged read), its scripts and
        React parts, and which files the project uses. '' without a catalogue. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$AppRoot)
-    $catRel = Get-UiKitCatalog
-    $cat = Join-Path $ProjectRoot $catRel.Replace('/', '\')
+    $catRel = Get-UiKitCatalog $ProjectRoot
+    $cat = Get-UiKitCatalogPath $ProjectRoot
     $ex = Join-Path $cat 'kit-examples.html'
     if (-not (Test-Path -LiteralPath $ex)) { return '' }
     $t = New-Object System.Collections.Generic.List[string]
-    $t.Add("UI kit (this project uses it: build every interface from it first, and write your own markup or CSS only for what it does not have). The whole kit is in $catRel/ (read-only).")
+    $where = if ($catRel -ne '.streamhub/ui-kit') { "The whole kit is in $catRel/ (read-only here: the central kit of every project in this folder, kept in the .streamhub folder beside the projects)." } else { "The whole kit is in $catRel/ (read-only)." }
+    $custom = @(Get-KitCustomFiles $cat | Where-Object { $_ -notmatch '^(vendor|react)/' })
+    if ($custom.Count) { $where += " The organisation changed these kit files, so they differ from the helper program's standard kit: $($custom -join ', ') (follow them as they are)." }
+    $t.Add("UI kit (this project uses it: build every interface from it first, and write your own markup or CSS only for what it does not have). $where")
     $t.Add("- $catRel/kit-examples.html has the markup of every part; read the part you need (read PATH:START-END):")
     foreach ($s in Get-KitExamplesIndex ([IO.File]::ReadAllText($ex))) {
         $t.Add("  $($s.title): lines $($s.start)-$($s.end)$(if (@($s.classes).Count) { ' (' + (@($s.classes) -join ' ') + ')' })")
@@ -484,16 +642,24 @@ function Format-UiKitContext {
 }
 
 function Install-UiKit {
-    <# The kit for a project: the whole kit (the parts that are on) once into its catalogue
-       .streamhub/ui-kit/ (a newer kit revision replaces it through Update-UiKitCatalog),
-       styles/kit/tokens.css as the project's own colours and sizes, and from then on only what the
-       pages use (Update-UiKitProject). Returns the styles/kit paths added. #>
+    <# The kit for a project: the whole kit (the parts that are on) once into the catalogue, which is
+       the shared one beside the projects when there is one (one central kit for every project in that
+       folder, Workspace Get-SharedRoot; made when the parent is the OneDrive projects folder) or else
+       the project's own .streamhub/ui-kit/ (a newer kit revision replaces it through
+       Update-UiKitCatalog); styles/kit/tokens.css as the project's own colours and sizes (taken from
+       the catalogue, so a central change to the tokens reaches new projects), and from then on only
+       what the pages use (Update-UiKitProject). Returns the styles/kit paths added. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$AppRoot)
     Clear-KitScanCache   # files written since the last look count
     $src = Join-Path $AppRoot 'templates\ui-kit'
-    $cat = Join-Path $ProjectRoot (Get-UiKitCatalog).Replace('/', '\')
+    $null = Get-SharedRoot $ProjectRoot -Create
+    $cat = Get-UiKitCatalogPath $ProjectRoot
     $parts = @(Get-UiKitParts $AppRoot)
     $files = @(Get-UiKitFiles $AppRoot)
+    $utf8 = New-Object Text.UTF8Encoding($false)
+    $man = Get-KitManifest $cat
+    $manFiles = if ($man) { $man.files } else { @{} }
+    $wrote = $false
     foreach ($f in $files) {
         $to = Join-Path $cat $f.Replace('/', '\')
         if (Test-Path -LiteralPath $to) { continue }
@@ -506,24 +672,32 @@ function Install-UiKit {
         if ($f -eq 'tokens.css' -and $colors -eq 'none') {
             # No colours set: the neutral values only as a start, with a header that says they are free.
             $t = [regex]::Replace([IO.File]::ReadAllText($from), '\A/\*[\s\S]*?\*/', "/*`n  UI kit tokens, no colours set (Settings > UI kit > Colours: None): neutral starting values only,`n  so the kit's parts show. This project chooses its own colours: change any value here, or use`n  colours in the project's own CSS. Keep text readable (WCAG AA) in light and dark.`n*/")
-            [IO.File]::WriteAllText($to, $t, (New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText($to, $t, $utf8)
         }
-        elseif ($f -eq 'kit-examples.html') { [IO.File]::WriteAllText($to, (Get-KitExamplesText ([IO.File]::ReadAllText($from)) $parts), (New-Object Text.UTF8Encoding($false))) }
+        elseif ($f -eq 'kit-examples.html') { [IO.File]::WriteAllText($to, (Get-KitExamplesText ([IO.File]::ReadAllText($from)) $parts), $utf8) }
         else { Copy-Item -LiteralPath $from -Destination $to }
+        $manFiles[$f] = Get-FileSha $to; $wrote = $true
+        if ($f -eq 'tokens.css') {
+            # The template the catalogue's tokens came from: what a later merge compares with.
+            $null = New-Item -ItemType Directory -Force -Path (Join-Path $cat '.pristine')
+            Copy-Item -LiteralPath $to -Destination (Join-Path $cat '.pristine\tokens.css') -Force
+        }
     }
     $verFile = Join-Path $cat 'VERSION.txt'
     if (-not (Test-Path -LiteralPath $verFile) -and (Test-Path -LiteralPath $cat)) { Write-KitCatalogVersion $cat $AppRoot 'copied' }
+    if (($wrote -or -not $man) -and (Test-Path -LiteralPath $cat)) { Save-KitManifest $cat @{ revision = (Get-KitCatalogRevision $cat); files = $manFiles } }
     $added = @()
-    # The project's own colours and sizes: copied once, then the project's to change.
+    # The project's own colours and sizes: copied once from the catalogue, then the project's to change.
     $tokens = Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css')
     $catTokens = Join-Path $cat 'tokens.css'
     if (-not (Test-Path -LiteralPath $tokens) -and (Test-Path -LiteralPath $catTokens)) {
         $null = New-Item -ItemType Directory -Force -Path (Split-Path $tokens)
         # Light only (setting uiKitDarkMode): the project gets the tokens without their dark values.
-        if ((Get-UiKitDarkMode $AppRoot) -eq 'light-only') { [IO.File]::WriteAllText($tokens, (Remove-DarkTokens ([IO.File]::ReadAllText($catTokens))), (New-Object Text.UTF8Encoding($false))) }
+        if ((Get-UiKitDarkMode $AppRoot) -eq 'light-only') { [IO.File]::WriteAllText($tokens, (Remove-DarkTokens ([IO.File]::ReadAllText($catTokens))), $utf8) }
         else { Copy-Item -LiteralPath $catTokens -Destination $tokens }
         $added += "$(Get-UiKitFolder)/tokens.css"
     }
+    if (Test-Path -LiteralPath $cat) { $null = Register-KitCopies $ProjectRoot $cat }
     $sync = Update-UiKitProject $ProjectRoot $AppRoot
     @($added) + @($sync.added)
 }
@@ -803,7 +977,7 @@ function Get-KitFileSource([string]$ProjectRoot, [string]$AppRoot, [string]$Name
     <# Where a kit file comes from: the project's catalogue (Install-UiKit puts the parts that are on
        there; a part switched on later arrives at the next interface task). A React import may leave
        out the extension. $null when the catalogue has no such file. #>
-    $cat = Join-Path $ProjectRoot (Get-UiKitCatalog).Replace('/', '\')
+    $cat = Get-UiKitCatalogPath $ProjectRoot
     $names = @($Name); if ($Name -notmatch '\.\w+$') { $names = @("$Name.tsx", "$Name.ts", "$Name.js") }
     foreach ($n in $names) {
         $p = Join-Path $cat $n.Replace('/', '\')
@@ -839,6 +1013,11 @@ function Update-UiKitProject {
     $kit = Join-Path $ProjectRoot (Get-UiKitFolder).Replace('/', '\')
     $added = New-Object System.Collections.Generic.List[string]
     $updated = New-Object System.Collections.Generic.List[string]
+    # Every copy is recorded with its hash (.streamhub/kit-copies.json), so a copy the project never
+    # changed follows the catalogue (Sync-KitCopies) while a changed one is the project's own.
+    $rec = Get-KitCopyRecord $ProjectRoot
+    $recFiles = if ($rec) { $rec.files } else { @{} }
+    $recChanged = $false
     $usage = Get-KitUsage $ProjectRoot
     $queue = New-Object System.Collections.Generic.Queue[string]
     foreach ($r in $usage.refs) { $queue.Enqueue($r) }
@@ -858,6 +1037,7 @@ function Update-UiKitProject {
                 $null = New-Item -ItemType Directory -Force -Path (Split-Path $to)
                 Copy-Item -LiteralPath $src.path -Destination $to
                 $added.Add("$(Get-UiKitFolder)/$($src.name)")
+                $recFiles["$(Get-UiKitFolder)/$($src.name)"] = Get-FileSha $to; $recChanged = $true
             }
             if ($src.name -match '(?i)\.(js|ts|tsx|css)$') {
                 $t = try { [IO.File]::ReadAllText($to) } catch { '' }
@@ -904,6 +1084,7 @@ function Update-UiKitProject {
     foreach ($tw in @(Update-KitTailwind $ProjectRoot $AppRoot)) { $added.Add($tw) }
     # A PowerShell window app (WPF): the kit's theme with the project's colours.
     foreach ($wp in @(Update-KitWpf $ProjectRoot $AppRoot)) { $added.Add($wp) }
+    if ($recChanged) { Save-KitCopyRecord $ProjectRoot @{ revision = (Get-KitCatalogRevision (Get-UiKitCatalogPath $ProjectRoot)); files = $recFiles } }
     @{ added = $added.ToArray(); updated = $updated.ToArray(); unknown = $unknown }
     } finally { Set-KitScanHold $false }
 }
@@ -1000,4 +1181,4 @@ function Test-UiKitInProject([string]$ProjectRoot) {
     Test-Path -LiteralPath (Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css'))
 }
 
-Export-ModuleMember -Function Get-KitScanFiles, Clear-KitScanCache, Set-KitScanHold, Update-KitTokens, Get-TokenBlockSpans, Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder
+Export-ModuleMember -Function Get-UiKitCatalogPath, Get-FileSha, Get-KitManifest, Save-KitManifest, Get-KitCustomFiles, Get-KitCopyRecord, Register-KitCopies, Sync-KitCopies, Update-KitCatalogFiles, Get-KitScanFiles, Clear-KitScanCache, Set-KitScanHold, Update-KitTokens, Get-TokenBlockSpans, Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder

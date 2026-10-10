@@ -182,6 +182,7 @@ Describe 'A project from an older kit gets the new tokens' {
             # Pretend the project came from the kit before --kit-title existed, with its own accent.
             $oldTemplate = [IO.File]::ReadAllText($tokens) -replace '(?m)^\s*--kit-title: [^;]+;\r?\n', '' -replace '(?m)^\s*--kit-icon: [^;]+;\r?\n', ''
             [IO.File]::WriteAllText((Join-Path $cat 'tokens.css'), $oldTemplate)
+            [IO.File]::WriteAllText((Join-Path $p '.streamhub\kit-tokens-base.css'), $oldTemplate)   # what the project took its tokens from
             [IO.File]::WriteAllText($tokens, $oldTemplate.Replace('--kit-accent: #10069f;', '--kit-accent: #224466;'))
             [IO.File]::WriteAllText((Join-Path $cat 'VERSION.txt'), 'Kit revision 9')
             $r = @(Update-UiKitCatalog $p $root)

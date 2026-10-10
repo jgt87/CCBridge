@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runbookRows } from "./runbooks-panel";
+import { editPlace, runbookRows } from "./runbooks-panel";
 
 describe("runbookRows", () => {
   it("lists both kinds of runbook in one list, by title, with their file and result", () => {
@@ -10,5 +10,15 @@ describe("runbookRows", () => {
     expect(rows.map((r) => `${r.kind}:${r.name}`)).toEqual(["text:agenda", "json:meetings"]);
     expect(rows[0]).toMatchObject({ file: "Runbooks/agenda.prompt.md", output: "Runbooks/Exports/agenda.md", lastRun: "2026-10-04T10:00:00", extra: "work data only" });
     expect(rows[1]).toMatchObject({ file: "Runbooks/meetings.runbook.md", lastRun: null });
+  });
+  it("carries the shared flag of runbooks from the library beside the projects, and says where they are edited", () => {
+    const rows = runbookRows(
+      [{ name: "weekly", title: "Weekly numbers", path: "shared/Runbooks/weekly.runbook.md", output: "Runbooks/Exports/weekly.json", lastRun: null, shared: true }],
+      [{ name: "agenda", prompt: "Agenda", promptPath: "Runbooks/agenda.prompt.md", output: "Runbooks/Exports/agenda.md", fetchedAt: null, outputSize: 0 }],
+    );
+    expect(rows.map((r) => r.shared)).toEqual([undefined, true]);
+    expect(editPlace("shared/Runbooks/weekly.runbook.md", true)).toMatch(/^shared by every project in this folder/);
+    expect(editPlace("library/Scripts/hello.ps1")).toMatch(/^shared by every project/);
+    expect(editPlace("Runbooks/agenda.prompt.md")).toBe("edit it in the project folder");
   });
 });
