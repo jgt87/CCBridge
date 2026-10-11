@@ -46,9 +46,11 @@ function Get-BlockNote($Block) {
     "/* ${what}: written by the helper program and kept up to date; not shown here, never edit these lines */"
 }
 
-function Hide-GeneratedBlocks([AllowEmptyString()][string]$Text) {
+function Hide-GeneratedBlocks([AllowEmptyString()][string]$Text, [switch]$Compact) {
     <# The page with each generated block's contents replaced by a one-line note, keeping the number
-       of lines (so line numbers in reads and edits stay right). Unchanged text without blocks. #>
+       of lines (so line numbers in reads and edits stay right). Unchanged text without blocks.
+       -Compact: the note alone, without the empty lines that keep the count (for a change card a
+       person reads, where thousands of empty lines look like the page was emptied). #>
     $t = "$Text"
     if (-not (Test-OneFileText $t)) { return $t }
     $blocks = @(Get-GeneratedBlocks $t)
@@ -57,9 +59,12 @@ function Hide-GeneratedBlocks([AllowEmptyString()][string]$Text) {
     foreach ($b in $blocks) {
         [void]$sb.Append($t.Substring($at, $b.start - $at))
         if ($b.content.Trim()) {
+            # The block's own line break (CRLF or LF), so the hidden page does not mix the two.
+            $eol = if ($b.content.Contains("`r`n")) { "`r`n" } else { "`n" }
             $breaks = ([regex]::Matches($b.content, "`n")).Count
-            $lead = if ($b.content.StartsWith("`n")) { "`n"; $breaks-- } else { '' }
-            [void]$sb.Append($lead + (Get-BlockNote $b) + ("`n" * [Math]::Max(0, $breaks)))
+            $lead = if ($b.content.StartsWith($eol)) { $eol; $breaks-- } else { '' }
+            $pad = if ($Compact) { [Math]::Min(1, [Math]::Max(0, $breaks)) } else { [Math]::Max(0, $breaks) }
+            [void]$sb.Append($lead + (Get-BlockNote $b) + ($eol * $pad))
         } else { [void]$sb.Append($b.content) }
         $at = $b.start + $b.length
     }

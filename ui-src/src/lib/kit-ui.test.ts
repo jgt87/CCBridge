@@ -238,6 +238,38 @@ describe("kit-charts.js charts written later", () => {
   });
 });
 
+describe("kit-charts.js data shapes", () => {
+  it("reads a list of { label, value } as a ring's items and as a bar chart's labels and values (run 6)", () => {
+    document.body.innerHTML = '<div class="kit-chart" id="r"></div><div class="kit-chart" id="b"></div>';
+    load(chartsJs);
+    const list = [{ label: "Power user", value: 912 }, { label: "Starter", value: 4100 }, { label: "Inactive", value: 237 }];
+    w.KitCharts.ring(document.getElementById("r")!, list);
+    w.KitCharts.bar(document.getElementById("b")!, list);
+    for (const id of ["r", "b"]) {
+      const el = document.getElementById(id)!;
+      expect(el.querySelector("svg")).not.toBeNull();
+      expect(el.querySelector(".kit-empty")).toBeNull();
+      expect(el.querySelector(".kit-chart__table")!.textContent).toContain("Power user");
+    }
+    // name/count and labels with values
+    w.KitCharts.barlist(document.getElementById("r")!, [{ name: "A", count: 3 }]);
+    expect(document.querySelector("#r .kit-barlist__row")!.textContent).toContain("A");
+    w.KitCharts.ring(document.getElementById("b")!, { labels: ["X", "Y"], values: [1, 2] });
+    expect(document.querySelector("#b svg")).not.toBeNull();
+  });
+  it("says which shape it expected when the data cannot be read, and keeps the empty state for no data", () => {
+    document.body.innerHTML = '<div class="kit-chart" id="x"></div><div class="kit-chart" id="n"></div>';
+    load(chartsJs);
+    const x = document.getElementById("x")!, n = document.getElementById("n")!;
+    w.KitCharts.bar(x, { rows: [1, 2, 3] });
+    expect(x.hasAttribute("data-kit-shape-error")).toBe(true);
+    expect(x.textContent).toContain("Expected:");
+    w.KitCharts.ring(n, { items: [] });
+    expect(n.hasAttribute("data-kit-shape-error")).toBe(false);
+    expect(n.querySelector(".kit-empty")!.textContent).toBe("Nothing to show");
+  });
+});
+
 describe("kit-charts.js scatter", () => {
   it("draws points with axes, skips what is not a point, and has an empty state", () => {
     document.body.innerHTML = '<div class="kit-chart" id="s"></div><div class="kit-chart" id="e"></div>';

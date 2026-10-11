@@ -91,6 +91,14 @@ function Get-AppInEdge($State) {
     $script:AppInEdge
 }
 
+function Sync-LogLevel($State) {
+    <# The level the person chose lives in the shared $State; each server thread has its own copy of
+       the log module, so the one that answers a request takes it over here. Returns the level. #>
+    $want = "$($State.LogLevel)"
+    if ($want -and $want -ne (Get-CCBLogLevel)) { Set-CCBLogLevel $want }
+    Get-CCBLogLevel
+}
+
 function Get-StateSnapshot($State) {
     @{
         project = $(if ($State.ProjectRoot) { @{ name = (Split-Path $State.ProjectRoot -Leaf); path = $State.ProjectRoot; location = @(Get-ProjectLocation $State.ProjectRoot) } } else { $null })
@@ -98,7 +106,7 @@ function Get-StateSnapshot($State) {
         copilot = $State.Copilot; copilotMessage = $State.CopilotMessage
         throttle = $State.Throttle; credits = $State.Credits; todos = @($State.Todos)
         promptLimit = $State.Config.promptCharBudget
-        logLevel = (Get-CCBLogLevel)
+        logLevel = (Sync-LogLevel $State)   # the shared level, not this thread's copy: the menu steps from it
         version = [string]$State.Version
         instance = [string]$State.Instance   # changes when the app was restarted: the page starts its events over
         queue = @(Get-QueueView $State 40)
@@ -798,8 +806,9 @@ function Invoke-ApiRequest($Ctx, $State) {
             Set-CCBLogLevel $b.level
             $State.LogLevel = [string]$b.level   # the worker runspace follows
             Set-CCBridgeLocalSetting harness logLevel ([string]$b.level) $State.AppRoot
-            Write-CCBLog info server "Log level set to $($b.level) from the web app"
-            return Send-Json $Ctx @{ ok = $true; level = $b.level }
+            $now = Sync-LogLevel $State
+            Write-CCBLog info server "Log level set to $now from the web app"
+            return Send-Json $Ctx @{ ok = $true; level = $now }   # the level now in force: the page shows and steps from it
         }
         '^POST /api/diagnostics$' {
             $zip = & (Join-Path $State.AppRoot 'tools\collect-diagnostics.ps1') -NoOpen

@@ -4506,6 +4506,12 @@ function Start-AgentWorker {
                             $u = Update-UiKitProject $openRoot $State.AppRoot
                             foreach ($f in @($u.updated) + @($u.added)) { if ($f) { Add-OwnChangeEvent $State 'write' $f 'StreamHub wrote this kit file again from the newer kit.' } }
                         }
+                        # One-file pages carry their own copy of the kit: filled again from the (newer) catalogue
+                        # at open too, so a kit fix reaches them without waiting for the next task.
+                        if (Test-UiKitOn $State.AppRoot) {
+                            $prev = Enter-Activity $State 'index' 'Bringing one-file pages up to date'
+                            try { $null = Sync-OneFilePages $State } finally { Exit-Activity $State $prev }
+                        }
                     } catch { Write-CCBLogError agent 'UI kit at project open' $_ }
                 }
             }

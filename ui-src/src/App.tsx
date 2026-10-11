@@ -415,7 +415,13 @@ export default function App() {
       end: "Diagnostics",
       onSelect: () => {
         const level = state.logLevel === "verbose" ? "trace" : state.logLevel === "trace" ? "info" : "verbose";
-        return api.setLogging(level).then(() => setNotice({ text: `Logging set to ${level}.` }));
+        // The level the server reports back is used at once, so the next click steps on from it
+        // without waiting for the next state update.
+        return api.setLogging(level).then((r) => {
+          const now = r.level ?? level;
+          setState((s) => ({ ...s, logLevel: now }));
+          setNotice({ text: now === level ? `Logging set to ${now}.` : `Logging asked for ${level}, but StreamHub is at ${now}.` });
+        });
       },
     },
     {

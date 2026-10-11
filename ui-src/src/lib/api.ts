@@ -816,7 +816,7 @@ export const api = {
   ssoSetup: () => call<{ ok: boolean; result: string; logFile: string; status: SsoStatus }>("POST", "/api/sso/setup"),
   openSsoSettings: () => call<{ ok: boolean }>("POST", "/api/sso/open"),
   setWorkIq: (value: "on" | "off" | "leave") => call<{ ok: boolean }>("POST", "/api/workiq", { value }),
-  setLogging: (level: "off" | "info" | "verbose" | "trace") => call<{ ok: boolean }>("POST", "/api/logging", { level }),
+  setLogging: (level: "off" | "info" | "verbose" | "trace") => call<{ ok: boolean; level?: "off" | "info" | "verbose" | "trace" }>("POST", "/api/logging", { level }),
   diagnostics: () => call<{ ok: boolean; path: string; fullPath: string }>("POST", "/api/diagnostics"),
   showDiagnostics: (path: string) => call<{ ok: boolean }>("POST", "/api/diagnostics/show", { path }),
   /** Uploads a file into the project's read-only Source/ folder, reporting progress 0-100. */

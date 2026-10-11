@@ -6,6 +6,20 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.126] - 2026-10-12
+
+### Fixed
+- A one-file page carries its own copy of the UI kit, and it was only filled again at the next task, so a kit fix did not reach the page when the project was opened. One-file pages are now filled again from the updated kit when the project opens.
+- Charts showed "Nothing to show" while the page had the data: Copilot gave a ring and a bar chart a plain list of `{ label, value }`, which the kit's charts did not read, so they drew their empty state, and the page check took that for a chart without data. The kit's charts now read the common shapes (a list of `{ label, value }` or name/count pairs, a list of numbers, items for a bar chart, labels with values for a ring), and data that is there but in a shape a chart cannot read shows an error with the shape it expects, which the page check sends back to Copilot.
+- A one-file page with its data inline (two workbooks made a 13.6 MB page) made StreamHub look stuck for minutes after each change: the mechanical repairs and the file check walked the whole page, data included. Both now leave out the blocks StreamHub fills: on that page the repairs went from 67 to under 1 second and the file check of a change from 24 to under 6 seconds.
+- The change card for StreamHub filling a one-file page's UI kit and data blocks showed thousands of empty lines (the content it leaves out, kept as lines for the checks), as if the page had been emptied. The card now shows each filled block as one line.
+- A link whose opening tag Copilot's route stripped down to its address (`<a href="#main">Skip to content</a>` arriving as `#mainSkip to content</a>`) was written into the page, and only the file check found the stray `</a>` afterwards. Such a line is now refused at the write, with the reason, so Copilot writes it again.
+- One-file pages: the blocks StreamHub fills (UI kit and data) no longer cause file-check findings. Hiding them for the checks kept LF line breaks in a CRLF page ("mixes CRLF and LF"), a CSS variable the kit sets at run time was reported as undefined, and a data global the page's own data block defines was reported as missing when the page was larger than 2 MB.
+- The logging item in the menu did not always step on to trace. The server now answers with the level it applied, the menu steps on from that level at once, and the app reports the level kept for the whole app.
+
+### Added
+- The system check at every start (and check.cmd) begins with the StreamHub version and commit, so a pasted report says which release it came from.
+
 ## [v0.1.125] - 2026-10-12
 
 ### Fixed

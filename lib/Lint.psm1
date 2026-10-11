@@ -1760,7 +1760,7 @@ function Find-DataGlobalIssues {
     <# A page or script that uses a data global (a name ending in Data, like the ones the helper
        program writes in data/*.js) that nothing in the project defines: the page loads but stays
        empty. "line N: ..." with the names the data files do define. #>
-    param([string]$ProjectRoot, [string]$Path, [string]$Text)
+    param([string]$ProjectRoot, [string]$Path, [string]$Text, [string[]]$Defined = @())
     if (-not $ProjectRoot -or $Path -notmatch '(?i)\.(html?|m?js|jsx)$' -or $Path -match '(?i)(^|/)(data|node_modules|dist|build|styles/kit)/') { return }
     if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'data'))) { return }
     $g = Get-ProjectDataGlobals $ProjectRoot
@@ -1776,7 +1776,10 @@ function Find-DataGlobalIssues {
     } else { (Get-JsMask $Text).masked }
     foreach ($m in [regex]::Matches($code, '(?<![\w$.])(?:window\.)?([a-z][A-Za-z0-9_$]*Data)\b(?!\s*:)')) {
         $n = $m.Groups[1].Value
-        if ($g.all.Contains($n)) { continue }
+        if ($g.all.Contains($n) -or $Defined -contains $n) { continue }
+        # Defined in this file itself: a one-file page's data block (data-global, window.NAME = rows)
+        # or its own script; a large page is not part of the project scan above.
+        if ($Text -match ('(?i)\bdata-global\s*=\s*["'']' + [regex]::Escape($n) + '["'']') -or $Text -cmatch ('\bwindow\.' + [regex]::Escape($n) + '\s*=(?!=)')) { continue }
         if ($code -match ('(?<![\w$.])(var|let|const|function|class)\s+' + [regex]::Escape($n) + '\b|[(,]\s*' + [regex]::Escape($n) + '\s*[,)=]|\b' + [regex]::Escape($n) + '\s*=>')) { continue }   # its own variable or parameter
         return "line $(LineAt $Text $m.Index): uses $n, which no script or data file in the project defines, so the page has no data there; the data files define: $(@($g.data | Select-Object -First 8) -join ', ')"
     }
@@ -1920,13 +1923,28 @@ function Get-NewFileIssues {
     param([string]$Path, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [bool]$Crlf = $false, [string]$ProjectRoot = '')
     # A page a project script builds (OneFile Get-GeneratedPage): output, checked as the template.
     if ($Path -match '(?i)\.html?$' -and (Get-GeneratedPage $ProjectRoot $Path $New)) { return }
+    # A one-file page's kit and data blocks are the helper program's: the page's own text is checked
+    # without them (same line numbers), which also keeps the check fast on a page with megabytes of data.
+    # The data globals its data blocks define are taken first (the start of each block).
+    $blockGlobals = @()
+    if ($Path -match '(?i)\.html?$' -and (Test-OneFileText "$New")) {
+        $blockGlobals = @(foreach ($b in @(Get-GeneratedBlocks "$New" | Where-Object { $_.kind -eq 'data' })) {
+            if ($b.global) { $b.global }
+            $head = $b.content.Substring(0, [Math]::Min(400, $b.content.Length))
+            $g = [regex]::Match($head, '\bwindow\.([A-Za-z_$][\w$]*)\s*=')
+            if ($g.Success) { $g.Groups[1].Value }
+        })
+        $New = Hide-GeneratedBlocks "$New"
+        if ("$Old") { $Old = Hide-GeneratedBlocks "$Old" }
+    }
     $all = {
         param($text)
+        $own = $text
         @(Test-FileContent $Path $text $Crlf) + @(Test-LocalReferences $text.Replace("`r`n", "`n") $Path $ProjectRoot) +
             @(if ($Path -match '(?i)\.ps[md]?1$') { Test-PsCommands $text $ProjectRoot }) +
             @(if ($Path -match '(?i)\.prisma$') { Test-PrismaEnv $text.Replace("`r`n", "`n") $Path $ProjectRoot }) +
-            @(Find-UndefinedCssVars $text.Replace("`r`n", "`n") $Path $ProjectRoot) +
-            @(Find-DataGlobalIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
+            @(Find-UndefinedCssVars $own.Replace("`r`n", "`n") $Path $ProjectRoot) +
+            @(Find-DataGlobalIssues $ProjectRoot $Path $text.Replace("`r`n", "`n") $blockGlobals) +
             @(Find-PsGuiIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
             @(Find-XamlLayoutIssues $Path $text.Replace("`r`n", "`n") $ProjectRoot) | Where-Object { $_ }
     }

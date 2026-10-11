@@ -296,7 +296,7 @@ function Update-OneFilePages {
         }
         Write-TextFile $full $out $info.Bom $info.Crlf $info.Encoding
         $files.Add($rel)
-        $items.Add(@{ path = $rel; old = (Hide-GeneratedBlocks $text); new = (Hide-GeneratedBlocks $out) })
+        $items.Add(@{ path = $rel; old = (Hide-GeneratedBlocks $text -Compact); new = (Hide-GeneratedBlocks $out -Compact) })   # the card: one line per block
     }
     if ($files.Count) { Write-CCBLog info setup 'One-file pages filled' @{ pages = $files.Count } }
     @{ files = $files.ToArray(); notes = $notes.ToArray(); checkpoint = $cp; items = $items.ToArray() }

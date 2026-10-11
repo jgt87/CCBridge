@@ -75,6 +75,34 @@ Describe 'When StreamHub asks how a project is built (Get-SetupQuestions)' {
     }
 }
 
+Describe 'One-file pages: the helper program''s blocks never cause file-check findings' {
+    It 'keeps CRLF line endings when hiding a block, and finds no mixed endings' {
+        $page = "<!doctype html>`r`n<html lang=`"en`">`r`n<head>`r`n<meta charset=`"utf-8`">`r`n<title>T</title>`r`n<style data-streamhub=`"kit`">`r`n.kit-a { color: red; }`r`n.kit-b { color: blue; }`r`n</style>`r`n</head>`r`n<body><h1>T</h1></body>`r`n</html>`r`n"
+        $hidden = Hide-GeneratedBlocks $page
+        ([regex]::Matches($hidden, "(?<!`r)`n")).Count | Should Be 0
+        ($hidden -split "`n").Count | Should Be ($page -split "`n").Count
+        (@(Test-FileContent 'index.html' $page $true) -join ' ') | Should Not Match 'mixes CRLF and LF'
+    }
+    It 'shows a filled block as one line in a change card (-Compact), not as thousands of empty lines' {
+        $rows = (1..500 | ForEach-Object { "{`"n`":$_}," }) -join "`n"
+        $page = "<html><body>`n<script data-streamhub=`"data`" data-source=`"Source/a.csv`">`n$rows`n</script>`n<p>after</p>`n</body></html>`n"
+        $c = Hide-GeneratedBlocks $page -Compact
+        ($c -split "`n").Count | Should BeLessThan 10
+        $c | Should Match 'the rows of Source/a.csv'
+        $c | Should Match '<p>after</p>'
+    }
+    It 'does not report CSS variables the kit block uses, or a data global the page''s own data block defines' {
+        $p = Join-Path $env:TEMP ('ccb-onefile-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'data') -Force | Out-Null
+        try {
+            [IO.File]::WriteAllText((Join-Path $p 'data\usage.js'), "window.usageData = [];")
+            $page = "<!doctype html>`n<html lang=`"en`">`n<head>`n<meta charset=`"utf-8`">`n<title>T</title>`n<style data-streamhub=`"kit`">`n.kit-legend__item { background: var(--kit-legend-color); }`n</style>`n</head>`n<body><h1>T</h1>`n<script data-streamhub=`"data`" data-source=`"Source/usage.csv`" data-global=`"dashboardData`">`nwindow.dashboardData = [];`n</script>`n<script>`nvar rows = dashboardData;`n</script>`n</body>`n</html>`n"
+            $issues = @(Get-NewFileIssues 'index.html' '' $page $false $p) -join ' | '
+            $issues | Should Not Match 'kit-legend-color'
+            $issues | Should Not Match 'dashboardData'
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 Describe 'The saved project setup' {
     It 'keeps the build form and the live data file, and ignores an unknown form' {
         $p = New-SetupProject

@@ -1629,6 +1629,10 @@ function Find-DamagedHtmlLine([string]$Path, [string]$Old, [string]$New) {
         if (-not $t -or $had.Contains($t)) { continue }
         $why = $null
         if ($t -match '(?i)\.(js|mjs|cjs|css|json)(script|link|style)>') { $why = 'the start of a tag is missing (only its end is left)' }
+        # A link whose opening tag was stripped down to its address, glued to the text it showed
+        # ('<a href="#main" class="kit-skip">Skip to content</a>' arrived as '#mainSkip to content</a>'):
+        # an address at the start of the line, text right after it, and a closing tag with no opener on the line.
+        elseif ($t -match '^(#[A-Za-z][\w-]*|https?://[^\s<>"]+|\.{0,2}/[\w./-]+)[A-Za-z][^<]*</([a-z][\w-]*)\s*>' -and $t -notmatch ('(?i)<' + $Matches[2] + '\b')) { $why = 'the opening tag of a link was stripped down to its address (only the address, the text and the closing tag are left)' }
         else {
             foreach ($m in [regex]::Matches($t, '<[A-Za-z][\w-]*(\s[^<>]*)?>')) {
                 $attrs = $m.Groups[1].Value -replace '\{[^{}]*\}', ''   # JSX expressions may hold quotes

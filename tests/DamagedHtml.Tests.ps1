@@ -27,6 +27,21 @@ Describe 'Find-DamagedHtmlLine' {
     }
 }
 
+Describe 'A link that lost its opening tag on the way' {
+    It 'refuses a new line with the address glued to the text and a closing tag without opener' {
+        $old = "<body>`n<header class=`"kit-header`">`n"
+        $bad = Find-DamagedHtmlLine 'index.html' $old ("<body>`n#mainSkip to content</a>`n<header class=`"kit-header`">`n")
+        $bad.line | Should Be 2
+        $bad.why | Should Match 'stripped down to its address'
+        (Find-DamagedHtmlLine 'index.html' $old ("<body>`nhttps://example.org/helpRead the help</a>`n")).line | Should Be 2
+    }
+    It 'leaves real links, a link text on its own line and plain text alone' {
+        Find-DamagedHtmlLine 'index.html' '' ("<a class=`"kit-skip`" href=`"#main`">Skip to content</a>`n") | Should BeNullOrEmpty
+        Find-DamagedHtmlLine 'index.html' '' ("<a href=`"#main`">`n  Skip to content</a>`n") | Should BeNullOrEmpty
+        Find-DamagedHtmlLine 'index.html' '' ("<p>#1 in the list</p>`n") | Should BeNullOrEmpty
+    }
+}
+
 Describe 'A damaged HTML edit is refused before it is written' {
     It 'refuses the edit, leaves the file as it was, and asks Copilot to send it again' {
         $p = Join-Path $env:TEMP ('ccb-dmghtml-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null

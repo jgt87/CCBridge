@@ -581,10 +581,68 @@
   }
 
   var kinds = { bar: bar, line: function (h, d) { line(h, d, false); }, area: function (h, d) { line(h, d, true); }, ring: ring, gauge: gauge, heatmap: heatmap, sparkline: sparkline, barlist: barlist, scatter: scatter };
+
+  // The data shapes a page commonly writes, read as the chart's own: a list of { label, value }
+  // (or name/key/category with count/total/y), a list of numbers, items for a bar or line chart,
+  // labels with series for a ring or bar list. What is still not the chart's shape is reported
+  // ("expected ...") instead of being drawn as "Nothing to show", which means no data.
+  var SHAPES = {
+    bar: '{ "labels": [...], "series": [{ "name": "...", "values": [...] }] }', line: '{ "labels": [...], "series": [{ "name": "...", "values": [...] }] }',
+    area: '{ "labels": [...], "series": [{ "name": "...", "values": [...] }] }', ring: '{ "items": [{ "label": "...", "value": 1 }] }',
+    barlist: '{ "items": [{ "label": "...", "value": 1 }] }', sparkline: '{ "values": [...] }', gauge: '{ "value": 1, "max": 100 }',
+    heatmap: '{ "rows": [...], "cols": [...], "values": [[...]] }', scatter: '{ "series": [{ "name": "...", "points": [{ "x": 1, "y": 2 }] }] }'
+  };
+  var NEEDS = { bar: ["labels", "series"], line: ["labels", "series"], area: ["labels", "series"], ring: ["items"], barlist: ["items"], sparkline: ["values"], gauge: ["value"], heatmap: ["rows", "cols"], scatter: ["series"] };
+  function pick(o, names) { for (var i = 0; i < names.length; i++) if (o && o[names[i]] !== undefined && o[names[i]] !== null) return o[names[i]]; }
+  function asItems(list) {
+    return list.map(function (it, i) {
+      if (typeof it === "number" || typeof it === "string") return { label: String(i + 1), value: Number(it) };
+      return Object.assign({}, it, { label: String(pick(it, ["label", "name", "key", "category", "x"]) !== undefined ? pick(it, ["label", "name", "key", "category", "x"]) : i + 1), value: Number(pick(it, ["value", "count", "total", "y", "amount"])) || 0 });
+    });
+  }
+  function shapeData(kind, data) {
+    if (Array.isArray(data)) {
+      if (kind === "sparkline") return { values: data.map(function (v) { return typeof v === "object" && v ? pick(v, ["value", "count", "total", "y"]) : v; }) };
+      if (kind === "scatter") return { series: [{ name: "", points: data }] };
+      data = { items: data };
+    }
+    if (!data || typeof data !== "object") return {};
+    var out = Object.assign({}, data);
+    var items = Array.isArray(out.items) ? out.items : Array.isArray(out.data) ? out.data : null;
+    if ((kind === "ring" || kind === "barlist") && !Array.isArray(out.items)) {
+      if (items) out.items = asItems(items);
+      else if (Array.isArray(out.labels) && Array.isArray(out.series) && out.series[0]) out.items = out.labels.map(function (l, i) { return { label: String(l), value: Number((out.series[0].values || [])[i]) || 0 }; });
+      else if (Array.isArray(out.labels) && Array.isArray(out.values)) out.items = out.labels.map(function (l, i) { return { label: String(l), value: Number(out.values[i]) || 0 }; });
+    } else if (kind === "ring" || kind === "barlist") out.items = asItems(out.items);
+    if ((kind === "bar" || kind === "line" || kind === "area") && !Array.isArray(out.series)) {
+      if (Array.isArray(out.values)) out.series = [{ name: out.name || "", values: out.values }];
+      else if (items) { var it = asItems(items); out.labels = it.map(function (x) { return x.label; }); out.series = [{ name: out.name || "", values: it.map(function (x) { return x.value; }) }]; delete out.items; }
+    }
+    if ((kind === "bar" || kind === "line" || kind === "area") && Array.isArray(out.series) && !Array.isArray(out.labels) && out.series[0] && out.series[0].values) out.labels = out.series[0].values.map(function (v, i) { return String(i + 1); });
+    return out;
+  }
+  // Data that has something in it but not what this chart reads: the expected shape, or "".
+  function shapeProblem(kind, raw, data) {
+    var given = Array.isArray(raw) ? raw.length > 0 : raw && typeof raw === "object" && Object.keys(raw).some(function (k) { return ["empty", "title", "format", "unit", "color", "height"].indexOf(k) < 0; });
+    if (!given || !NEEDS[kind]) return "";
+    var missing = NEEDS[kind].filter(function (k) { return data[k] === undefined || data[k] === null; });
+    return missing.length ? "This chart's data is not in the shape it reads (missing " + missing.join(", ") + "). Expected: " + SHAPES[kind] : "";
+  }
   function render(host, kind, data) {
     var fn = kinds[kind];
     if (!fn) return;
-    data = data || {};
+    var raw = data;
+    data = shapeData(kind, data || {});
+    var problem = shapeProblem(kind, raw, data);
+    if (problem) {
+      clear(host);
+      empty(host, { empty: problem });
+      host.setAttribute("data-kit-shape-error", "");
+      host.__kitChart = { kind: kind, data: data };
+      if (window.console) console.error("UI kit chart (" + kind + "): " + problem, host);
+      return;
+    }
+    host.removeAttribute("data-kit-shape-error");
     var parts = function () { return Array.prototype.slice.call(host.querySelectorAll('[role="button"], button')); };
     var at = document.activeElement, focusAt = at && host.contains(at) ? parts().indexOf(at) : -1;
     host.__kitChart = { kind: kind, data: data };

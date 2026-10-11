@@ -7,7 +7,7 @@
 # standard fixes and tells Copilot, strict leaves them to Copilot. Non-ASCII written as [char].
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Lint') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Lint', 'OneFile') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function Set-At([string]$Text, [int[]]$Indexes, [string]$With) {
     # Replaces the single characters at these positions (from the end, so positions stay right).
@@ -17,7 +17,36 @@ function Set-At([string]$Text, [int[]]$Indexes, [string]$With) {
 }
 
 function Repair-MechanicalIssues {
-    <# The text with the mechanical problems fixed, and what was fixed: @{ text; fixes }. #>
+    <# The text with the mechanical problems fixed, and what was fixed: @{ text; fixes }. A one-file
+       page's filled blocks (the UI kit and the data, written by the helper program) are set aside
+       first and put back unchanged: they are never repaired, and on a page with megabytes of data
+       walking them took minutes. #>
+    param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text)
+    if ($Path -match '(?i)\.html?$' -and (Test-OneFileText $Text)) {
+        $blocks = @(Get-GeneratedBlocks $Text | Where-Object { $_.content.Trim() })
+        if ($blocks.Count) {
+            $sb = New-Object Text.StringBuilder
+            $at = 0
+            for ($k = 0; $k -lt $blocks.Count; $k++) {
+                [void]$sb.Append($Text.Substring($at, $blocks[$k].start - $at)).Append("/*streamhub-block-$k*/")
+                $at = $blocks[$k].start + $blocks[$k].length
+            }
+            [void]$sb.Append($Text.Substring($at))
+            $r = Repair-MechanicalCore $Path $sb.ToString()
+            $out = $r.text
+            for ($k = 0; $k -lt $blocks.Count; $k++) {
+                $mark = "/*streamhub-block-$k*/"
+                $i = $out.IndexOf($mark)
+                if ($i -lt 0 -or $out.IndexOf($mark, $i + 1) -ge 0) { return @{ text = $Text; fixes = @() } }   # a block lost or doubled: leave the page as it is
+                $out = $out.Substring(0, $i) + $blocks[$k].content + $out.Substring($i + $mark.Length)
+            }
+            return @{ text = $out; fixes = $r.fixes }
+        }
+    }
+    Repair-MechanicalCore $Path $Text
+}
+
+function Repair-MechanicalCore {
     param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text)
     $fixes = New-Object System.Collections.Generic.List[string]
     $t = $Text

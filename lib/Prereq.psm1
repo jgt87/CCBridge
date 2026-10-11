@@ -194,6 +194,15 @@ function Get-PrereqChecks {
     param([int]$WebPort = 8765, [int]$CdpPort = 9333, [switch]$Online, [switch]$Tools)
     $out = New-Object System.Collections.Generic.List[object]
 
+    # The installed StreamHub version first, so a pasted report says which release it came from.
+    $out.Add((Invoke-SafeCheck 'StreamHub' {
+        Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
+        $b = Get-CCBridgeBuild (Split-Path -Parent $PSScriptRoot)
+        $text = "$($b.version)$(if ($b.commit) { " (commit $($b.commit))" })"
+        if ($b.version -eq 'dev') { New-Check 'StreamHub' 'WARN' $text 'No release version found (a development copy without version.txt or a release tag): update.cmd installs the latest release.' }
+        else { New-Check 'StreamHub' 'OK' $text }
+    }))
+
     $out.Add((Invoke-SafeCheck 'Windows PowerShell' {
         $v = $PSVersionTable.PSVersion
         if ($PSVersionTable.PSEdition -eq 'Desktop' -and $v.Major -eq 5 -and $v.Minor -ge 1) { New-Check 'Windows PowerShell' 'OK' "$v" }

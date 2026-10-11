@@ -5,8 +5,12 @@ Import-Module (Join-Path $root 'lib\Prereq.psm1') -Force
 Describe 'Get-PrereqChecks' {
     $checks = @(Get-PrereqChecks -WebPort 8765 -CdpPort 9333)
     It 'checks every part StreamHub needs, each with OK, WARN or FAIL' {
-        ($checks | ForEach-Object { $_.name }) -join '|' | Should Match '^Windows PowerShell\|Language mode\|Execution policy\|\.NET Framework\|Microsoft Edge\|Edge remote debugging\|Local web server\|Port 8765 \(web app\)\|Port 9333 \(Edge for Copilot\)\|OneDrive\|Single sign-on\|Data folder$'
+        ($checks | ForEach-Object { $_.name }) -join '|' | Should Match '^StreamHub\|Windows PowerShell\|Language mode\|Execution policy\|\.NET Framework\|Microsoft Edge\|Edge remote debugging\|Local web server\|Port 8765 \(web app\)\|Port 9333 \(Edge for Copilot\)\|OneDrive\|Single sign-on\|Data folder$'
         @($checks | Where-Object { $_.status -notin 'OK', 'WARN', 'FAIL' }).Count | Should Be 0
+    }
+    It 'starts with the StreamHub version and commit' {
+        $checks[0].name | Should Be 'StreamHub'
+        $checks[0].detail | Should Match '^v\d+\.\d+\.\d+( \(commit [0-9a-f]+\))?$'
     }
     It 'gives a hint for everything that is not OK' {
         @($checks | Where-Object { $_.status -ne 'OK' -and -not $_.hint }).Count | Should Be 0
