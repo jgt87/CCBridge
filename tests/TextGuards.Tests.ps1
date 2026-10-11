@@ -149,6 +149,27 @@ Describe 'Chart colours from the preset' {
     }
 }
 
+Describe 'A fixed chart-unavailable message in place of a chart' {
+    It 'reports it in pages and scripts, not an empty state for missing data' {
+        Find-ChartPlaceholder 'dashboard.js' "x.innerHTML = '<div class=`"kit-empty`"><p class=`"kit-empty__title`">Chart unavailable</p>Usage tier distribution data could not be rendered.</div>';" | Should Match "^line 1: a fixed message that a chart is unavailable"
+        Find-ChartPlaceholder 'index.html' '<div class="kit-empty">The graph could not be drawn</div>' | Should Match 'line 1:'
+        Find-ChartPlaceholder 'app.js' "if (!rows.length) host.innerHTML = '<div class=`"kit-empty`"><p class=`"kit-empty__title`">No usage data</p>Adjust the filters.</div>';" | Should BeNullOrEmpty
+        Find-ChartPlaceholder 'README.md' 'Chart unavailable' | Should BeNullOrEmpty
+        (@(Test-FileContent 'dashboard.js' "var a = '<div class=`"kit-empty`"><p>Chart unavailable</p></div>';") -join ' ') | Should Match 'chart is unavailable'
+        # A message after a real failure is right (Mermaid, a catch).
+        Find-ChartPlaceholder 'block.tsx' 'catch (e) { setError(e.message); } ... <div className="kit-empty">The diagram could not be drawn</div>' | Should BeNullOrEmpty
+    }
+    It 'reports a change that takes every chart out of a file, whatever text took their place' {
+        $old = "host.innerHTML = '<div class=`"kit-chart`" data-kit-chart=`"ring`" data-kit-data=`"{}`"></div>';`nKitCharts.barlist(el, data);"
+        foreach ($instead in "host.innerHTML = '<p>No visual right now</p>';", "host.innerHTML = '';", "host.innerHTML = '<div class=`"kit-empty`">Graph not available</div>';") {
+            Find-ChartsRemoved 'dashboard.js' $old $instead | Should Match '^this change removes every chart from the file \(2 before, none now\)'
+        }
+        Find-ChartsRemoved 'dashboard.js' $old ($old + "`nKitCharts.bar(b, d);") | Should BeNullOrEmpty
+        Find-ChartsRemoved 'dashboard.js' '' 'var a = 1;' | Should BeNullOrEmpty
+        @(Get-NewFileIssues 'dashboard.js' $old "host.innerHTML = '<p>Chart is coming</p>';") -join ' ' | Should Match 'removes every chart'
+    }
+}
+
 Describe 'Pages written with stand-ins for < and >' {
     It 'reports a page whose tags are stand-ins or escaped, not a normal page' {
         Find-PlaceholderMarkup 'index.html' "[[LT]]!doctype html[[GT]]`n[[LT]]html lang=`"en`"[[GT]]" | Should Match 'line 1: .*stand-in \[\[LT\]\]'

@@ -94,7 +94,7 @@ Describe 'Saved answers, their labels and their context lines' {
         $s.answers.extras | Should Be 'export,print'
         $list = @(Get-SetupAnswerList $p)
         ($list | ForEach-Object { $_.id }) -join ',' | Should Be 'appkind,audience,extras'
-        ($list | Where-Object id -eq 'extras').label | Should Be 'Extras for tables and reports: Export to CSV or Excel, A print view'
+        ($list | Where-Object id -eq 'extras').label | Should Be 'Optional extras for tables and reports: Export to CSV or Excel, A print view'
         Get-SetupAnswerLabel 'appkind' 'react' | Should Be 'What kind of app is this: React app'
         $ctx = Format-ProjectSetupContext $p
         $ctx | Should Match '- App kind: a React app'

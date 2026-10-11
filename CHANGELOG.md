@@ -6,6 +6,21 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.125] - 2026-10-12
+
+### Fixed
+- A shared UI kit catalogue that moved in from an older project's catalogue had a record (manifest.json) that listed only the files added after the move, so StreamHub treated kit.js, kit-charts.js and kit.css as changed by the organisation and never updated them: projects kept the 10 October kit, without the chart drawing fix, the new table headers, legends and spacing. A catalogue file is now StreamHub's when the record does not list it, when its hash is the record's, or when its content is any kit file a StreamHub release shipped (templates/ui-kit/kit-history.json, kept by tools/update-kit-history.ps1 and checked by the release gate); a catalogue without a record gets one listing every kit file. Such a catalogue is brought up to date at the next project open.
+- Copilot replaced the charts it could not get to draw with permanent "Chart unavailable" messages, and that passed the page check. Now, structurally and whatever the words: a change that takes every chart out of a file is a file-check error that holds up "done"; a request that asks for charts or graphs where none of the written pages draws one is sent back once at "done"; a fixed "chart unavailable" message inside an empty state (not after a real error) is reported as well; and the page check's message about a chart that draws nothing now says to make it draw, an empty state being only for when there is no data.
+- At "done", open items in a TODO.md the task wrote are sent back once (do them, or tick them off and say why).
+- Blocks in a UI kit stack lost the space between them when the page's own CSS set the stack's display (to show a section). The stack now spaces its parts with margins, which hold under any display.
+
+### Changed
+- The logging item in the menu steps through info, verbose and trace (trace adds the prompt and reply text, for a short test).
+
+### Added
+- The setup card marks a question with several answers as optional ("Optional extras for tables and reports? (optional: pick any, or none)"); before, "(choose any)" could read as required.
+- The system check at every start (and check.cmd) lists the UI kit: switched on or off, its revision with the StreamHub release, the parts that are on, the colours, and the shared catalogue beside the projects (its revision, whether it is updated at the next project open, and how many files your organisation changed).
+
 ## [v0.1.124] - 2026-10-11
 
 ### Changed

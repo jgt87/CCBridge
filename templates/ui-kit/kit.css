@@ -59,7 +59,9 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-page ::-webkit-scrollbar-corner { background: transparent; }
 
 /* Layout */
-.kit-stack { display: flex; flex-direction: column; gap: var(--kit-space-3); }
+.kit-stack { display: flex; flex-direction: column; }
+/* The space between a stack's parts is a margin, not gap: page CSS that sets the stack's display (to show a section, say) keeps it. */
+.kit-stack > :not([hidden], script, template, style, dialog) ~ :not([hidden], script, template, style, dialog) { margin-block-start: var(--kit-space-3); }
 .kit-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kit-space-2); }
 .kit-row--between { justify-content: space-between; }
 .kit-grid { display: grid; gap: var(--kit-space-4); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }

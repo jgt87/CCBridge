@@ -107,6 +107,28 @@ Describe 'Get-DeviceJoinStatus' {
     }
 }
 
+Describe 'The UI kit in the system check' {
+    It 'shows the kit on or off, its revision with the release, the parts and the shared catalogue' {
+        $p = Join-Path $env:TEMP ('ccb-kitcheck-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        try {
+            $c = Get-UiKitCheck -AppRoot $root -ProjectsRoot $p
+            $c.name | Should Be 'UI kit'
+            $c.status | Should Match '^(OK|INFO)$'
+            $c.detail | Should Match 'kit revision \d+'
+            if ($c.status -eq 'OK') {
+                $c.detail | Should Match '^on, kit revision \d+'
+                $c.detail | Should Match 'parts: '
+                $c.detail | Should Match 'shared catalogue: made at the first project'
+                # A shared catalogue from an older revision: said, with when it is updated.
+                New-Item -ItemType Directory (Join-Path $p '.streamhub\ui-kit') -Force | Out-Null
+                [IO.File]::WriteAllText((Join-Path $p '.streamhub\ui-kit\kit.css'), '/* old */')
+                [IO.File]::WriteAllText((Join-Path $p '.streamhub\ui-kit\VERSION.txt'), 'Kit revision 9')
+                (Get-UiKitCheck -AppRoot $root -ProjectsRoot $p).detail | Should Match 'shared catalogue: revision 9, updated to \d+ when a project opens'
+            } else { $c.detail | Should Match 'switched off' }
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 Describe 'Optional tools' {
     It 'shows missing tools as information, never as a failure, and old versions as a warning' {
         Mock -ModuleName Prereq Get-ToolVersion { $null }
@@ -131,6 +153,6 @@ Describe 'The start report names the optional tools without touching the network
         $node.Count | Should Be 1
         $node[0].status | Should Match '^(OK|INFO|WARN)$'
         $node[0].detail | Should Not Match 'registry'
-        ($c | ForEach-Object { $_.name }) -join ',' | Should Match 'Python,Node\.js,\.NET SDK,Git$'
+        ($c | ForEach-Object { $_.name }) -join ',' | Should Match 'Python,Node\.js,\.NET SDK,Git,UI kit$'
     }
 }

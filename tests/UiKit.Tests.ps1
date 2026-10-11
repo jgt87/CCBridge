@@ -372,6 +372,22 @@ Describe 'What the kit offers, for every task (Format-UiKitContext)' {
 }
 
 Describe 'Update-UiKitCatalog' {
+    It 'knows every kit file of this version as StreamHub''s (kit-history.json is up to date: run tools/update-kit-history.ps1)' {
+        $h = Get-KitHistory $root
+        foreach ($f in @(Get-ChildItem (Join-Path $root 'templates\ui-kit') -Recurse -File | Where-Object { $_.FullName -notmatch '\\(vendor|icons)\\' -and $_.Name -notmatch '\.(json|png)$' })) {
+            $rel = $f.FullName.Substring((Join-Path $root 'templates\ui-kit').Length + 1).Replace('\', '/')
+            "${rel}: $($h.ContainsKey($rel) -and $h[$rel].Contains((Get-FileSha $f.FullName)))" | Should Be "${rel}: True"
+        }
+    }
+    It 'treats a catalogue file as StreamHub''s when the manifest does not list it or it is a version StreamHub shipped' {
+        $man = @{ revision = 12; files = @{ 'kit.js' = 'abc'; 'kit.css' = 'def' } }
+        Test-KitFileOwned 'kit-charts.js' '123' $man $root | Should Be $true            # not listed: written before the manifest knew it
+        Test-KitFileOwned 'kit.js' 'abc' $man $root | Should Be $true                    # the manifest's hash
+        Test-KitFileOwned 'kit.js' 'zzz' $man $root | Should Be $false                   # changed by the organisation
+        $shipped = Get-FileSha (Join-Path $root 'templates\ui-kit\kit.css')
+        Test-KitFileOwned 'kit.css' $shipped $man $root | Should Be $true                # a version StreamHub shipped
+        Test-KitFileOwned 'x.js' 'q' $null $root | Should Be $true                       # no manifest at all
+    }
     It 'updates a kit file StreamHub wrote that differs from this version even at the same revision, never one the organisation changed' {
         $p = Join-Path $env:TEMP ('ccb-stale-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
         try {

@@ -147,7 +147,7 @@ export function SetupChoiceCard({ item, onSend }: { item: SetupChoiceItem; onSen
         <div className="space-y-1.5" key={q.id}>
           <div>
             {q.question}
-            {q.multi && <span className="text-muted-foreground text-xs"> (choose any)</span>}
+            {q.multi && <span className="text-muted-foreground text-xs"> (optional: pick any, or none)</span>}
             {q.scope === "request" && <span className="text-muted-foreground text-xs"> (for this request)</span>}
           </div>
           {choiceGrid(q)}

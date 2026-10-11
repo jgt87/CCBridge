@@ -405,12 +405,18 @@ export default function App() {
     { id: "project", label: "Switch project", description: "Open or create a OneDrive project folder", icon: <FolderOpen className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setShowPicker(true) },
     { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: <AtSign className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setPalette("attach"), 0) },
     {
+      // One item that steps through the levels: info -> verbose -> trace -> info.
       id: "logging",
-      label: state.logLevel === "verbose" || state.logLevel === "trace" ? "Verbose logging: turn off" : "Verbose logging: turn on",
-      description: `Detailed diagnostic log (now: ${state.logLevel}); stays on after restarts`,
+      label: state.logLevel === "verbose" ? "Logging: verbose (switch to trace)" : state.logLevel === "trace" ? "Logging: trace (switch back to info)" : "Logging: info (switch to verbose)",
+      description: state.logLevel === "verbose"
+        ? "Trace adds the prompt and reply text, which can hold Microsoft 365 data: use it for a short test; stays on after restarts"
+        : "Detailed diagnostic log, one step per click: info, verbose, trace; stays on after restarts",
       icon: <ScrollText className="h-4 w-4 text-muted-foreground" />,
       end: "Diagnostics",
-      onSelect: () => api.setLogging(state.logLevel === "verbose" || state.logLevel === "trace" ? "info" : "verbose").then(() => setNotice({ text: `Logging set to ${state.logLevel === "verbose" || state.logLevel === "trace" ? "info" : "verbose"}.` })),
+      onSelect: () => {
+        const level = state.logLevel === "verbose" ? "trace" : state.logLevel === "trace" ? "info" : "verbose";
+        return api.setLogging(level).then(() => setNotice({ text: `Logging set to ${level}.` }));
+      },
     },
     {
       id: "diagnostics",

@@ -3,6 +3,29 @@
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Guardrails.psm1') -Force
 
+Describe 'Open items in the task''s TODO at done' {
+    It 'reminds once about open items in a TODO.md the task wrote, not when all are ticked' {
+        $p = Join-Path $env:TEMP ('ccb-todo-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        try {
+            [IO.File]::WriteAllText((Join-Path $p 'TODO.md'), "# Plan`n- [x] Build the page`n- [ ] Add sector filters`n- [ ] Add loading states`n")
+            $r = Get-DoneReminders $p @{ 'TODO.md' = 'new' } @('TODO.md')
+            $r | Should Match 'TODO\.md still lists 2 open item\(s\): Add sector filters; Add loading states'
+            [IO.File]::WriteAllText((Join-Path $p 'TODO.md'), "# Plan`n- [x] Build the page`n")
+            Get-DoneReminders $p @{ 'TODO.md' = 'new' } @('TODO.md') | Should Not Match 'open item'
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'reminds when the request asks for charts and no page the task wrote draws one, whatever the page says' {
+        $p = Join-Path $env:TEMP ('ccb-charts-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        try {
+            [IO.File]::WriteAllText((Join-Path $p 'dashboard.js'), "el.innerHTML = '<div class=`"kit-empty`">Nothing to see</div>';")
+            Get-DoneReminders $p @{ 'dashboard.js' = 'new' } @('dashboard.js') -Request 'Build a dashboard, include graphs and charts' | Should Match 'The request asks for charts or graphs, and none of the pages and scripts you wrote \(dashboard\.js\) draws one'
+            Get-DoneReminders $p @{ 'dashboard.js' = 'new' } @('dashboard.js') -Request 'Build a table of the users' | Should Not Match 'charts or graphs'
+            [IO.File]::WriteAllText((Join-Path $p 'dashboard.js'), "KitCharts.ring(el, { items: items });")
+            Get-DoneReminders $p @{ 'dashboard.js' = 'new' } @('dashboard.js') -Request 'include graphs and charts' | Should Not Match 'charts or graphs'
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 Describe 'Find-PersonalPaths' {
     It 'reports paths into a user folder that a change adds' {
         $r = @(Find-PersonalPaths 'src/config.js' '' "const dir = 'C:\\Users\\jane\\Documents\\data';`nconst x = 1;")

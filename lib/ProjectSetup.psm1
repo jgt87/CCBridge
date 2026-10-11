@@ -484,7 +484,7 @@ $script:SetupQuestionDefs = @(
            'nl' { '- Language: texts, numbers and dates in Dutch: <html lang="nl">, 1.234,56, dates as dd-mm-yyyy, day and month names in Dutch (the kit''s format helpers follow lang).' }
            'en' { '- Language: texts, numbers and dates in English: <html lang="en">, 1,234.56, dates as 10 Oct 2026 (the kit''s format helpers follow lang).' } } }
     },
-    @{ id = 'extras'; scope = 'project'; multi = $true; question = 'Extras for tables and reports?'
+    @{ id = 'extras'; scope = 'project'; multi = $true; question = 'Optional extras for tables and reports?'
        options = @(
            @{ value = 'export'; label = 'Export to CSV or Excel'; help = 'A button per table (the kit''s KitData.download).' },
            @{ value = 'print'; label = 'A print view'; help = 'Fits the paper, hides buttons (the kit''s print part).' },

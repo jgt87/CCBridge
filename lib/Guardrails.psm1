@@ -598,7 +598,7 @@ function Get-DoneReminders {
     <# One reminder when a task says done (sent once per task): code changed but no test, in a
        project that has tests; a new part in src/ or Scripts/ while README.md stayed the same.
        $Files: rel path -> 'new' or 'existed' (the task's change set). Returns '' when all is well. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, $Files, [string[]]$ProjectPaths)
+    param([Parameter(Mandatory)][string]$ProjectRoot, $Files, [string[]]$ProjectPaths, [string]$Request = '')
     $changed = @($Files.Keys | ForEach-Object { "$_".Replace('\', '/') })
     if (-not $changed.Count) { return '' }
     if (-not $PSBoundParameters.ContainsKey('ProjectPaths')) { $ProjectPaths = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\(node_modules|\.git|dist|\.streamhub|source)\\' } | Select-Object -First 3000 | ForEach-Object { $_.FullName.Substring($ProjectRoot.TrimEnd('\').Length + 1).Replace('\', '/') }) }
@@ -608,6 +608,20 @@ function Get-DoneReminders {
     $hasTests = @($ProjectPaths | Where-Object { $_ -match $script:TestPathPattern }).Count -gt 0
     if ($code.Count -and -not $tests.Count -and $hasTests) {
         $notes.Add("You changed code ($(($code | Select-Object -First 4) -join ', ')) but no test, and this project has tests. Add or update a test for the change; if no test is needed, say why in your done block.")
+    }
+    # The request asked for charts or graphs and no page or script the task wrote draws one (structural:
+    # whatever the pages say instead).
+    if ($Request -match '(?i)\b(charts?|graphs?|visuali[sz](e|ations?)|diagrams?|grafieken?|diagrammen?|visueel)\b') {
+        $pagesWritten = @($changed | Where-Object { $_ -match '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$' -and $_ -notmatch '(?i)(^|/)(styles/kit|data|tests?)/' })
+        $draws = @(foreach ($w in $pagesWritten) { $f = Join-Path $ProjectRoot $w.Replace('/', '\'); if ((Test-Path -LiteralPath $f -PathType Leaf) -and [regex]::IsMatch([IO.File]::ReadAllText($f), '(?i)\bdata-kit-chart\b|\bKitCharts\s*\.\s*[a-z]+\s*\(|<canvas\b|\bnew\s+Chart\s*\(|\bcreateElement\(\s*[\"'']canvas|\bcharts?\s*:\s*\[|\bChart\b\s+kind=')) { $w } })
+        if ($pagesWritten.Count -and -not $draws.Count) { $notes.Add("The request asks for charts or graphs, and none of the pages and scripts you wrote ($(($pagesWritten | Select-Object -First 3) -join ', ')) draws one. Draw them with the data (the UI kit's charts: data-kit-chart with data-kit-data, or KitCharts.NAME(element, data)); a message in place of a chart is not a chart.") }
+    }
+    # A plan list the task wrote (TODO.md) with items still open: finish them or say why they are left.
+    foreach ($todo in @($changed | Where-Object { $_ -match '(?i)(^|/)(TODO|PLAN|TASKS)\.md$' })) {
+        $tf = Join-Path $ProjectRoot $todo.Replace('/', '\')
+        if (-not (Test-Path -LiteralPath $tf -PathType Leaf)) { continue }
+        $open = @(([IO.File]::ReadAllText($tf) -split "`r?`n") | Where-Object { $_ -match '^\s*[-*]\s*\[ \]\s*\S' } | ForEach-Object { ($_ -replace '^\s*[-*]\s*\[ \]\s*', '').Trim() })
+        if ($open.Count) { $notes.Add("$todo still lists $($open.Count) open item(s): $(($open | Select-Object -First 4) -join '; '). Do them now, or if one is not needed, tick it off and say why in your summary.") }
     }
     $readme = @($ProjectPaths | Where-Object { $_ -match '(?i)^README\.md$' }) | Select-Object -First 1
     $newParts = @($changed | Where-Object { $Files[$_] -eq 'new' -and $_ -match '(?i)^(src|Scripts)/' -and $_ -notmatch $script:TestPathPattern })

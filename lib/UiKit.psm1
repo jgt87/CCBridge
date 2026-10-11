@@ -256,12 +256,42 @@ function Get-KitManifest([string]$Catalog) {
 }
 function Save-KitManifest([string]$Catalog, $Manifest) { Write-ShaRecord (Join-Path $Catalog 'manifest.json') $Manifest }
 
-function Get-KitCustomFiles([string]$Catalog) {
-    # Catalogue files the organisation changed after StreamHub wrote them (their hash differs from the manifest's).
+$script:KitHistory = $null
+function Get-KitHistory([string]$AppRoot) {
+    <# Every version of each kit file a StreamHub release shipped (templates/ui-kit/kit-history.json:
+       file -> SHA-256 list, LF and CRLF forms), as file -> HashSet. Empty without the file. #>
+    if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
+    if ($script:KitHistory -and $script:KitHistory.root -eq $AppRoot) { return $script:KitHistory.files }
+    $files = @{}
+    $f = Join-Path $AppRoot 'templates\ui-kit\kit-history.json'
+    if (Test-Path -LiteralPath $f) {
+        try {
+            $j = [IO.File]::ReadAllText($f) | ConvertFrom-Json
+            foreach ($p in $j.files.PSObject.Properties) { $set = New-Object 'System.Collections.Generic.HashSet[string]'; foreach ($h in @($p.Value)) { [void]$set.Add("$h") }; $files[$p.Name] = $set }
+        } catch { }
+    }
+    $script:KitHistory = @{ root = $AppRoot; files = $files }
+    $files
+}
+
+function Test-KitFileOwned {
+    <# Whether a catalogue file is StreamHub's (a newer version may replace it) rather than one the
+       organisation changed: the manifest does not list it (written before the manifest knew it), its
+       hash is the manifest's, or its hash is one of a version a StreamHub release shipped. #>
+    param([string]$Name, [string]$Sha, $Manifest, [string]$AppRoot)
+    if (-not $Manifest) { return $true }
+    if (-not $Manifest.files.ContainsKey($Name)) { return $true }
+    if ($Sha -eq $Manifest.files[$Name]) { return $true }
+    $h = Get-KitHistory $AppRoot
+    [bool]($h.ContainsKey($Name) -and $h[$Name].Contains($Sha))
+}
+
+function Get-KitCustomFiles([string]$Catalog, [string]$AppRoot) {
+    # Catalogue files the organisation changed after StreamHub wrote them (listed with another hash, and no version StreamHub shipped).
     $m = Get-KitManifest $Catalog
     if (-not $m) { return @() }
     $keys = [string[]]@($m.files.Keys); [Array]::Sort($keys, [StringComparer]::Ordinal)
-    @(foreach ($k in $keys) { $p = Join-Path $Catalog $k.Replace('/', '\'); if ((Test-Path -LiteralPath $p -PathType Leaf) -and (Get-FileSha $p) -ne $m.files[$k]) { $k } })
+    @(foreach ($k in $keys) { $p = Join-Path $Catalog $k.Replace('/', '\'); if ((Test-Path -LiteralPath $p -PathType Leaf) -and -not (Test-KitFileOwned $k (Get-FileSha $p) $m $AppRoot)) { $k } })
 }
 
 function Get-KitCopyRecord([string]$ProjectRoot) {
@@ -398,6 +428,31 @@ function Get-UiKitFiles([string]$AppRoot) {
     @($files)
 }
 
+function Get-UiKitStatus {
+    <# The UI kit as the system check shows it: @{ on (setting uiKit); revision (this StreamHub's kit
+       revision); version (StreamHub's release); parts (switched on); colors; missing (kit files the
+       install lacks); catalog (the shared catalogue beside the projects, '' when there is none yet);
+       catalogRevision; custom (catalogue files the organisation changed) }. Reads only, writes nothing. #>
+    param([Parameter(Mandatory)][string]$AppRoot, [string]$ProjectsRoot = '')
+    $tpl = Join-Path $AppRoot 'templates\ui-kit'
+    $missing = @('tokens.css', 'kit.css', 'kit.js', 'kit-charts.js', 'kit-examples.html') | Where-Object { -not (Test-Path -LiteralPath (Join-Path $tpl $_)) }
+    if (-not $ProjectsRoot) {
+        $od = foreach ($p in $env:OneDriveCommercial, $env:OneDrive, $env:OneDriveConsumer) { if ($p -and (Test-Path -LiteralPath $p)) { $p; break } }
+        $folder = try { "$((Get-CCBridgeConfig harness $AppRoot).projectsFolder)" } catch { '' }
+        if ($od) { $ProjectsRoot = Join-Path $od $(if ($folder) { $folder } else { 'CCBridge' }) }
+    }
+    $cat = if ($ProjectsRoot) { Join-Path $ProjectsRoot '.streamhub\ui-kit' } else { '' }
+    $hasCat = $cat -and (Test-Path -LiteralPath (Join-Path $cat 'kit.css'))
+    $version = try { (Get-CCBridgeBuild $AppRoot).version } catch { '' }
+    @{
+        on = [bool](Test-UiKitOn $AppRoot); revision = $script:KitRevision; version = "$version"
+        parts = @(Get-UiKitParts $AppRoot | Where-Object { $_ -notin 'base', 'palette', 'themeswitch' })
+        colors = "$(Get-UiKitColors $AppRoot)"; missing = @($missing)
+        catalog = $(if ($hasCat) { $cat } else { '' }); catalogRevision = $(if ($hasCat) { Get-KitCatalogRevision $cat } else { 0 })
+        custom = @(if ($hasCat) { Get-KitCustomFiles $cat })
+    }
+}
+
 function Get-KitCatalogRevision([string]$Catalog) {
     # The kit revision a catalogue holds (VERSION.txt "Kit revision N"): 1 before revisions were written, 0 without one.
     $f = Join-Path $Catalog 'VERSION.txt'
@@ -426,7 +481,7 @@ function Test-KitCatalogStale([string]$Catalog, [string]$AppRoot) {
         $to = Join-Path $Catalog $f.Replace('/', '\')
         if (-not (Test-Path -LiteralPath $to -PathType Leaf)) { return $true }
         $sha = Get-FileSha $to
-        if ($man.files.ContainsKey($f) -and $sha -eq $man.files[$f] -and $sha -ne (Get-FileSha $from)) { return $true }
+        if ($sha -ne (Get-FileSha $from) -and (Test-KitFileOwned $f $sha $man $AppRoot)) { return $true }
     }
     $false
 }
@@ -451,7 +506,7 @@ function Update-KitCatalogFiles([string]$Catalog, [string]$AppRoot, [switch]$Sha
         if (-not (Test-Path -LiteralPath $from)) { continue }
         $to = Join-Path $Catalog $f.Replace('/', '\')
         $exists = Test-Path -LiteralPath $to -PathType Leaf
-        $ownWrite = (-not $Shared) -or (-not $exists) -or (-not $man) -or ($files.ContainsKey($f) -and (Get-FileSha $to) -eq $files[$f])
+        $ownWrite = (-not $Shared) -or (-not $exists) -or (Test-KitFileOwned $f (Get-FileSha $to) $man $AppRoot)
         if ($f -eq 'tokens.css') {
             # The palette the catalogue was made with (the template it came from, else its own file); the organisation's own values stay through a merge.
             $pristine = Join-Path $pristineDir 'tokens.css'
@@ -702,6 +757,11 @@ function Install-UiKit {
             $null = New-Item -ItemType Directory -Force -Path (Join-Path $cat '.pristine')
             Copy-Item -LiteralPath $to -Destination (Join-Path $cat '.pristine\tokens.css') -Force
         }
+    }
+    if (-not $man -and (Test-Path -LiteralPath $cat)) {
+        # A catalogue from before manifests: every kit file in it is StreamHub's, so the new manifest lists them all
+        # (listing only the files written now made the others look changed by the organisation, and they were never updated).
+        foreach ($f in $files) { $to = Join-Path $cat $f.Replace('/', '\'); if (-not $manFiles.ContainsKey($f) -and (Test-Path -LiteralPath $to -PathType Leaf)) { $manFiles[$f] = Get-FileSha $to } }
     }
     $verFile = Join-Path $cat 'VERSION.txt'
     if (-not (Test-Path -LiteralPath $verFile) -and (Test-Path -LiteralPath $cat)) { Write-KitCatalogVersion $cat $AppRoot 'copied' }
@@ -1298,4 +1358,4 @@ function Test-UiKitInProject([string]$ProjectRoot) {
     Test-Path -LiteralPath (Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css'))
 }
 
-Export-ModuleMember -Function Get-UiKitCatalogPath, Get-FileSha, Get-KitManifest, Save-KitManifest, Get-KitCustomFiles, Get-KitCopyRecord, Register-KitCopies, Sync-KitCopies, Update-KitCatalogFiles, Get-KitScanFiles, Clear-KitScanCache, Set-KitScanHold, Update-KitTokens, Get-TokenBlockSpans, Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder, Test-KitCatalogStale, Read-KitPageClasses, Repair-KitPageClasses, Get-KitOffPartClasses
+Export-ModuleMember -Function Get-UiKitCatalogPath, Get-FileSha, Get-KitManifest, Save-KitManifest, Get-KitCustomFiles, Get-KitCopyRecord, Register-KitCopies, Sync-KitCopies, Update-KitCatalogFiles, Get-KitScanFiles, Clear-KitScanCache, Set-KitScanHold, Update-KitTokens, Get-TokenBlockSpans, Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder, Test-KitCatalogStale, Read-KitPageClasses, Repair-KitPageClasses, Get-KitOffPartClasses, Get-UiKitStatus, Get-KitHistory, Test-KitFileOwned

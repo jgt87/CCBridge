@@ -1056,6 +1056,35 @@ function Get-StandInToken([string]$Text) {
     $null
 }
 
+# Chart drawing in a page or script, whatever the words around it: a declared kit chart, a KitCharts
+# call, a canvas, Chart.js, the React Chart part.
+$script:ChartDrawPattern = '(?i)\bdata-kit-chart\b|\bKitCharts\s*\.\s*[a-z]+\s*\(|<canvas\b|\bnew\s+Chart\s*\(|\bcreateElement\(\s*[\"'']canvas|\bcharts?\s*:\s*\[|\bChart\b\s+kind='
+
+function Find-ChartsRemoved([string]$Path, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New) {
+    <# A change that takes a page or script from drawing charts to drawing none, whatever text took
+       their place (Copilot's words differ every time; the structure does not). "..." or nothing. #>
+    if ($Path -notmatch '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$' -or ($Path -replace '\\', '/') -match '(?i)(^|/)(styles/kit|templates/ui-kit|tests?|__tests__)/') { return }
+    $before = [regex]::Matches("$Old", $script:ChartDrawPattern).Count
+    if (-not $before -or [regex]::IsMatch("$New", $script:ChartDrawPattern)) { return }
+    "this change removes every chart from the file ($before before, none now): a chart that does not draw is fixed by drawing it with the data (the UI kit's charts: data-kit-chart with data-kit-data, or KitCharts.NAME(element, data)), never by taking it out or putting a message in its place; if the person no longer wants a chart, say so in your summary"
+}
+
+function Find-ChartPlaceholder([string]$Path, [string]$Text) {
+    <# A page or script that shows a fixed "chart unavailable" / "could not be rendered" message where a
+       chart belongs (seen: Copilot replaced every chart with one to pass the page check). An empty state
+       says there is no data; it never stands in for a chart that should draw. "line N: ..." or nothing. #>
+    if ($Path -notmatch '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$') { return }
+    if (($Path -replace '\\', '/') -match '(?i)(^|/)(styles/kit|templates/ui-kit|tests?|__tests__)/|(^|/)kit-[\w-]+\.js$|\.(test|spec)\.[cm]?[jt]sx?$|\.Tests\.ps1$') { return }   # the kit's own error state, tests
+    foreach ($m in [regex]::Matches($Text, '(?i)(chart|graph|diagram|visual(isation|ization)?)\s+(is\s+)?(unavailable|not available|could not be (rendered|drawn|shown|displayed)|cannot be (rendered|drawn|shown|displayed)|failed to (render|draw|load))|(could not be|cannot be) (rendered|drawn)\b')) {
+        # Only inside an empty-state block (kit-empty or an "empty" class) that is not error handling:
+        # a message shown after a real failure (catch, onerror, an error variable) is right.
+        $before = $Text.Substring([Math]::Max(0, $m.Index - 300), [Math]::Min(300, $m.Index))
+        if ($before -notmatch '(?i)kit-empty|class\s*=\s*\\?["''][^"'']*\bempty\b') { continue }
+        if ($before -match '(?i)\bcatch\b|\.catch\(|onerror|\berr(or)?\b\s*[\)\.,;]|\bexception\b') { continue }
+        return "line $(LineAt $Text $m.Index): a fixed message that a chart is unavailable ('$($m.Value)') stands where a chart belongs: make the chart draw with the data (the UI kit's charts: data-kit-chart with data-kit-data, or KitCharts.NAME(element, data)); an empty state is only for when there is no data, written by the code in that case"
+    }
+}
+
 function Find-PlaceholderMarkup {
     <# A page (or markup a script writes) whose tags are stand-ins ([[LT]] and [[GT]] around a tag name) or escaped
        (&lt;html&gt; with no real tag in the file): "line N: ..." or nothing. #>
@@ -1391,6 +1420,7 @@ function Test-FileContent {
     $t = $Text.Replace("`r`n", "`n")
     $issues = New-Object System.Collections.Generic.List[string]
     $add = { param($x) foreach ($y in @($x)) { if ($y) { $issues.Add([string]$y) } } }
+    & $add (Find-ChartPlaceholder $Path $t)   # a fixed "chart unavailable" message in place of a chart
     if ($Path -match $script:CodeExt) {
         # Markers inside strings (a PowerShell here-string, a test) are text, not damage.
         $noStrings = if ($Path -match '(?i)\.ps[md]?1$') { Hide $t '@''[\s\S]*?\n''@|@"[\s\S]*?\n"@' } elseif ($Path -match '(?i)\.pyw?$') { Hide $t '"""[\s\S]*?"""|''''''[\s\S]*?''''''' } else { $t }
@@ -1903,6 +1933,9 @@ function Get-NewFileIssues {
     # The fixed rules; when they find nothing, the language's own syntax check (node, python, when
     # installed) for what they cannot see (one problem is not reported twice).
     $after = @(& $all $New)
+    # Charts taken out by the change (structural, whatever text replaced them): an error, so "done" waits.
+    $gone = Find-ChartsRemoved $Path $Old $New
+    if ($gone) { $after = @($after) + $gone }
     $tool = @(if (-not $after.Count) { Test-ToolSyntax $Path "$New".Replace("`r`n", "`n") })
     # A Prisma schema: prisma validate on the file as saved (the new text), when the project has Prisma.
     if (-not $after.Count -and $Path -match '(?i)\.prisma$') { $tool += @(Test-PrismaValidate $ProjectRoot $Path) }
@@ -1918,4 +1951,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Find-LeakedMarkup, Test-Delimiters, Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences
+Export-ModuleMember -Function Find-LeakedMarkup, Test-Delimiters, Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences, Find-ChartPlaceholder, Find-ChartsRemoved

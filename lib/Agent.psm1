@@ -4091,9 +4091,9 @@ function Invoke-AgentTurn {
                 # in src/ or Scripts/ without a README line (Get-DoneReminders). Not for issue fixes.
                 if (-not $doneReminded -and $checkpoint.Files.Count -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.Cancel) {
                     $doneReminded = $true
-                    $reminder = try { Get-DoneReminders $State.ProjectRoot $checkpoint.Files } catch { Write-CCBLogError agent 'done reminders' $_; '' }
+                    $reminder = try { Get-DoneReminders $State.ProjectRoot $checkpoint.Files -Request "$($State.TurnText)" } catch { Write-CCBLogError agent 'done reminders' $_; '' }
                     if ($reminder) {
-                        Add-AgentEvent $State 'status' @{ text = 'Before finishing: Copilot is reminded once about tests or the README.' }
+                        Add-AgentEvent $State 'status' @{ text = 'Before finishing: Copilot is reminded once about what is still open (tests, README, charts asked for, open TODO items).' }
                         $message = $reminder
                         continue
                     }

@@ -170,6 +170,24 @@ function Get-OptionalToolChecks {
     $out.ToArray()
 }
 
+function Get-UiKitCheck {
+    <# The UI kit line of the system check: on or off (Settings > UI kit), its revision with the
+       StreamHub release, the parts that are on, the colours, and the shared catalogue beside the
+       projects (its revision; it is brought up to date when a project opens). Never a failure: WARN
+       only when kit files are missing from the install. #>
+    param([string]$AppRoot, [string]$ProjectsRoot = '')
+    if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
+    Import-Module (Join-Path $PSScriptRoot 'UiKit.psm1')
+    $k = Get-UiKitStatus -AppRoot $AppRoot -ProjectsRoot $ProjectsRoot
+    $ver = "kit revision $($k.revision)$(if ($k.version) { " (StreamHub $($k.version))" })"
+    if (@($k.missing).Count) { return New-Check 'UI kit' 'WARN' "$ver, files missing: $(@($k.missing) -join ', ')" 'The install lacks UI kit files: run update.cmd to install StreamHub again.' }
+    if (-not $k.on) { return New-Check 'UI kit' 'INFO' "installed, $ver, switched off" 'Settings > UI kit turns it on: pages and apps are then built with the kit.' }
+    $cat = if (-not $k.catalog) { 'shared catalogue: made at the first project that uses the kit' }
+        elseif ($k.catalogRevision -lt $k.revision) { "shared catalogue: revision $($k.catalogRevision), updated to $($k.revision) when a project opens" }
+        else { "shared catalogue: revision $($k.catalogRevision)$(if (@($k.custom).Count) { ", $(@($k.custom).Count) file(s) changed by your organisation" })" }
+    New-Check 'UI kit' 'OK' "on, $ver; parts: $(if (@($k.parts).Count) { @($k.parts) -join ', ' } else { 'base only' }); colours $($k.colors); $cat"
+}
+
 function Get-PrereqChecks {
     <# The checks, in order. -Online adds GitHub and Copilot reachability (a few seconds at most).
        Each check runs in its own guard (Invoke-SafeCheck): one that breaks is a WARN, never fatal. #>
@@ -277,7 +295,10 @@ function Get-PrereqChecks {
     }))
 
     # Optional tools (Python, Node.js...): check.cmd and the installer show them; not at every start.
-    if ($Tools) { foreach ($c in @(Get-OptionalToolChecks -Registry:$Online)) { $out.Add($c) } }
+    if ($Tools) {
+        foreach ($c in @(Get-OptionalToolChecks -Registry:$Online)) { $out.Add($c) }
+        $out.Add((Invoke-SafeCheck 'UI kit' { Get-UiKitCheck }))   # StreamHub's own part: on or off, revision, parts, the shared catalogue
+    }
 
     if ($Online) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -355,4 +376,4 @@ function Write-PrereqReport {
     -not @($Checks | Where-Object { $_.status -eq 'FAIL' }).Count
 }
 
-Export-ModuleMember -Function Get-ToolVersion, Get-OptionalToolChecks, Rename-AppShortcuts, Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText
+Export-ModuleMember -Function Get-ToolVersion, Get-OptionalToolChecks, Get-UiKitCheck, Rename-AppShortcuts, Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText
