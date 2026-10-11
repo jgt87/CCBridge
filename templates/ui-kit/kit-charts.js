@@ -53,7 +53,7 @@
     if (v === null || v === undefined || v === "" || !isFinite(n)) return "-";
     if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" + unit;
     if (Math.abs(n) >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k" + unit;
-    return n.toLocaleString(undefined, { maximumFractionDigits: 2 }) + unit;
+    return n.toLocaleString(document.documentElement.lang || undefined, { maximumFractionDigits: 2 }) + unit;
   }
   // Round axis steps: 1, 2 or 5 times a power of ten.
   function niceMax(max, ticks) {
@@ -415,6 +415,7 @@
       items.forEach(function (it, i) {
         var li = document.createElement("li");
         if (!it.value) li.classList.add("is-zero");
+        li.style.setProperty("--kit-legend-color", it.color);
         if (isOff(data.selected, it.label)) li.classList.add("is-off");
         li.innerHTML = '<span class="kit-chart__swatch" style="background:' + it.color + '"></span><span class="kit-chart__legend-label">' + esc(it.label) +
           '</span><span class="kit-chart__legend-value">' + esc(fmt(it.value, data)) + '</span><span class="kit-chart__legend-share">' + share(it.value) + "</span>";
@@ -498,8 +499,11 @@
     var shown = items.map(function (it, i) { return { it: it, i: i }; });
     if (limit && !open && items.length > limit) shown = shown.filter(function (x) { return x.i < limit || (sel && sel.indexOf(x.it.label) >= 0); });
     var first = data.base === "first" ? Math.max(0, items[0].value) : 0;
-    var max = first || Math.max.apply(null, [0].concat(shown.map(function (x) { return x.it.value; }))) || 1;
     var whole = Number(data.total) || first || items.reduce(function (a, it) { return a + Math.max(0, it.value); }, 0);
+    // A bar next to a percentage fills exactly that share of its track ("share": 18.8% is 18.8% of the
+    // track); "scale": "max" scales the bars to the largest row instead (the page then should not show
+    // a percentage as the bar's meaning).
+    var max = data.share && data.scale !== "max" ? (whole || 1) : (first || Math.max.apply(null, [0].concat(shown.map(function (x) { return x.it.value; }))) || 1);
     var text = function (v) { return fmt(v, data) + (data.share ? " \u00b7 " + percent(v, whole) : ""); };
     var list = document.createElement("div");
     list.className = data.share ? "kit-barlist kit-barlist--share" : "kit-barlist";

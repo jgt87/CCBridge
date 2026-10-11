@@ -436,7 +436,7 @@ $script:SetupQuestionDefs = @(
            @{ value = 'runbook'; label = 'A scheduled runbook'; help = 'The helper program runs it on a schedule and exports the data as JSON for the app.' },
            @{ value = 'file'; label = 'A file I export myself'; help = 'From Outlook, Teams or SharePoint into the project''s Source folder.' },
            @{ value = 'once'; label = 'Copilot gathers it once now'; help = 'Written as a data file in the project; the app reads that.' })
-       trigger = { param($Text, $Info) $Text -match '(?i)\b(outlook|teams|sharepoint( lists?)?|onedrive|calendar|agenda|e-?mails?|mailbox|inbox|meetings?|afspraken|planner|to ?do|microsoft 365|m365|graph api)\b' -and ($Info.hasPages -or $Text -match $script:PageWords -or $Text -match $script:BuildWords) }
+       trigger = { param($Text, $Info) $Text -match '(?i)\b(outlook|teams|sharepoint( lists?)?|onedrive|calendar|agenda|e-?mails?|mailbox|inbox|meetings?|afspraken|planner|to ?do|microsoft 365|m365|graph api)\b' -and -not ($Info.hasData -and $Text -match '(?i)\b(files?|workbooks?|spreadsheets?|sheets?|exports?|csv|excel|xlsx|bestand(en)?)\b') -and ($Info.hasPages -or $Text -match $script:PageWords -or $Text -match $script:BuildWords) }
        stated = { param($Text)
            if ($Text -match '(?i)\b(runbook|scheduled?|every (day|week|month)|daily|weekly|elke (dag|week))\b') { 'runbook' }
            elseif ($Text -match '(?i)\b(export(ed)? (file|csv|excel)|from (a|the|an|my) (csv|excel|export)|uit (een|de) export)\b') { 'file' }

@@ -208,6 +208,19 @@ describe("kit.js additions", () => {
   });
 });
 
+describe("kit-charts.js bar list shares", () => {
+  it("fills a bar to its share when shares are shown, and to the largest row otherwise", () => {
+    document.body.innerHTML = '<div class="kit-chart" id="a"></div><div class="kit-chart" id="b"></div>';
+    load(chartsJs);
+    const items = [{ label: "A", value: 30 }, { label: "B", value: 10 }, { label: "C", value: 60 }];
+    w.KitCharts.barlist(document.getElementById("a")!, { items, share: true });
+    w.KitCharts.barlist(document.getElementById("b")!, { items });
+    const widths = (id: string) => Array.from(document.querySelectorAll<HTMLElement>(`#${id} .kit-barlist__fill`)).map((f) => f.style.width);
+    expect(widths("a").map(parseFloat)).toEqual([30, 10, 60]);
+    expect(widths("b").map(parseFloat)).toEqual([50, 16.7, 100]);
+  });
+});
+
 describe("kit-charts.js charts written later", () => {
   it("draws a declared chart a script adds after the page loaded, and again when its data changes", async () => {
     document.body.innerHTML = '<div id="dash"></div>';
@@ -323,5 +336,20 @@ describe("kit.js basics (revision 11)", () => {
     (ad.querySelector(".kit-btn") as HTMLButtonElement).click();
     expect(await a).toBeUndefined();
     expect(document.querySelector("dialog.kit-dialog")).toBeNull();
+  });
+});
+
+describe("page check: kit classes without a rule", () => {
+  const pageCheck = fs.readFileSync(path.join(repo, "lib/page-content-check.js"), "utf8");
+  it("lists kit classes on the page, also ones a script added, that no loaded stylesheet has a rule for", async () => {
+    document.head.innerHTML = "<style>.kit-panel { padding: 4px; } @media (min-width: 1px) { .kit-table th { color: red; } }</style>";
+    document.body.innerHTML = '<div class="kit-panel"><table class="kit-table"><thead><tr><th><button class="kit-table__sort">Name</button></th></tr></thead></table><span class="kit-chart__swatch other"></span></div><template><i class="kit-ghost"></i></template>';
+    const out = JSON.parse(await (new Function("return (\n" + pageCheck + "\n)")() as Promise<string>)) as { kind: string; classes?: string[] }[];
+    const kit = out.find((f) => f.kind === "kitcss");
+    expect(kit).toBeDefined();
+    expect(kit!.classes).toEqual(["kit-chart__swatch", "kit-table__sort"]);   // kit-panel and kit-table have rules; a template is not shown
+    document.head.innerHTML = "<style>.kit-panel, .kit-table, .kit-table__sort, .kit-chart__swatch { margin: 0; }</style>";
+    const out2 = JSON.parse(await (new Function("return (\n" + pageCheck + "\n)")() as Promise<string>)) as { kind: string }[];
+    expect(out2.some((f) => f.kind === "kitcss")).toBe(false);
   });
 });

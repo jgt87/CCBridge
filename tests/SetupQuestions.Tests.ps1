@@ -39,6 +39,8 @@ Describe 'Which questions a request triggers' {
         & $ids (Get-SetupQuestions 'Build a dashboard with charts of the sales per region' @() $none) | Should Be 'build,sampledata'
         (Get-SetupQuestions 'Build a dashboard with sample data of the sales' @() $none).stated.sampledata | Should Be 'sample'
         & $ids (Get-SetupQuestions 'Build a dashboard of my calendar' @() $none) | Should Be 'build,m365data'   # Microsoft 365 data, not sample data
+        # The data is already in the project (the request names its files): no question how Microsoft 365 data arrives.
+        & $ids (Get-SetupQuestions 'This project contains two files, one with M365 Copilot usage, the other with HR data. Build a dashboard of the usage.' @('usage.xlsx', 'hr.xlsx') $none) | Should Not Match 'm365data'
     }
     It 'asks the language for a Dutch request, and the extras only with the kit and a table or report' {
         & $ids (Get-SetupQuestions 'Maak een overzicht van de verkoop per regio' @('Source/x.csv') $none) | Should Be 'build,language'

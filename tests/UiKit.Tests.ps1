@@ -250,7 +250,7 @@ Describe 'The kit charts' {
         $js.Contains('/^var\(--kit-[\w-]+\)$/') | Should Be $true
         @($js.ToCharArray() | Where-Object { [int]$_ -gt 127 }).Count | Should Be 0
         $css = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
-        foreach ($c in '.kit-barlist--share .kit-barlist__row', '.kit-barlist__value b', '.kit-progress--ok .kit-progress__bar', '.kit-progress--warn .kit-progress__bar', '.kit-progress--error .kit-progress__bar', '.kit-figure__bar', '.kit-select.is-active', '.kit-header--band .kit-btn--ghost') { $css.Contains($c) | Should Be $true }
+        foreach ($c in '.kit-barlist--share {', '.kit-barlist__value b', '.kit-progress--ok .kit-progress__bar', '.kit-progress--warn .kit-progress__bar', '.kit-progress--error .kit-progress__bar', '.kit-figure__bar', '.kit-select.is-active', '.kit-header--band .kit-btn--ghost') { $css.Contains($c) | Should Be $true }
         $css | Should Match '\.kit-panel__title \{ font-size: var\(--kit-text-md\)'
         $ex = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit-examples.html'))
         foreach ($w in '"share":true', '"base":"first"', '"color":"ok"', '"color":"warn"', '"color":"error"', '"type":"line","axis":"right"', 'kit-progress kit-progress--ok kit-figure__bar', 'share: true') { $ex.Contains($w) | Should Be $true }
@@ -315,7 +315,7 @@ Describe 'The kit charts' {
         $css = [IO.File]::ReadAllText((Join-Path $p 'styles\kit\kit.css'))
         $css | Should Match '\.kit-barlist__row \{'
         $css | Should Match '\.kit-chart__legend--values'
-        $css | Should Match '\.kit-barlist--share \.kit-barlist__row'
+        $css | Should Match '\.kit-barlist--share \{'
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
@@ -372,6 +372,26 @@ Describe 'What the kit offers, for every task (Format-UiKitContext)' {
 }
 
 Describe 'Update-UiKitCatalog' {
+    It 'updates a kit file StreamHub wrote that differs from this version even at the same revision, never one the organisation changed' {
+        $p = Join-Path $env:TEMP ('ccb-stale-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        try {
+            $null = Install-UiKit $p $root
+            $cat = Get-UiKitCatalogPath $p
+            Test-KitCatalogStale $cat $root | Should Be $false
+            # An older kit-charts.js that StreamHub wrote (the manifest has its hash), same revision.
+            $charts = Join-Path $cat 'kit-charts.js'
+            [IO.File]::WriteAllText($charts, '/* an older kit-charts.js */')
+            $man = Get-Content (Join-Path $cat 'manifest.json') -Raw | ConvertFrom-Json
+            $man.files.'kit-charts.js' = (Get-FileSha $charts)
+            [IO.File]::WriteAllText((Join-Path $cat 'manifest.json'), (ConvertTo-Json $man -Depth 5))
+            Test-KitCatalogStale $cat $root | Should Be $true
+            $null = Update-UiKitCatalog $p $root
+            [IO.File]::ReadAllText($charts) | Should Match 'drawDeclared'
+            # A file the organisation changed (hash not the manifest's) is left alone.
+            [IO.File]::WriteAllText($charts, '/* our own charts */')
+            Test-KitCatalogStale $cat $root | Should Be $false
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
     It 'brings a catalogue from an older kit revision up to date, with the unchanged kit files the pages use' {
         $p = Join-Path $env:TEMP ('ccb-kitv-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
         $null = Install-UiKit $p $root

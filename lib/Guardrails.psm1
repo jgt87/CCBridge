@@ -591,7 +591,7 @@ function Find-QualityIssues {
     # A one-file page: the helper program's kit and data blocks are not the change's own text.
     if ($Rel -match '(?i)\.html?$') { $loads = Find-OneFileLoads $Rel $Old $New; $Old = Hide-GeneratedBlocks $Old; $New = Hide-GeneratedBlocks $New } else { $loads = $null }
     if ($Rel -match '(?i)\.html?$' -and (Get-GeneratedPageInfo $New)) { return @($loads) }   # a page a script built: its template is checked
-    @($loads) + @(Find-TableHeaderIssues $Rel $Old $New) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageBuildScript $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
+    @($loads) + @(if ($UseKit) { Find-TableHeaderIssues $Rel $Old $New }) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageBuildScript $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {

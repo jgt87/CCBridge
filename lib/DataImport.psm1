@@ -69,10 +69,15 @@ function Get-ColumnNames([string[]]$Header, [int]$Width) {
     }
 }
 
+# Compiled once: whether a value is missing, and whether a text needs JSON escaping.
+$script:MissingRe = New-Object regex ($script:Missing, 'Compiled')
+$script:NeedsEscape = New-Object regex ('[\x00-\x1f"\\]', 'Compiled')
+
 function Get-ColumnType([string[]]$Values, [string]$Delimiter = ',') {
     <# The type of a column from all its values (missing ones left out): @{ type = number | boolean |
        date | text; decimal ('.' or ','); order ('iso', 'dmy', 'mdy'); note }. #>
-    $vals = @($Values | Where-Object { $_ -notmatch $script:Missing })
+    $vals = New-Object System.Collections.Generic.List[string]
+    foreach ($x in $Values) { if (-not $script:MissingRe.IsMatch($x)) { $vals.Add($x) } }
     if (-not $vals.Count) { return @{ type = 'text' } }
     $dot = $true; $comma = $true; $bool = $true; $iso = $true; $dmy = $true; $dayFirst = $false; $monthFirst = $false; $dots = $true
     foreach ($v in $vals) {
@@ -135,6 +140,8 @@ function ConvertTo-TypedJson([string]$Value, $Type) {
 }
 
 function ConvertTo-JsonString([string]$Text) {
+    # Most values need no escaping: quoted as they are (the loop below is slow in PowerShell 5.1).
+    if (-not $script:NeedsEscape.IsMatch($Text)) { return '"' + $Text + '"' }
     $sb = New-Object Text.StringBuilder ($Text.Length + 2)
     [void]$sb.Append('"')
     foreach ($ch in $Text.ToCharArray()) {
@@ -162,15 +169,20 @@ function ConvertTo-DataTable {
         if ($t.note) { $notes += "column $($names[$c]): $($t.note)" }
         $types += , $t
     }
-    $keys = @($names | ForEach-Object { ConvertTo-JsonString $_ })
-    $sb = New-Object Text.StringBuilder
+    $keys = @($names | ForEach-Object { (ConvertTo-JsonString $_) + ': ' })
+    $isText = @($types | ForEach-Object { $_.type -eq 'text' })
+    $sb = New-Object Text.StringBuilder ([Math]::Min(200MB, $rows.Count * $width * 24))
     [void]$sb.Append('[')
     for ($i = 1; $i -lt $rows.Count; $i++) {
+        $row = $rows[$i]; $n = $row.Count
         [void]$sb.Append($(if ($i -gt 1) { ",`n$Indent  {" } else { "`n$Indent  {" }))
         for ($c = 0; $c -lt $width; $c++) {
-            $v = if ($c -lt $rows[$i].Count) { "$($rows[$i][$c])".Trim() } else { '' }
+            $v = if ($c -lt $n -and $null -ne $row[$c]) { ([string]$row[$c]).Trim() } else { '' }
             if ($c) { [void]$sb.Append(', ') }
-            [void]$sb.Append($keys[$c]).Append(': ').Append((ConvertTo-TypedJson $v $types[$c]))
+            [void]$sb.Append($keys[$c])
+            if ($script:MissingRe.IsMatch($v)) { [void]$sb.Append('null') }
+            elseif ($isText[$c]) { [void]$sb.Append((ConvertTo-JsonString $v)) }
+            else { [void]$sb.Append((ConvertTo-TypedJson $v $types[$c])) }
         }
         [void]$sb.Append('}')
     }

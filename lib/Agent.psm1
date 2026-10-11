@@ -2343,7 +2343,24 @@ function Test-WebPageCore {
                 try {
                     $res = Invoke-Cdp $s 'Runtime.evaluate' @{ expression = (Get-PageContentScript); returnByValue = $true; awaitPromise = $true } -TimeoutMs 30000
                     $list = ConvertFrom-Json "$($res.result.value)"
-                    foreach ($f in $list) { if ($f -and $f.text) { $problems.Add("$page $($f.text)") } }
+                    foreach ($f in $list) {
+                        if ($f -and $f.kind -eq 'kitcss') {
+                            # Kit classes on the page with no rule: their rules go into kit.css (a StreamHub
+                            # change card); a class the kit does not have goes back to Copilot. Only with the
+                            # UI kit on (Settings) and in the project.
+                            if (-not ((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $State.ProjectRoot))) { continue }
+                            try {
+                                $kr = Repair-KitPageClasses $State.ProjectRoot $State.AppRoot $page @($f.classes)
+                                if (@($kr.added).Count) {
+                                    Add-OwnChangeEvent $State 'edit' "$(Get-UiKitFolder)/kit.css" "StreamHub added the UI kit rules for $(@($kr.added).Count) class(es) $page shows but had no style for: $(@($kr.added) -join ', ')." @{ path = "$(Get-UiKitFolder)/kit.css"; exists = $true; old = $kr.kitCss.old; new = $kr.kitCss.new }
+                                    Write-CCBLog info agent "Kit rules added after the page check of $page" @{ classes = @($kr.added) }
+                                }
+                                if (@($kr.unknown).Count) { $problems.Add("$page uses class(es) the UI kit does not have: $(@($kr.unknown) -join ', ') (a misspelling or an invented kit class, so the element has no style): use a class from the kit's examples, or style it in your own stylesheet with a name that does not start with kit-") }
+                            } catch { Write-CCBLogError agent "Kit rules for $page" $_ }
+                            continue
+                        }
+                        if ($f -and $f.text) { $problems.Add("$page $($f.text)") }
+                    }
                 } catch { Write-CCBLogError agent "Page content check of $page" $_ }
             }
             # At phone width (375 px): sideways scrolling and the parts that cause it (a warning).
@@ -4483,7 +4500,7 @@ function Start-AgentWorker {
                     try {
                         # The shared library beside the projects (one kit, shared notes, runbooks for all): made at the first open.
                         $null = Get-SharedRoot $openRoot -Create
-                        $kitNewer = @(Update-UiKitCatalog $openRoot $State.AppRoot)
+                        $kitNewer = @(if (Test-UiKitOn $State.AppRoot) { Update-UiKitCatalog $openRoot $State.AppRoot })   # only with the UI kit on (Settings)
                         if ($kitNewer.Count) {
                             Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub updated the project's UI kit to its newer version: the catalogue in $(Get-UiKitCatalog $State.ProjectRoot)/, new tokens in tokens.css (your own colours stay) and the kit files the pages use that the project had not changed ($($kitNewer -join ', ')). Kit files the project changed stay as they are." -Output ($kitNewer -join "`n")
                             $u = Update-UiKitProject $openRoot $State.AppRoot

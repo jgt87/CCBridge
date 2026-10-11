@@ -6,6 +6,28 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.124] - 2026-10-11
+
+### Changed
+- Excel and CSV files convert about five times faster: a 10,000-row workbook takes about 8 seconds instead of 40, the same output byte for byte. The first message of a new project with two such files waited five minutes for the conversion on a work PC.
+- The setup question how Microsoft 365 data reaches the app is no longer asked when the project already holds data files and the request talks about them ("two files, one with M365 Copilot usage"): the data is there.
+- The kit's chart instruction tells Copilot that a chart written later draws itself, so it no longer adds draw calls of its own (or calls that do not exist).
+
+- UI kit table headers: the whole header cell is the sort button, without a button frame; a quiet up and down mark shows a column can be sorted, and the sorted column gets one arrow and an underline in the accent colour.
+- UI kit legends with values: each entry carries its slice's colour, a larger swatch, the label underlined in that colour and the share as a tinted pill.
+- UI kit bar lists with shares: each bar fills exactly its share (18.8% is 18.8% of the track), as the kit's own page check expects; "scale": "max" keeps the old scaling to the largest row.
+- UI kit chart grid: charts sit two side by side on a desktop page instead of three narrow ones next to an empty column, and kit blocks that follow each other outside a stack or grid (a panel after a panel, a grid after a panel) get the kit's gap instead of touching.
+- Numbers in kit charts follow the page's language (`html lang`), like the kit's other helpers.
+
+- A request to change how something looks ("change the look of the header", "adjust the GUI", "improve the user interface"; also in Dutch) now works kit first: Copilot finds the element in the UI kit and builds it with the kit part when it is not one yet, uses the kit's own variant, option or token where the kit offers what is asked, and only where the request goes beyond the kit does it overrule the kit's default, exactly as asked and marked so it stays. It says per element which of these it did.
+- Every UI kit check runs only with the UI kit switched on in Settings, and only for the kit parts that are on: the new page-check repair, the catalogue update at project open and the table header check included.
+- The page check also compares the page as it is shown with the UI kit: every kit class on the page, also the ones the kit's scripts add at run time, against the rules of the stylesheets the page loaded. Rules the kit has but the project's kit.css lacks are added at once (a StreamHub change card) and kept for that page; a kit class the kit does not have at all (a misspelling or an invented class) goes back to Copilot as a likely mistake.
+
+### Fixed
+- A page's kit.css could miss the rules for parts the kit's scripts draw themselves (the table's sort buttons, chart legends and swatches, bar list rows), so a dashboard showed browser buttons in its headers, legends without colours and no bars. Those classes are now read from StreamHub's own copy of each kit script as well as the project's.
+- The kit's stylesheet filter kept a rule only when every kit class in its selector was used, also a class inside `:not(...)` or one of the alternatives of `:where(...)`; such rules were dropped from every project.
+- A kit file changed in a StreamHub release without a new kit revision (the chart drawing of v0.1.123) never reached the shared catalogue, so projects kept the older file and a dashboard's charts stayed empty. A catalogue file StreamHub wrote that differs from the current version is now replaced at the next project open (the organisation's own changes stay); the kit revision is 12.
+
 ## [v0.1.123] - 2026-10-11
 
 ### Changed

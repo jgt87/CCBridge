@@ -342,7 +342,7 @@ $script:Companions = @{
 }
 # The kit's revision: raise it when the kit changes in a way projects should get (new classes, chart
 # options the rules name). Update-UiKitCatalog brings an older project catalogue up to date.
-$script:KitRevision = 11
+$script:KitRevision = 12
 
 $script:ScanCache = @{ root = ''; at = [datetime]::MinValue; files = @() }
 $script:ScanSkip = '^(node_modules|dist|build|out|\.git|\.streamhub|Source)$'
@@ -410,6 +410,25 @@ function Get-KitCatalogRevision([string]$Catalog) {
 function Write-KitCatalogVersion([string]$Catalog, [string]$AppRoot, [string]$Verb) {
     $v = try { Get-CCBridgeVersion $AppRoot } catch { '' }
     [IO.File]::WriteAllText((Join-Path $Catalog 'VERSION.txt'), "UI kit from StreamHub $v, $Verb $((Get-Date).ToString('yyyy-MM-dd')). Kit revision $($script:KitRevision). The helper program takes what the pages use from here into styles/kit/.`n")
+}
+
+function Test-KitCatalogStale([string]$Catalog, [string]$AppRoot) {
+    <# Whether a catalogue file StreamHub wrote (its hash is the manifest's) differs from this
+       StreamHub's template, or a kit file is missing: a kit change that came without a new kit
+       revision still reaches the catalogue. Files the organisation changed do not count. #>
+    $man = Get-KitManifest $Catalog
+    if (-not $man) { return $false }
+    $src = Join-Path $AppRoot 'templates\ui-kit'
+    foreach ($f in Get-UiKitFiles $AppRoot) {
+        if ($f -in 'tokens.css', 'kit-examples.html') { continue }   # merged or filtered per part: compared by revision only
+        $from = Join-Path $src $f.Replace('/', '\')
+        if (-not (Test-Path -LiteralPath $from)) { continue }
+        $to = Join-Path $Catalog $f.Replace('/', '\')
+        if (-not (Test-Path -LiteralPath $to -PathType Leaf)) { return $true }
+        $sha = Get-FileSha $to
+        if ($man.files.ContainsKey($f) -and $sha -eq $man.files[$f] -and $sha -ne (Get-FileSha $from)) { return $true }
+    }
+    $false
 }
 
 function Update-KitCatalogFiles([string]$Catalog, [string]$AppRoot, [switch]$Shared) {
@@ -493,7 +512,7 @@ function Update-UiKitCatalog {
     if (-not (Test-Path -LiteralPath $cat -PathType Container)) { return @($out) }
     # Copies equal to the catalogue's files are StreamHub's (recorded now, before the catalogue changes).
     if (Test-UiKitInProject $ProjectRoot) { foreach ($m in @(Register-KitCopies $ProjectRoot $cat)) { $out.Add($m) } }
-    if ((Get-KitCatalogRevision $cat) -lt $script:KitRevision) { $null = Update-KitCatalogFiles $cat $AppRoot -Shared:($cat -ne $local) }
+    if ((Get-KitCatalogRevision $cat) -lt $script:KitRevision -or (Test-KitCatalogStale $cat $AppRoot)) { $null = Update-KitCatalogFiles $cat $AppRoot -Shared:($cat -ne $local) }
     # The project's tokens.css: new tokens added, defaults the project never changed brought to the
     # catalogue's values, the project's own values kept (the base is what it last took from the catalogue).
     $kit = Join-Path $ProjectRoot (Get-UiKitFolder).Replace('/', '\')
@@ -748,6 +767,72 @@ function Find-UnlinkedKitTokens {
     }
 }
 
+function Get-KitPageClassesFile([string]$ProjectRoot) { Join-Path $ProjectRoot '.streamhub\kit-page-classes.json' }
+
+function Read-KitPageClasses([string]$ProjectRoot) {
+    <# The kit classes the page check saw on each page without a rule (page -> classes): kept so the
+       next kit.css keeps their rules too. @{} when there is none. #>
+    $f = Get-KitPageClassesFile $ProjectRoot
+    $out = @{}
+    if (Test-Path -LiteralPath $f) {
+        try { $j = [IO.File]::ReadAllText($f) | ConvertFrom-Json; foreach ($p in $j.PSObject.Properties) { $out[$p.Name] = @($p.Value | ForEach-Object { "$_" }) } } catch { }
+    }
+    $out
+}
+
+function Get-KitOffPartClasses([string]$AppRoot, [string[]]$Parts) {
+    <# The kit classes that belong only to parts switched off (Settings > UI kit): the classes of the
+       examples page's sections of those parts that no section of a part that is on uses. #>
+    $ex = Join-Path $AppRoot 'templates\ui-kit\kit-examples.html'
+    if (-not (Test-Path -LiteralPath $ex)) { return @() }
+    $all = [IO.File]::ReadAllText($ex)
+    $on = Get-KitExamplesText $all $Parts
+    $onSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($m in [regex]::Matches($on, '(?<![\w-])kit-[A-Za-z0-9_-]+')) { [void]$onSet.Add($m.Value) }
+    @([regex]::Matches($all, '(?<![\w-])kit-[A-Za-z0-9_-]+') | ForEach-Object { $_.Value } | Where-Object { -not $onSet.Contains($_) } | Select-Object -Unique)
+}
+
+function Repair-KitPageClasses {
+    <# The page check found kit classes on $Page with no rule in any loaded stylesheet. The ones the
+       kit's catalogue has a rule for are kept for that page (.streamhub/kit-page-classes.json) and
+       kit.css is written again with them (when it is StreamHub's file); the ones the kit does not have
+       at all (no rule and not written by a kit script) come back as unknown, a misspelling or an
+       invented class. Returns @{ added (classes now in kit.css); unknown; kitCss (@{ old; new } when
+       written) }. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$AppRoot, [Parameter(Mandatory)][string]$Page, [string[]]$Classes)
+    $result = @{ added = @(); unknown = @(); kitCss = $null }
+    $classes = @($Classes | Where-Object { $_ -match '^kit-[A-Za-z0-9_-]+$' } | Select-Object -Unique)
+    # Only for the kit parts that are on: a class of a part switched off is neither added nor reported.
+    $off = @(Get-KitOffPartClasses $AppRoot @(Get-UiKitParts $AppRoot))
+    if ($off.Count) { $classes = @($classes | Where-Object { $off -notcontains $_ }) }
+    if (-not $classes.Count) { return $result }
+    $src = Get-KitFileSource $ProjectRoot $AppRoot 'kit.css'
+    $catCss = if ($src) { [IO.File]::ReadAllText($src.path) } else { '' }
+    $tplDir = Join-Path $AppRoot 'templates\ui-kit'
+    $scripts = (@(Get-ChildItem -LiteralPath $tplDir -Filter 'kit*.js' -File -ErrorAction SilentlyContinue | ForEach-Object { [IO.File]::ReadAllText($_.FullName) })) -join "`n"
+    $known = New-Object System.Collections.Generic.List[string]; $unknown = New-Object System.Collections.Generic.List[string]
+    foreach ($c in $classes) {
+        if ([regex]::IsMatch($catCss, '\.' + [regex]::Escape($c) + '(?![\w-])')) { $known.Add($c) }
+        elseif ($scripts -notmatch ('(?<![\w-])' + [regex]::Escape($c) + '(?![\w-])')) { $unknown.Add($c) }   # a hook class of a kit script has no rule on purpose
+    }
+    $result.unknown = $unknown.ToArray()
+    if (-not $known.Count) { return $result }
+    $map = Read-KitPageClasses $ProjectRoot
+    $map[$Page] = @(@($map[$Page]) + $known.ToArray() | Where-Object { $_ } | Select-Object -Unique)
+    $f = Get-KitPageClassesFile $ProjectRoot
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $f)
+    [IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject $map -Depth 4), (New-Object Text.UTF8Encoding($false)))
+    $cssFile = Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\kit.css')
+    $old = if (Test-Path -LiteralPath $cssFile) { [IO.File]::ReadAllText($cssFile) } else { '' }
+    $null = Update-UiKitProject $ProjectRoot $AppRoot
+    $new = if (Test-Path -LiteralPath $cssFile) { [IO.File]::ReadAllText($cssFile) } else { '' }
+    if ($new -ne $old) {
+        $result.kitCss = @{ old = $old; new = $new }
+        $result.added = @($known | Where-Object { [regex]::IsMatch($new, '\.' + [regex]::Escape($_) + '(?![\w-])') })
+    }
+    $result
+}
+
 function Get-KitUsage([string]$ProjectRoot) {
     <# What the project's pages and code use of the kit: classes (kit-NAME; a name that ends in - or _
        is a prefix, as in "kit-btn--" + variant), and kit files they refer to (styles/kit/FILE). Kit
@@ -793,6 +878,19 @@ function Get-KitUsage([string]$ProjectRoot) {
         if ($t -match 'kit-(tabs|segmented)--animated') { [void]$hooks.Add('tabs') }
         foreach ($m in [regex]::Matches($t, '(?i)styles/kit/([\w./-]+?)(?=["''`?#)\s;,]|$)')) { [void]$refs.Add($m.Groups[1].Value) }
     }
+    # The kit scripts a page loads write classes of their own (sort buttons, chart legends, bar rows):
+    # those are read from this StreamHub's template of each script as well, so a project copy that is
+    # older, still being written or not readable (OneDrive) never drops them from kit.css.
+    $tplDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'templates\ui-kit'
+    foreach ($r in @($refs)) {
+        if ($r -notmatch '(?i)^kit[\w-]*\.js$') { continue }
+        $tpl = Join-Path $tplDir $r
+        if (-not (Test-Path -LiteralPath $tpl -PathType Leaf)) { continue }
+        $tt = try { [IO.File]::ReadAllText($tpl) } catch { '' }
+        foreach ($m in [regex]::Matches($tt, '(?<![\w-])kit-[A-Za-z0-9_-]+')) { $fromKit.Add(@{ token = $m.Value; file = "$kitDir/$r" }) }
+    }
+    # Classes the page check saw on a page without a rule (Repair-KitPageClasses): counted as used.
+    foreach ($list in (Read-KitPageClasses $root).Values) { foreach ($c in @($list)) { if ($c) { [void]$classes.Add("$c") } } }
     # KitUI.confirm / KitUI.alert build a kit-dialog with a title, a text and kit buttons at run time (the
     # class names are put together in kit.js): a page that calls them gets those rules.
     if ($hooks.Contains('confirm') -or $hooks.Contains('alert')) { foreach ($c in 'kit-dialog', 'kit-dialog__actions', 'kit-h3', 'kit-btn', 'kit-btn--primary', 'kit-btn--danger') { [void]$classes.Add($c) } }
@@ -895,13 +993,26 @@ function Split-CssSelectors([string]$Head) {
 }
 
 function Test-KitSelectorUsed([string]$Selector, $Usage) {
-    # Every kit class in the selector is used (or starts with a used prefix).
-    foreach ($m in [regex]::Matches($Selector, '\.(kit-[A-Za-z0-9_-]+)')) {
-        $c = $m.Groups[1].Value
-        if ($Usage.classes.Contains($c)) { continue }
-        if (@($Usage.prefixes | Where-Object { $c.StartsWith($_) }).Count) { continue }
-        return $false
+    <# Every kit class the selector needs is used (or starts with a used prefix). A class inside
+       :not(...) is not needed (it says what an element must not be); a :where(...) or :is(...) list
+       needs one of its alternatives. #>
+    $sel = [regex]::Replace($Selector, ':not\([^()]*\)', '')
+    $used = {
+        param($c)
+        if ($Usage.classes.Contains($c)) { return $true }
+        @($Usage.prefixes | Where-Object { $c.StartsWith($_) }).Count -gt 0
     }
+    foreach ($g in [regex]::Matches($sel, ':(?:where|is)\(([^()]*)\)')) {
+        $any = $false
+        foreach ($alt in $g.Groups[1].Value.Split(',')) {
+            $ok = $true
+            foreach ($m in [regex]::Matches($alt, '\.(kit-[A-Za-z0-9_-]+)')) { if (-not (& $used $m.Groups[1].Value)) { $ok = $false; break } }
+            if ($ok) { $any = $true; break }
+        }
+        if (-not $any) { return $false }
+    }
+    $rest = [regex]::Replace($sel, ':(?:where|is)\([^()]*\)', '')
+    foreach ($m in [regex]::Matches($rest, '\.(kit-[A-Za-z0-9_-]+)')) { if (-not (& $used $m.Groups[1].Value)) { return $false } }
     $true
 }
 
@@ -1187,4 +1298,4 @@ function Test-UiKitInProject([string]$ProjectRoot) {
     Test-Path -LiteralPath (Join-Path $ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css'))
 }
 
-Export-ModuleMember -Function Get-UiKitCatalogPath, Get-FileSha, Get-KitManifest, Save-KitManifest, Get-KitCustomFiles, Get-KitCopyRecord, Register-KitCopies, Sync-KitCopies, Update-KitCatalogFiles, Get-KitScanFiles, Clear-KitScanCache, Set-KitScanHold, Update-KitTokens, Get-TokenBlockSpans, Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder
+Export-ModuleMember -Function Get-UiKitCatalogPath, Get-FileSha, Get-KitManifest, Save-KitManifest, Get-KitCustomFiles, Get-KitCopyRecord, Register-KitCopies, Sync-KitCopies, Update-KitCatalogFiles, Get-KitScanFiles, Clear-KitScanCache, Set-KitScanHold, Update-KitTokens, Get-TokenBlockSpans, Get-TokenValues, Get-WpfThemeText, Test-PsGuiProject, Update-KitWpf, Get-TailwindInfo, Test-TailwindProject, Update-KitTailwind, Get-UiKitDarkMode, Remove-DarkTokens, Get-KitSettingsCss, Get-KitTextUsage, Get-KitIconsText, Get-KitExamplesIndex, Format-UiKitContext, Update-UiKitCatalog, Get-KitCatalogRevision, Find-UnlinkedKitTokens, Get-UiKitCatalog, Get-KitUsage, Select-KitCss, Update-UiKitProject, Get-LucideIcons, Find-UsedIcons, Get-IconSuggestions, Update-KitIcons, Get-UiKitColors, Get-UiKitParts, Get-KitExamplesText, Test-ReactProject, Install-UiKit, Test-UiKitInProject, Get-UiKitFolder, Test-KitCatalogStale, Read-KitPageClasses, Repair-KitPageClasses, Get-KitOffPartClasses

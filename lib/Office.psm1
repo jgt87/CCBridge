@@ -371,6 +371,8 @@ function Get-XlsxDateStyles($Zip) {
     , $set
 }
 
+$script:CellCol = New-Object regex ('^[A-Z]{1,3}', 'Compiled')   # the column letters of a cell reference (B12 -> B)
+
 function Read-XlsxSheets {
     <# The cell values of each sheet as rows of text (values as last calculated; dates as ISO text,
        yyyy-MM-dd or yyyy-MM-ddTHH:mm:ss): @(@{ name; state; rows (string[] per row, empty rows left
@@ -395,12 +397,15 @@ function Read-XlsxSheets {
             $x = Get-ZipXml $zip $t.part
             if (-not $x) { continue }
             $xns = New-OfficeNs $x
+            $sUri = $xns.LookupNamespace('s')
             $rows = New-Object System.Collections.Generic.List[object]
             $total = 0
             foreach ($row in $x.SelectNodes('//s:sheetData/s:row', $xns)) {
                 $cells = @{}; $max = -1
-                foreach ($c in $row.SelectNodes('s:c', $xns)) {
-                    $v = $c.SelectSingleNode('s:v', $xns)
+                # Child elements directly (an XPath query per cell is slow in PowerShell 5.1).
+                foreach ($c in $row.ChildNodes) {
+                    if ($c.LocalName -ne 'c') { continue }
+                    $v = $c['v', $sUri]
                     $type = $c.GetAttribute('t')
                     $val = switch ($type) {
                         's' { if ($v -and [int]$v.InnerText -lt $shared.Count) { $shared[[int]$v.InnerText] } else { '' } }
@@ -416,7 +421,8 @@ function Read-XlsxSheets {
                         $val = if ($num -eq [Math]::Floor($num)) { $d.ToString('yyyy-MM-dd', $inv) } elseif ($num -lt 1) { $d.ToString('HH:mm:ss', $inv) } else { $d.ToString('yyyy-MM-ddTHH:mm:ss', $inv) }
                     }
                     if ("$val" -eq '') { continue }
-                    $i = if ($c.GetAttribute('r')) { Get-ColumnIndex $c.GetAttribute('r') } else { $max + 1 }
+                    $ref = $c.GetAttribute('r')
+                    $i = if ($ref) { $m = $script:CellCol.Match($ref); if ($m.Success) { $n = 0; foreach ($ch in $m.Value.ToCharArray()) { $n = $n * 26 + ([int]$ch - 64) }; $n - 1 } else { Get-ColumnIndex $ref } } else { $max + 1 }
                     $cells[$i] = "$val"; if ($i -gt $max) { $max = $i }
                 }
                 if ($max -lt 0) { continue }

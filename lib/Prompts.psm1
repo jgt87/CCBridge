@@ -122,8 +122,8 @@ function Get-EnvironmentText {
 
 # A request for a look of the person's own (a follow-up that changes how something looks): words for a
 # look (colour, size, shape, font, effects, a colour name) plus a word that asks for a change.
-$script:LookWords = '(?i)(\b(colou?rs?|kleur(en)?|background|achtergrond|fonts?|lettertype|bold|vet(ter)?|italic|cursief|bigger|larger|smaller|wider|narrower|taller|groter|kleiner|breder|smaller|rounded|round(er)?|ronde?r?|square|vierkant|corners?|hoeken|radius|shadows?|schaduw|borders?|randen?|gradient|verloop|darker|lighter|brighter|donkerder|lichter|feller|spacing|padding|margins?|ruimte|thicker|thinner|dikker|dunner|style|stijl|look|uiterlijk|theme|thema|dark mode|donkere modus|light mode|opacity|transparant|transparent|underlined?|onderstreept|uppercase|hoofdletters|size|grootte|blue|red|green|yellow|orange|purple|pink|grey|gray|black|white|navy|teal|blauw|rood|groen|geel|oranje|paars|roze|grijs|zwart|wit)\b|#[0-9a-f]{3,8}\b)'
-$script:LookVerbs = '(?i)\b(make|change|set|use|turn|give|should be|switch|replace|want|instead|more|less|maak|verander|wijzig|zet|gebruik|moet|liever|in plaats van|meer|minder)\b'
+$script:LookWords = '(?i)(\b(gui|ui|user interface|interface|layout|design|appearance|visuals?|styling|look and feel|uitstraling|vormgeving|opmaak|weergave|colou?rs?|kleur(en)?|background|achtergrond|fonts?|lettertype|bold|vet(ter)?|italic|cursief|bigger|larger|smaller|wider|narrower|taller|groter|kleiner|breder|smaller|rounded|round(er)?|ronde?r?|square|vierkant|corners?|hoeken|radius|shadows?|schaduw|borders?|randen?|gradient|verloop|darker|lighter|brighter|donkerder|lichter|feller|spacing|padding|margins?|ruimte|thicker|thinner|dikker|dunner|style|stijl|look|uiterlijk|theme|thema|dark mode|donkere modus|light mode|opacity|transparant|transparent|underlined?|onderstreept|uppercase|hoofdletters|size|grootte|blue|red|green|yellow|orange|purple|pink|grey|gray|black|white|navy|teal|blauw|rood|groen|geel|oranje|paars|roze|grijs|zwart|wit)\b|#[0-9a-f]{3,8}\b)'
+$script:LookVerbs = '(?i)\b(make|change|set|use|turn|give|should be|switch|replace|want|instead|more|less|adjust|tweak|restyle|redesign|improve|polish|moderni[sz]e|tidy|maak|verander|wijzig|zet|gebruik|moet|liever|in plaats van|meer|minder|aanpassen|pas(\s+\S+){1,6}\s+aan|verbeter\w*|mooier)\b'
 
 # A report that a page shows its markup or script as text (English and Dutch): the helper program
 # then checks the pages itself before the message goes to Copilot (Agent Get-LeakReport).
@@ -148,6 +148,8 @@ function Test-LookRequest {
     <# The message asks to change how something looks (a fixed rule on its words): then the person's
        look wins over the UI kit's for this change (rules/userlook.md, and the kit's look checks rest). #>
     param([string]$Text)
+    # Words that ask for a new look on their own (restyle the figures, herontwerp de pagina).
+    if ($Text -match '(?i)\b(restyle|re-style|redesign|re-design|reskin|herontwerp\w*|restylen)\b') { return $true }
     [bool]($Text -match $script:LookWords -and $Text -match $script:LookVerbs)
 }
 
@@ -189,14 +191,18 @@ function Get-PromptModules {
         $ids.Add('rules:ui')
         if (Test-UiKitPart 'designRules' (Split-Path -Parent $PSScriptRoot)) { $ids.Add('rules:design') }   # how a good interface behaves (our own short rules)
         if ($designReview) { $ids.Add('rules:designreview') }
-        # A look the person asks for in a project with the kit: theirs wins (and stays).
-        if ((Test-LookRequest $Text) -and @($Context.Paths) -contains 'styles/kit/tokens.css') { $ids.Add('rules:userlook') }
         # Build from the UI kit (setting uiKit; the agent adds the kit to the project when this goes out).
         if (Test-UiKitOn (Split-Path -Parent $PSScriptRoot)) { $ids.Add('rules:uikit') }
     }
     elseif ($web -and @($Context.Paths) -contains 'styles/kit/tokens.css' -and ($Text -match $script:ChangePattern -or $Text -match $script:FixPattern -or $Text -match $script:BuildPattern) -and (Test-UiKitOn (Split-Path -Parent $PSScriptRoot))) {
         # A project with the UI kit: any change to it may add interface, so the kit's rule goes too.
         $ids.Add('rules:uikit')
+    }
+    # A change to how something looks, in a project with the UI kit (setting on): the kit first (its part,
+    # variant, option or token for that element), the person's own look where it goes beyond the kit.
+    if ((Test-LookRequest $Text) -and @($Context.Paths) -contains 'styles/kit/tokens.css' -and (Test-UiKitOn (Split-Path -Parent $PSScriptRoot))) {
+        if ($ids -notcontains 'rules:uikit') { $ids.Add('rules:uikit') }
+        if ($ids -notcontains 'rules:userlook') { $ids.Add('rules:userlook') }
     }
     if ($Text -match $script:HttpPattern) { $ids.Add('rules:http') }
     if (($traits -contains 'csharp') -or ($Text -match $script:CSharpPattern)) { $ids.Add('rules:csharp') }

@@ -64,9 +64,12 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-row--between { justify-content: space-between; }
 .kit-grid { display: grid; gap: var(--kit-space-4); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 /* A dashboard grid: panels at least 340px wide; kit-grid__wide spans the whole row. */
-.kit-grid--charts { grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
+.kit-grid--charts { grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
 .kit-grid__wide { grid-column: 1 / -1; }
 .kit-grid > * { min-width: 0; }
+/* Blocks one after the other, outside a kit-stack, grid, row or toolbar (which space their parts
+   themselves): the kit's gap between them, so a panel never touches the next one. */
+*:not(.kit-stack):not(.kit-grid):not(.kit-row):not(.kit-toolbar):not(.kit-figures):not(.kit-bento) > :where(.kit-panel, .kit-grid, .kit-table-wrap, .kit-notice, .kit-figures, .kit-chart, .kit-bento) + :where(.kit-panel, .kit-grid, .kit-table-wrap, .kit-notice, .kit-figures, .kit-bento) { margin-top: var(--kit-space-4); }
 .kit-split { display: grid; gap: var(--kit-space-5); grid-template-columns: minmax(0, 1fr) 320px; }
 @media (max-width: 860px) { .kit-split { grid-template-columns: 1fr; } }
 .kit-divider { border: 0; border-top: 1px solid var(--kit-border); margin: var(--kit-space-4) 0; }
@@ -176,15 +179,26 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-table tr:last-child td { border-bottom: 0; }
 .kit-table tbody tr:hover { background: var(--kit-surface-2); }
 .kit-table td.kit-num, .kit-table th.kit-num { text-align: right; font-variant-numeric: tabular-nums; }
-/* Sortable headers (kit.js, data-kit-sort): a button per header with an arrow for the sort order. */
-.kit-table__sort { display: inline-flex; align-items: center; gap: var(--kit-space-1); padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: inherit; cursor: pointer; border-radius: var(--kit-radius); }
-.kit-table__sort::after { content: ""; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: 0.3; }
-.kit-table th[aria-sort="ascending"] .kit-table__sort::after { border-top: 0; border-bottom: 5px solid currentColor; opacity: 0.9; }
-.kit-table th[aria-sort="descending"] .kit-table__sort::after { opacity: 0.9; }
-.kit-table th[aria-sort="ascending"], .kit-table th[aria-sort="descending"] { color: var(--kit-text); }
-.kit-table__sort:hover { color: var(--kit-text); }
-.kit-table__sort:focus-visible { outline: none; box-shadow: var(--kit-focus); }
-.kit-table th .kit-table__sort { width: 100%; justify-content: flex-start; }
+/* Sortable headers (kit.js, data-kit-sort): the whole header cell is the sort button (no button
+   frame), with a quiet up/down mark that turns into one arrow in the accent once the column is
+   sorted; the sorted column's title is in the text colour with an accent line under it. */
+.kit-table th:has(> .kit-table__sort) { padding: 0; }
+.kit-table__sort {
+  display: flex; align-items: center; gap: var(--kit-space-2); width: 100%; min-height: 2.5rem; box-sizing: border-box;
+  padding: var(--kit-space-2) var(--kit-space-3); margin: 0; border: 0; border-radius: 0; background: none;
+  font: inherit; color: inherit; text-align: inherit; cursor: pointer; justify-content: flex-start;
+  transition: background var(--kit-speed) ease-out, color var(--kit-speed) ease-out;
+}
+.kit-table__sort::after {
+  content: ""; flex: 0 0 auto; width: 8px; height: 12px; background: currentColor; opacity: 0.35;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 1 9 5.5H1zM5 13 1 8.5h8z'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 1 9 5.5H1zM5 13 1 8.5h8z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.kit-table__sort:hover { color: var(--kit-text); background: color-mix(in srgb, var(--kit-border) 45%, transparent); }
+.kit-table__sort:hover::after { opacity: 0.7; }
+.kit-table__sort:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
+.kit-table th[aria-sort="ascending"], .kit-table th[aria-sort="descending"] { color: var(--kit-text); box-shadow: inset 0 -2px 0 var(--kit-accent); }
+.kit-table th[aria-sort="ascending"] .kit-table__sort::after { opacity: 1; background: var(--kit-accent); -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 3 9.5 9.5H.5z'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 3 9.5 9.5H.5z'/%3E%3C/svg%3E"); }
+.kit-table th[aria-sort="descending"] .kit-table__sort::after { opacity: 1; background: var(--kit-accent); -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 11 .5 4.5h9z'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 11 .5 4.5h9z'/%3E%3C/svg%3E"); }
 .kit-table th.kit-num .kit-table__sort { justify-content: flex-end; }
 /* Pages under a table (kit.js, data-kit-pages="N"). */
 .kit-pager { display: flex; align-items: center; justify-content: flex-end; gap: var(--kit-space-2); padding-top: var(--kit-space-2); }
@@ -843,7 +857,7 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 }
 .kit-chart__legend { display: flex; flex-wrap: wrap; gap: var(--kit-space-1) var(--kit-space-4); list-style: none; margin: var(--kit-space-2) 0 0; padding: 0; font-size: var(--kit-text-xs); color: var(--kit-text-muted); }
 .kit-chart__legend li { display: inline-flex; align-items: center; gap: var(--kit-space-1); cursor: default; }
-.kit-chart__swatch { width: 10px; height: 10px; border-radius: var(--kit-radius-sm); display: inline-block; flex: 0 0 auto; }
+.kit-chart__swatch { width: 12px; height: 12px; border-radius: var(--kit-radius-sm); display: inline-block; flex: 0 0 auto; }
 /* Picked parts (data.selected): the rest fades; clickable parts (data.selectable) are buttons. */
 .kit-chart__bar.is-off, .kit-chart__arc.is-off, .kit-chart__path.is-off { opacity: 0.28; }
 .kit-chart__legend li.is-off { opacity: 0.45; }
@@ -853,17 +867,26 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-chart__legend li[role="button"]:hover { background: var(--kit-surface-2); }
 /* Ring legend with values (data.legend "values"): label, value and share in columns. */
 .kit-chart__legend--values { display: block; max-width: 320px; margin: var(--kit-space-3) auto 0; font-size: var(--kit-text-sm); color: var(--kit-text); }
-.kit-chart__legend--values li { display: grid; grid-template-columns: 10px 1fr auto 3.5rem; gap: var(--kit-space-2); align-items: center; padding: 3px 0; border-bottom: 1px solid var(--kit-border); }
+.kit-chart__legend--values li { display: grid; grid-template-columns: 12px 1fr auto 4rem; gap: var(--kit-space-2); align-items: center; padding: 4px 0; border-bottom: 1px solid var(--kit-border); }
 .kit-chart__legend--values li[role="button"] { margin: 0; padding: 3px var(--kit-space-1); }
 .kit-chart__legend--values li:last-child { border-bottom: 0; }
 .kit-chart__legend-value { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
 .kit-chart__legend-share { color: var(--kit-text-muted); font-size: var(--kit-text-xs); text-align: right; font-variant-numeric: tabular-nums; }
+/* The share in the entry's own colour: a tinted pill, its text mixed toward the text colour so it stays readable. */
+.kit-chart__legend--values li[style*="--kit-legend-color"] .kit-chart__legend-share {
+  justify-self: end; padding: 1px 6px; border-radius: 999px; font-weight: 600;
+  background: color-mix(in srgb, var(--kit-legend-color) 16%, transparent);
+  color: color-mix(in srgb, var(--kit-legend-color) 55%, var(--kit-text));
+}
+.kit-chart__legend--values li[style*="--kit-legend-color"] .kit-chart__legend-label { box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--kit-legend-color) 35%, transparent); justify-self: start; }
 .kit-chart__legend--values li.is-zero { color: var(--kit-text-muted); }
 .kit-chart__legend--values li.is-zero .kit-chart__swatch { background: var(--kit-surface-2) !important; }
 /* Bar list (data-kit-chart="barlist"): label, bar and value per row. */
-.kit-barlist { display: flex; flex-direction: column; gap: 2px; }
+/* The rows share one set of columns (subgrid), so every track starts and ends at the same place
+   whatever the width of a row's value. */
+.kit-barlist { display: grid; grid-template-columns: minmax(90px, 38%) 1fr auto; column-gap: var(--kit-space-2); row-gap: 2px; }
 .kit-barlist__row {
-  display: grid; grid-template-columns: minmax(90px, 38%) 1fr 4.5rem; gap: var(--kit-space-2); align-items: center;
+  display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; gap: var(--kit-space-2); align-items: center;
   width: 100%; padding: 3px var(--kit-space-1); border: 0; border-radius: var(--kit-radius); background: none;
   font: inherit; font-size: var(--kit-text-sm); color: var(--kit-text); text-align: left;
 }
@@ -875,7 +898,7 @@ button.kit-barlist__row:focus-visible { outline: none; box-shadow: var(--kit-foc
 .kit-barlist__fill { display: block; height: 100%; border-radius: 999px; transform-origin: left center; }
 .kit-barlist__value { text-align: right; font-variant-numeric: tabular-nums; font-size: var(--kit-text-xs); color: var(--kit-text-muted); white-space: nowrap; }
 .kit-barlist__value b { color: var(--kit-text); font-weight: 600; }
-.kit-barlist--share .kit-barlist__row { grid-template-columns: minmax(80px, 34%) minmax(48px, 1fr) auto; }
+.kit-barlist--share { grid-template-columns: minmax(80px, 34%) minmax(48px, 1fr) auto; }
 .kit-barlist__row.is-on { background: var(--kit-accent-soft); }
 .kit-barlist__row.is-on .kit-barlist__label { font-weight: 600; }
 .kit-barlist__row.is-off .kit-barlist__fill { opacity: 0.35; }

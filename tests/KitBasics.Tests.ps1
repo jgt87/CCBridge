@@ -50,8 +50,8 @@ Describe 'Every control and content element has a kit form' {
         $line[0] | Should Match 'Never call the browser''s alert\(\), confirm\(\) or prompt\(\): KitUI\.confirm'
         $rule.Length | Should BeLessThan 40000
     }
-    It 'is kit revision 11, with the React basics in every React kit' {
-        & (Get-Module UiKit) { $script:KitRevision } | Should Be 11
+    It 'is kit revision 11 or later, with the React basics in every React kit' {
+        & (Get-Module UiKit) { $script:KitRevision } | Should BeGreaterThan 10
         foreach ($f in 'Popover.tsx', 'Tree.tsx', 'Confirm.tsx') { Test-Path (Join-Path $root "templates\ui-kit\react\$f") | Should Be $true }
         $files = @(& (Get-Module UiKit) { param($r) Get-UiKitFiles $r } $root)
         $files -contains 'react/Tree.tsx' | Should Be $true
