@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost kit-btn--sm";
 
 const CATEGORIES: { id: IssueCategory; label: string; help: string }[] = [
   { id: "error", label: "Errors", help: "Broken syntax, unclosed blocks or strings, missing local files, unknown commands" },
@@ -136,12 +136,12 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
           <RefreshCw className={cn("h-3.5 w-3.5", indexing && "animate-spin")} /> Re-index
         </button>
       </div>
-      {error && <div className="text-rose-500 dark:text-rose-400 text-xs">{error}</div>}
+      {error && <div className="kit-error-text">{error}</div>}
 
       <div className="grid grid-cols-2 gap-1 [&>button]:justify-center">
         {CATEGORIES.map((c) => (
           <button
-            className={cn(flatButton, "border border-black/10 dark:border-white/10", show.has(c.id) ? "bg-black/5 dark:bg-white/10" : "text-muted-foreground")}
+            className={cn(flatButton, "border border-(--kit-border)", show.has(c.id) ? "bg-(--kit-surface-2)" : "text-muted-foreground")}
             key={c.id}
             onClick={() => setShow(toggle(show, c.id))}
             title={c.help}
@@ -151,7 +151,7 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
           </button>
         ))}
         <button
-          className={cn(flatButton, "border border-black/10 dark:border-white/10", showIgnored ? "bg-black/5 dark:bg-white/10" : "text-muted-foreground")}
+          className={cn(flatButton, "border border-(--kit-border)", showIgnored ? "bg-(--kit-surface-2)" : "text-muted-foreground")}
           onClick={() => setShowIgnored(!showIgnored)}
           title="Show ignored problems too"
           type="button"
@@ -166,17 +166,17 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
         </div>
       )}
 
-      <div className="rounded-lg border border-black/10 p-2 dark:border-white/10">
+      <div className="kit-panel p-2">
         <div className="mb-1 text-muted-foreground text-xs">Fix automatically, one file at a time, scanning each file again afterwards:</div>
         <div className="flex flex-wrap items-center gap-2">
           {CATEGORIES.map((c) => (
-            <label className="flex items-center gap-1 text-xs" key={c.id} title={c.help}>
-              <input checked={fixCats.has(c.id)} className="accent-zinc-500" onChange={() => setFixCats(toggle(fixCats, c.id))} type="checkbox" />
+            <label className="kit-check text-xs" key={c.id} title={c.help}>
+              <input checked={fixCats.has(c.id)} onChange={() => setFixCats(toggle(fixCats, c.id))} type="checkbox" />
               {c.label}
             </label>
           ))}
           <button
-            className={cn(flatButton, "ml-auto border border-black/10 dark:border-white/10")}
+            className={cn(flatButton, "ml-auto border border-(--kit-border)")}
             onClick={() => fix([])}
             title="Queue a fix task per file with problems of the chosen kinds"
             type="button"
@@ -197,7 +197,7 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
           const isOpen = allOpen ? !open.has(path) : open.has(path);
           const active = items.filter((i) => i.status !== "ignored");
           return (
-            <div className="rounded-lg border border-black/10 dark:border-white/10" key={path}>
+            <div className="kit-panel p-0" key={path}>
               <div className="flex items-center gap-1 px-1.5 py-1">
                 <button className="flex min-w-0 flex-1 items-center gap-1 text-left" onClick={() => setOpen(toggle(open, path))} type="button">
                   {isOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
@@ -209,10 +209,10 @@ export function IssuesPanel({ onOpen, tick, activity }: { onOpen: (path: string)
                 </button>
               </div>
               {isOpen && (
-                <div className="border-black/10 border-t px-2 py-1 dark:border-white/10">
+                <div className="border-(--kit-border) border-t px-2 py-1">
                   {items.map((i) => (
                     <div className={cn("flex items-start gap-2 py-1 text-xs", i.status === "ignored" && "opacity-50")} key={i.id}>
-                      <button className="w-10 shrink-0 text-left font-mono text-muted-foreground hover:underline" onClick={() => onOpen(path)} title="Open the file" type="button">
+                      <button className="kit-link w-10 shrink-0 text-left font-mono text-muted-foreground no-underline hover:underline" onClick={() => onOpen(path)} title="Open the file" type="button">
                         {i.line ? `:${i.line}` : ""}
                       </button>
                       <div className="min-w-0 flex-1">

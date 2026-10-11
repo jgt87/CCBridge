@@ -111,7 +111,7 @@ function Find-NewDependencies {
 $script:RiskRules = @(
     @{ ext = '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$'; re = '\beval\s*\('; why = 'eval() runs text as code' }
     @{ ext = '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$'; re = '\bnew\s+Function\s*\('; why = 'new Function() runs text as code' }
-    @{ ext = '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$'; re = '\.(?:inner|outer)HTML\s*\+?=(?!\s*[''"][^''"\n]*[''"]\s*;?\s*$)\s*[^\s\n][^\n]*'; why = 'innerHTML set from a variable can run injected HTML and scripts (use textContent, or build elements)' }
+    @{ ext = '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$'; re = '\.(?:inner|outer)HTML\s*\+?=\s*[^\s\n][^\n]*'; skip = { param($l) Test-LiteralHtmlAssign $l }; why = 'innerHTML set from a variable can run injected HTML and scripts (use textContent, or build elements)' }
     @{ ext = '(?i)\.(html?|m?js|cjs|jsx|tsx?|vue|svelte)$'; re = '\binsertAdjacentHTML\s*\(|\bdocument\.write(?:ln)?\s*\('; why = 'insertAdjacentHTML / document.write insert raw HTML' }
     @{ ext = '(?i)\.(jsx|tsx)$'; re = 'dangerouslySetInnerHTML'; why = 'dangerouslySetInnerHTML inserts raw HTML' }
     @{ ext = '(?i)\.ps[md]?1$'; re = '(?i)^\s*([^''"#\n]*[;|{(=]\s*)?(Invoke-Expression|iex)(\s|$)'; why = 'Invoke-Expression runs text as a command' }
@@ -123,19 +123,32 @@ $script:RiskRules = @(
     @{ ext = '(?i)\.(pyw?|m?js|cjs|jsx|tsx?|php|cs|java|rb|go)$'; re = '(?i)(\.(execute|query|raw|exec|executemany)\s*\(|\bSqlCommand\s*\()\s*(f["'']|["''][^"''\n]*\b(select|insert|update|delete)\b[^"''\n]*["'']\s*(\+|%|\.format)|`[^`\n]*\b(select|insert|update|delete)\b[^`\n]*\$\{)'; why = 'SQL built from strings is open to SQL injection (use query parameters)' }
 )
 
+function Test-LiteralHtmlAssign([string]$Line) {
+    <# An innerHTML assignment whose whole right-hand side, on this line, is fixed text: string
+       literals (also template strings without ${...}) joined with +, ending the statement. Text
+       nobody can inject is not a risk; a line that goes on (ends in +) or holds a variable is. #>
+    $m = [regex]::Match($Line, '\.(?:inner|outer)HTML\s*\+?=\s*(.*)$')
+    if (-not $m.Success) { return $false }
+    $rest = $m.Groups[1].Value.Trim().TrimEnd(';').Trim()
+    if (-not $rest -or $rest.EndsWith('+')) { return $false }
+    $lit = [regex]::Replace($rest, '''(?:[^''\\\n]|\\.)*''|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\$]|\\.|\$(?!\{))*`', '""')
+    $lit -match '^""(\s*\+\s*"")*$'
+}
+
 function Get-RiskHits([string]$Rel, [string]$Text) {
     # "why|line text" for each risky line, so the same line elsewhere still counts as the same.
     if (-not "$Text") { return }
     $lines = "$Text".Replace("`r`n", "`n").Split("`n")
     foreach ($r in $script:RiskRules) {
         if ($Rel -notmatch $r.ext) { continue }
-        foreach ($l in $lines) { if ($l -match $r.re -and $l.Trim() -notmatch '^(//|#|\*|<!--)') { "$($r.why)|$($l.Trim())" } }
+        foreach ($l in $lines) { if ($l -match $r.re -and $l.Trim() -notmatch '^(//|#|\*|<!--)' -and -not ($r.skip -and (& $r.skip $l))) { "$($r.why)|$($l.Trim())" } }
     }
 }
 
 function Find-RiskyCode {
     <# Risky constructs a change adds: "line N: WHY". Comment lines do not count. #>
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -match '(?i)\.html?$' -and (Get-GeneratedPageInfo $New)) { return }   # a page a script built: its template is checked
     $added = @(Get-Added @(Get-RiskHits $Rel $Old) @(Get-RiskHits $Rel $New))
     if (-not $added.Count) { return }
     $lines = "$New".Replace("`r`n", "`n").Split("`n")
@@ -161,6 +174,7 @@ function Find-ChangeSmells {
     <# Debug leftovers and swallowed errors a change adds: "line N: WHY". Empty catch blocks and
        except-pass are counted per file (a comment inside the catch explains it and is fine). #>
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -match '(?i)\.html?$' -and (Get-GeneratedPageInfo $New)) { return }   # a page a script built: its template is checked
     $out = New-Object System.Collections.Generic.List[string]
     $newText = "$New".Replace("`r`n", "`n"); $oldText = "$Old".Replace("`r`n", "`n")
     $newLines = $newText.Split("`n")
@@ -267,12 +281,21 @@ function Find-LargeCode {
 
 function Find-HtmlBasics {
     <# Accessibility basics a change adds to markup: an image without alt text, a button without
-       text or label, a form field without a label. #>
+       text or label, a form field without a label, a click handler on an element a keyboard cannot
+       reach (no tabindex), and a page without an h1 (the page check also finds clickable parts a
+       keyboard cannot reach at run time, page-content-check.js). #>
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
     if ($Rel -notmatch '(?i)\.(html?|jsx|tsx|vue|svelte)$') { return }
+    $isPage = $Rel -match '(?i)\.html?$'
     $hits = {
         param($t)
         $t = "$t"
+        if ($isPage -and $t -match '(?i)<html\b' -and $t -match '(?i)<body\b' -and $t -notmatch '(?i)<h1\b') { @{ key = 'h1|page'; line = 1; msg = 'the page has no <h1>: put the page title in an h1 (with the UI kit <h1 class="kit-header__title">), so the page has a top heading for screen readers and search' } }
+        foreach ($m in [regex]::Matches($t, '(?is)<(div|span|li|tr|td|th|p|section|article|img|svg|i|b|strong|em|dd|dt|figure|header|footer|nav|aside|main|ul|ol|h[1-6])\b((?:\{(?:[^{}]|\{[^{}]*\})*\}|=>|[^>{])*)>')) {
+            $attrs = $m.Groups[2].Value
+            if ($attrs -notmatch '(?i)\bonclick\s*=' -or $attrs -match '(?i)\btabindex\s*=' -or $attrs -match '\{\s*\.\.\.') { continue }
+            @{ key = 'click|' + ($m.Value -replace '\s+', ' '); line = (Get-LineIndex $t $m.Index); msg = "a clickable <$($m.Groups[1].Value.ToLowerInvariant())> a keyboard cannot reach (a click handler without tabindex): make it a <button>, or give it role=""button"", tabindex=""0"" and the same action on Enter and Space" }
+        }
         foreach ($m in [regex]::Matches($t, '(?is)<img\b((?:\{(?:[^{}]|\{[^{}]*\})*\}|=>|[^>{])*)>')) {
             if ($m.Groups[1].Value -notmatch '(?i)\balt\s*=' -and $m.Groups[1].Value -notmatch '\{\s*\.\.\.') { @{ key = 'img|' + ($m.Value -replace '\s+', ' '); line = (Get-LineIndex $t $m.Index); msg = 'an image without alt text (alt="what it shows", or alt="" when it is decoration)' } }
         }
@@ -491,12 +514,16 @@ function Find-UnsortedTables {
     $tag = '(?i)<table\b[^>]*>'
     $before = @{}; foreach ($m in [regex]::Matches("$Old", $tag)) { $before[($m.Value -replace '\s+', ' ')] = $true }
     $sorting = "$New" -match '(?i)aria-sort|data-kit-sort|\.sort\(|localeCompare|\bsortBy\b|\borderBy\b|useSortBy|getSortedRowModel|sortable|data-sortable'
+    $ownSort = "$New" -match '(?i)aria-sort|\.sort\(|localeCompare|\bsortBy\b|\borderBy\b|useSortBy|getSortedRowModel'   # sorting the page does itself
     foreach ($m in [regex]::Matches("$New", $tag)) {
         $t = $m.Value
         if ($before.ContainsKey(($t -replace '\s+', ' ')) -or $t -match '(?i)\brole\s*=\s*["''](presentation|none)') { continue }
         $line = Get-LineIndex "$New" $m.Index
         if ($t -match '(?i)\bkit-table\b') {
-            if ($t -notmatch '(?i)\bdata-kit-sort\b') { return "line ${line}: a table that cannot be sorted by its columns: add data-kit-sort to the kit-table (th.kit-num on number columns, data-sort=""VALUE"" on cells with dates or formatted numbers)" }
+            if ($t -notmatch '(?i)\bdata-kit-sort\b') {
+                if ($ownSort) { return "line ${line}: this kit-table is sorted by code of its own (aria-sort, sort buttons or a sort call in the file): use the kit's sorting instead: data-kit-sort on the table (th.kit-num on number columns); for rows your code writes, data-kit-rows=""external"" with data-key on each th and your rows sorted on kit:sort; then drop the own sort code" }
+                return "line ${line}: a table that cannot be sorted by its columns: add data-kit-sort to the kit-table (th.kit-num on number columns, data-sort=""VALUE"" on cells with dates or formatted numbers)"
+            }
         } elseif (-not $sorting) {
             return "line ${line}: a table that cannot be sorted by its columns: every table sorts its rows when a column header is clicked (a button in each th, aria-sort on the sorted one); with the UI kit use class=""kit-table"" with data-kit-sort"
         }
@@ -542,6 +569,19 @@ function Find-TableHeaderIssues {
     @(Get-TableHeaderFindings $New | Where-Object { $before -notcontains ($_ -replace '^line \d+: ', '') })
 }
 
+function Find-PageBuildScript {
+    <# A script that builds a page from a template page (OneFile Get-TemplateBuildPairs) without
+       writing the Generated line first: the built page would be checked, reviewed and edited as
+       code. Said once (not when the old text already built it without the line). #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(ps1|m?js|cjs|py)$' -or $Rel -match '(?i)(^|/)(node_modules|\.streamhub|styles/kit|tests?)/') { return }
+    $pairs = @(Get-TemplateBuildPairs $New)
+    if (-not $pairs.Count -or "$New" -match '(?i)<!--\s*Generated by') { return }
+    if (@(Get-TemplateBuildPairs $Old).Count -and "$Old" -notmatch '(?i)<!--\s*Generated by') { return }
+    $p = $pairs[0]
+    "this script builds $($p.output) from $($p.template): make it write <!-- Generated by $([IO.Path]::GetFileName($Rel)) from $($p.template); change the template and run the script --> as the first line of the built page, so the helper program treats that page as output (not checked or reviewed as code, never edited in place)"
+}
+
 function Find-QualityIssues {
     <# The second batch, for the round's file check: what a change adds, as "line N: ..." or a
        whole-file note. -UserLook (the person asked for a look of their own): the kit's look checks rest
@@ -549,7 +589,8 @@ function Find-QualityIssues {
     param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$UseKit, [switch]$UserLook)
     # A one-file page: the helper program's kit and data blocks are not the change's own text.
     if ($Rel -match '(?i)\.html?$') { $loads = Find-OneFileLoads $Rel $Old $New; $Old = Hide-GeneratedBlocks $Old; $New = Hide-GeneratedBlocks $New } else { $loads = $null }
-    @($loads) + @(Find-TableHeaderIssues $Rel $Old $New) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
+    if ($Rel -match '(?i)\.html?$' -and (Get-GeneratedPageInfo $New)) { return @($loads) }   # a page a script built: its template is checked
+    @($loads) + @(Find-TableHeaderIssues $Rel $Old $New) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageBuildScript $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {
@@ -588,4 +629,4 @@ function Get-DoneReminders {
     "Before finishing, one check:`n- " + ($notes -join "`n- ") + "`nThen send done again."
 }
 
-Export-ModuleMember -Function Find-TailwindSlop, Find-RoundedBarBase, Find-UnsortedTables, Find-TableHeaderIssues, Get-TableHeaderFindings, Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders
+Export-ModuleMember -Function Find-TailwindSlop, Find-RoundedBarBase, Find-UnsortedTables, Find-TableHeaderIssues, Get-TableHeaderFindings, Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders, Find-PageBuildScript, Test-LiteralHtmlAssign

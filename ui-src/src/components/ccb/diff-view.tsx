@@ -10,8 +10,8 @@ const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
 
 /** How each kind of line looks: the row background, the sign and its colour. */
 const LINE_LOOK: Record<DiffLine["kind"], { row?: string; sign: string; signClass: string }> = {
-  add: { row: "bg-black/[0.06] dark:bg-white/[0.08]", sign: "+", signClass: "text-foreground" },
-  del: { row: "bg-rose-500/10", sign: "-", signClass: "text-rose-500 dark:text-rose-400" },
+  add: { row: "bg-(--kit-surface-2)", sign: "+", signClass: "text-foreground" },
+  del: { row: "bg-(--kit-error-soft)", sign: "-", signClass: "text-(--kit-error)" },
   same: { sign: " ", signClass: "text-transparent" },
 };
 
@@ -27,7 +27,7 @@ export function DiffView({ preview, tall = false }: { preview: Preview; tall?: b
   else body = <DiffTable newHtml={newHtml} oldHtml={oldHtml} rows={preview.exists ? toHunks(lines) : lines} />;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+    <div className="kit-panel overflow-hidden p-0">
       <DiffHeader isNew={!preview.exists} markdown={md} onRendered={setRendered} path={preview.path} rendered={rendered} />
       <div className={cn(tall ? "overflow-auto" : "max-h-[28rem] overflow-auto", lines && !(md && rendered) && "font-mono text-xs leading-5")}>{body}</div>
     </div>
@@ -49,18 +49,17 @@ function useDiff(preview: Preview) {
 
 /** The file name, the Changes / Rendered switch for Markdown, and "new file". */
 function DiffHeader({ path, markdown, rendered, onRendered, isNew }: { path: string; markdown: boolean; rendered: boolean; onRendered: (on: boolean) => void; isNew: boolean }) {
-  const tab = (on: boolean) =>
-    cn("rounded px-1.5 py-px", on ? "bg-black/10 text-foreground dark:bg-white/10" : "text-muted-foreground hover:text-foreground");
+  const tab = "px-1.5 py-0 text-xs";
   return (
-    <div className="flex items-center justify-between gap-2 border-black/10 border-b bg-black/[0.03] px-3 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.03]">
+    <div className="flex items-center justify-between gap-2 border-(--kit-border) border-b bg-(--kit-surface-2) px-3 py-1.5 text-xs">
       <span className="min-w-0 truncate font-mono">{path}</span>
       <span className="flex shrink-0 items-center gap-2">
         {markdown && (
-          <span className="flex items-center gap-0.5">
-            <button className={tab(!rendered)} onClick={() => onRendered(false)} type="button">
+          <span className="kit-segmented">
+            <button aria-pressed={!rendered} className={tab} onClick={() => onRendered(false)} type="button">
               Changes
             </button>
-            <button className={tab(rendered)} onClick={() => onRendered(true)} title="The file as it will look" type="button">
+            <button aria-pressed={rendered} className={tab} onClick={() => onRendered(true)} title="The file as it will look" type="button">
               Rendered
             </button>
           </span>
@@ -78,7 +77,7 @@ function DiffTable({ rows, oldHtml, newHtml }: { rows: DiffRow[]; oldHtml: strin
       <tbody>
         {rows.map((r, idx) =>
           r.kind === "gap" ? (
-            <tr className="bg-black/[0.03] text-muted-foreground dark:bg-white/[0.03]" key={idx}>
+            <tr className="bg-(--kit-surface-2) text-muted-foreground" key={idx}>
               <td className="px-3 py-0.5 text-center" colSpan={3}>
                 ⋯ {r.count} unchanged line{r.count === 1 ? "" : "s"}
               </td>

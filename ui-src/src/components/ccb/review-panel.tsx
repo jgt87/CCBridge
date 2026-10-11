@@ -5,9 +5,9 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost kit-btn--sm";
 const field =
-  "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+  "kit-input h-8 min-h-8 w-full";
 
 const FOCUS = ["bugs", "security", "performance", "structure", "readability", "tests"];
 const DEFAULT_FOCUS = ["bugs", "security", "performance", "structure"];
@@ -117,7 +117,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
 
   return (
     <div className="space-y-2">
-      <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
+      <div className="kit-panel space-y-2 p-2">
         <select aria-label="What to review" className={field} onChange={(e) => setScope(e.target.value as Scope)} value={scope}>
           <option value="all">Whole project</option>
           <option value="changes">Changes since you opened the project</option>
@@ -129,7 +129,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
             <button
               className={cn(
                 "rounded-md border px-1.5 py-0.5 text-xs",
-                focus.includes(f) ? "border-black/30 bg-black/10 dark:border-white/30 dark:bg-white/15" : "border-black/10 text-muted-foreground dark:border-white/10"
+                focus.includes(f) ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border) text-muted-foreground"
               )}
               key={f}
               onClick={() => setFocus((cur) => (cur.includes(f) ? cur.filter((x) => x !== f) : [...cur, f]))}
@@ -148,7 +148,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
               : "Build output, lock files, data and Source/ are never reviewed.")}
         </p>
         <button
-          className={cn(flatButton, "w-full justify-center border border-black/10 py-1.5 dark:border-white/10")}
+          className={cn(flatButton, "w-full justify-center border border-(--kit-border) py-1.5")}
           disabled={starting || !estimate?.files || !focus.length}
           onClick={start}
           type="button"
@@ -159,7 +159,7 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
       </div>
 
       {reviews.map((r) => (
-        <div className="rounded-lg border border-black/10 dark:border-white/10" key={r.id}>
+        <div className="kit-panel p-0" key={r.id}>
           <button className="flex w-full items-start gap-1.5 p-2 text-left" onClick={() => setOpenId(openId === r.id ? null : r.id)} type="button">
             {openId === r.id ? <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
             <span className="min-w-0 flex-1">
@@ -171,13 +171,13 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
             </span>
           </button>
           {openId === r.id && detail?.id === r.id && (
-            <div className="space-y-2 border-black/10 border-t p-2 dark:border-white/10">
+            <div className="space-y-2 border-(--kit-border) border-t p-2">
               {detail.overall && <p className="text-xs">{detail.overall}</p>}
               <div className="flex flex-wrap gap-1">
                 <button className={flatButton} onClick={() => onOpen(r.report)} type="button">
                   <FileText className="h-3 w-3" /> Report
                 </button>
-                <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={!picked.size || fixing} onClick={fix} title="Add coding tasks for the ticked findings to the queue" type="button">
+                <button className={cn(flatButton, "bg-(--kit-surface-2)")} disabled={!picked.size || fixing} onClick={fix} title="Add coding tasks for the ticked findings to the queue" type="button">
                   <Wrench className="h-3 w-3" /> {fixing ? "Adding..." : `Fix selected (${picked.size})`}
                 </button>
               </div>
@@ -229,9 +229,9 @@ function FindingRow({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className={cn("rounded-md border border-black/10 p-1.5 dark:border-white/10", (f.status === "unverified" || f.ignored) && "opacity-50")}>
+    <div className={cn("rounded-md border border-(--kit-border) p-1.5", (f.status === "unverified" || f.ignored) && "opacity-50")}>
       <div className="flex items-start gap-1.5">
-        <input checked={picked && !f.ignored} className="mt-0.5 accent-zinc-500" disabled={Boolean(f.fixQueueId || f.ignored)} onChange={onToggle} title="Fix this finding" type="checkbox" />
+        <input checked={picked && !f.ignored} className="mt-0.5 accent-(--kit-accent)" disabled={Boolean(f.fixQueueId || f.ignored)} onChange={onToggle} title="Fix this finding" type="checkbox" />
         <button className="min-w-0 flex-1 text-left text-xs" onClick={() => setOpen(!open)} type="button">
           <span className="font-medium">{f.title}</span>
           {f.category && <span className="text-muted-foreground"> · {f.category}</span>}
@@ -239,7 +239,7 @@ function FindingRow({
       </div>
       <div className="mt-0.5 flex flex-wrap gap-x-2 pl-5 text-muted-foreground text-xs">
         {f.file ? (
-          <button className="font-mono hover:underline" onClick={() => onOpen(f.file)} type="button">
+          <button className="kit-link font-mono no-underline hover:underline" onClick={() => onOpen(f.file)} type="button">
             {f.file}
             {f.line ? `:${f.line}` : ""}
           </button>
@@ -264,7 +264,7 @@ function FindingRow({
         <div className="mt-1 space-y-1 pl-5 text-xs">
           {f.detail && <p>{f.detail}</p>}
           {f.suggestion && <p className="text-muted-foreground">Fix: {f.suggestion}</p>}
-          {f.quote && <pre className="overflow-x-auto rounded bg-black/5 p-1 font-mono text-[11px] dark:bg-white/5">{f.quote}</pre>}
+          {f.quote && <pre className="kit-code overflow-x-auto p-1 text-[11px]">{f.quote}</pre>}
         </div>
       )}
     </div>

@@ -6,9 +6,9 @@ import { cn } from "@/lib/utils";
 import { fetchedAge, TextRunbookForm, webSummary } from "./fetch-panel";
 
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost kit-btn--sm";
 const field =
-  "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+  "kit-input h-8 min-h-8 w-full";
 
 /** Two kinds behind one list: a text answer (NAME.prompt.md, saved as Markdown) or checked JSON (NAME.runbook.md). */
 export type RunbookKind = "text" | "json";
@@ -111,7 +111,7 @@ export function RunbooksPanel({
       </InfoNote>
 
       {adding ? (
-        <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
+        <div className="kit-panel space-y-2 p-2">
           <select aria-label="Kind of runbook" className={field} onChange={(e) => setChoice(e.target.value)} value={choice}>
             <option value="text">Text answer (Markdown)</option>
             <optgroup label="Checked JSON, from a template">
@@ -127,12 +127,12 @@ export function RunbooksPanel({
           ) : (
             <>
               <input aria-label="Runbook name" className={field} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. meetings next week" value={name} />
-              {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
+              {error && <p className="kit-error-text">{error}</p>}
               <div className="flex justify-end gap-1">
                 <button className={flatButton} onClick={() => setAdding(false)} type="button">
                   Cancel
                 </button>
-                <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={saving || !name.trim()} onClick={create} type="button">
+                <button className={cn(flatButton, "bg-(--kit-surface-2)")} disabled={saving || !name.trim()} onClick={create} type="button">
                   {saving ? "Creating..." : "Create"}
                 </button>
               </div>
@@ -140,22 +140,22 @@ export function RunbooksPanel({
           )}
         </div>
       ) : (
-        <button className={cn(flatButton, "w-full justify-center border border-black/10 py-1.5 dark:border-white/10")} onClick={() => setAdding(true)} type="button">
+        <button className={cn(flatButton, "w-full justify-center border border-(--kit-border) py-1.5")} onClick={() => setAdding(true)} type="button">
           <Plus className="h-3.5 w-3.5" /> New runbook
         </button>
       )}
 
       {rows.map((r) => (
-        <div className="rounded-lg border border-black/10 p-2 dark:border-white/10" key={`${r.kind}:${r.name}`}>
+        <div className="kit-panel p-2" key={`${r.kind}:${r.name}`}>
           <div className="flex items-center gap-2">
             <span className="truncate font-medium text-sm" title={r.file}>
               {r.title}
             </span>
-            <span className="shrink-0 rounded-full border border-black/15 px-1.5 text-[10px] text-muted-foreground dark:border-white/20" title={r.kind === "json" ? "Saves JSON checked against the runbook's shape" : "Saves Copilot's answer as Markdown"}>
+            <span className="kit-badge min-h-0 shrink-0 py-px text-[10px]" title={r.kind === "json" ? "Saves JSON checked against the runbook's shape" : "Saves Copilot's answer as Markdown"}>
               {r.kind === "json" ? "JSON" : "text"}
             </span>
             {r.shared && (
-              <span className="shrink-0 rounded-full border border-black/15 px-1.5 text-[10px] text-muted-foreground dark:border-white/20" title="From the library beside the projects: every project in this folder can run it">
+              <span className="kit-badge min-h-0 shrink-0 py-px text-[10px]" title="From the library beside the projects: every project in this folder can run it">
                 shared
               </span>
             )}
@@ -193,7 +193,7 @@ export function RunbooksPanel({
           </div>
         </div>
       ))}
-      {rows.length === 0 && !adding && <p className="text-muted-foreground text-xs">No runbooks yet.</p>}
+      {rows.length === 0 && !adding && <p className="kit-empty py-3 text-xs">No runbooks yet.</p>}
     </div>
   );
 }

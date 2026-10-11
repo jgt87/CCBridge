@@ -28,5 +28,5 @@ export default defineConfig({
   base: './',
   resolve: { alias: { '@': path.resolve(import.meta.dirname, './src') } },
   build: { outDir: '../ui', emptyOutDir: true, chunkSizeWarningLimit: 1500 },
-  server: { proxy: { '/api': 'http://localhost:8765' } },
+  server: { proxy: { '/api': 'http://localhost:8765' }, fs: { allow: ['..'] } },   // the kit's stylesheet lives in ../templates/ui-kit
 })

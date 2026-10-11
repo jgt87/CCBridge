@@ -14,7 +14,7 @@ function IssueCount({ withIssues, onShowIssues }: { withIssues: number; onShowIs
   const text = `${withIssues} file(s) with issues`;
   if (!onShowIssues) return <span className="truncate">{text}</span>;
   return (
-    <button className="min-w-0 truncate underline-offset-2 hover:text-foreground hover:underline" onClick={onShowIssues} title="Show the issues (Code health tab)" type="button">
+    <button className="kit-link min-w-0 truncate text-muted-foreground no-underline hover:text-foreground hover:underline" onClick={onShowIssues} title="Show the issues (Code health tab)" type="button">
       {text}
     </button>
   );
@@ -55,7 +55,7 @@ export function IndexBar(props: IndexBarProps) {
       </div>
       {/* The bar only while an index run is busy. */}
       {running && (
-        <div className="mt-1.5 h-0.5 w-full overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+        <div className="kit-progress mt-1.5 h-0.5">
           <div
             className={cn("h-full rounded-full bg-foreground/60 transition-[width] duration-500", pct === null && "w-1/3 animate-pulse")}
             style={pct === null ? undefined : { width: `${pct}%` }}

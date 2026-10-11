@@ -92,7 +92,7 @@ function NewTag({ node }: { node: TreeNode }) {
   if (!isNew(node)) return null;
   return (
     <span
-      className="shrink-0 rounded px-1 font-medium text-[9px] text-muted-foreground uppercase tracking-wide ring-1 ring-black/15 dark:ring-white/20"
+      className="shrink-0 rounded px-1 font-medium text-[9px] text-muted-foreground uppercase tracking-wide ring-1 ring-(--kit-border-strong)"
       title={node.children ? "New folder: everything in it was created since the project was opened" : "New file: created since the project was opened"}
     >
       new
@@ -107,7 +107,7 @@ function IssueBadge({ path }: { path: string }) {
   const n = useContext(IssueCounts).get(path);
   if (!n) return null;
   return (
-    <span className="ml-auto shrink-0 rounded px-1 text-[10px] text-muted-foreground ring-1 ring-black/10 dark:ring-white/15" title={`${n} open issue(s); see Issues in the Code health tab`}>
+    <span className="ml-auto shrink-0 rounded px-1 text-[10px] text-muted-foreground ring-1 ring-(--kit-border-strong)" title={`${n} open issue(s); see Issues in the Code health tab`}>
       {n}
     </span>
   );
@@ -123,14 +123,14 @@ function ChangeBadge({ node }: { node: TreeNode }) {
 
 // Tree guide lines: every item gets a short horizontal tick from its parent's vertical line; the
 // vertical line stops at the last item's tick, as in a file explorer.
-const LINE = "border-black/15 dark:border-white/15";
+const LINE = "border-(--kit-border-strong)";
 const ITEM = cn(
   "relative pl-4",
   "before:pointer-events-none before:absolute before:top-[14px] before:left-0 before:w-3 before:border-t before:content-['']",
   "after:pointer-events-none after:absolute after:top-0 after:left-0 after:h-full after:border-l after:content-[''] last:after:h-[14px]",
-  "before:border-black/15 after:border-black/15 dark:before:border-white/15 dark:after:border-white/15"
+  "before:border-(--kit-border-strong) after:border-(--kit-border-strong)"
 );
-const ROW = "flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5";
+const ROW = "kit-tree__row h-7 min-h-0 w-full gap-1.5 px-1.5 text-left text-sm";
 
 /** Folders you closed in the tree, for the whole tree at once (see useClosedFolders). */
 const ClosedFolders = createContext<{ closed: Record<string, boolean>; toggle: (path: string) => void }>({ closed: {}, toggle: () => {} });
@@ -243,7 +243,7 @@ function ProjectRoot({ project, children }: { project: { name: string; path: str
         <span className="truncate font-medium">{project.name}</span>
         <button
           aria-label="Open the project folder in File Explorer"
-          className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+          className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:bg-(--kit-surface-2) hover:text-foreground"
           onClick={() => void api.showProject()}
           title="Open the project folder in File Explorer"
           type="button"
@@ -291,7 +291,7 @@ function FilesPanel({
   const rows = tree.length ? (
     <TreeRows nodes={tree} onOpen={onOpenFile} />
   ) : (
-    <p className="p-2 text-muted-foreground text-sm">No files yet. Ask Copilot to create some.</p>
+    <p className="kit-empty py-3 text-sm">No files yet. Ask Copilot to create some.</p>
   );
   return (
     // Dragging a file over the panel opens the Add data section, so drag-and-drop works while it is folded.
@@ -334,7 +334,7 @@ function FilesPanel({
         actions={
           entry && previewBase ? (
             <a
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground text-xs hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground text-xs hover:bg-(--kit-surface-2) hover:text-foreground"
               href={appEntryUrl(previewBase, entry)}
               onClick={openExternal}
               rel="noopener noreferrer"
@@ -349,7 +349,7 @@ function FilesPanel({
         title="Files"
       >
         {/* While the tree refreshes: a thin bar sweeping left to right. */}
-        <div aria-hidden className={cn("mb-1 h-0.5 overflow-hidden rounded-full", refreshing ? "bg-black/5 dark:bg-white/10" : "bg-transparent")}>
+        <div aria-hidden className={cn("mb-1 h-0.5 overflow-hidden rounded-full", refreshing ? "bg-(--kit-surface-2)" : "bg-transparent")}>
           {refreshing && <div className="h-full w-1/3 animate-[ccb-sweep_0.9s_ease-in-out_infinite] rounded-full bg-foreground/60" />}
         </div>
         <ClosedFolders.Provider value={folders}>
@@ -460,7 +460,7 @@ function RestoreControl({
   if (!confirming) {
     return (
       <button
-        className="ml-auto shrink-0 rounded px-1 hover:bg-black/5 hover:text-foreground disabled:opacity-40 dark:hover:bg-white/5"
+        className="ml-auto shrink-0 rounded px-1 hover:bg-(--kit-surface-2) hover:text-foreground disabled:opacity-40"
         disabled={busy}
         onClick={onAsk}
         title={`Put the files back as they were before this change set: undoes it and the ${newer} newer one(s), newest first`}
@@ -473,10 +473,10 @@ function RestoreControl({
   return (
     <span className="ml-auto flex shrink-0 items-center gap-1">
       <span>Restore: undo {newer + 1} change sets?</span>
-      <button className="rounded bg-black/10 px-1.5 text-foreground hover:bg-black/15 dark:bg-white/15 dark:hover:bg-white/20" onClick={onRestore} type="button">
+      <button className="kit-btn kit-btn--sm h-6 min-h-0 px-1.5" onClick={onRestore} type="button">
         Yes
       </button>
-      <button className="rounded px-1.5 hover:bg-black/5 dark:hover:bg-white/5" onClick={onCancel} type="button">
+      <button className="rounded px-1.5 hover:bg-(--kit-surface-2)" onClick={onCancel} type="button">
         Cancel
       </button>
     </span>
@@ -511,7 +511,7 @@ function ChangeSetCard({
   const restore = newer > 0 && Boolean(c.changeSet) && (Boolean(onUndoTo) || confirming);
   return (
     <div
-      className={cn("rounded-lg border p-2 transition-colors", lit ? "border-black/40 bg-black/5 dark:border-white/40 dark:bg-white/10" : "border-black/10 dark:border-white/10")}
+      className={cn("rounded-lg border p-2 transition-colors", lit ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border)")}
       id={`change-${c.seq}`}
     >
       <div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
@@ -539,7 +539,7 @@ function ChangeSetCard({
       {c.files.map((f) => {
         const n = counts.get(f);
         return (
-          <button className="flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs hover:underline" key={f} onClick={() => (c.changeSet && onOpenChangeFile ? onOpenChangeFile(c.changeSet, f) : onOpenFile(f))} title={c.changeSet && onOpenChangeFile ? `${f}: the lines this change set added and removed` : f} type="button">
+          <button className="kit-link flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs no-underline hover:underline" key={f} onClick={() => (c.changeSet && onOpenChangeFile ? onOpenChangeFile(c.changeSet, f) : onOpenFile(f))} title={c.changeSet && onOpenChangeFile ? `${f}: the lines this change set added and removed` : f} type="button">
             <span className="min-w-0 flex-1 truncate">{f}</span>
             {n && (n.deleted ? <span className="shrink-0 font-sans text-muted-foreground">deleted</span> : <ChangePill added={n.added} removed={n.removed} />)}
           </button>
@@ -679,7 +679,7 @@ function AutomationPanel({
       <PanelSection badge={schedules.length ? <SectionCount n={schedules.length} /> : null} id="automation.scheduled" title="Scheduled">
         <div className="space-y-2">
           <button
-            className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-black/10 px-2 py-1.5 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+            className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-(--kit-border) px-2 py-1.5 text-xs hover:bg-(--kit-surface-2)"
             onClick={() => onSchedule({ kind: "chat" })}
             type="button"
           >

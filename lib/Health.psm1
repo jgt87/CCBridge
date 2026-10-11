@@ -20,8 +20,9 @@ function Blank([string]$Text, [string]$Pattern) {
 }
 function LineOf([string]$Text, [int]$Index) { ([regex]::Matches($Text.Substring(0, [Math]::Min([Math]::Max(0, $Index), $Text.Length)), "`n")).Count + 1 }
 
-function New-Metric([string]$Name, [int]$Line, [int]$End, [int]$Ccn, [int]$Nesting, [int]$Params) {
-    $len = $End - $Line + 1
+function New-Metric([string]$Name, [int]$Line, [int]$End, [int]$Ccn, [int]$Nesting, [int]$Params, [int]$OwnLines = 0) {
+    # $OwnLines: the lines of the function's own statements, for a wrapper whose body is other functions.
+    $len = if ($OwnLines -gt 0) { $OwnLines } else { $End - $Line + 1 }
     $l = $script:Limits
     $brain = ($len -gt $l.lines -and $Ccn -gt $l.ccn -and $Nesting -ge $l.nesting)
     $pen = [Math]::Min(30, [Math]::Max(0, $Ccn - $l.ccn) * 1.5) + [Math]::Max(0, $Nesting - ($l.nesting - 1)) * 5 + [Math]::Max(0, $len - $l.lines) / 10 + [Math]::Max(0, $Params - $l.params) * 2 + $(if ($brain) { 10 } else { 0 })
@@ -101,7 +102,7 @@ function Get-BraceFunctionMetrics([string]$Text, [string]$Path) {
             if ($close -lt 0) { continue }
             $taken[$open] = $true
             $paramCount = if ($x.Groups[2].Success -and $x.Groups[2].Value.Trim()) { @($x.Groups[2].Value.Split(',') | Where-Object { $_.Trim() }).Count } elseif ($x.Groups[3].Success -and $x.Groups[3].Value) { 1 } else { 0 }
-            $starts.Add(@{ name = $(if ($name) { $name } else { '(anonymous)' }); start = $x.Index; open = $open; close = $close; params = $paramCount })
+            $starts.Add(@{ name = $name; start = $x.Index; open = $open; close = $close; params = $paramCount })
         }
     }
     foreach ($f in $starts) {
@@ -123,7 +124,13 @@ function Get-BraceFunctionMetrics([string]$Text, [string]$Path) {
                 $stack.Push($control); if ($control) { $depth++; if ($depth -gt $max) { $max = $depth } }
             } elseif ($body[$i] -eq '}' -and $stack.Count) { if ($stack.Pop()) { $depth-- } }
         }
-        New-Metric $f.name (LineOf $m $f.start) (LineOf $m $f.close) $ccn $max $f.params
+        # A file-level wrapper, (function () { ... })() or ;(function () { ... }()), holds the file's
+        # functions: it is measured by its own statements, not by everything inside it.
+        $ownLines = 0
+        if (-not $f.name -and $m.Substring(0, $f.start) -match '^[\s(!;]*$' -and $m.Substring($f.close + 1) -match '^\s*\)?\s*(\((this|window|globalThis|self)?\)|\.call\([^)]*\))\s*\)?\s*;?\s*$') {
+            $ownLines = [Math]::Max(1, @($body.Split("`n") | Where-Object { $_.Trim() }).Count)
+        }
+        New-Metric $(if ($f.name) { $f.name } else { '(anonymous)' }) (LineOf $m $f.start) (LineOf $m $f.close) $ccn $max $f.params $ownLines
     }
 }
 

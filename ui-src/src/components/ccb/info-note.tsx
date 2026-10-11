@@ -18,7 +18,7 @@ export function InfoNote({ children, details }: { children: React.ReactNode; det
           aria-describedby={open ? id : undefined}
           aria-expanded={open}
           aria-label="More about this"
-          className="-my-0.5 inline-flex rounded p-0.5 align-middle text-muted-foreground hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-white/10"
+          className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm -my-1.5 h-6 w-6 min-h-0 align-middle text-muted-foreground hover:text-foreground"
           onBlur={() => (setPinned(false), setHover(false))}
           onClick={() => setPinned((p) => !p)}
           onFocus={() => setHover(true)}
@@ -32,7 +32,7 @@ export function InfoNote({ children, details }: { children: React.ReactNode; det
       </p>
       {open && (
         <div
-          className="absolute top-full right-0 left-0 z-30 mt-1 space-y-1 rounded-lg border border-black/10 bg-popover p-2.5 text-popover-foreground text-xs leading-relaxed shadow-lg dark:border-white/10"
+          className="kit-popover absolute top-full right-0 left-0 mt-1 w-auto min-w-0 max-w-none space-y-1 p-2.5 text-xs leading-relaxed"
           id={id}
           onMouseEnter={() => setHover(true)}
           onMouseLeave={() => setHover(false)}

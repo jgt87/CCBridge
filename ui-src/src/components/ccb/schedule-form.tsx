@@ -5,9 +5,9 @@ import { cn } from "@/lib/utils";
 import { KeepOpenNote, SCHEDULE_NOTE } from "./keep-open-note";
 
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost kit-btn--sm";
 const field =
-  "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+  "kit-input h-8 min-h-8 w-full";
 
 /** Mon..Sun as shown; values are JavaScript/.NET day numbers (0 = Sunday). */
 const DAYS: { label: string; value: number }[] = [
@@ -159,7 +159,7 @@ export function ScheduleForm({
   const valid = missing.length === 0;
 
   return (
-    <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
+    <div className="kit-panel space-y-2 p-2">
       <div className="font-medium text-sm">{existing ? "Edit schedule" : "Schedule"}</div>
       <div className="space-y-1">
         <span className="text-muted-foreground text-xs">What runs</span>
@@ -209,7 +209,7 @@ export function ScheduleForm({
         </select>
           <button
             aria-label="Pick a project file"
-            className={cn("shrink-0 rounded-md border border-black/10 px-2 hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5", picking && "bg-black/10 dark:bg-white/15")}
+            className={cn("shrink-0 rounded-md border border-(--kit-border) px-2 hover:bg-(--kit-surface-2)", picking && "bg-(--kit-surface-2)")}
             onClick={() => setPicking(!picking)}
             title="Pick a project file: a runbook (Runbooks/*.runbook.md) runs as a runbook; any other file, such as a Markdown file with instructions, is attached to the message"
             type="button"
@@ -218,10 +218,10 @@ export function ScheduleForm({
           </button>
         </div>
         {picking && (
-          <div className="rounded-md border border-black/10 dark:border-white/10">
+          <div className="kit-panel rounded-(--kit-radius) p-0">
             <input aria-label="Find a project file"
               autoFocus
-              className="w-full border-black/10 border-b bg-transparent px-2 py-1 text-sm outline-none dark:border-white/10"
+              className="kit-input h-8 min-h-8 w-full"
               onChange={(e) => setFilter(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && pickable[0]) pick(pickable[0].path);
@@ -236,7 +236,7 @@ export function ScheduleForm({
             <div className="max-h-48 overflow-y-auto py-1">
               {pickable.map((f) => (
                 <button
-                  className="flex w-full items-center gap-1.5 px-2 py-0.5 text-left font-mono text-xs hover:bg-black/5 dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-1.5 px-2 py-0.5 text-left font-mono text-xs hover:bg-(--kit-surface-2)"
                   key={f.path}
                   onClick={() => pick(f.path)}
                   type="button"
@@ -257,7 +257,7 @@ export function ScheduleForm({
 
       <div className="flex gap-1">
         {(["repeat", "once"] as const).map((m) => (
-          <button className={cn(flatButton, mode === m && "bg-black/10 dark:bg-white/15")} key={m} onClick={() => setMode(m)} type="button">
+          <button className={cn(flatButton, mode === m && "bg-(--kit-surface-2)")} key={m} onClick={() => setMode(m)} type="button">
             {m === "repeat" ? "Repeat" : "Once"}
           </button>
         ))}
@@ -272,7 +272,7 @@ export function ScheduleForm({
               <button
                 className={cn(
                   "h-7 w-8 rounded-md border text-xs",
-                  days.includes(d.value) ? "border-black/30 bg-black/10 dark:border-white/30 dark:bg-white/15" : "border-black/10 text-muted-foreground dark:border-white/10"
+                  days.includes(d.value) ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border) text-muted-foreground"
                 )}
                 key={d.value}
                 onClick={() => toggleDay(d.value)}
@@ -290,7 +290,7 @@ export function ScheduleForm({
           </div>
           <div className="flex flex-wrap items-center gap-1">
             {times.map((t) => (
-              <span className="inline-flex items-center gap-1 rounded-md border border-black/10 px-1.5 py-0.5 font-mono text-xs dark:border-white/10" key={t}>
+              <span className="kit-badge rounded-(--kit-radius-sm) gap-1 font-mono font-normal text-foreground" key={t}>
                 {t}
                 <button aria-label={`Remove ${t}`} className="text-muted-foreground hover:text-foreground" onClick={() => setTimes(times.filter((x) => x !== t))} type="button">
                   <X className="h-3 w-3" />
@@ -298,7 +298,7 @@ export function ScheduleForm({
               </span>
             ))}
             <input aria-label="Time to add"
-              className="rounded-md border border-black/10 bg-transparent px-1.5 py-0.5 text-xs outline-none dark:border-white/10"
+              className="kit-input h-7 min-h-0 px-1.5 text-xs"
               onChange={(e) => setNewTime(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addTime()}
               type="time"
@@ -313,13 +313,13 @@ export function ScheduleForm({
 
       <input aria-label="Schedule name" className={field} onChange={(e) => setTitle(e.target.value)} placeholder="Name (optional)" value={title} />
       <KeepOpenNote>{SCHEDULE_NOTE}</KeepOpenNote>
-      {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
+      {error && <p className="kit-error-text">{error}</p>}
       <div className="flex items-center justify-end gap-1">
         {!valid && <span className="mr-auto text-muted-foreground text-xs">To schedule it: {missing.join(", ")}.</span>}
         <button className={flatButton} onClick={onCancel} type="button">
           Cancel
         </button>
-        <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={saving || !valid} onClick={save} title={valid ? undefined : `Still needed: ${missing.join(", ")}`} type="button">
+        <button className={cn(flatButton, "bg-(--kit-surface-2)")} disabled={saving || !valid} onClick={save} title={valid ? undefined : `Still needed: ${missing.join(", ")}`} type="button">
           {saving ? "Saving..." : existing ? "Save changes" : "Schedule"}
         </button>
       </div>

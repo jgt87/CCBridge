@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 /** A visible note that something only runs while StreamHub is open (schedules, the queue). */
 export function KeepOpenNote({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("flex items-start gap-2 rounded-lg border border-black/15 bg-black/[0.03] px-2.5 py-2 text-xs dark:border-white/15 dark:bg-white/[0.04]", className)}>
+    <div className={cn("kit-notice px-2.5 py-2 text-xs", className)}>
       <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span>{children}</span>
     </div>

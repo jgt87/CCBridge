@@ -1,7 +1,6 @@
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { languageForPath } from "@/lib/highlight";
-import { cn } from "@/lib/utils";
 import type { Preview } from "@/lib/api";
 import { CodeView, CopyButton } from "./code-block";
 import { DiffView } from "./diff-view";
@@ -44,40 +43,39 @@ export function FileViewer({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const tab = (on: boolean) =>
-    cn("rounded-md px-2 py-0.5 text-xs", on ? "bg-black/10 text-foreground dark:bg-white/10" : "text-muted-foreground hover:text-foreground");
+  const tab = "px-2 py-0 text-xs";
 
   return (
     <ModalBackdrop center onClose={onClose}>
-      <div className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 border-black/10 border-b px-4 py-2 dark:border-white/10">
+      <div className="kit-dialog flex max-h-full w-full max-w-4xl flex-col overflow-hidden p-0" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-(--kit-border) border-b px-4 py-2">
           <span className="min-w-0 flex-1 truncate font-mono text-sm">{file.path}</span>
           {file.change && (
-            <div className="flex items-center gap-0.5">
-              <button className={tab(showChange)} onClick={() => setShowChange(true)} title="The lines this change set added and removed" type="button">
+            <div className="kit-segmented">
+              <button aria-pressed={showChange} className={tab} onClick={() => setShowChange(true)} title="The lines this change set added and removed" type="button">
                 Changes
               </button>
-              <button className={tab(!showChange)} onClick={() => setShowChange(false)} title="The whole file" type="button">
+              <button aria-pressed={!showChange} className={tab} onClick={() => setShowChange(false)} title="The whole file" type="button">
                 File
               </button>
             </div>
           )}
           {md && !change && (
-            <div className="flex items-center gap-0.5">
-              <button className={tab(!source)} onClick={() => setSource(false)} type="button">
+            <div className="kit-segmented">
+              <button aria-pressed={!source} className={tab} onClick={() => setSource(false)} type="button">
                 Rendered
               </button>
-              <button className={tab(source)} onClick={() => setSource(true)} type="button">
+              <button aria-pressed={source} className={tab} onClick={() => setSource(true)} type="button">
                 Source
               </button>
             </div>
           )}
           {!isImage(file.path) && <CopyButton text={file.text} />}
-          <button className="rounded p-1 hover:bg-black/5 dark:hover:bg-white/10" onClick={onClose} title="Close (Esc)" type="button">
+          <button className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" onClick={onClose} title="Close (Esc)" type="button">
             <X className="h-4 w-4" />
           </button>
         </div>
-        {change && <div className="border-black/10 border-b px-4 py-1.5 text-muted-foreground text-xs dark:border-white/10">{change.note}</div>}
+        {change && <div className="border-(--kit-border) border-b px-4 py-1.5 text-muted-foreground text-xs">{change.note}</div>}
         <div className="min-h-0 flex-1 overflow-auto">
           {change ? (
             <div className="p-3">

@@ -67,7 +67,7 @@
   </div>
 </section>
 
-<!-- kit-field, kit-input, kit-select, kit-textarea, kit-check, kit-form -->
+<!-- kit-field, kit-input, kit-select, kit-textarea, kit-check, kit-choices, kit-fieldset, kit-legend, kit-label--required, kit-input-group, kit-input-icon, kit-form, kit-form__actions -->
 <section id="forms">
   <h2 class="kit-h2">Forms</h2>
   <form class="kit-form">
@@ -89,7 +89,52 @@
       <label class="kit-label" for="ex-notes">Notes</label>
       <textarea class="kit-textarea" id="ex-notes"></textarea>
     </div>
+    <div class="kit-field">
+      <label class="kit-label kit-label--required" for="ex-budget">Budget</label>
+      <div class="kit-input-group"><span class="kit-input-group__addon">EUR</span><input class="kit-input" id="ex-budget" type="number" min="0" step="100" value="2500" required><button class="kit-btn" type="button">Apply</button></div>
+      <span class="kit-help">A unit or a button shares the field's edge.</span>
+    </div>
+    <div class="kit-field">
+      <label class="kit-label" for="ex-find">Find a station</label>
+      <div class="kit-input-icon"><span data-kit-icon="search" aria-hidden="true"></span><input class="kit-input" id="ex-find" type="search" placeholder="Name or city"></div>
+    </div>
+    <div class="kit-field">
+      <label class="kit-label" for="ex-date">Start date</label>
+      <input class="kit-input" id="ex-date" type="date" value="2026-10-09">
+    </div>
+    <div class="kit-field">
+      <label class="kit-label" for="ex-file">Attachment</label>
+      <input class="kit-input" id="ex-file" type="file">
+    </div>
+    <div class="kit-field">
+      <label class="kit-label" for="ex-colour">Label colour</label>
+      <input class="kit-input" id="ex-colour" type="color" value="#019adc">
+    </div>
+    <div class="kit-field">
+      <label class="kit-label" for="ex-regions">Regions (several)</label>
+      <select class="kit-select" id="ex-regions" multiple><optgroup label="Europe"><option selected>Netherlands</option><option>Germany</option></optgroup><optgroup label="Asia"><option>Taiwan</option><option>Korea</option></optgroup></select>
+    </div>
+    <fieldset class="kit-fieldset">
+      <legend class="kit-legend">How often</legend>
+      <div class="kit-choices">
+        <label class="kit-check"><input type="radio" name="ex-often" checked> Every week</label>
+        <label class="kit-check"><input type="radio" name="ex-often"> Every month</label>
+        <label class="kit-check"><input type="radio" name="ex-often" disabled> Every quarter (not yet)</label>
+      </div>
+    </fieldset>
+    <fieldset class="kit-fieldset kit-fieldset--plain">
+      <legend class="kit-legend">Include</legend>
+      <div class="kit-choices kit-choices--row">
+        <label class="kit-check"><input type="checkbox" checked> Charts</label>
+        <label class="kit-check"><input type="checkbox" checked> Tables</label>
+        <label class="kit-check"><input type="checkbox"> Raw data</label>
+      </div>
+    </fieldset>
     <label class="kit-check"><input type="checkbox" checked> Send me a copy</label>
+    <div class="kit-form__actions">
+      <button class="kit-btn" type="reset">Reset</button>
+      <button class="kit-btn kit-btn--primary" type="submit">Save</button>
+    </div>
   </form>
 </section>
 
@@ -255,6 +300,103 @@
       <button class="kit-btn kit-btn--danger" type="button" onclick="this.closest('dialog').close()">Delete</button>
     </div>
   </dialog>
+</section>
+
+<!-- KitUI.confirm, KitUI.alert (a kit-dialog built by kit.js instead of the browser's own boxes), kit-popover with data-kit-popover, kit-popover__head, kit-popover__actions -->
+<section id="boxes">
+  <h2 class="kit-h2">Confirm, alert and popover</h2>
+  <div class="kit-row">
+    <button class="kit-btn kit-btn--danger" type="button" id="ex-confirm">Delete 3 items</button>
+    <button class="kit-btn" type="button" id="ex-alert">Show a message</button>
+    <span class="kit-small kit-muted" id="ex-box-result" aria-live="polite"></span>
+    <span class="kit-toolbar__spacer"></span>
+    <div class="kit-popover-wrap">
+      <button class="kit-btn" type="button" data-kit-popover="ex-columns" aria-expanded="false" aria-controls="ex-columns"><span data-kit-icon="columns-3" aria-hidden="true"></span>Columns</button>
+      <div class="kit-popover kit-popover--right" id="ex-columns" hidden>
+        <p class="kit-popover__head">Show columns</p>
+        <div class="kit-choices">
+          <label class="kit-check"><input type="checkbox" checked> Station</label>
+          <label class="kit-check"><input type="checkbox" checked> Rentals</label>
+          <label class="kit-check"><input type="checkbox"> Revenue</label>
+        </div>
+        <div class="kit-popover__actions"><button class="kit-btn kit-btn--sm kit-btn--primary" type="button">Apply</button></div>
+      </div>
+    </div>
+  </div>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var out = document.getElementById("ex-box-result");
+      document.getElementById("ex-confirm").addEventListener("click", function () {
+        KitUI.confirm("Delete 3 items? This cannot be undone.", { title: "Delete items", ok: "Delete", danger: true }).then(function (yes) { out.textContent = yes ? "Deleted." : "Kept."; });
+      });
+      document.getElementById("ex-alert").addEventListener("click", function () { KitUI.alert("The export is ready in Downloads.", { title: "Export" }); });
+    });
+  </script>
+</section>
+
+<!-- kit-list, kit-list__item, kit-list__body, kit-list__title, kit-list__meta, kit-list__actions, kit-tree with data-kit-tree, kit-tree__row (listens: kit:select) -->
+<section id="lists">
+  <h2 class="kit-h2">Lists and trees</h2>
+  <div class="kit-grid">
+    <div>
+      <h3 class="kit-h3">List</h3>
+      <ul class="kit-list" aria-label="Stations">
+        <li class="kit-list__item"><span data-kit-icon="map-pin" aria-hidden="true"></span><div class="kit-list__body"><div class="kit-list__title">Central</div><div class="kit-list__meta">42 bikes, open until 23:00</div></div><div class="kit-list__actions"><button class="kit-btn kit-btn--ghost kit-btn--sm kit-btn--icon" type="button" aria-label="Edit Central"><span data-kit-icon="pencil" aria-hidden="true"></span></button></div></li>
+        <li><a class="kit-list__item" href="#lists"><span data-kit-icon="map-pin" aria-hidden="true"></span><div class="kit-list__body"><div class="kit-list__title">Harbour</div><div class="kit-list__meta">17 bikes</div></div><span class="kit-badge kit-badge--warn">Dock stuck</span></a></li>
+        <li><button class="kit-list__item" type="button" aria-current="true"><span data-kit-icon="map-pin" aria-hidden="true"></span><div class="kit-list__body"><div class="kit-list__title">University</div><div class="kit-list__meta">The one shown now</div></div></button></li>
+      </ul>
+    </div>
+    <div>
+      <h3 class="kit-h3">Tree</h3>
+      <ul class="kit-tree" role="tree" data-kit-tree aria-label="Folders" id="ex-tree">
+        <li role="treeitem" aria-expanded="true" data-value="reports"><div class="kit-tree__row"><span data-kit-icon="folder" aria-hidden="true"></span>Reports</div>
+          <ul role="group">
+            <li role="treeitem" data-value="reports/2026"><div class="kit-tree__row"><span data-kit-icon="file-text" aria-hidden="true"></span>2026 rentals</div></li>
+            <li role="treeitem" aria-expanded="false" data-value="reports/old"><div class="kit-tree__row"><span data-kit-icon="folder" aria-hidden="true"></span>Older</div>
+              <ul role="group"><li role="treeitem" data-value="reports/2025"><div class="kit-tree__row"><span data-kit-icon="file-text" aria-hidden="true"></span>2025 rentals</div></li></ul>
+            </li>
+          </ul>
+        </li>
+        <li role="treeitem" data-value="stations"><div class="kit-tree__row"><span data-kit-icon="folder" aria-hidden="true"></span>Stations</div></li>
+      </ul>
+      <p class="kit-small kit-muted" id="ex-tree-pick">Arrow keys move, Enter picks.</p>
+    </div>
+  </div>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      document.getElementById("ex-tree").addEventListener("kit:select", function (e) { document.getElementById("ex-tree-pick").textContent = "Picked " + e.detail.value; });
+    });
+  </script>
+</section>
+
+<!-- kit-code, kit-mark, kit-media, kit-caption, a table caption, kit-dot (--ok --warn --error --accent), kit-truncate, kit-sr-only, kit-skip, kit-footer -->
+<section id="content">
+  <h2 class="kit-h2">Content basics</h2>
+  <div class="kit-grid">
+    <div class="kit-stack">
+      <pre class="kit-code">SELECT station, COUNT(*) AS rentals
+FROM trips
+GROUP BY station;</pre>
+      <p>Search hits are shown with <mark class="kit-mark">a highlight</mark>, a status with a dot: <span class="kit-dot kit-dot--ok"></span>Open, <span class="kit-dot kit-dot--warn"></span>Busy, <span class="kit-dot kit-dot--error"></span>Closed.</p>
+      <p class="kit-truncate" style="max-width: 16rem" title="A long station name that does not fit in its column and is cut with an ellipsis">A long station name that does not fit in its column and is cut with an ellipsis</p>
+      <p>A link only screen readers hear: <a class="kit-link" href="#content">Details<span class="kit-sr-only"> about the Central station</span></a>.</p>
+    </div>
+    <div class="kit-stack">
+      <div class="kit-table-wrap">
+        <table class="kit-table" data-kit-sort>
+          <caption>Rentals per station, this week</caption>
+          <thead><tr><th>Station</th><th class="kit-num">Rentals</th></tr></thead>
+          <tbody><tr><td>Central</td><td class="kit-num">1,204</td></tr><tr><td>Harbour</td><td class="kit-num">640</td></tr><tr data-kit-empty hidden><td colspan="2">No rentals</td></tr></tbody>
+        </table>
+      </div>
+      <figure style="margin: 0">
+        <img class="kit-media" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='90'%3E%3Crect width='320' height='90' fill='%23e5f6fc'/%3E%3C/svg%3E" alt="A placeholder picture" width="320" height="90">
+        <figcaption class="kit-caption">Central station, seen from the harbour.</figcaption>
+      </figure>
+    </div>
+  </div>
+  <footer class="kit-footer"><span>City bikes, data as of 9 Oct 2026</span><span><a href="#content">Help</a> and <a href="#content">About</a></span></footer>
+  <p class="kit-small kit-muted">A page's first element is a <code class="kit-mono">kit-skip</code> link ("Skip to content") whose href is the id of the main element: it shows only when focused with the keyboard.</p>
 </section>
 
 <!-- kit-part:interactive -->

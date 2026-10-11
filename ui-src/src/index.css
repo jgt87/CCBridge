@@ -2,6 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+/* The UI kit (templates/ui-kit/kit.css) in the components layer, on tokens bound to the app's own colours (CCBridge). */
+@import "./styles/kit-tokens.css";
+@import "../../templates/ui-kit/kit.css" layer(components);
 
 @custom-variant dark (&:is(.dark *));
 
@@ -144,12 +147,13 @@
 .ccb-markdown ul { list-style: disc; padding-left: 1.25rem; margin: 0.4rem 0; }
 .ccb-markdown ol { list-style: decimal; padding-left: 1.25rem; margin: 0.4rem 0; }
 .ccb-markdown h1, .ccb-markdown h2, .ccb-markdown h3 { font-weight: 600; margin: 0.8rem 0 0.3rem; }
-.ccb-markdown code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.9em; background: color-mix(in oklab, currentColor 8%, transparent); padding: 0.1rem 0.3rem; border-radius: 0.3rem; }
-.ccb-markdown pre { background: color-mix(in oklab, currentColor 6%, transparent); padding: 0.75rem; border-radius: 0.6rem; overflow-x: auto; margin: 0.5rem 0; }
+.ccb-markdown code { font-family: var(--kit-font-mono); font-size: 0.9em; background: var(--kit-surface-2); padding: 0.1rem 0.3rem; border-radius: var(--kit-radius-sm); }
+.ccb-markdown pre { background: var(--kit-surface-2); border: 1px solid var(--kit-border); padding: 0.75rem; border-radius: var(--kit-radius); overflow-x: auto; margin: 0.5rem 0; }
 .ccb-markdown pre code { background: none; padding: 0; }
 .ccb-markdown a { text-decoration: underline; }
 .ccb-markdown table { border-collapse: collapse; margin: 0.5rem 0; }
-.ccb-markdown th, .ccb-markdown td { border: 1px solid color-mix(in oklab, currentColor 15%, transparent); padding: 0.25rem 0.5rem; }
+.ccb-markdown th, .ccb-markdown td { border: 1px solid var(--kit-border-strong); padding: 0.25rem 0.5rem; }
+.ccb-markdown th { background: var(--kit-surface-2); font-weight: 600; text-align: left; }
 
 /* Scrollbars: thin, grey, matching the monochrome UI (CCBridge) */
 * {

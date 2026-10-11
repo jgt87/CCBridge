@@ -117,7 +117,7 @@ export function MarkdownView({
   return (
     <div className={cn("ccb-markdown text-sm leading-relaxed", className)} ref={root}>
       {fields.length > 0 && (
-        <table className="md-frontmatter">
+        <table className="kit-table md-frontmatter">
           <tbody>
             {fields.map(([k, v]) => (
               <tr key={k}>

@@ -102,7 +102,7 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
           <span className="min-w-0 flex-1 truncate font-mono text-xs">{root}</span>
           <button
             aria-label="Refresh the project list"
-            className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 hover:text-foreground disabled:opacity-50 dark:hover:bg-white/5"
+            className="kit-btn kit-btn--ghost kit-btn--sm shrink-0"
             disabled={refreshing}
             onClick={() => void refresh()}
             title="Read the folders in the projects folder again (names, sizes and file types)"
@@ -129,14 +129,14 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
         <GradientButton className="h-12" disabled={!name.trim()} label="Create project" type="submit" variant="neutral" />
       </form>
 
-      {error && <p className="text-rose-500 dark:text-rose-400 text-sm">{error}</p>}
+      {error && <p className="text-(--kit-error) text-sm">{error}</p>}
 
       <div className="space-y-2">
         {projects.map((p) => (
           <button
             aria-busy={opening === p.path}
             className={cn(
-              "flex w-full items-center gap-3 rounded-xl border border-black/10 px-4 py-3 text-left transition-colors hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5",
+              "flex w-full items-center gap-3 rounded-xl border border-(--kit-border) px-4 py-3 text-left transition-colors hover:bg-(--kit-surface-2)",
               opening && opening !== p.path && "opacity-50",
             )}
             disabled={Boolean(opening)}
@@ -154,7 +154,7 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
           </button>
         ))}
         {!projects.length && root && (
-          <p className="text-muted-foreground text-sm">No projects yet. Create your first one above.</p>
+          <p className="kit-empty py-4 text-sm">No projects yet. Create your first one above.</p>
         )}
       </div>
     </div>

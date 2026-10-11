@@ -1,0 +1,73 @@
+/*
+  The UI kit's tokens, bound to StreamHub's own colours (index.css): the app keeps its monochrome
+  white and grey look (rose for errors, emerald for lines added), and the kit's components
+  (templates/ui-kit/kit.css, imported in the components layer) take their colours, type and
+  sizes from here. Dark mode follows the app's `.dark` class through the variables it maps.
+*/
+:root {
+  --kit-bg: var(--background);
+  --kit-surface: var(--card);
+  --kit-surface-2: var(--muted);
+  --kit-border: var(--border);
+  --kit-border-strong: var(--input);
+  --kit-text: var(--foreground);
+  --kit-text-muted: var(--muted-foreground);
+  --kit-title: var(--foreground);
+  --kit-icon: var(--muted-foreground);
+
+  /* The accent is the app's primary: near black in light, near white in dark (no blue). */
+  --kit-accent: var(--primary);
+  --kit-accent-hover: color-mix(in oklab, var(--primary) 85%, var(--background));
+  --kit-accent-soft: var(--accent);
+  --kit-on-accent: var(--primary-foreground);
+  --kit-gradient: linear-gradient(135deg, var(--primary), var(--primary));
+  --kit-on-gradient: var(--primary-foreground);
+
+  /* Meaning: emerald for what went well, rose for errors (as the app draws them), grey for a warning. */
+  --kit-ok: oklch(0.596 0.145 163);
+  --kit-ok-soft: color-mix(in oklab, var(--kit-ok) 15%, transparent);
+  --kit-warn: var(--muted-foreground);
+  --kit-warn-soft: var(--muted);
+  --kit-error: oklch(0.586 0.253 17.6);
+  --kit-error-soft: color-mix(in oklab, var(--kit-error) 10%, transparent);
+  --kit-chart-1: var(--chart-1);
+  --kit-chart-2: var(--chart-2);
+  --kit-chart-3: var(--chart-3);
+  --kit-chart-4: var(--chart-4);
+  --kit-chart-5: var(--chart-5);
+  --kit-chart-6: var(--chart-3);
+
+  /* Type and sizes: the app's Geist and its 12 / 14 px steps. */
+  --kit-font: var(--font-sans);
+  --kit-font-mono: ui-monospace, SFMono-Regular, Consolas, "Cascadia Mono", monospace;
+  --kit-text-2xs: 0.6875rem;
+  --kit-text-xs: 0.75rem;
+  --kit-text-sm: 0.875rem;
+  --kit-text-md: 0.875rem;
+  --kit-text-lg: 1rem;
+  --kit-text-xl: 1.25rem;
+  --kit-line: 1.5;
+  --kit-space-1: 0.25rem;
+  --kit-space-2: 0.5rem;
+  --kit-space-3: 0.75rem;
+  --kit-space-4: 1rem;
+  --kit-space-5: 1.5rem;
+  --kit-space-6: 2rem;
+  --kit-space-7: 3rem;
+  --kit-radius-sm: 0.25rem;
+  --kit-radius: 0.375rem;
+  --kit-radius-lg: var(--radius);
+  --kit-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --kit-backdrop: rgb(0 0 0 / 0.4);
+  --kit-focus: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+  --kit-speed: 150ms;
+  --kit-speed-slow: 300ms;
+  --kit-scroll-thumb: color-mix(in oklab, var(--foreground) 18%, transparent);
+  --kit-scroll-thumb-hover: color-mix(in oklab, var(--foreground) 35%, transparent);
+  --kit-page-width: 100%;
+  --kit-page-pad: 1rem;
+}
+.dark {
+  --kit-ok: oklch(0.765 0.177 163);
+  --kit-error: oklch(0.712 0.194 13.4);
+}

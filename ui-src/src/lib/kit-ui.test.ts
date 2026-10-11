@@ -222,3 +222,89 @@ describe("kit-charts.js scatter", () => {
     expect(e.querySelector(".kit-empty")).not.toBeNull();
   });
 });
+
+describe("kit.js basics (revision 11)", () => {
+  type Basics = Window & { KitUI: { confirm: (t: string, o?: Record<string, unknown>) => Promise<boolean>; alert: (t: string, o?: Record<string, unknown>) => Promise<void> } };
+  const b = window as unknown as Basics;
+  it("gives a tree its toggles and roles, moves with the arrow keys, opens and closes, and picks with Enter", async () => {
+    document.body.innerHTML = `<ul class="kit-tree" data-kit-tree aria-label="Folders" id="tree">
+      <li data-value="a" aria-expanded="true"><div class="kit-tree__row">A</div><ul><li data-value="a1"><div class="kit-tree__row">A1</div></li></ul></li>
+      <li data-value="b" aria-expanded="false"><div class="kit-tree__row">B</div><ul><li data-value="b1"><div class="kit-tree__row">B1</div></li></ul></li>
+      <li data-value="c"><div class="kit-tree__row">C</div></li></ul>`;
+    load(kitJs);
+    await tick();
+    const tree = document.getElementById("tree")!;
+    expect(tree.getAttribute("role")).toBe("tree");
+    expect(tree.querySelectorAll("li[role=treeitem]").length).toBe(5);
+    expect(tree.querySelectorAll("ul[role=group]").length).toBe(2);
+    expect(tree.querySelectorAll(".kit-tree__toggle").length).toBe(2);
+    expect(tree.querySelectorAll(".kit-tree__spacer").length).toBe(3);
+    const rows = () => Array.from(tree.querySelectorAll<HTMLElement>(".kit-tree__row"));
+    expect(rows().filter((r) => r.tabIndex === 0).length).toBe(1);
+    const first = rows()[0];
+    first.focus();
+    first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(document.activeElement!.textContent).toBe("A1");
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(document.activeElement!.textContent!.trim()).toBe("B");   // B1 is inside a closed branch
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(tree.querySelector("li[data-value=b]")!.getAttribute("aria-expanded")).toBe("true");
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    expect(tree.querySelector("li[data-value=b]")!.getAttribute("aria-expanded")).toBe("false");
+    const picked: string[] = [];
+    tree.addEventListener("kit:select", (e) => picked.push((e as CustomEvent).detail.value));
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(picked).toEqual(["b"]);
+    expect(tree.querySelector("li[data-value=b]")!.getAttribute("aria-selected")).toBe("true");
+    (tree.querySelector("li[data-value=c] .kit-tree__row") as HTMLElement).click();
+    expect(picked).toEqual(["b", "c"]);
+    expect(tree.querySelectorAll("li[aria-selected=true]").length).toBe(1);
+  });
+  it("opens a popover from its button, closes it with Escape or a click beside it, and gives focus back", async () => {
+    document.body.innerHTML = `<div class="kit-popover-wrap"><button class="kit-btn" id="pb" data-kit-popover="pop" aria-expanded="false">Columns</button>
+      <div class="kit-popover" id="pop" hidden><label class="kit-check"><input type="checkbox" id="pc"> Station</label></div></div><p id="out">outside</p>`;
+    load(kitJs);
+    await tick();
+    const btn = document.getElementById("pb")!, pop = document.getElementById("pop")!;
+    const events: string[] = [];
+    pop.addEventListener("kit:open", () => events.push("open"));
+    pop.addEventListener("kit:close", () => events.push("close"));
+    btn.click();
+    expect(pop.hidden).toBe(false);
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(btn.getAttribute("aria-controls")).toBe("pop");
+    expect(document.activeElement!.id).toBe("pc");
+    document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(pop.hidden).toBe(true);
+    expect(document.activeElement).toBe(btn);
+    btn.click();
+    document.getElementById("out")!.click();
+    expect(pop.hidden).toBe(true);
+    expect(events).toEqual(["open", "close", "open", "close"]);
+  });
+  it("shows confirm and alert as kit dialogs and answers with a promise", async () => {
+    document.body.innerHTML = "<p>page</p>";
+    load(kitJs);
+    await tick();
+    const p = b.KitUI.confirm("Delete 3 items?", { title: "Delete", ok: "Delete", danger: true });
+    const d = document.querySelector("dialog.kit-dialog")!;
+    expect(d).not.toBeNull();
+    expect(d.getAttribute("role")).toBe("alertdialog");
+    expect(d.querySelector("h3.kit-h3")!.textContent).toBe("Delete");
+    const buttons = Array.from(d.querySelectorAll<HTMLButtonElement>(".kit-dialog__actions .kit-btn"));
+    expect(buttons.map((x) => x.textContent)).toEqual(["Cancel", "Delete"]);
+    expect(buttons[1].classList.contains("kit-btn--danger")).toBe(true);
+    buttons[1].click();
+    expect(await p).toBe(true);
+    expect(document.querySelector("dialog.kit-dialog")).toBeNull();   // gone once answered
+    const q = b.KitUI.confirm("Sure?");
+    (document.querySelector("dialog.kit-dialog .kit-btn") as HTMLButtonElement).click();   // Cancel
+    expect(await q).toBe(false);
+    const a = b.KitUI.alert("Saved.");
+    const ad = document.querySelector("dialog.kit-dialog")!;
+    expect(ad.querySelectorAll(".kit-btn").length).toBe(1);
+    (ad.querySelector(".kit-btn") as HTMLButtonElement).click();
+    expect(await a).toBeUndefined();
+    expect(document.querySelector("dialog.kit-dialog")).toBeNull();
+  });
+});

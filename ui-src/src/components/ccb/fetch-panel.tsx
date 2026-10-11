@@ -14,11 +14,11 @@ export function fetchedAge(iso: string | null, now = Date.now()): string {
 }
 
 const field =
-  "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-xs outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+  "kit-input h-8 min-h-8 w-full text-xs";
 const bigField =
-  "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+  "kit-input h-8 min-h-8 w-full";
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost kit-btn--sm";
 
 /** "web only · nodejs.org · 1 page · Analyst · 2 files": the header fields of a text runbook, or "" when it has none. */
 export function webSummary(it: Pick<FetchItem, "sources" | "sites" | "pages" | "agent" | "files">): string {
@@ -92,12 +92,12 @@ export function TextRunbookForm({ onSave, onCancel }: { onSave: (name: string, p
         <span className="text-muted-foreground">Files</span>
         <input aria-label="Files to attach" className={field} onChange={(e) => setFiles(e.target.value)} placeholder="Optional: project files to attach, e.g. Source/sales.csv" value={files} />
       </div>
-      {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
+      {error && <p className="kit-error-text">{error}</p>}
       <div className="flex justify-end gap-1">
         <button className={flatButton} onClick={onCancel} type="button">
           Cancel
         </button>
-        <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={saving || !name.trim() || !prompt.trim()} onClick={save} type="button">
+        <button className={cn(flatButton, "bg-(--kit-surface-2)")} disabled={saving || !name.trim() || !prompt.trim()} onClick={save} type="button">
           {saving ? "Creating..." : "Create"}
         </button>
       </div>

@@ -3,7 +3,7 @@ import { editPlace } from "./runbooks-panel";
 import { CalendarClock, FileCode2, Play } from "lucide-react";
 
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost kit-btn--sm";
 
 /**
  * Automation > Scripts: the project's scripts (Scripts/*.ps1, .cmd, .bat, .py), run on their own
@@ -37,9 +37,9 @@ export function ScriptsPanel({
       >
         Your project's scripts, run with one click.
       </InfoNote>
-      {scripts.length === 0 && <p className="text-muted-foreground text-xs">No scripts yet.</p>}
+      {scripts.length === 0 && <p className="kit-empty py-3 text-xs">No scripts yet.</p>}
       {scripts.map((path) => (
-        <div className="rounded-lg border border-black/10 p-2 dark:border-white/10" key={path}>
+        <div className="kit-panel p-2" key={path}>
           <div className="truncate font-mono text-xs" title={path}>
             {path.replace(/^Scripts\//i, "")}
           </div>

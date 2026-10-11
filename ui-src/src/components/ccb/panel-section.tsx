@@ -67,7 +67,7 @@ export function PanelSection({
   };
 
   return (
-    <section className={cn("scroll-mt-2 border-black/10 border-t first:border-t-0 dark:border-white/10", className)} id={`section-${id}`}>
+    <section className={cn("scroll-mt-2 border-(--kit-border) border-t first:border-t-0", className)} id={`section-${id}`}>
       <div className="flex h-9 items-center gap-1 px-2">
         <button
           aria-expanded={open}
@@ -91,7 +91,7 @@ export function PanelSection({
 export function SectionButton({ title, onClick, disabled, children }: { title: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
   return (
     <button
-      className="rounded p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5"
+      className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm text-muted-foreground hover:text-foreground"
       disabled={disabled}
       onClick={onClick}
       title={title}
@@ -104,5 +104,5 @@ export function SectionButton({ title, onClick, disabled, children }: { title: s
 
 /** A small grey count next to a section title. */
 export function SectionCount({ n }: { n: number }) {
-  return <span className="rounded px-1 text-[10px] text-muted-foreground tabular-nums ring-1 ring-black/10 dark:ring-white/15">{n}</span>;
+  return <span className="kit-badge min-h-0 px-1 text-[10px] tabular-nums">{n}</span>;
 }

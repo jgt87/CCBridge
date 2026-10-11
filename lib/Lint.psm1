@@ -1022,6 +1022,40 @@ function Find-BrokenEncoding {
 $script:StandInPattern = '(\[\[|\{\{|__)(LT|GT)(\]\]|\}\}|__)'
 $script:EscapedPagePattern = '(?im)^\s*&lt;(!doctype|html|head|body|main|div|section|header|script|style|table)\b'
 
+function Get-StandInToken([string]$Text) {
+    <# A token a script swaps for < in front of tag names: @{ token; line (first tag written with it);
+       swapLine }, or $null. The swap is a Replace of the token with a < source (a '<' literal,
+       [char]60, chr(60), String.fromCharCode(60), '\u003c', '\x3c', or a variable assigned one of these),
+       in PowerShell, JavaScript or Python; the token then stands before at least two tag names. #>
+    $t = "$Text"
+    if (-not $t -or $t -notmatch '(?i)replace|split') { return $null }
+    $ltSource = '(?i)(?:["'']<["'']|\[(?:string\]\[)?char\]\s*(?:60|0x3c)\b|\bchr\(\s*60\s*\)|String\.fromCharCode\(\s*60\s*\)|["'']\\(?:u003c|x3c)["''])'
+    # Variables assigned a < source: $lt = [string][char]60; const lt = '<'; lt = chr(60)
+    $vars = @{}
+    foreach ($m in [regex]::Matches($t, "(?im)^\s*(?:[$]|(?:const|let|var)\s+)?([A-Za-z_]\w*)\s*=\s*$ltSource\s*;?\s*$")) { $vars[$m.Groups[1].Value] = $true }
+    $isLt = { param($arg) $a = "$arg".Trim(); ($a -match "^$ltSource$") -or ($a -match '^\$?([A-Za-z_]\w*)$' -and $vars.ContainsKey($Matches[1])) }
+    $arg = '((?:[^,()\n]|\([^()\n]*\))+)'   # the replacement: a literal, a variable or one call such as chr(60)
+    $swaps = @(
+        [regex]::Matches($t, '(?i)\.replace\(\s*(?:/((?:[^/\\\n]|\\.){1,12})/[a-z]*|(["''])((?:(?!\2)[^\n\\]|\\.){1,12})\2)\s*,\s*' + $arg + '\s*\)'),
+        [regex]::Matches($t, '(?i)-c?replace\s+(["''])((?:(?!\1)[^\n\\]|\\.){1,12})\1\s*,\s*([^\n;|)]+)'),
+        [regex]::Matches($t, '(?i)\.split\(\s*(["''])((?:(?!\1)[^\n\\]|\\.){1,12})\1\s*\)\s*\.join\(\s*' + $arg + '\s*\)')
+    )
+    foreach ($set in $swaps) {
+        foreach ($m in $set) {
+            $g = $m.Groups
+            $token = if ($g.Count -ge 5 -and $g[1].Success) { $g[1].Value } elseif ($g.Count -ge 5) { $g[3].Value } else { $g[2].Value }
+            $with = if ($g.Count -ge 5) { $g[4].Value } else { $g[3].Value }
+            $token = try { [regex]::Unescape($token.Replace('\/', '/')) } catch { $token }
+            if (-not $token.Trim() -or $token -match '[A-Za-z0-9\s]' -or $token -eq '<' -or -not (& $isLt $with)) { continue }
+            # The token before tag names, as the page text written by the script.
+            $uses = [regex]::Matches($t, [regex]::Escape($token) + "(?:!doctype|/?(?:$script:KnownTagNames))\b")
+            if ($uses.Count -lt 2) { continue }
+            return @{ token = $token; line = (LineAt $t $uses[0].Index); swapLine = (LineAt $t $m.Index) }
+        }
+    }
+    $null
+}
+
 function Find-PlaceholderMarkup {
     <# A page (or markup a script writes) whose tags are stand-ins ([[LT]] and [[GT]] around a tag name) or escaped
        (&lt;html&gt; with no real tag in the file): "line N: ..." or nothing. #>
@@ -1032,6 +1066,10 @@ function Find-PlaceholderMarkup {
         if ($Path -match '(?i)\.Tests\.ps1$|(^|[\\/])test_[^\\/]+\.py$|\.(test|spec)\.[cm]?[jt]s$') { return }   # tests hold such text on purpose
         $g = [regex]::Match($Text, '(\[\[|\{\{|__)LT(\]\]|\}\}|__)/?[!a-zA-Z]')
         if ($g.Success) { return "line $(LineAt $Text $g.Index): this script writes markup with the stand-in $($g.Groups[1].Value)LT$($g.Groups[2].Value) for <: write the page itself with a write or edit action (the helper program keeps < and > as they are) and delete this script, so the page and its generator cannot drift apart" }
+        # Any other token swapped for < (@@div ... a Replace of '@@' with a [char] 60; .replace(/~~/g, '<');
+        # chr(60); String.fromCharCode(60); '\u003c'; a variable holding one of these): the same generator.
+        $own = Get-StandInToken $Text
+        if ($own) { return "line $($own.line): this script writes markup with the stand-in $($own.token) for < (swapped for < at line $($own.swapLine)): write the page itself with a write or edit action (the helper program keeps < and > as they are) and delete this script, so the page and its generator cannot drift apart" }
         return
     }
     if ($Path -notmatch '(?i)\.(html?|xhtml|svg|xml|vue|svelte)$') { return }
@@ -1348,7 +1386,8 @@ function Test-FileContent {
        Also for every code file: leftover edit or merge markers and ``` fence lines. #>
     param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text, [bool]$Crlf = $false)
     # A one-file page: the UI kit and data blocks the helper program writes are not the page's own code.
-    if ($Path -match '(?i)\.html?$') { $Text = Hide-GeneratedBlocks $Text }
+    # A page a project script built from a template (its first line says so) is output, not code.
+    if ($Path -match '(?i)\.html?$') { if (Get-GeneratedPageInfo $Text) { return @() }; $Text = Hide-GeneratedBlocks $Text }
     $t = $Text.Replace("`r`n", "`n")
     $issues = New-Object System.Collections.Generic.List[string]
     $add = { param($x) foreach ($y in @($x)) { if ($y) { $issues.Add([string]$y) } } }
@@ -1849,6 +1888,8 @@ function Get-NewFileIssues {
     <# Problems a change added: those in the new text that the old text did not have (compared
        without line numbers, so an existing problem that only moved is not reported again). #>
     param([string]$Path, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [bool]$Crlf = $false, [string]$ProjectRoot = '')
+    # A page a project script builds (OneFile Get-GeneratedPage): output, checked as the template.
+    if ($Path -match '(?i)\.html?$' -and (Get-GeneratedPage $ProjectRoot $Path $New)) { return }
     $all = {
         param($text)
         @(Test-FileContent $Path $text $Crlf) + @(Test-LocalReferences $text.Replace("`r`n", "`n") $Path $ProjectRoot) +

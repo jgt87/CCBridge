@@ -2,7 +2,7 @@ import type React from "react";
 import { cn } from "@/lib/utils";
 
 /** The look every modal shares (menu, settings, schedules, file viewer): the app behind is dimmed and blurred. */
-export const BACKDROP = "bg-black/40 backdrop-blur-sm";
+export const BACKDROP = "bg-(--kit-backdrop) backdrop-blur-sm";
 
 /** Full-screen backdrop for a modal; a click on it (outside the content) closes the modal. */
 export function ModalBackdrop({

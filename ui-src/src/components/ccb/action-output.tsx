@@ -26,7 +26,7 @@ export function splitActionOutput(output: string): Part[] {
 export function ActionOutput({ output, fallbackPath }: { output: string; fallbackPath?: string }) {
   const parts = splitActionOutput(output.replace(/^~~~~\n?/gm, ""));
   return (
-    <div className="max-h-72 overflow-auto rounded-lg bg-black/5 font-mono text-xs dark:bg-white/5">
+    <div className="kit-code max-h-72 overflow-auto p-0 text-xs">
       {parts.map((p, i) =>
         p.kind === "text" ? (
           p.text.trim() ? (
@@ -35,7 +35,7 @@ export function ActionOutput({ output, fallbackPath }: { output: string; fallbac
             </pre>
           ) : null
         ) : (
-          <div className="border-black/5 border-t first:border-t-0 dark:border-white/5" key={i}>
+          <div className="border-(--kit-border) border-t first:border-t-0" key={i}>
             <div className="px-3 pt-1.5 text-[11px] text-muted-foreground">{p.path}</div>
             <CodeView language={languageForPath(p.path || fallbackPath || "")} startLine={p.start} text={p.code} />
           </div>

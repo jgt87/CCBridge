@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost kit-btn--sm";
 
 const KIND: Record<ScheduleItem["kind"], string> = { chat: "Message", fetch: "Runbook", runbook: "Runbook", chain: "Chain", script: "Script" };
 
@@ -27,11 +27,11 @@ export function formatWhen(iso: string | null): string {
 export function SchedulesList({ schedules, onEdit }: { schedules: ScheduleItem[]; onEdit?: (s: ScheduleItem) => void }) {
   return (
     <div className="space-y-1.5">
-      {schedules.length === 0 && <p className="text-muted-foreground text-xs">Nothing scheduled yet. The calendar button in the message box schedules a message too.</p>}
+      {schedules.length === 0 && <p className="kit-empty py-3 text-xs">Nothing scheduled yet. The calendar button in the message box schedules a message too.</p>}
       {schedules.map((s) => {
         const finished = !s.enabled && s.repeat === "once" && s.lastRun;
         return (
-          <div className={cn("rounded-lg border border-black/10 p-2 dark:border-white/10", !s.enabled && "opacity-60")} key={s.id}>
+          <div className={cn("kit-panel p-2", !s.enabled && "opacity-60")} key={s.id}>
             <div className="flex items-start gap-2">
               <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="line-clamp-2 min-w-0 flex-1 text-sm" title={s.title}>

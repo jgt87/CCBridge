@@ -4,7 +4,7 @@ import { LIMITATIONS } from "@/lib/limitations";
 /** The start screen's short list of what StreamHub does not do (yet). */
 export function LimitationsNote() {
   return (
-    <div className="w-full max-w-md rounded-lg border border-black/10 px-4 py-3 text-left dark:border-white/10">
+    <div className="kit-panel w-full max-w-md px-4 py-3 text-left">
       <div className="mb-2 flex items-center gap-1.5 font-medium text-muted-foreground text-xs uppercase tracking-wide">
         <Info aria-hidden className="h-3.5 w-3.5" /> Limitations
       </div>

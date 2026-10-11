@@ -240,6 +240,28 @@ function Get-DataImportSources([string]$ProjectRoot) {
         Sort-Object { $_.rel.Length }, rel)
 }
 
+function Get-ScriptOwnedSources([string]$Root, $Sources) {
+    <# Data files a project script converts itself: source rel path -> script rel path, for a source
+       whose file name a project script (root, Scripts/, tools/, src/, build/; not one-off Work/
+       scripts, not the helper program's own) holds and that writes data (JSON, JS, CSV). No copy
+       is made of such a file: the project already has its conversion. #>
+    $owned = @{}
+    $list = @($Sources)
+    if (-not $list.Count) { return $owned }
+    $files = @(Get-ChildItem -LiteralPath $Root -File -ErrorAction SilentlyContinue) + @(foreach ($d in 'Scripts', 'scripts', 'tools', 'src', 'build') { Get-ChildItem -LiteralPath (Join-Path $Root $d) -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 400 })
+    foreach ($f in $files) {
+        $rel = $f.FullName.Substring($Root.Length + 1).Replace('\', '/')
+        if ($f.Name -notmatch '(?i)\.(ps1|m?js|cjs|py)$' -or $f.Length -gt 300KB -or $rel -match '(?i)(^|/)(node_modules|\.streamhub|styles/kit|data|dist|out)/' -or $f.Name -in 'Refresh-Data.ps1', 'Build-App.ps1', 'data-tools.js', 'data-index.js') { continue }
+        $t = try { [IO.File]::ReadAllText($f.FullName) } catch { '' }
+        if (-not $t -or $t -match 'helper program' -or $t -notmatch '(?i)\b(Set-Content|Out-File|Add-Content|WriteAllText|WriteAllLines|Export-Csv|ConvertTo-Json|writeFileSync|writeFile|json\.dump|write_text|to_json|to_csv)\b') { continue }
+        foreach ($s in $list) {
+            if ($owned.ContainsKey($s.rel)) { continue }
+            if ($t.IndexOf([IO.Path]::GetFileName($s.rel), [StringComparison]::OrdinalIgnoreCase) -ge 0) { $owned[$s.rel] = $rel }
+        }
+    }
+    $owned
+}
+
 function Read-DataImportManifest([string]$ProjectRoot) {
     $file = Join-Path $ProjectRoot $script:ManifestRel.Replace('/', '\')
     $items = @{}
@@ -265,7 +287,9 @@ function Update-DataImports {
     <# Converts new and changed data files (Get-DataImportSources) to data/NAME.json, and for a project
        opened from disk ($JsCopy) adds data/NAME.js (a data copy, DataMirror). Never overwrites a file
        it did not write or one changed since. Earlier versions go into one change set. Returns
-       @{ items = @(@{ source; output; js; status (created, updated, failed, too-large, edited, taken); note; old; new }); checkpoint }.
+       @{ items = @(@{ source; output; js; status (created, updated, failed, too-large, edited, taken, script); note; old; new }); checkpoint }.
+       'script': a project script converts the file itself (Get-ScriptOwnedSources), so no copy is
+       made, and copies made earlier that are still as written are removed (removed; undo keeps them).
        $OnProgress (source path, its number, how many sources) is called before each file is converted. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [bool]$JsCopy = $true, $Checkpoint = $null, [string]$AppRoot = '', [scriptblock]$OnProgress = $null)
     $root = $ProjectRoot.TrimEnd('\')
@@ -274,6 +298,7 @@ function Update-DataImports {
     $cp = $Checkpoint
     $taken = @{}; $changed = $false
     $sources = @(Get-DataImportSources $root)
+    $owned = Get-ScriptOwnedSources $root $sources
     $present = @{}; foreach ($s in $sources) { $present[$s.rel] = $true }
     # A source that is gone: its converted file stays (it is still data), without a source to follow.
     foreach ($k in @($man.Keys)) { if (-not $present.ContainsKey("$($man[$k].source)")) { $man.Remove($k); $changed = $true } }
@@ -296,6 +321,24 @@ function Update-DataImports {
         $exists = Test-Path -LiteralPath $outFull -PathType Leaf
         if ($prev -and "$($prev.stamp)" -eq $s.stamp -and ($exists -or $prev.status)) { continue }   # unchanged (or already reported)
         $entry = [ordered]@{ output = $out; source = $s.rel; stamp = $s.stamp }
+        if ($owned.ContainsKey($s.rel)) {
+            # The project's own script converts this file: no copy; earlier copies still as this helper
+            # wrote them go (into the undo checkpoint first).
+            $removed = @()
+            if ($prev -and $prev.hash -and $exists -and (Get-TextHash ([IO.File]::ReadAllText($outFull))) -eq "$($prev.hash)") {
+                if (-not $cp) { $cp = New-Checkpoint $root 'Data files converted for Copilot' }
+                Save-CheckpointFile $cp $root $outFull; Remove-Item -LiteralPath $outFull -Force; $removed += $out
+                if ($prev.js) {
+                    $jsOld = Join-Path $root "$($prev.js)".Replace('/', '\')
+                    $wOld = if (Test-Path -LiteralPath $jsOld -PathType Leaf) { try { Read-DataWrapper ([IO.File]::ReadAllText($jsOld)) } catch { $null } } else { $null }
+                    if ($wOld -and $wOld.source -eq $out) { Save-CheckpointFile $cp $root $jsOld; Remove-Item -LiteralPath $jsOld -Force; $removed += "$($prev.js)" }
+                }
+            }
+            $entry.status = 'script'; $entry.script = $owned[$s.rel]
+            $man[$out] = [pscustomobject]$entry; $changed = $true
+            if (-not ($prev -and "$($prev.status)" -eq 'script')) { $results.Add([pscustomobject]@{ source = $s.rel; output = $out; status = 'script'; note = $owned[$s.rel]; removed = $removed }) }
+            continue
+        }
         if ($exists -and -not ($prev -and $prev.hash)) {
             # Someone else's file with that name (often Copilot's own conversion): left alone. An
             # entry without a hash (a conversion that failed or was too large) never wrote the file.
@@ -424,6 +467,7 @@ function Format-DataImportNotes($Result) {
             'tools' { "data/data-tools.js added: DataTools.load reads the data in a page (the file itself when served, the converted copy when opened from disk), plus filter, sort, group, totals, months, number and date formats, so pages do not write their own." }
             'tools-updated' { "data/data-tools.js updated to a newer version (DataTools.load, which reads the data in a page opened from disk or served)." }
             'edited' { "$($r.output) was changed after it was made from $($r.source), so it is no longer made again from it." }
+            'script' { "$($r.source) is converted by the project's own script $($r.note), which reads it by name and writes data: no copy is made for Copilot$(if (@($r.removed).Count) { "; the earlier copies $(@($r.removed) -join ' and ') were removed (Undo brings them back)" })." }
         }
     }
 }
@@ -463,4 +507,4 @@ function Format-DataImportContext {
     "Data files ready to use (the helper program converted them; numbers, dates as yyyy-MM-dd and true/false are typed, empty cells are null). Never write a CSV or Excel parser for them; change the source file, not the converted files, since they are made again when it changes:`n" + (@($lines) -join "`n")
 }
 
-Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Read-DataImportManifest, Update-DataImports, Format-DataImportNotes, Format-DataImportContext, Get-DataToolsSource
+Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Get-ScriptOwnedSources, Read-DataImportManifest, Update-DataImports, Format-DataImportNotes, Format-DataImportContext, Get-DataToolsSource

@@ -6,9 +6,9 @@ import type { ChainItem, ChainStep } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost kit-btn--sm";
 const field =
-  "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+  "kit-input h-8 min-h-8 w-full";
 
 /** One step as a short line: "runbook meetings", "script Scripts/x.ps1 -Week 1", "runbook summary + 1 file", "download sales.csv to Downloads/sales.csv". */
 export function stepText(s: ChainStep): string {
@@ -80,32 +80,32 @@ export function ChainsPanel({
       </InfoNote>
 
       {adding ? (
-        <div className="space-y-2 rounded-lg border border-black/10 p-2 dark:border-white/10">
+        <div className="kit-panel space-y-2 p-2">
           <input aria-label="Chain name" className={field} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. weekly report" value={name} />
-          {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
+          {error && <p className="kit-error-text">{error}</p>}
           <div className="flex justify-end gap-1">
             <button className={flatButton} onClick={() => setAdding(false)} type="button">
               Cancel
             </button>
-            <button className={cn(flatButton, "bg-black/5 dark:bg-white/10")} disabled={saving || !name.trim()} onClick={create} type="button">
+            <button className={cn(flatButton, "bg-(--kit-surface-2)")} disabled={saving || !name.trim()} onClick={create} type="button">
               {saving ? "Creating..." : "Create"}
             </button>
           </div>
         </div>
       ) : (
-        <button className={cn(flatButton, "w-full justify-center border border-black/10 py-1.5 dark:border-white/10")} onClick={() => setAdding(true)} type="button">
+        <button className={cn(flatButton, "w-full justify-center border border-(--kit-border) py-1.5")} onClick={() => setAdding(true)} type="button">
           <Plus className="h-3.5 w-3.5" /> New chain
         </button>
       )}
 
       {chains.map((c) => (
-        <div className="rounded-lg border border-black/10 p-2 dark:border-white/10" key={c.name}>
+        <div className="kit-panel p-2" key={c.name}>
           <div className="flex items-center gap-2">
             <span className="truncate font-medium text-sm" title={c.path}>
               {c.title}
             </span>
             {c.shared && (
-              <span className="shrink-0 rounded-full border border-black/15 px-1.5 text-[10px] text-muted-foreground dark:border-white/20" title="From the library beside the projects: every project in this folder can run it">
+              <span className="kit-badge min-h-0 shrink-0 py-px text-[10px]" title="From the library beside the projects: every project in this folder can run it">
                 shared
               </span>
             )}
@@ -165,12 +165,12 @@ export function ChainsPanel({
           </div>
         </div>
       ))}
-      {chains.length === 0 && !adding && <p className="text-muted-foreground text-xs">No chains yet.</p>}
+      {chains.length === 0 && !adding && <p className="kit-empty py-3 text-xs">No chains yet.</p>}
     </div>
   );
 }
 
-const iconButton = "rounded p-0.5 hover:bg-black/5 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent dark:hover:bg-white/5";
+const iconButton = "kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm disabled:opacity-30";
 
 /** Adds a runbook, a script from Scripts/ or a download from SharePoint/OneDrive as the chain's last step. */
 function AddStep({
@@ -236,7 +236,7 @@ function AddStep({
             <option value="download:">Download a file from SharePoint or OneDrive</option>
           </optgroup>
         </select>
-        <button className={cn(flatButton, "shrink-0 border border-black/10 dark:border-white/10")} disabled={!pick || saving || (isDownload && !link.trim())} onClick={add} type="button">
+        <button className={cn(flatButton, "shrink-0 border border-(--kit-border)")} disabled={!pick || saving || (isDownload && !link.trim())} onClick={add} type="button">
           <Plus className="h-3 w-3" /> Add
         </button>
       </div>
@@ -251,7 +251,7 @@ function AddStep({
         </>
       )}
       {!runbooks.length && !scripts.length && <p className="text-muted-foreground text-xs">No runbooks or scripts yet: create a runbook above, or put a script in Scripts/.</p>}
-      {error && <p className="text-rose-600 text-xs dark:text-rose-400">{error}</p>}
+      {error && <p className="kit-error-text">{error}</p>}
     </div>
   );
 }

@@ -435,11 +435,11 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Header */}
-      <header className="flex h-14 shrink-0 items-center gap-3 border-black/10 border-b px-4 dark:border-white/10">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-(--kit-border) border-b px-4">
         {state.project && !pickerOpen && !sideVisible && (
           <button
             aria-label="Open side panel"
-            className="-ml-1.5 grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+            className="kit-btn kit-btn--ghost kit-btn--icon -ml-1.5 h-8 w-8 text-muted-foreground hover:text-foreground"
             onClick={() => setDrawerOpen(true)}
             title="Open side panel (the window is too narrow to show it beside the chat)"
             type="button"
@@ -453,7 +453,7 @@ export default function App() {
         </div>
         {state.project && (
           <button
-            className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-muted-foreground text-sm hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+            className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-muted-foreground text-sm hover:bg-(--kit-surface-2) hover:text-foreground"
             onClick={() => setShowPicker(true)}
             title={`${state.project.name}\n${state.project.path}\nClick to open or create another project`}
             type="button"
@@ -466,7 +466,7 @@ export default function App() {
         <CopilotStatus copilot={state.copilot} message={state.copilotMessage} />
         <button
           aria-label="Settings"
-          className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+          className="kit-btn kit-btn--ghost kit-btn--icon h-8 w-8 text-muted-foreground hover:text-foreground"
           onClick={() => setShowSettings(true)}
           title="Settings"
           type="button"
@@ -481,15 +481,15 @@ export default function App() {
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
       {notice && (
-        <div className="flex items-center justify-between gap-3 bg-black/5 px-4 py-2 text-sm dark:bg-white/10">
+        <div className="flex items-center justify-between gap-3 bg-(--kit-surface-2) px-4 py-2 text-sm">
           <span className="truncate">{notice.text}</span>
           <span className="flex shrink-0 items-center gap-3">
             {notice.path && (
-              <button className="hover:underline" onClick={() => api.showDiagnostics(notice.path!)} type="button">
+              <button className="kit-link" onClick={() => api.showDiagnostics(notice.path!)} type="button">
                 Show in folder
               </button>
             )}
-            <button aria-label="Dismiss" title="Dismiss" onClick={() => setNotice(null)} type="button">
+            <button aria-label="Dismiss" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" title="Dismiss" onClick={() => setNotice(null)} type="button">
               <X className="h-4 w-4" />
             </button>
           </span>
@@ -497,9 +497,9 @@ export default function App() {
       )}
 
       {error && (
-        <div className="flex items-center justify-between bg-rose-500/10 px-4 py-2 text-rose-600 text-sm dark:text-rose-400">
+        <div className="kit-notice kit-notice--error items-center justify-between rounded-none border-x-0 border-t-0 px-4 py-2 text-(--kit-error) text-sm" role="alert">
           {error}
-          <button aria-label="Dismiss the error" title="Dismiss" onClick={() => setError("")} type="button">
+          <button aria-label="Dismiss the error" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm text-(--kit-error)" title="Dismiss" onClick={() => setError("")} type="button">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -524,8 +524,8 @@ export default function App() {
           <aside
             className={
               wide
-                ? `flex w-80 shrink-0 flex-col border-black/10 border-r p-3 dark:border-white/10`
-                : `${drawerOpen ? "flex" : "hidden"} fixed top-14 bottom-0 left-0 z-40 w-80 max-w-[85vw] flex-col border-black/10 border-r bg-background p-3 shadow-lg dark:border-white/10`
+                ? `flex w-80 shrink-0 flex-col border-(--kit-border) border-r p-3`
+                : `${drawerOpen ? "flex" : "hidden"} fixed top-14 bottom-0 left-0 z-40 w-80 max-w-[85vw] flex-col border-(--kit-border) border-r bg-background p-3 shadow-lg`
             }
           >
             <div className="min-h-0 flex-1">
@@ -593,7 +593,7 @@ export default function App() {
                 <span>StreamHub {state.release || state.version}</span>
                 {state.commit && (
                   <>
-                    <span aria-hidden className="h-3 w-px bg-black/15 dark:bg-white/20" />
+                    <span aria-hidden className="h-3 w-px bg-(--kit-border-strong)" />
                     <a
                       className="font-mono underline-offset-2 hover:text-foreground hover:underline"
                       href={changelogUrl()}
@@ -613,7 +613,7 @@ export default function App() {
           {/* Chat column */}
           <main className="flex min-w-0 flex-1 flex-col">
             {state.installProblem && (
-              <div className="flex items-start gap-2 border-black/10 border-b bg-black/[0.04] px-4 py-2 text-xs dark:border-white/10 dark:bg-white/[0.06]" role="alert">
+              <div className="flex items-start gap-2 border-(--kit-border) border-b bg-(--kit-surface-2) px-4 py-2 text-xs" role="alert">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
                   {state.installProblem} Close StreamHub and run <span className="font-mono">update.cmd</span> in its folder to install the files again
@@ -692,7 +692,7 @@ export default function App() {
                     <>
                       <select
                         aria-label="Who answers"
-                        className="shrink-0 rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                        className="kit-btn kit-btn--sm shrink-0"
                         onChange={(e) => setAgent(e.target.value as AgentChoice)}
                         title="Who answers the next message: Copilot (with StreamHub's instructions), or one of Copilot's agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat. Auto: StreamHub picks by fixed words - Analyst when you ask for analysis, a chart or a trend of a data file (csv, xlsx, json) you attach or name; Researcher when you ask to research, investigate, compare competitors or the market, or for sources; Copilot itself for everything else, including all work on code."
                         value={agent}
@@ -703,7 +703,7 @@ export default function App() {
                         <option value="analyst">Agent: Analyst</option>
                       </select>
                       <select
-                        className="shrink-0 rounded-md bg-black/5 px-1.5 py-0.5 text-xs outline-none hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                        className="kit-btn kit-btn--sm shrink-0"
                         onChange={(e) => api.setResponseMode(e.target.value).catch((err) => setError((err as Error).message))}
                         title={`Copilot's response mode: Auto, Quick response, Think deeper, or any other option Copilot's own picker offers here (read when StreamHub connects, such as Advanced reasoning or a model)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
                         value={state.responseMode ?? "leave"}
@@ -728,8 +728,8 @@ export default function App() {
                           aria-pressed={state.workIq === "on"}
                           className={
                             state.workIq === "on"
-                              ? "rounded-md bg-black px-2 py-0.5 font-medium text-white shadow-sm hover:bg-black/85 dark:bg-white dark:text-black dark:hover:bg-white/85"
-                              : "rounded-md bg-black/5 px-2 py-0.5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                              ? "kit-btn kit-btn--primary kit-btn--sm h-7 min-h-0 px-2 font-medium"
+                              : "kit-btn kit-btn--sm h-7 min-h-0 px-2"
                           }
                           onClick={() => api.setWorkIq(state.workIq === "on" ? "off" : "on")}
                           title="Work IQ lets Copilot use your Microsoft 365 data: Outlook, Teams, calendar, OneDrive and SharePoint"
@@ -740,7 +740,7 @@ export default function App() {
                       )}
                       {state.credits && state.credits.remaining <= 10 && (
                         <span
-                          className={state.credits.remaining === 0 ? "text-rose-500 dark:text-rose-400" : "text-muted-foreground"}
+                          className={state.credits.remaining === 0 ? "text-(--kit-error)" : "text-muted-foreground"}
                           title={`Copilot daily credits; they reset at ${new Date(state.credits.resetAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
                         >
                           {state.credits.remaining === 0
@@ -754,7 +754,7 @@ export default function App() {
                         </span>
                       )}
                       <button
-                        className="inline-flex items-center gap-1 rounded-md border border-black/10 bg-black/5 px-2 py-0.5 text-foreground hover:bg-black/10 disabled:opacity-50 dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/15"
+                        className="kit-btn kit-btn--sm h-7 min-h-0 px-2"
                         disabled={newChatPending}
                         onClick={startNewChat}
                         title="Start a new Copilot conversation (the project stays open)"
@@ -787,7 +787,7 @@ export default function App() {
       {/* Command palette */}
       {palette && (
         <ModalBackdrop className="pt-24" onClose={() => setPalette(null)}>
-          <div className="w-full max-w-xl rounded-2xl bg-background px-4 pb-4 shadow-2xl">
+          <div className="kit-dialog w-full max-w-xl px-4 pt-0 pb-4">
             <ActionSearchBar
               actions={palette === "attach" ? fileActions : commandActions}
               key={palette}

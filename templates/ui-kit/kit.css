@@ -530,6 +530,130 @@ fieldset:disabled .kit-btn, fieldset:disabled .kit-input, fieldset:disabled .kit
 .kit-chart__point.is-faded, .kit-chart__point.is-off { opacity: 0.25; }
 
 
+/* Basics (kit revision 11): every control and content element a page may hold, in the kit's look, so a
+   page never falls back to the browser's own. Radios and check boxes in groups, a fieldset, a required
+   mark, file, colour, date and number fields, a field with a unit or a button on it, a field with an
+   icon in it, a form's action row, native progress and meter, text selection, lists, trees, popovers,
+   code, highlighted text, captions, status dots, truncated text, screen-reader-only text, a skip
+   link and a page footer. kit.js adds the behaviour of trees and popovers and KitUI.confirm / alert. */
+
+/* Check boxes and radios: <label class="kit-check"><input type="checkbox|radio" name="N"> TEXT</label>,
+   several in <div class="kit-choices"> (one under the other; kit-choices--row beside each other),
+   grouped with their question in <fieldset class="kit-fieldset"><legend class="kit-legend">. */
+.kit-check input:focus-visible { outline: none; box-shadow: var(--kit-focus); border-radius: var(--kit-radius-sm); }
+.kit-check input[type="radio"]:focus-visible { border-radius: 999px; }
+.kit-check input:disabled, .kit-check:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
+.kit-choices { display: flex; flex-direction: column; gap: var(--kit-space-2); }
+.kit-choices--row { flex-direction: row; flex-wrap: wrap; gap: var(--kit-space-2) var(--kit-space-4); }
+.kit-fieldset { border: 1px solid var(--kit-border); border-radius: var(--kit-radius); padding: var(--kit-space-3) var(--kit-space-4) var(--kit-space-4); margin: 0; min-width: 0; }
+.kit-fieldset--plain { border: 0; padding: 0; }
+.kit-legend { font-size: var(--kit-text-sm); font-weight: 550; padding: 0 var(--kit-space-1); }
+.kit-fieldset--plain .kit-legend { padding: 0 0 var(--kit-space-2); }
+/* A required field: <label class="kit-label kit-label--required">. The mark is drawn, not typed. */
+.kit-label--required::after { content: " *"; color: var(--kit-error); }
+
+/* Field types: a file field shows its button as a small kit button, a colour field is a swatch,
+   dates and numbers use tabular figures; the browser draws its pickers in the page's theme (color-scheme). */
+.kit-input[type="file"] { padding: 0 var(--kit-space-2) 0 0; line-height: 2.125rem; color: var(--kit-text-muted); cursor: pointer; }
+.kit-input::file-selector-button { font: inherit; font-size: var(--kit-text-xs); min-height: 1.75rem; margin: 3px var(--kit-space-2) 3px 3px; padding: 0 var(--kit-space-3); border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius-sm); background: var(--kit-surface-2); color: var(--kit-text); cursor: pointer; }
+.kit-input::file-selector-button:hover { background: var(--kit-border); }
+.kit-input[type="color"] { width: 2.75rem; padding: 3px; cursor: pointer; }
+.kit-input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.kit-input[type="color"]::-webkit-color-swatch { border: 0; border-radius: var(--kit-radius-sm); }
+.kit-input[type="color"]::-moz-color-swatch { border: 0; border-radius: var(--kit-radius-sm); }
+.kit-input[type="date"], .kit-input[type="time"], .kit-input[type="datetime-local"], .kit-input[type="month"], .kit-input[type="week"], .kit-input[type="number"] { font-variant-numeric: tabular-nums; }
+.kit-input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
+.kit-select[multiple] { min-height: 7rem; padding: var(--kit-space-1); }
+.kit-select[multiple] option { padding: var(--kit-space-1) var(--kit-space-2); border-radius: var(--kit-radius-sm); }
+.kit-select optgroup { font-weight: 600; font-style: normal; }
+/* A field with a unit, a prefix or a button on it: <div class="kit-input-group"><span class="kit-input-group__addon">EUR</span>
+   <input class="kit-input" ...><button class="kit-btn" type="button">Apply</button></div> (one edge shared). */
+.kit-input-group { display: flex; align-items: stretch; }
+.kit-input-group > .kit-input, .kit-input-group > .kit-select { flex: 1 1 auto; min-width: 0; }
+.kit-input-group > :not(:first-child) { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+.kit-input-group > :not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.kit-input-group > :focus, .kit-input-group > :focus-visible { position: relative; z-index: 1; }
+.kit-input-group__addon { display: inline-flex; align-items: center; padding: 0 var(--kit-space-3); border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); background: var(--kit-surface-2); color: var(--kit-text-muted); font-size: var(--kit-text-sm); white-space: nowrap; }
+/* A field with an icon in it: <div class="kit-input-icon"><span data-kit-icon="search" aria-hidden="true"></span><input class="kit-input" type="search" ...></div>. */
+.kit-input-icon { position: relative; display: flex; align-items: center; }
+.kit-input-icon > [data-kit-icon], .kit-input-icon > .kit-icon { position: absolute; left: var(--kit-space-3); color: var(--kit-text-muted); pointer-events: none; }
+.kit-input-icon > .kit-input { padding-left: 2.25rem; width: 100%; box-sizing: border-box; }
+/* The buttons of a form, in one row at its end: <div class="kit-form__actions"> (--sticky stays in view on a long form). */
+.kit-form__actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: var(--kit-space-2); padding-top: var(--kit-space-2); }
+.kit-form__actions--sticky { position: sticky; bottom: 0; background: var(--kit-bg); padding: var(--kit-space-3) 0; border-top: 1px solid var(--kit-border); }
+/* The browser's own progress and meter, and selected text, in the kit's colours. */
+.kit-page progress, .kit-page meter { accent-color: var(--kit-accent); width: 100%; height: 0.5rem; }
+.kit-page ::selection { background: var(--kit-accent); color: var(--kit-on-accent); }
+
+/* List: rows with a title, a line under it and actions, <ul class="kit-list"><li class="kit-list__item">
+   <span data-kit-icon="..."></span><div class="kit-list__body"><div class="kit-list__title">...</div><div class="kit-list__meta">...</div></div>
+   <div class="kit-list__actions">...</div></li></ul>; a row that is a link or button is <a class="kit-list__item"> / <button class="kit-list__item">. */
+.kit-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--kit-border); border-radius: var(--kit-radius); background: var(--kit-surface); }
+.kit-list__item { display: flex; align-items: center; gap: var(--kit-space-3); min-height: 2.75rem; padding: var(--kit-space-2) var(--kit-space-3); border-top: 1px solid var(--kit-border); box-sizing: border-box; }
+.kit-list__item:first-child, .kit-list > li:first-child > .kit-list__item { border-top: 0; }
+.kit-list > li > .kit-list__item { width: 100%; }
+.kit-list__body { flex: 1 1 auto; min-width: 0; }
+.kit-list__title { font-weight: 550; }
+.kit-list__meta { font-size: var(--kit-text-xs); color: var(--kit-text-muted); }
+.kit-list__actions { display: flex; align-items: center; gap: var(--kit-space-1); flex: 0 0 auto; }
+a.kit-list__item, button.kit-list__item { width: 100%; font: inherit; color: inherit; text-align: left; text-decoration: none; background: none; border-left: 0; border-right: 0; border-bottom: 0; cursor: pointer; }
+a.kit-list__item:hover, button.kit-list__item:hover { background: var(--kit-surface-2); }
+a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
+.kit-list__item[aria-current], .kit-list__item.is-active { background: var(--kit-accent-soft); }
+.kit-list--plain { border: 0; background: none; }
+.kit-list--plain .kit-list__item { padding-left: 0; padding-right: 0; }
+
+/* Tree: <ul class="kit-tree" role="tree" data-kit-tree aria-label="Folders"><li role="treeitem" aria-expanded="true" data-value="ID">
+   <div class="kit-tree__row">TEXT</div><ul role="group">...</ul></li></ul>. kit.js adds the toggle, the arrow keys and kit:select
+   (detail.value) when a row is chosen; a leaf is an li without a group. */
+.kit-tree, .kit-tree ul { list-style: none; margin: 0; padding: 0; }
+.kit-tree ul { padding-left: var(--kit-space-5); }
+.kit-tree li[aria-expanded="false"] > ul { display: none; }
+.kit-tree__row { display: flex; align-items: center; gap: var(--kit-space-1); min-height: 2rem; padding: 0 var(--kit-space-2); border-radius: var(--kit-radius); cursor: default; }
+.kit-tree__row:hover { background: var(--kit-surface-2); }
+.kit-tree__row:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
+.kit-tree li[aria-selected="true"] > .kit-tree__row { background: var(--kit-accent-soft); font-weight: 550; }
+.kit-tree__toggle { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: var(--kit-radius-sm); background: none; color: var(--kit-text-muted); cursor: pointer; }
+.kit-tree__toggle::before { content: ""; width: 0.4rem; height: 0.4rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateX(-1px) rotate(-45deg); transition: transform var(--kit-speed) ease-out; }
+.kit-tree li[aria-expanded="true"] > .kit-tree__row > .kit-tree__toggle::before { transform: translateY(-1px) rotate(45deg); }
+.kit-tree__toggle:hover { background: var(--kit-border); color: var(--kit-text); }
+.kit-tree__spacer { flex: 0 0 auto; width: 1.25rem; }
+.kit-tree__row [data-kit-icon] { color: var(--kit-icon); }
+@media (prefers-reduced-motion: reduce) { .kit-tree__toggle::before { transition: none; } }
+
+/* Popover: a small panel of content (a filter, a setting, a legend) that opens from a button and closes with
+   Escape or a click beside it: <div class="kit-popover-wrap"><button class="kit-btn" type="button" data-kit-popover="ID"
+   aria-expanded="false" aria-controls="ID">Columns</button><div class="kit-popover" id="ID" hidden>...</div></div> (kit.js).
+   For actions use a kit-menu, for a long form a kit-drawer or kit-dialog. */
+.kit-popover-wrap { position: relative; display: inline-block; }
+.kit-popover { position: absolute; top: 100%; left: 0; z-index: 30; min-width: 14rem; max-width: min(24rem, 90vw); margin-top: var(--kit-space-1); padding: var(--kit-space-3) var(--kit-space-4); background: var(--kit-surface); color: var(--kit-text); border: 1px solid var(--kit-border); border-radius: var(--kit-radius-lg); box-shadow: var(--kit-shadow); box-sizing: border-box; }
+.kit-popover--right { left: auto; right: 0; }
+.kit-popover__head { font-weight: 600; margin: 0 0 var(--kit-space-2); font-size: var(--kit-text-sm); }
+.kit-popover__actions { display: flex; justify-content: flex-end; gap: var(--kit-space-2); margin-top: var(--kit-space-3); }
+
+/* Content basics. Code: <pre class="kit-code">; a highlighted hit in text: <mark class="kit-mark">; a picture:
+   <img class="kit-media"> with <figcaption class="kit-caption">; a table's title: <caption>; a status dot before a word:
+   <span class="kit-dot kit-dot--ok"></span>; text cut with an ellipsis: kit-truncate (give the box a width);
+   text only for screen readers: kit-sr-only; a skip link as the first thing in the body: <a class="kit-skip" href="#main">;
+   the page's end: <footer class="kit-footer">. */
+.kit-code { display: block; margin: 0; padding: var(--kit-space-3) var(--kit-space-4); background: var(--kit-surface-2); border: 1px solid var(--kit-border); border-radius: var(--kit-radius); font-family: var(--kit-font-mono); font-size: var(--kit-text-sm); line-height: 1.5; overflow: auto; white-space: pre; color: var(--kit-text); }
+.kit-page mark, .kit-mark { background: var(--kit-warn-soft); color: inherit; border-radius: var(--kit-radius-sm); padding: 0 2px; }
+.kit-media { display: block; max-width: 100%; height: auto; border-radius: var(--kit-radius); }
+.kit-caption { font-size: var(--kit-text-xs); color: var(--kit-text-muted); margin-top: var(--kit-space-1); }
+.kit-table caption { caption-side: top; text-align: left; padding: 0 0 var(--kit-space-2); font-weight: 600; }
+.kit-prose blockquote, .kit-quote { margin: var(--kit-space-3) 0; padding: var(--kit-space-2) var(--kit-space-4); border-left: 3px solid var(--kit-border-strong); color: var(--kit-text-muted); }
+.kit-dot { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--kit-text-muted); vertical-align: middle; margin-right: var(--kit-space-1); }
+.kit-dot--ok { background: var(--kit-ok); }
+.kit-dot--warn { background: var(--kit-warn); }
+.kit-dot--error { background: var(--kit-error); }
+.kit-dot--accent { background: var(--kit-accent); }
+.kit-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.kit-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.kit-skip { position: absolute; left: var(--kit-space-3); top: -100px; z-index: 100; padding: var(--kit-space-2) var(--kit-space-3); background: var(--kit-surface); color: var(--kit-text); border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); text-decoration: none; }
+.kit-skip:focus { top: var(--kit-space-3); outline: none; box-shadow: var(--kit-focus); }
+.kit-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--kit-space-2) var(--kit-space-4); margin-top: var(--kit-space-6); padding: var(--kit-space-4) 0; border-top: 1px solid var(--kit-border); font-size: var(--kit-text-xs); color: var(--kit-text-muted); }
+.kit-footer a { color: inherit; }
+
 /*
   Interactive components adapted from kokonutui (MIT licence, see LICENSE-kokonutui.txt; website
   https://kokonutui.com): hold button, search with suggestions, file drop zone, animated tabs,

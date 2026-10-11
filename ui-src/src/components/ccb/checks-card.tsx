@@ -21,7 +21,7 @@ export function ChecksCard({ text, items }: { text: string; items: CheckFinding[
     }
   };
   return (
-    <div className="rounded-xl border border-black/10 px-3 py-2 text-sm dark:border-white/10">
+    <div className="kit-panel px-3 py-2 text-sm">
       <div className="mb-1 text-muted-foreground text-xs">{text}</div>
       <ul className="space-y-0.5">
         {items.map((f, i) => (
@@ -37,7 +37,7 @@ export function ChecksCard({ text, items }: { text: string; items: CheckFinding[
             </span>
             {f.path && (
               <button
-                className="inline-flex shrink-0 items-center gap-1 rounded px-1 text-muted-foreground text-xs hover:bg-black/5 hover:text-foreground disabled:opacity-40 dark:hover:bg-white/5"
+                className="kit-btn kit-btn--ghost kit-btn--sm shrink-0 text-muted-foreground hover:text-foreground"
                 disabled={ignored.has(i)}
                 onClick={() => ignore(i)}
                 title="A false alarm for this code: never report it again (also hidden in Code health > Issues)"
@@ -49,7 +49,7 @@ export function ChecksCard({ text, items }: { text: string; items: CheckFinding[
           </li>
         ))}
       </ul>
-      {error && <div className="mt-1 text-rose-500 dark:text-rose-400 text-xs">{error}</div>}
+      {error && <div className="kit-error-text mt-1">{error}</div>}
     </div>
   );
 }

@@ -13,7 +13,7 @@ export function SchedulesSummary({ schedules, onOpen }: { schedules: ScheduleIte
   const next = [...active].sort((a, b) => String(a.nextRun).localeCompare(String(b.nextRun)))[0];
   return (
     <button
-      className="flex w-full items-center gap-2 rounded-lg border border-black/10 p-2 text-left hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+      className="kit-panel flex w-full items-center gap-2 p-2 text-left hover:bg-(--kit-surface-2)"
       onClick={onOpen}
       title="Open the schedules"
       type="button"
@@ -70,10 +70,10 @@ export function SchedulesModal({
   return (
     <ModalBackdrop onClose={onClose}>
       <div
-        className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-black/10 bg-background shadow-xl dark:border-white/10"
+        className="kit-dialog flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden p-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between gap-2 border-black/10 border-b px-4 py-3 dark:border-white/10">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-(--kit-border) border-b px-4 py-3">
           <div className="min-w-0">
             <div className="font-semibold">Scheduled</div>
             <div className="text-muted-foreground text-xs">Messages, runbooks and chains that run on set days and times while StreamHub is open.</div>
@@ -81,14 +81,14 @@ export function SchedulesModal({
           <div className="flex shrink-0 items-center gap-1">
             {!target && !editing && (
               <button
-                className="inline-flex items-center gap-1 rounded-md border border-black/10 px-2 py-1 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+                className="kit-btn kit-btn--sm"
                 onClick={() => setTarget({ kind: runbooks.length ? "runbook" : "chat", name: runbooks[0]?.name })}
                 type="button"
               >
                 <Plus className="h-3.5 w-3.5" /> New schedule
               </button>
             )}
-            <button className="rounded p-1 hover:bg-black/5 dark:hover:bg-white/5" onClick={onClose} title="Close (Esc)" type="button">
+            <button className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" onClick={onClose} title="Close (Esc)" type="button">
               <X className="h-4 w-4" />
             </button>
           </div>

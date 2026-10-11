@@ -8,7 +8,7 @@ export function CopyButton({ text, className }: { text: string; className?: stri
   const [done, setDone] = useState(false);
   return (
     <button
-      className={cn("rounded p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10", className)}
+      className={cn("kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm text-muted-foreground hover:text-foreground", className)}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
@@ -47,7 +47,7 @@ export function CodeView({ text, language, startLine = 1 }: { text: string; lang
   const numbers = useMemo(() => Array.from({ length: lines }, (_, i) => i + startLine).join("\n"), [lines, startLine]);
   return (
     <div className="flex min-w-max font-mono text-xs leading-5">
-      <pre aria-hidden className="select-none border-black/10 border-r py-4 pr-3 pl-4 text-right text-muted-foreground/75 dark:border-white/10">
+      <pre aria-hidden className="select-none border-(--kit-border) border-r py-4 pr-3 pl-4 text-right text-muted-foreground/75">
         {numbers}
       </pre>
       <pre className="py-4 pr-4 pl-3">{html ? <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} /> : <code>{text}</code>}</pre>

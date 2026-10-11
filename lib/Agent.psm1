@@ -2694,6 +2694,9 @@ function Get-ProjectContext($State) {
         $ready = try { Format-DataImportContext $root -OneFile:((Get-ProjectSetup $root).build -eq 'single') } catch { Write-CCBLogError agent 'data context' $_; '' }
         if ($ready) { $full += "`n`n$ready" }
     }
+    # Pages a project script builds from a template (OneFile Get-TemplateBuilds): output, never edited.
+    $built = @(try { Get-TemplateBuilds $root } catch { Write-CCBLogError agent 'built pages' $_; @() })
+    if ($built.Count) { $full += "`n`nPages built by a script (output: never write or edit them; change the template, then run the script): " + (@($built | ForEach-Object { "$($_.output) from $($_.template) by $($_.script)" }) -join '; ') }
     # What the UI kit offers (where each part is), so every task can use it, not only interface requests.
     if ((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $root)) {
         $kitText = try { Format-UiKitContext $root $State.AppRoot } catch { Write-CCBLogError agent 'UI kit context' $_; '' }
@@ -3949,6 +3952,7 @@ function Invoke-AgentTurn {
                         if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Test-BinaryFile $full)) { continue }
                         $now = Read-TextFile $full
                         $rel = $p.Replace('\', '/')
+                        if ($rel -match '(?i)\.html?$' -and (Get-GeneratedPage $State.ProjectRoot $rel $now.Text)) { continue }   # a page a project script built: its template is checked
                         $before = ''
                         if ($checkpoint.Files[$rel] -eq 'existed') { $bk = Join-Path $checkpoint.Dir ($rel.Replace('/', '\')); if (Test-Path -LiteralPath $bk) { $before = (Read-TextFile $bk).Text } }
                         # Shown while it runs: the checks can start a tool (node --check, python, prisma validate).

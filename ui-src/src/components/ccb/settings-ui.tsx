@@ -11,22 +11,15 @@ import { cn } from "@/lib/utils";
 /** Width of every control (fields, choices, switches, buttons). */
 export const CONTROL_W = "w-48";
 /** Fields and selects: same width and height as the choice buttons. */
-export const fieldClass = cn(
-  CONTROL_W,
-  "h-8 rounded-md border border-black/10 bg-transparent px-2 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30"
-);
+export const fieldClass = cn(CONTROL_W, "kit-input h-8 min-h-8");
 /** Buttons in the control column. */
-export const actionClass = cn(
-  CONTROL_W,
-  "h-8 rounded-md border border-black/10 px-2 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:border-white/10 dark:hover:bg-white/5"
-);
+export const actionClass = cn(CONTROL_W, "kit-btn kit-btn--sm h-8");
 /** Smaller buttons in a row under the text (for example Sign-in's actions). */
-export const smallButtonClass =
-  "h-7 rounded-md border border-black/10 px-2.5 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:border-white/10 dark:hover:bg-white/5";
+export const smallButtonClass = "kit-btn kit-btn--sm h-7 min-h-7";
 
 export function SettingsGroup({ title, first = false, children }: { title: string; first?: boolean; children: React.ReactNode }) {
   return (
-    <section className={cn("pt-3 pb-1", !first && "border-black/10 border-t dark:border-white/10")}>
+    <section className={cn("pt-3 pb-1", !first && "border-(--kit-border) border-t")}>
       <h3 className="mb-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">{title}</h3>
       {children}
     </section>
@@ -81,18 +74,14 @@ export function Segmented<T extends string>({
   label: string;
 }) {
   return (
-    <div aria-label={label} className={cn(CONTROL_W, "flex h-8 rounded-md border border-black/10 p-0.5 dark:border-white/10")} role="radiogroup">
+    <div aria-label={label} className={cn(CONTROL_W, "kit-segmented flex h-8 flex-nowrap")} role="group">
       {options.map((o) => (
         <button
-          aria-checked={value === o.id}
-          className={cn(
-            "inline-flex flex-1 items-center justify-center gap-1 rounded px-1.5 text-xs disabled:opacity-40",
-            value === o.id ? "bg-black/10 text-foreground dark:bg-white/15" : "text-muted-foreground hover:text-foreground"
-          )}
+          aria-pressed={value === o.id}
+          className="inline-flex flex-1 items-center justify-center gap-1 px-1.5 py-0 text-xs disabled:opacity-40"
           disabled={disabled}
           key={o.id}
           onClick={() => value !== o.id && onChange(o.id)}
-          role="radio"
           type="button"
         >
           {o.icon}

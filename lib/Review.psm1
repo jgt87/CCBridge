@@ -37,6 +37,8 @@ function Get-ReviewFiles {
         if ($p -notmatch $script:ReviewExt -or $p -match $script:ReviewSkipPath) { continue }
         if (Get-SecretFileKind $p) { continue }   # never sent to Copilot (SecretFiles.psm1)
         if ([int64]$f.size -gt $MaxBytes) { $skipped.Add("$p (too large, probably generated)"); continue }
+        # A page a project script builds from a template (OneFile): the template is the code.
+        if ($p -match '(?i)\.html?$') { $gp = Get-GeneratedPage $ProjectRoot $p; if ($gp) { $skipped.Add("$p (built by $($gp.script)$(if ($gp.template) { " from $($gp.template)" }))"); continue } }
         # A data copy (a JS file that only wraps JSON data): its content is the JSON's, reviewed there.
         if ($p -match '(?i)\.js$' -and $dataCopies) {
             $w = try { Read-DataWrapper (Read-TextFile (Join-Path $ProjectRoot $p.Replace('/', '\'))).Text } catch { $null }

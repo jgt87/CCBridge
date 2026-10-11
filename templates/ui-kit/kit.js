@@ -1047,8 +1047,165 @@
     }, 2400);
   }
 
+  // Tree (<ul class="kit-tree" role="tree" data-kit-tree>): every li is a treeitem; one with a nested
+  // ul is a branch (aria-expanded) and gets a toggle button in its row; the arrow keys move and open or
+  // close, Home and End jump, Enter or Space select (aria-selected on one item; "kit:select" on the
+  // tree with detail.value from data-value or the row's text). One tab stop (roving tabindex).
+  function treeRows(tree) {
+    return Array.prototype.slice.call(tree.querySelectorAll("li")).filter(function (li) {
+      for (var p = li.parentElement; p && p !== tree; p = p.parentElement) { if (p.tagName === "LI" && p.getAttribute("aria-expanded") === "false") return false; }
+      return true;
+    }).map(function (li) { return li.querySelector(":scope > .kit-tree__row"); }).filter(Boolean);
+  }
+  function setupTree(tree) {
+    if (tree.kitTree) return;
+    tree.kitTree = true;
+    if (!tree.getAttribute("role")) tree.setAttribute("role", "tree");
+    Array.prototype.forEach.call(tree.querySelectorAll("li"), function (li) {
+      if (!li.getAttribute("role")) li.setAttribute("role", "treeitem");
+      var row = li.querySelector(":scope > .kit-tree__row");
+      if (!row) { row = document.createElement("div"); row.className = "kit-tree__row"; while (li.firstChild && li.firstChild.tagName !== "UL") row.appendChild(li.firstChild); li.insertBefore(row, li.firstChild); }
+      var group = li.querySelector(":scope > ul");
+      if (group) {
+        if (!group.getAttribute("role")) group.setAttribute("role", "group");
+        if (!li.hasAttribute("aria-expanded")) li.setAttribute("aria-expanded", "false");
+        if (!row.querySelector(".kit-tree__toggle")) {
+          var t = document.createElement("button");
+          t.type = "button"; t.className = "kit-tree__toggle"; t.tabIndex = -1;
+          t.setAttribute("aria-label", "Open or close");
+          row.insertBefore(t, row.firstChild);
+        }
+      } else if (!row.querySelector(".kit-tree__spacer, .kit-tree__toggle")) {
+        var s = document.createElement("span"); s.className = "kit-tree__spacer"; s.setAttribute("aria-hidden", "true"); row.insertBefore(s, row.firstChild);
+      }
+      row.tabIndex = -1;
+    });
+    var roving = function (current) {
+      var rows = treeRows(tree), cur = current || rows.filter(function (r) { return r.parentElement.getAttribute("aria-selected") === "true"; })[0] || rows[0];
+      rows.forEach(function (r) { r.tabIndex = r === cur ? 0 : -1; });
+    };
+    var toggle = function (li, open) { if (li.querySelector(":scope > ul")) li.setAttribute("aria-expanded", String(open)); };
+    var select = function (row) {
+      Array.prototype.forEach.call(tree.querySelectorAll('li[aria-selected="true"]'), function (li) { li.removeAttribute("aria-selected"); });
+      var li = row.parentElement;
+      li.setAttribute("aria-selected", "true");
+      roving(row);
+      tree.dispatchEvent(new CustomEvent("kit:select", { bubbles: true, detail: { value: li.getAttribute("data-value") || row.textContent.trim(), item: li } }));
+    };
+    tree.addEventListener("click", function (e) {
+      var tog = e.target.closest(".kit-tree__toggle");
+      var row = e.target.closest(".kit-tree__row");
+      if (!row || !tree.contains(row)) return;
+      var li = row.parentElement;
+      if (tog) { toggle(li, li.getAttribute("aria-expanded") !== "true"); roving(row); row.focus(); return; }
+      select(row);
+      row.focus();
+    });
+    tree.addEventListener("keydown", function (e) {
+      var row = e.target.closest && e.target.closest(".kit-tree__row");
+      if (!row) return;
+      var li = row.parentElement, rows = treeRows(tree), i = rows.indexOf(row), branch = !!li.querySelector(":scope > ul");
+      var go = function (r) { if (r) { roving(r); r.focus(); } };
+      if (e.key === "ArrowDown") { e.preventDefault(); go(rows[i + 1]); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); go(rows[i - 1]); }
+      else if (e.key === "Home") { e.preventDefault(); go(rows[0]); }
+      else if (e.key === "End") { e.preventDefault(); go(rows[rows.length - 1]); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); if (branch && li.getAttribute("aria-expanded") !== "true") toggle(li, true); else if (branch) go(treeRows(tree)[i + 1]); }
+      else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (branch && li.getAttribute("aria-expanded") === "true") toggle(li, false);
+        else { var up = li.parentElement && li.parentElement.closest("li"); if (up && tree.contains(up)) go(up.querySelector(":scope > .kit-tree__row")); }
+      }
+      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(row); }
+    });
+    roving();
+  }
+
+  // Popover (a small panel from a button): data-kit-popover="ID" on the button toggles #ID (hidden),
+  // keeps aria-expanded, closes on Escape or a click beside it and gives focus back; "kit:open" and
+  // "kit:close" on the panel.
+  function popoverOf(btn) { return document.getElementById(btn.getAttribute("data-kit-popover")); }
+  function closePopovers(except) {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-kit-popover][aria-expanded=true]"), function (b) {
+      if (b === except) return;
+      var p = popoverOf(b);
+      b.setAttribute("aria-expanded", "false");
+      if (p && !p.hidden) { p.hidden = true; p.dispatchEvent(new CustomEvent("kit:close", { bubbles: true })); }
+    });
+  }
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("[data-kit-popover]");
+    if (btn) {
+      var p = popoverOf(btn);
+      if (!p) return;
+      var open = btn.getAttribute("aria-expanded") === "true";
+      closePopovers(btn);
+      btn.setAttribute("aria-expanded", String(!open));
+      if (!btn.getAttribute("aria-controls")) btn.setAttribute("aria-controls", p.id);
+      p.hidden = open;
+      if (!open) {
+        p.dispatchEvent(new CustomEvent("kit:open", { bubbles: true }));
+        var f = p.querySelector("input, select, textarea, button, a[href], [tabindex]:not([tabindex='-1'])");
+        if (f) f.focus(); else { p.tabIndex = -1; p.focus(); }
+      } else p.dispatchEvent(new CustomEvent("kit:close", { bubbles: true }));
+      return;
+    }
+    if (!(e.target.closest && e.target.closest(".kit-popover"))) closePopovers();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    var open = Array.prototype.slice.call(document.querySelectorAll("[data-kit-popover][aria-expanded=true]"));
+    if (!open.length) return;
+    var inside = e.target.closest && e.target.closest(".kit-popover");
+    closePopovers();
+    var back = inside ? open.filter(function (b) { return popoverOf(b) === inside; })[0] : open[open.length - 1];
+    if (back) back.focus();
+  });
+
+  // Confirm and alert boxes, KitUI's confirm(text, { title, ok, cancel, danger }) and alert(text, { title, ok }):
+  // a kit dialog instead of the browser's own boxes; confirm gives a promise of true or false, alert a
+  // promise once it is closed. (No "KitUI." call written here: a one-file page counts the kit's classes by text.)
+  function dialogBox(text, opts, buttons) {
+    opts = opts || {};
+    var d = document.createElement("dialog");
+    d.className = DIALOG;
+    d.setAttribute("role", "alertdialog");
+    if (opts.title) { var h = document.createElement("h3"); h.className = "kit-" + "h3"; h.textContent = opts.title; d.appendChild(h); d.setAttribute("aria-labelledby", h.id = "kit-box-" + (++boxCount)); }
+    var p = document.createElement("p"); p.textContent = String(text); p.id = "kit-box-" + (++boxCount); d.appendChild(p);
+    d.setAttribute("aria-describedby", p.id);
+    if (!opts.title) d.setAttribute("aria-labelledby", p.id);
+    var row = document.createElement("div"); row.className = DIALOG + "__actions";   // put together: a page gets these styles through the confirm/alert hook, not from this token
+    buttons.forEach(function (b) {
+      var btn = document.createElement("button"); btn.type = "button";
+      btn.className = "kit-btn" + (b.kind ? " kit-btn--" + b.kind : "");
+      btn.textContent = b.label; btn.setAttribute("data-value", b.value);
+      row.appendChild(btn);
+    });
+    d.appendChild(row);
+    document.body.appendChild(d);
+    return new Promise(function (resolve) {
+      var done = false;
+      var finish = function (v) { if (done) return; done = true; resolve(v); closePanel(d); if (d.parentNode) d.parentNode.removeChild(d); };
+      row.addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) finish(b.getAttribute("data-value") === "ok"); });
+      d.addEventListener("cancel", function (e) { e.preventDefault(); finish(false); });
+      d.addEventListener("close", function () { finish(false); });
+      openPanel(d);
+      var first = row.querySelector(".kit-btn--primary, .kit-btn--danger") || row.querySelector("button");
+      if (first) first.focus();
+    });
+  }
+  var boxCount = 0;
+  function confirmBox(text, opts) {
+    opts = opts || {};
+    return dialogBox(text, opts, [{ label: opts.cancel || "Cancel", value: "cancel" }, { label: opts.ok || "OK", value: "ok", kind: opts.danger ? "danger" : "primary" }]);
+  }
+  function alertBox(text, opts) {
+    opts = opts || {};
+    return dialogBox(text, opts, [{ label: opts.ok || "OK", value: "ok", kind: "primary" }]).then(function () { });
+  }
+
   // The parts that need setting up, in what the page has now or writes later.
-  var PARTS = [[".kit-tip[data-kit-tip], [data-kit-tip]", setupTip], ["select[data-kit-multi]", setupMulti], ["[data-kit-range]", setupRange],
+  var PARTS = [[".kit-tip[data-kit-tip], [data-kit-tip]", setupTip], ["select[data-kit-multi]", setupMulti], ["[data-kit-range]", setupRange], ["[data-kit-tree]", setupTree],
     ["[data-kit-iconbar]", setupIconbar], ["[data-kit-avatar]", setupAvatar], ["[data-kit-slider-range]", setupSliderRange], ["[data-kit-tags]", setupTags],
     ["[data-kit-board] > *", setupBoardCard], ["[data-kit-board]", setupBoardList], ["[data-kit-calendar]", function (el) { if (!el.kitCal) setupCalendar(el); }], ["[data-kit-cycle]", setupCycle],
     [".kit-avatars[aria-label], .kit-board[aria-label]", function (el) { if (!el.getAttribute("role")) el.setAttribute("role", "group"); }],
@@ -1068,6 +1225,8 @@
 
   window.KitUI = {
     toast: toast,
+    confirm: confirmBox,
+    alert: alertBox,
     format: format,
     open: openPanel,
     close: closePanel,

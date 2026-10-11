@@ -197,9 +197,9 @@ function Sources({ refs }: { refs: Reference[] }) {
       <span className="text-muted-foreground">Sources</span>
       {refs.map((r, i) => {
         const label = `${r.kind ? `${r.kind}: ` : ""}${r.title ?? r.url ?? "source"}`;
-        const cls = "inline-flex max-w-72 items-center gap-1 truncate rounded-md bg-black/5 px-2 py-0.5 text-foreground/80 dark:bg-white/10";
+        const cls = "inline-flex max-w-72 items-center gap-1 truncate rounded-md bg-(--kit-surface-2) px-2 py-0.5 text-foreground/80";
         return r.url ? (
-          <a className={`${cls} hover:bg-black/10 dark:hover:bg-white/15`} href={r.url} key={i} onClick={openExternal} rel="noreferrer" target="_blank" title={label}>
+          <a className={`${cls} hover:bg-(--kit-surface-2)`} href={r.url} key={i} onClick={openExternal} rel="noreferrer" target="_blank" title={label}>
             <Link2 className="h-3 w-3 shrink-0" />
             <span className="truncate">{label}</span>
           </a>
@@ -215,12 +215,12 @@ function Sources({ refs }: { refs: Reference[] }) {
 
 const NOTE_STYLE = {
   info: { icon: <Info className="h-4 w-4" />, cls: "text-muted-foreground" },
-  error: { icon: <AlertCircle className="h-4 w-4" />, cls: "text-rose-500 dark:text-rose-400" },
+  error: { icon: <AlertCircle className="h-4 w-4" />, cls: "text-(--kit-error)" },
   done: { icon: <CheckCircle2 className="h-4 w-4" />, cls: "text-foreground" },
   undo: { icon: <RotateCcw className="h-4 w-4" />, cls: "text-muted-foreground" },
   human: {
     icon: <Hand className="h-4 w-4" />,
-    cls: "rounded-lg border border-black/20 bg-black/5 px-3 py-2 font-medium text-foreground dark:border-white/25 dark:bg-white/10",
+    cls: "rounded-lg border border-(--kit-border-strong) bg-(--kit-surface-2) px-3 py-2 font-medium text-foreground",
   },
 };
 
@@ -230,15 +230,15 @@ function UserMessage({ text, taskKind, agent, onResendAsCoding }: { text: string
   const label = taskKind ? KIND_LABEL[taskKind] : undefined;
   return (
     <div className="flex flex-col items-end gap-1">
-      {agent && <span className="rounded-full border border-black/15 px-2 py-0.5 text-muted-foreground text-xs dark:border-white/20">to {agent}</span>}
-      <div className="flex max-w-[85%] items-start gap-2 rounded-2xl rounded-tr-sm bg-black/5 px-4 py-2.5 text-sm dark:bg-white/10">
+      {agent && <span className="rounded-full border border-(--kit-border-strong) px-2 py-0.5 text-muted-foreground text-xs">to {agent}</span>}
+      <div className="flex max-w-[85%] items-start gap-2 rounded-2xl rounded-tr-sm bg-(--kit-surface-2) px-4 py-2.5 text-sm">
         <span className="whitespace-pre-wrap">{text}</span>
         <User className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-50" />
       </div>
       {label && onResendAsCoding && (
         <div className="flex items-center gap-2 text-muted-foreground text-xs">
           <span>{label}</span>
-          <button className="rounded-md px-1.5 py-0.5 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5" onClick={() => onResendAsCoding(text)} title="Send it again with the coding instructions and the project's files" type="button">
+          <button className="rounded-md px-1.5 py-0.5 hover:bg-(--kit-surface-2) hover:text-foreground" onClick={() => onResendAsCoding(text)} title="Send it again with the coding instructions and the project's files" type="button">
             Send again as a coding task
           </button>
         </div>
@@ -253,7 +253,7 @@ function AssistantMessage({ text, references, agent }: { text: string; reference
   return (
     <div className="px-1">
       {agent && (
-        <span className="mb-1 inline-block rounded-full border border-black/15 px-2 py-0.5 text-muted-foreground text-xs dark:border-white/20" title={`Answered by Copilot's ${agent} agent (from Copilot's reply)`}>
+        <span className="mb-1 inline-block rounded-full border border-(--kit-border-strong) px-2 py-0.5 text-muted-foreground text-xs" title={`Answered by Copilot's ${agent} agent (from Copilot's reply)`}>
           {agent}
         </span>
       )}
@@ -284,9 +284,9 @@ function RunbookChoiceCard({ item, onSend }: { item: Extract<TranscriptItem, { k
     setChosen("copilot");
     onSend?.(item.request, { noRunbook: true });
   };
-  const btn = "inline-flex h-10 items-center gap-1 rounded-md px-3 text-sm hover:bg-black/10 disabled:opacity-40 dark:hover:bg-white/15";
+  const btn = "kit-btn kit-btn--ghost h-10";
   return (
-    <div className="space-y-2 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
+    <div className="kit-panel space-y-2 px-3 py-2 text-sm">
       <div>Your message names runbook {label}. Run it now, or send the message to Copilot (for example to change the runbook)?</div>
       <div className="flex flex-wrap items-center gap-2">
         <GradientButton className="h-10 min-w-44" label="Run it" onClick={run} variant="neutral" />
@@ -302,7 +302,7 @@ function RunbookChoiceCard({ item, onSend }: { item: Extract<TranscriptItem, { k
 function UnfinishedCard({ item, onSend }: { item: Extract<TranscriptItem, { kind: "unfinished" }>; onSend?: (text: string, opts: ChatOptions) => void }) {
   const [sent, setSent] = useState(false);
   return (
-    <div className="space-y-2 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
+    <div className="kit-panel space-y-2 px-3 py-2 text-sm">
       <div className="flex items-start gap-2">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
         <span>{item.text}</span>
@@ -380,16 +380,16 @@ function PackagesCard({ item }: { item: Extract<TranscriptItem, { kind: "package
         setNodeMessage("The install could not be started.");
       });
   };
-  const btn = "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs hover:bg-black/10 disabled:opacity-40 dark:hover:bg-white/15";
+  const btn = "kit-btn kit-btn--ghost kit-btn--sm";
   return (
-    <div className="space-y-2 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
+    <div className="kit-panel space-y-2 px-3 py-2 text-sm">
       <div>This project needs its packages: {item.text}. Install them with npm now? It downloads them from npm's registry and runs their install steps.</div>
       {!npm && node === "" && <div className="text-muted-foreground text-xs">npm is not installed. Node.js brings it: an install for this user only, from nodejs.org (nothing needs admin rights).</div>}
       {node === "installing" && <div className="text-muted-foreground text-xs">Installing Node.js in the background...</div>}
       {node === "pending" && <div className="text-muted-foreground text-xs">Node.js is in use; it is installed at the next start of StreamHub. {nodeMessage}</div>}
       {node === "done" && <div className="text-muted-foreground text-xs">Node.js and npm are installed.</div>}
-      {node === "failed" && <div className="text-rose-600 text-xs dark:text-rose-400">Node.js could not be installed. {nodeMessage}</div>}
-      {state === "failed" && <div className="text-rose-600 text-xs dark:text-rose-400">npm install could not be started.</div>}
+      {node === "failed" && <div className="kit-error-text">Node.js could not be installed. {nodeMessage}</div>}
+      {state === "failed" && <div className="kit-error-text">npm install could not be started.</div>}
       <div className="flex flex-wrap items-center gap-2">
         {!npm && node !== "done" && (
           <GradientButton className="h-10 min-w-44" disabled={node === "installing" || node === "pending"} label="Install Node.js" onClick={installNode} variant="neutral" />
@@ -416,7 +416,7 @@ function NoteLine({ tone, text, path, onOpenFile }: { tone: NoteTone; text: stri
       <span className="mt-0.5">{style.icon}</span>
       {/* A note about a saved file (task report, chart): the note itself opens it. */}
       {path && onOpenFile ? (
-        <button className="whitespace-pre-wrap text-left underline-offset-2 hover:underline" onClick={() => onOpenFile(path)} title={`Open ${path}`} type="button">
+        <button className="kit-link whitespace-pre-wrap text-left no-underline hover:underline" onClick={() => onOpenFile(path)} title={`Open ${path}`} type="button">
           {text}
         </button>
       ) : (
@@ -450,9 +450,9 @@ function ErrorNote({ item }: { item: Extract<TranscriptItem, { kind: "error" }> 
     <div className="space-y-1 px-1 text-sm">
       <NoteLine text={item.text} tone="error" />
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6 text-muted-foreground text-xs" title={details}>
-        {item.code && <span className="rounded bg-black/5 px-1.5 py-0.5 font-mono dark:bg-white/10">{item.code}</span>}
+        {item.code && <span className="kit-badge rounded-(--kit-radius-sm) font-mono font-normal">{item.code}</span>}
         {item.hint && <span>{item.hint}</span>}
-        <button className="text-foreground hover:underline" onClick={copy} type="button">
+        <button className="kit-link no-underline hover:underline" onClick={copy} type="button">
           {copied ? "Copied" : "Copy details"}
         </button>
         {item.errId && <span className="font-mono">{item.errId}</span>}
@@ -464,12 +464,12 @@ function ErrorNote({ item }: { item: Extract<TranscriptItem, { kind: "error" }> 
 /** Follow-ups Copilot suggested; a click puts the text in the message box (nothing is sent yet). */
 function NextSteps({ steps, onUse }: { steps: string[]; onUse?: (text: string) => void }) {
   return (
-    <div className="rounded-xl border border-black/10 border-dashed px-3 py-2 dark:border-white/10">
+    <div className="kit-panel border-dashed px-3 py-2">
       <div className="mb-1.5 text-muted-foreground text-xs">Suggested next steps (click one to put it in the message box)</div>
       <div className="flex flex-col gap-1">
         {steps.map((s, i) => (
           <button
-            className="w-full rounded-md px-2 py-1 text-left text-sm hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/5"
+            className="w-full rounded-md px-2 py-1 text-left text-sm hover:bg-(--kit-surface-2) disabled:opacity-50"
             disabled={!onUse}
             key={`${i}-${s}`}
             onClick={() => onUse?.(s)}
@@ -548,7 +548,7 @@ function ThinkingIndicator({ progress, stopping, activity }: { progress: string;
   // One order of the light lines per wait (the indicator mounts when a message starts waiting).
   const [seed] = useState(() => Date.now());
   return (
-    <div className="rounded-xl border border-black/10 border-dashed px-3 py-2 dark:border-white/10">
+    <div className="kit-panel border-dashed px-3 py-2">
       <AITextLoading
         className="font-semibold text-base"
         containerClassName="justify-start p-0"
@@ -676,7 +676,7 @@ export function Transcript({
     <div className="mx-auto flex w-full max-w-[max(48rem,80%)] flex-col gap-3 px-4 py-6" ref={contentRef}>
       {hidden > 0 && (
         <div className="flex justify-center" ref={topRef}>
-          <button className="rounded-md px-2 py-1 text-muted-foreground text-xs hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5" onClick={loadEarlier} type="button">
+          <button className="rounded-md px-2 py-1 text-muted-foreground text-xs hover:bg-(--kit-surface-2) hover:text-foreground" onClick={loadEarlier} type="button">
             {hidden} earlier item{hidden === 1 ? "" : "s"}: scroll up or click to show {Math.min(PAGE, hidden)} more
           </button>
         </div>

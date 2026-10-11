@@ -9,7 +9,7 @@
 # A machine-wide mutex keeps the background indexer and the worker from writing at the same time.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Workspace', 'Executor', 'Lint', 'Health') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Workspace', 'Executor', 'Lint', 'Health', 'OneFile') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:IssueExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|psd1|css|scss|less|json|jsonc|ya?ml|toml|sh|bash|cmd|bat|sql|html?|xml|csproj|config|xaml|svg|md|markdown|csv|tsv)$'
 $script:IssueSkip = '(?i)(^|/)(source|\.streamhub|node_modules|dist|build|out|bin|obj|coverage|vendor|\.git|\.venv|venv|__pycache__|evidence|reviews|exports|History|Logs|Runbooks/Exports)/|\.min\.(js|css)$|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$'
@@ -208,6 +208,7 @@ function Update-IssueIndex {
         if ($Progress) { $Progress.done = [int]$Progress.done + 1; $Progress.current = $rel }
         $full = try { Resolve-ProjectPath $ProjectRoot $rel } catch { $null }
         if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf) -or $rel -notmatch $script:IssueExt -or $rel -match $script:IssueSkip) { $gone.Add($rel); continue }
+        if ($rel -match '(?i)\.html?$' -and (Get-GeneratedPage $ProjectRoot $rel)) { $gone.Add($rel); continue }   # a page a project script builds: output
         $fi = Get-Item -LiteralPath $full
         $old = $ix.files[$rel]
         if (-not $Force -and $old -and $old.size -eq $fi.Length -and $old.mtime -eq $fi.LastWriteTimeUtc.Ticks) { continue }

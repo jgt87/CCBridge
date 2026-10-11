@@ -14,20 +14,20 @@ export function UndoCard({ text, changes }: { text: string; changes: UndoChange[
   const added = changes.reduce((n, c) => n + (c.added ?? 0), 0);
   const removed = changes.reduce((n, c) => n + (c.removed ?? 0), 0);
   return (
-    <div className="rounded-xl border border-black/10 bg-card/60 text-sm dark:border-white/10">
+    <div className="kit-panel p-0 text-sm">
       <div className="flex items-center gap-2 px-3 py-2">
         <RotateCcw className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate font-medium">{text.replace(/:.*$/, "")}</span>
         <ChangePill added={added} removed={removed} />
       </div>
-      <div className="border-black/5 border-t px-1.5 py-1 dark:border-white/5">
+      <div className="border-(--kit-border) border-t px-1.5 py-1">
         {changes.map((c) => {
           const canOpen = Boolean(c.preview) && !c.binary;
           const isOpen = open === c.path;
           return (
             <div key={c.path}>
               <button
-                className={cn("flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs", canOpen && "hover:bg-black/5 dark:hover:bg-white/5")}
+                className={cn("flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs", canOpen && "hover:bg-(--kit-surface-2)")}
                 disabled={!canOpen}
                 onClick={() => setOpen(isOpen ? null : c.path)}
                 type="button"

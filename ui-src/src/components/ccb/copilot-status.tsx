@@ -50,7 +50,7 @@ export function CopilotStatus({ copilot, message }: { copilot: AppState["copilot
       {connecting ? <ConnectIcon done={copilot === "ready"} /> : <CircleX aria-hidden className="h-3.5 w-3.5" />}
       <span>Copilot {LABELS[copilot].toLowerCase()}</span>
       {copilot === "error" && (
-        <button className="text-foreground hover:underline" onClick={() => api.connect()} type="button">
+        <button className="kit-link no-underline hover:underline" onClick={() => api.connect()} type="button">
           Retry
         </button>
       )}

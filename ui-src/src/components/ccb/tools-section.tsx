@@ -59,7 +59,7 @@ export function ToolsSection() {
         );
       })}
       <ProjectPackages />
-      {error && <p className="text-rose-500 dark:text-rose-400 text-xs">{error}</p>}
+      {error && <p className="kit-error-text">{error}</p>}
     </>
   );
 }

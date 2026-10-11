@@ -7,10 +7,10 @@ import { cn } from "@/lib/utils";
 // Every button a person must act on is as visible as the run approval: a tall primary button
 // (GradientButton, h-10) for the main action, a tall flat one beside it for the other way.
 const flatButton =
-  "inline-flex h-10 items-center gap-1 rounded-md px-3 text-sm hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost h-10";
 const primary = "h-10 min-w-44";
 const field =
-  "w-full rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30";
+  "kit-input h-8 min-h-8 w-full";
 
 export interface ClarifyQuestion {
   question: string;
@@ -27,7 +27,7 @@ export function AgentPlanCard({ agent, onSend }: { agent: string; onSend: (text:
     onSend(text, { agent: key, agentAnswer: true });
   };
   return (
-    <div className="space-y-2 rounded-lg border border-black/10 p-3 dark:border-white/10">
+    <div className="kit-panel space-y-2 p-3">
       <div className="flex items-center gap-2 font-medium text-sm">
         <MessageCircleQuestion className="h-4 w-4 text-muted-foreground" /> {agent} made a research plan and waits for you
       </div>
@@ -87,7 +87,7 @@ export function ClarifyCard({
   };
 
   return (
-    <div className="rounded-xl border border-black/10 p-3 dark:border-white/10">
+    <div className="kit-panel p-3">
       <div className="mb-1 flex items-center gap-1.5 font-medium text-sm">
         <MessageCircleQuestion className="h-4 w-4" /> Copilot has questions first
       </div>
@@ -102,7 +102,7 @@ export function ClarifyCard({
                   <button
                     className={cn(
                       "rounded-md border px-1.5 py-0.5 text-xs",
-                      answers[i] === o ? "border-black/30 bg-black/10 dark:border-white/30 dark:bg-white/15" : "border-black/10 text-muted-foreground dark:border-white/10"
+                      answers[i] === o ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border) text-muted-foreground"
                     )}
                     disabled={sent}
                     key={o}
@@ -173,7 +173,7 @@ export function PlanCard({
   };
 
   return (
-    <div className="rounded-xl border border-black/20 p-3 dark:border-white/20">
+    <div className="kit-panel border-(--kit-border-strong) p-3">
       <div className="mb-2 flex items-center gap-1.5 font-medium text-sm">
         <ClipboardCheck className="h-4 w-4" /> {PLAN_TEXT[variant].title}
       </div>

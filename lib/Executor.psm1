@@ -1195,6 +1195,11 @@ function Assert-Writable([string]$ProjectRoot, [string]$Path) {
     }
     $generated = Test-GeneratedPath $rel $ProjectRoot
     if ($generated) { throw "not written: $generated." }
+    # A page a project script builds from a template (OneFile Get-GeneratedPage): the next build writes it again.
+    if ($rel -match '(?i)\.html?$') {
+        $gp = Get-GeneratedPage $ProjectRoot $rel
+        if ($gp) { throw "$Path is built by $($gp.script)$(if ($gp.template) { " from $($gp.template)" }) and is written again at the next build, so a change to it is lost. Do not edit it: change $(if ($gp.template) { $gp.template } else { 'the template it is built from' }) and run $($gp.script)." }
+    }
     # A data copy (DataMirror.psm1): rewritten from its JSON, so a change belongs in the JSON.
     if ($rel -match '(?i)\.js$' -and (Test-Path -LiteralPath $full -PathType Leaf)) {
         $head = ''

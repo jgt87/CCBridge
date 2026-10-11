@@ -90,7 +90,7 @@ function ListBox({ s, draft, setDraft, save }: { s: Setting; draft: string; setD
   return (
     <textarea
       aria-label={s.label}
-      className="min-h-[4.5rem] w-full rounded-md border border-black/10 bg-transparent px-2 py-1 font-mono text-xs outline-none focus:border-black/30 dark:border-white/10 dark:focus:border-white/30"
+      className="kit-textarea min-h-[4.5rem] w-full font-mono text-xs"
       onBlur={() => draft !== asDraft(s.value) && save(draft.split("\n").map((l) => l.trim()).filter(Boolean))}
       onChange={(e) => setDraft(e.target.value)}
       placeholder={s.type === "commands" ? "none (every command asks)" : (s.placeholder ?? "none")}
@@ -125,7 +125,7 @@ function SettingSide({ s, saved, onReset }: { s: Setting; saved: boolean; onRese
     <>
       <span className={cn("text-muted-foreground text-xs", !saved && "invisible")}>Saved</span>
       <button
-        className={cn("rounded p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5", !s.custom && "invisible")}
+        className={cn("rounded p-1 text-muted-foreground hover:bg-(--kit-surface-2) hover:text-foreground", !s.custom && "invisible")}
         onClick={onReset}
         title={`Reset to the default (${defaultText(s)})`}
         type="button"
@@ -163,7 +163,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: (list: Setting[]) => 
       {s.type !== "info" && ` Default: ${defaultText(s)}.`}
     </>
   );
-  const notes = error ? <div className="text-rose-500 dark:text-rose-400 text-xs">{error}</div> : null;
+  const notes = error ? <div className="kit-error-text">{error}</div> : null;
   const kind = settingControlKind(s);
 
   // A list (commands, protected paths): the box goes the full width under the text.
@@ -361,7 +361,7 @@ function NotificationSetting() {
     <SettingLine
       control={<Segmented disabled={!notifySupported()} label="Desktop notifications" onChange={change} options={ON_OFF} value={on ? "on" : "off"} />}
       help="While this tab is in the background: approvals needed, Copilot's questions, a plan to approve, tasks done or failed, and the daily-limit pause."
-      notes={note ? <div className="text-rose-500 dark:text-rose-400 text-xs">{note}</div> : null}
+      notes={note ? <div className="kit-error-text">{note}</div> : null}
       title="Desktop notifications"
     />
   );
@@ -382,7 +382,7 @@ function ResetAllControl({ anyCustom, onReset }: { anyCustom: boolean; onReset: 
   if (!confirm) {
     return (
       <button
-        className="inline-flex h-8 items-center gap-1 rounded-md px-2.5 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5"
+        className="kit-btn kit-btn--ghost kit-btn--sm h-8"
         disabled={!anyCustom}
         onClick={() => setConfirm(true)}
         title={anyCustom ? "Set every setting below back to the app default" : "All settings have the app defaults"}
@@ -396,7 +396,7 @@ function ResetAllControl({ anyCustom, onReset }: { anyCustom: boolean; onReset: 
     <>
       <span className="text-muted-foreground text-xs">Reset all?</span>
       <button
-        className="h-8 rounded-md border border-black/10 px-2.5 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5"
+        className="kit-btn kit-btn--sm h-8"
         onClick={() => {
           setConfirm(false);
           onReset();
@@ -405,7 +405,7 @@ function ResetAllControl({ anyCustom, onReset }: { anyCustom: boolean; onReset: 
       >
         Yes, reset
       </button>
-      <button className="h-8 rounded-md px-2.5 text-xs hover:bg-black/5 dark:hover:bg-white/5" onClick={() => setConfirm(false)} type="button">
+      <button className="kit-btn kit-btn--ghost kit-btn--sm h-8" onClick={() => setConfirm(false)} type="button">
         Cancel
       </button>
     </>
@@ -441,13 +441,13 @@ function SettingsBody({
   const list = groups.find(([g]) => g === current)?.[1] ?? [];
   return (
     <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-      <nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-black/10 border-b p-2 sm:w-52 sm:flex-col sm:overflow-x-visible sm:overflow-y-auto sm:border-r sm:border-b-0 sm:p-3 dark:border-white/10">
+      <nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-(--kit-border) border-b p-2 sm:w-52 sm:flex-col sm:overflow-x-visible sm:overflow-y-auto sm:border-r sm:border-b-0 sm:p-3">
         {sections.map((name) => (
           <button
             aria-current={name === current ? "page" : undefined}
             className={cn(
-              "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5",
-              name === current ? "bg-black/5 font-medium text-foreground dark:bg-white/10" : "text-muted-foreground",
+              "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-left text-sm hover:bg-(--kit-surface-2)",
+              name === current ? "bg-(--kit-surface-2) font-medium text-foreground" : "text-muted-foreground",
             )}
             key={name}
             onClick={() => choose(name)}
@@ -582,23 +582,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   return (
     <ModalBackdrop onClose={onClose}>
       <div
-        className="flex h-[min(80vh,760px)] w-full max-w-[960px] flex-col overflow-hidden rounded-xl border border-black/10 bg-background shadow-xl dark:border-white/10"
+        className="kit-dialog flex h-[min(80vh,760px)] w-full max-w-[960px] flex-col overflow-hidden p-0"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header stays in place; only the settings below it scroll. */}
-        <div className="flex shrink-0 items-center justify-between overflow-hidden border-black/10 border-b px-5 py-3 [scrollbar-gutter:stable_both-edges] dark:border-white/10">
+        <div className="flex shrink-0 items-center justify-between overflow-hidden border-(--kit-border) border-b px-5 py-3 [scrollbar-gutter:stable_both-edges]">
           <div>
             <div className="font-semibold">Settings</div>
             <div className="text-muted-foreground text-xs">For this computer; changes apply right away and are kept across updates.</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <ResetAllControl anyCustom={anyCustom} onReset={resetAll} />
-            <button className="rounded p-1.5 hover:bg-black/5 dark:hover:bg-white/5" onClick={onClose} title="Close (Esc)" type="button">
+            <button className="rounded p-1.5 hover:bg-(--kit-surface-2)" onClick={onClose} title="Close (Esc)" type="button">
               <X className="h-4 w-4" />
             </button>
           </div>
         </div>
-        {error && <div className="shrink-0 px-5 pt-2 text-rose-500 dark:text-rose-400 text-sm">{error}</div>}
+        {error && <div className="shrink-0 px-5 pt-2 text-(--kit-error) text-sm">{error}</div>}
         {/* The first time, before the background load: everything at once, not group by group. */}
         {!settings && !error && <div className="px-5 pt-4 text-muted-foreground text-sm">Loading settings...</div>}
         {settings && <SettingsBody onSaved={setSettings} onTheme={changeTheme} resetNote={resetNote} settings={settings} theme={theme} />}

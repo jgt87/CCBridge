@@ -17,11 +17,11 @@ const asList = <T,>(v: T[] | T | undefined): T[] => (Array.isArray(v) ? v : v ? 
 
 const choiceClass = (on: boolean) =>
   cn(
-    "w-full rounded-md border px-2.5 py-1.5 text-left text-xs",
-    on ? "border-foreground/40 bg-black/5 dark:bg-white/10" : "border-black/10 hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/5",
+    "kit-btn kit-btn--sm h-auto min-h-0 w-full flex-col items-start justify-start px-2.5 py-1.5 text-left font-normal text-xs",
+    on ? "border-(--kit-border-strong) bg-(--kit-accent-soft)" : "border-(--kit-border)",
   );
-const buttonClass = "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs hover:bg-black/10 disabled:opacity-50 dark:hover:bg-white/15";
-const inputClass = "w-full rounded-md border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/15";
+const buttonClass = "kit-btn kit-btn--ghost kit-btn--sm";
+const inputClass = "kit-input h-8 min-h-8 w-full text-xs";
 
 export interface SetupChoiceItem {
   kind: "setupChoice";
@@ -115,7 +115,7 @@ export function SetupChoiceCard({ item, onSend }: { item: SetupChoiceItem; onSen
     );
   };
   return (
-    <div className="space-y-3 rounded-lg border border-black/10 px-3 py-2 text-sm dark:border-white/10">
+    <div className="kit-panel space-y-3 px-3 py-2 text-sm">
       {buildQ && (
         <div className="space-y-2">
           <div>{buildQ.question} StreamHub remembers it for this project.</div>
@@ -129,7 +129,7 @@ export function SetupChoiceCard({ item, onSend }: { item: SetupChoiceItem; onSen
           </div>
           {item.live && (
             <div className="space-y-1">
-              <label className="flex items-center gap-2 text-xs">
+              <label className="kit-check text-xs">
                 <input checked={live} onChange={(e) => setLive(e.target.checked)} type="checkbox" />
                 Keep the data live from a file outside the project
               </label>
@@ -218,7 +218,7 @@ export function ProjectSetupPanel({ projectPath }: { projectPath: string }) {
         <div className="text-muted-foreground">Live data file outside the project</div>
         <input aria-label="Full path of the live data file" className={inputClass} disabled={busy} onChange={(e) => setPath(e.target.value)} placeholder={PATH_HINT} value={path} />
         <div className="flex gap-1.5">
-          <button className={cn(buttonClass, "bg-black/5 dark:bg-white/10")} disabled={busy || !path.trim() || path.trim() === setup.live?.path} onClick={() => void save({ liveSource: path.trim() }, "Saved: StreamHub copies the file in when it changes.")} type="button">
+          <button className={cn(buttonClass, "bg-(--kit-surface-2)")} disabled={busy || !path.trim() || path.trim() === setup.live?.path} onClick={() => void save({ liveSource: path.trim() }, "Saved: StreamHub copies the file in when it changes.")} type="button">
             Use this file
           </button>
           {setup.live && (

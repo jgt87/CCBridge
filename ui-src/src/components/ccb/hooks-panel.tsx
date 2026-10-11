@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { api, type HookItem } from "@/lib/api";
 
 const flatButton =
-  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/5";
+  "kit-btn kit-btn--ghost kit-btn--sm";
 
 const MOMENTS: { id: HookItem["event"]; label: string; help: string }[] = [
   { id: "afterEdit", label: "After Copilot edits a file", help: "{file} is the edited file; a failure goes back to Copilot" },
@@ -47,13 +47,13 @@ export function HooksPanel({ onOpen, refreshKey }: { onOpen: (path: string) => v
       >
         Your commands at fixed moments of a task.
       </InfoNote>
-      {state?.error && <p className="text-rose-500 dark:text-rose-400 text-xs">{state.error}</p>}
+      {state?.error && <p className="kit-error-text">{state.error}</p>}
       {state?.exists ? (
         <>
           {MOMENTS.map((m) => {
             const list = state.hooks.filter((h) => h.event === m.id);
             return (
-              <div className="rounded-lg border border-black/10 p-2 dark:border-white/10" key={m.id}>
+              <div className="kit-panel p-2" key={m.id}>
                 <div className="text-xs" title={m.help}>
                   {m.label} <span className="text-muted-foreground">({list.length})</span>
                 </div>

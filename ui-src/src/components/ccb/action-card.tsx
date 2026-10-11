@@ -87,8 +87,8 @@ function OpenInWindow({ command, strong = false }: { command: string; strong?: b
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <button
         className={cn(
-          "flex h-8 items-center gap-1.5 rounded-lg px-2.5 hover:bg-black/5 dark:hover:bg-white/5",
-          strong ? "border border-black/20 text-foreground dark:border-white/20" : "text-muted-foreground hover:text-foreground"
+          "flex h-8 items-center gap-1.5 rounded-lg px-2.5 hover:bg-(--kit-surface-2)",
+          strong ? "border border-(--kit-border-strong) text-foreground" : "text-muted-foreground hover:text-foreground"
         )}
         disabled={state === "busy"}
         onClick={open}
@@ -98,7 +98,7 @@ function OpenInWindow({ command, strong = false }: { command: string; strong?: b
         <TerminalSquare className="h-3.5 w-3.5" /> Open in a window
       </button>
       {state === "opened" && <span className="text-muted-foreground">Opened: see the console window. Its result shows on a new card.</span>}
-      {state && state !== "busy" && state !== "opened" && <span className="text-rose-500 dark:text-rose-400">{state}</span>}
+      {state && state !== "busy" && state !== "opened" && <span className="text-(--kit-error)">{state}</span>}
     </div>
   );
 }
@@ -137,7 +137,7 @@ function StatusBadge({ status }: { status: string }) {
     awaiting: "font-medium text-foreground",
     ok: "text-muted-foreground",
     "already applied": "text-muted-foreground",
-    failed: "text-rose-500 dark:text-rose-400",
+    failed: "text-(--kit-error)",
     rejected: "text-muted-foreground",
     skipped: "text-muted-foreground",
     interrupted: "text-muted-foreground",
@@ -194,7 +194,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
     <div
       className={cn(
         "rounded-xl border bg-card/60 text-sm",
-        awaiting ? "border-black/30 shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:border-white/30 dark:shadow-[0_0_0_3px_rgba(255,255,255,0.05)]" : "border-black/10 dark:border-white/10"
+        awaiting ? "border-(--kit-border-strong) shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:shadow-[0_0_0_3px_rgba(255,255,255,0.05)]" : "border-(--kit-border)"
       )}
     >
       <button
@@ -224,19 +224,19 @@ export function ActionCard({ item }: { item: ActionItem }) {
       </button>
 
       {expanded && (
-        <div className="space-y-3 border-black/5 border-t px-3 pt-3 pb-3 dark:border-white/5">
+        <div className="space-y-3 border-(--kit-border) border-t px-3 pt-3 pb-3">
           {item.warning && (
-            <div className="flex items-start gap-2 rounded-lg bg-black/5 px-3 py-2 text-foreground text-xs dark:bg-white/10">
+            <div className="kit-notice text-xs">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               {item.warning}
             </div>
           )}
-          {item.error && <div className="text-rose-500 dark:text-rose-400 text-xs">{item.error}</div>}
+          {item.error && <div className="kit-error-text">{item.error}</div>}
           {item.reasons && item.reasons.length > 0 && (
-            <div className="space-y-1 rounded-md bg-black/[0.03] p-2 text-xs dark:bg-white/[0.04]">
+            <div className="kit-notice flex-col space-y-1 p-2 text-xs">
               <div className="flex items-center gap-2">
                 <span className="font-medium">Possible reasons</span>
-                {item.code && <span className="rounded bg-black/5 px-1.5 py-0.5 font-mono text-muted-foreground dark:bg-white/10">{item.code}</span>}
+                {item.code && <span className="kit-badge rounded-(--kit-radius-sm) font-mono font-normal">{item.code}</span>}
               </div>
               <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                 {item.reasons.map((r) => (
@@ -253,8 +253,8 @@ export function ActionCard({ item }: { item: ActionItem }) {
           )}
           {item.preview && item.action === "run" ? (
             // A script a chain or Automation > Scripts runs: its text, not a change.
-            <div className="overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
-              <div className="border-black/10 border-b px-3 py-1.5 font-mono text-muted-foreground text-xs dark:border-white/10">{item.preview.path || "script"}</div>
+            <div className="kit-panel overflow-hidden p-0">
+              <div className="border-(--kit-border) border-b px-3 py-1.5 font-mono text-muted-foreground text-xs">{item.preview.path || "script"}</div>
               <div className="max-h-[28rem] overflow-auto">
                 <CodeView language={languageForPath(item.preview.path)} text={item.preview.new ?? ""} />
               </div>
@@ -313,7 +313,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
                 value={note}
               />
               <button
-                className="flex h-10 items-center gap-1 rounded-lg px-3 text-muted-foreground text-xs hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+                className="flex h-10 items-center gap-1 rounded-lg px-3 text-muted-foreground text-xs hover:bg-(--kit-surface-2) hover:text-foreground"
                 onClick={() => decide("reject")}
                 type="button"
               >

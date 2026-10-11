@@ -16,7 +16,7 @@ $script:KitParts = [ordered]@{
     python      = @('kit-python.js', 'vendor/pyodide/pyodide.js', 'vendor/pyodide/pyodide.asm.mjs', 'vendor/pyodide/pyodide.asm.wasm', 'vendor/pyodide/python_stdlib.zip', 'vendor/pyodide/pyodide-lock.json', 'vendor/pyodide/README.txt')
     pdf         = @('vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js', 'vendor/pdfjs/LICENSE-pdfjs.txt', 'vendor/pdfjs/README.txt')
 }
-$script:ReactFiles = @{ icons = @('Icon.tsx'); interactive = @('HoldButton.tsx', 'SearchBox.tsx', 'DropZone.tsx', 'Tabs.tsx', 'Loading.tsx', 'Composer.tsx', 'CommandButton.tsx'); charts = @('Chart.tsx'); data = @('useFileData.ts')
+$script:ReactFiles = @{ base = @('Popover.tsx', 'Tree.tsx', 'Confirm.tsx'); icons = @('Icon.tsx'); interactive = @('HoldButton.tsx', 'SearchBox.tsx', 'DropZone.tsx', 'Tabs.tsx', 'Loading.tsx', 'Composer.tsx', 'CommandButton.tsx'); charts = @('Chart.tsx'); data = @('useFileData.ts')
     dashboard = @('Drawer.tsx', 'Toast.tsx', 'Tip.tsx', 'MultiSelect.tsx', 'PeriodFilter.tsx', 'Stamp.tsx')
     extras = @('Menu.tsx', 'IconBar.tsx', 'Avatar.tsx', 'SliderRange.tsx', 'TagInput.tsx', 'Board.tsx', 'Calendar.tsx', 'Switch.tsx') }
 
@@ -342,7 +342,7 @@ $script:Companions = @{
 }
 # The kit's revision: raise it when the kit changes in a way projects should get (new classes, chart
 # options the rules name). Update-UiKitCatalog brings an older project catalogue up to date.
-$script:KitRevision = 10
+$script:KitRevision = 11
 
 $script:ScanCache = @{ root = ''; at = [datetime]::MinValue; files = @() }
 $script:ScanSkip = '^(node_modules|dist|build|out|\.git|\.streamhub|Source)$'
@@ -392,6 +392,7 @@ function Get-UiKitFiles([string]$AppRoot) {
     $parts = @(Get-UiKitParts $AppRoot)
     $files = @(@(foreach ($p in $parts) { if ($script:KitParts.Contains($p)) { $script:KitParts[$p] } }) | Select-Object -Unique)
     if ($parts -contains 'react') {
+        $files += @($script:ReactFiles.base | ForEach-Object { "react/$_" })   # the basics (popover, tree, confirm) come with every React kit
         foreach ($p in 'interactive', 'charts', 'icons', 'data', 'dashboard', 'extras') { if ($parts -contains $p) { $files += @($script:ReactFiles[$p] | ForEach-Object { "react/$_" }) } }
     }
     @($files)
@@ -605,7 +606,7 @@ function Get-KitExamplesIndex([string]$Text) {
 }
 
 $script:KitFileNotes = [ordered]@{
-    'kit.js'        = 'behaviour by data-kit-* attributes: sortable tables with pages and a search box, progress bars from aria-valuenow, hold to confirm, search with suggestions, file drop zone, animated tabs and choices, side panel and dialog openers, filters for several values and for a period, info tips, data-as-of stamps, a print button; KitUI.toast for confirmations'
+    'kit.js'        = 'behaviour by data-kit-* attributes: sortable tables with pages and a search box, progress bars from aria-valuenow, hold to confirm, search with suggestions, file drop zone, animated tabs and choices, side panel and dialog openers, popovers, trees with the arrow keys, filters for several values and for a period, info tips, data-as-of stamps, a print button; KitUI.toast for confirmations, KitUI.confirm and KitUI.alert instead of the browser''s own boxes'
     'kit-charts.js' = 'charts on the kit colours: bar (grouped, stacked or 100% stacked), line, area, ring, gauge, heatmap, sparkline, barlist (shares, funnels, colours by meaning); target lines; filter the page on a click; KitCharts.palette for canvas code'
     'kit-data.js'   = 'reading a file a person picks or drops: CSV, TSV, Excel, JSON, Word, PowerPoint'
     'kit-sql.js'    = 'SQL in the page: KitSql.open({ name: rows }) then db.query("SELECT ...") (SQLite; load vendor/sqljs/sql-asm.js first; works from disk)'
@@ -764,7 +765,8 @@ function Get-KitUsage([string]$ProjectRoot) {
     $fromKit = New-Object System.Collections.Generic.List[object]
     $kitHooks = @{ pager = @('pages'); toasts = @('toast'); toast = @('toast'); tip = @('tip'); multi = @('multi'); range = @('range'); segmented = @('range'); search = @('search'); drop = @('drop');
         tags = @('tags'); board = @('board'); calendar = @('calendar'); avatar = @('avatar'); avatars = @('avatar'); 'slider-range' = @('slider-range'); slider = @('slider-range'); iconbar = @('iconbar');
-        menu = @('menu'); chart = @('chart'); barlist = @('chart'); empty = @('chart'); icon = @('icon'); table = @('sort', 'pages', 'filter'); btn = @('multi', 'calendar', 'chart', 'range', 'pages'); input = @('multi', 'range', 'tags'); tabs = @('tabs'); progress = @('progress') }
+        menu = @('menu'); chart = @('chart'); barlist = @('chart'); empty = @('chart'); icon = @('icon'); table = @('sort', 'pages', 'filter'); btn = @('multi', 'calendar', 'chart', 'range', 'pages', 'confirm', 'alert'); input = @('multi', 'range', 'tags'); tabs = @('tabs'); progress = @('progress')
+        dialog = @('confirm', 'alert'); h3 = @('confirm', 'alert'); tree = @('tree') }
     foreach ($f in $files) {
         $rel = $f.FullName.Substring($root.Length + 1).Replace('\', '/')
         $inKit = $rel.StartsWith("$kitDir/", [StringComparison]::OrdinalIgnoreCase)
@@ -791,6 +793,9 @@ function Get-KitUsage([string]$ProjectRoot) {
         if ($t -match 'kit-(tabs|segmented)--animated') { [void]$hooks.Add('tabs') }
         foreach ($m in [regex]::Matches($t, '(?i)styles/kit/([\w./-]+?)(?=["''`?#)\s;,]|$)')) { [void]$refs.Add($m.Groups[1].Value) }
     }
+    # KitUI.confirm / KitUI.alert build a kit-dialog with a title, a text and kit buttons at run time (the
+    # class names are put together in kit.js): a page that calls them gets those rules.
+    if ($hooks.Contains('confirm') -or $hooks.Contains('alert')) { foreach ($c in 'kit-dialog', 'kit-dialog__actions', 'kit-h3', 'kit-btn', 'kit-btn--primary', 'kit-btn--danger') { [void]$classes.Add($c) } }
     $pageList = @($classes) + @($prefixes)
     $reactIn = {
         param($file)
@@ -828,6 +833,7 @@ function Get-KitTextUsage([string[]]$Texts) {
             if ($v -match '[-_]$') { [void]$prefixes.Add($v) } else { [void]$classes.Add($v) }
         }
     }
+    if (($Texts -join "`n") -match 'KitUI\.(confirm|alert)\s*\(') { foreach ($c in 'kit-dialog', 'kit-dialog__actions', 'kit-h3', 'kit-btn', 'kit-btn--primary', 'kit-btn--danger') { [void]$classes.Add($c) } }   # built by kit.js at run time
     @{ classes = $classes; prefixes = @($prefixes); refs = @() }
 }
 
