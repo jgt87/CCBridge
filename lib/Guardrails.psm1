@@ -536,6 +536,7 @@ function Get-TableHeaderFindings([AllowEmptyString()][string]$Text) {
        header cell aligned, filled or sized by a style of its own. "line N: ..." per table. #>
     $out = New-Object System.Collections.Generic.List[string]
     if (-not $Text -or $Text -notmatch 'kit-table') { return @() }
+    $Text = $Text -replace '\\(["''])', '$1'   # markup in a script's strings: \"kit-num\" is "kit-num" (same length minus the slashes; lines stay)
     foreach ($m in [regex]::Matches($Text, '(?is)<table\b[^>]*\bkit-table\b[^>]*>(.*?)</table>')) {
         $line = ([regex]::Matches($Text.Substring(0, $m.Index), "`n")).Count + 1
         $body = $m.Groups[1].Value

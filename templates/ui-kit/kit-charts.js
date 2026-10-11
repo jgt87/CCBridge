@@ -621,12 +621,28 @@
   };
   window.KitCharts = api;
 
+  // A declared chart (data-kit-chart with data-kit-data): drawn at load, and again when a script
+  // writes it later (a dashboard built once its data arrived) or changes its data attribute.
+  function drawDeclared(host) {
+    var data;
+    try { data = JSON.parse(host.getAttribute("data-kit-data") || "{}"); } catch (e) { return; }
+    var kind = host.getAttribute("data-kit-chart");
+    if (api[kind]) { host.kitChartDrawn = true; api[kind](host, data); }
+  }
+  function drawDeclaredIn(root) {
+    if (root.matches && root.matches("[data-kit-chart]") && !root.kitChartDrawn) drawDeclared(root);
+    if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll("[data-kit-chart]"), function (h) { if (!h.kitChartDrawn) drawDeclared(h); });
+  }
   function startCharts() {
-    Array.prototype.forEach.call(document.querySelectorAll("[data-kit-chart]"), function (host) {
-      var data;
-      try { data = JSON.parse(host.getAttribute("data-kit-data") || "{}"); } catch (e) { return; }
-      api[host.getAttribute("data-kit-chart")] && api[host.getAttribute("data-kit-chart")](host, data);
-    });
+    drawDeclaredIn(document);
+    if (window.MutationObserver && document.body) {
+      new MutationObserver(function (list) {
+        list.forEach(function (m) {
+          if (m.type === "attributes") { if (m.target.hasAttribute("data-kit-chart")) drawDeclared(m.target); }
+          else Array.prototype.forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1) drawDeclaredIn(n); });
+        });
+      }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-kit-data"] });
+    }
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startCharts); else startCharts();
 })();

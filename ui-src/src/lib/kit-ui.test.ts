@@ -208,6 +208,23 @@ describe("kit.js additions", () => {
   });
 });
 
+describe("kit-charts.js charts written later", () => {
+  it("draws a declared chart a script adds after the page loaded, and again when its data changes", async () => {
+    document.body.innerHTML = '<div id="dash"></div>';
+    load(chartsJs);
+    await tick();
+    document.getElementById("dash")!.innerHTML = `<div class="kit-chart" id="late" data-kit-chart="ring" aria-label="Tiers" data-kit-data='{"items":[{"label":"A","value":3},{"label":"B","value":1}]}'></div>`;
+    await tick();
+    const late = document.getElementById("late")!;
+    expect(late.querySelector("svg")).not.toBeNull();
+    expect(late.querySelector(".kit-chart__table")!.textContent).toContain("A");
+    late.setAttribute("data-kit-data", '{"items":[{"label":"C","value":5}]}');
+    await tick();
+    expect(late.querySelector(".kit-chart__table")!.textContent).toContain("C");
+    expect(late.querySelector(".kit-chart__table")!.textContent).not.toContain("A");
+  });
+});
+
 describe("kit-charts.js scatter", () => {
   it("draws points with axes, skips what is not a point, and has an empty state", () => {
     document.body.innerHTML = '<div class="kit-chart" id="s"></div><div class="kit-chart" id="e"></div>';

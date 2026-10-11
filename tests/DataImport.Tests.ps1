@@ -191,7 +191,7 @@ Describe 'Loading data in a page (DataTools.load)' {
         [IO.File]::WriteAllText($tools, "/* Data tools: small, tested helpers for the data files in this folder */`nold")
         $r = Update-DataImports $p -AppRoot $root
         @($r.items | ForEach-Object { $_.status }) -join ',' | Should Be 'tools-updated'
-        [IO.File]::ReadAllText($tools) | Should Match '^/\* Data tools v3'
+        [IO.File]::ReadAllText($tools) | Should Match '^/\* Data tools v4'
         [IO.File]::WriteAllText($tools, "// my own tools")
         @((Update-DataImports $p -AppRoot $root).items).Count | Should Be 0
         [IO.File]::ReadAllText($tools) | Should Be '// my own tools'

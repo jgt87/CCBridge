@@ -49,6 +49,14 @@ Describe 'Code health per language' {
     }
 }
 
+Describe 'Files the index leaves out' {
+    It 'never indexes the helper program''s own files: the kit copies, data-tools.js and data-index.js' {
+        $skip = & (Get-Module Issues) { $script:IssueSkip }
+        foreach ($p in 'styles/kit/kit.css', 'styles/kit/kit-icons.js', 'data/data-tools.js', 'data/data-index.js', 'Source/x.csv', 'node_modules/a/b.js') { ($p -match $skip) | Should Be $true }
+        foreach ($p in 'data/sales.js', 'js/app.js', 'index.html', 'styles/app.css') { ($p -match $skip) | Should Be $false }
+    }
+}
+
 Describe 'Get-FileIssues' {
     $dir = New-TestProject
     It 'sorts problems into error, secret and health with stable ids' {

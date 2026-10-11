@@ -1,4 +1,4 @@
-/* Data tools v3, from the helper program. Do not edit: a newer version replaces this file.
+/* Data tools v4, from the helper program. Do not edit: a newer version replaces this file.
 
    Helpers for the project's data. Load this file with a script tag before the page's own script
    (<script src="data/data-tools.js"></script>); it sets window.DataTools. It also works as a
@@ -32,8 +32,8 @@
    DataTools.toDate(text)                a Date at local midnight (no time zone shift), or null
    DataTools.month(text) / year(text)    "2024-01" / 2024 from a date text
    DataTools.byMonth(rows, dateColumn)   groupBy month, in calendar order
-   DataTools.formatNumber(n, decimals?)  with the browser's thousands separator
-   DataTools.formatDate(text, options?)  a date text shown in the browser's language
+   DataTools.formatNumber(n, decimals?)  with the thousands separator of the page's language (html lang; else the browser's)
+   DataTools.formatDate(text, options?)  a date text shown in the page's language (html lang; else the browser's)
    DataTools.percent(part, whole, decimals?)  "12.5%"
 */
 (function (root, factory) {
@@ -383,15 +383,20 @@
     return sortBy(groupBy(list, function (r) { return month(r[dateColumn]); }), 'key');
   }
 
+  // The page's language (html lang="en") decides the separators; without it, the browser's.
+  function pageLang() {
+    try { var l = typeof document !== 'undefined' && document.documentElement && document.documentElement.lang; return l ? String(l) : undefined; } catch (e) { return undefined; }
+  }
+
   function formatNumber(n, decimals) {
     if (typeof n !== 'number' || !isFinite(n)) return '';
     var o = decimals === undefined ? { maximumFractionDigits: 2 } : { minimumFractionDigits: decimals, maximumFractionDigits: decimals };
-    return n.toLocaleString(undefined, o);
+    return n.toLocaleString(pageLang(), o);
   }
 
   function formatDate(text, options) {
     var d = toDate(text);
-    return d ? d.toLocaleDateString(undefined, options || { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+    return d ? d.toLocaleDateString(pageLang(), options || { year: 'numeric', month: 'short', day: 'numeric' }) : '';
   }
 
   function percent(part, whole, decimals) {

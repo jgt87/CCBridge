@@ -153,6 +153,7 @@ Describe 'Rules refined for what the dashboards showed' {
         $js = Get-PageContentScript
         $js | Should Match 'kind: "keyboard"'
         $js | Should Match 'kind: "date"'
+        $js | Should Match 'const declared = box\.hasAttribute\("data-kit-chart"\)'   # an empty kit chart has no height: reported, not skipped
         [regex]::IsMatch($js, '[^\x00-\x7F]') | Should Be $false
         Get-CheckLevel 'index.html has 3 clickable parts a keyboard cannot reach (...)' 'script' | Should Be 'warning'
         Get-CheckLevel "index.html shows 50 dates in ISO form (such as '2026-07-16' in 'People')" 'script' | Should Be 'warning'

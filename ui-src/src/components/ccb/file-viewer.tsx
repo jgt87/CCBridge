@@ -24,7 +24,8 @@ export function FileViewer({
   onOpenFile,
   previewBase,
 }: {
-  file: { path: string; text: string; change?: ViewerChange };
+  /** `note`: a line about the text (a file over 2 MB shows its first part). */
+  file: { path: string; text: string; change?: ViewerChange; note?: string };
   onClose: () => void;
   onOpenFile: (path: string) => void;
   previewBase?: string;
@@ -76,6 +77,7 @@ export function FileViewer({
           </button>
         </div>
         {change && <div className="border-(--kit-border) border-b px-4 py-1.5 text-muted-foreground text-xs">{change.note}</div>}
+        {!change && file.note && <div className="border-(--kit-border) border-b px-4 py-1.5 text-muted-foreground text-xs">{file.note}</div>}
         <div className="min-h-0 flex-1 overflow-auto">
           {change ? (
             <div className="p-3">

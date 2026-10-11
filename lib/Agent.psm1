@@ -843,6 +843,30 @@ function Test-RoundsLeft([int]$Limit, [int]$Round, [int]$LastProgress) {
     @{ go = $false; extend = $false; idle = ($Round -lt $hard); hard = $hard; reason = $reason }
 }
 
+function Test-ExploreRound($Actions, $Results) {
+    <# Whether a round only looked around: reads, searches, finds and folder listings (dir, ls,
+       Get-ChildItem, tree, type, cat), and nothing changed. #>
+    if (-not @($Actions).Count) { return $false }
+    foreach ($a in @($Actions)) {
+        if ($a.type -in 'read', 'glob', 'grep', 'find') { continue }
+        if ($a.type -eq 'run') {
+            $cmd = $(if ($a.arg) { "$($a.arg)" } else { ("$($a.body)" -split "`n")[0] }).Trim()
+            if ($cmd -match '(?i)^(dir|ls|tree|Get-ChildItem|gci|type|cat|Get-Content|gc|where|findstr|Select-String|sls)\b') { continue }
+        }
+        return $false
+    }
+    @($Results | Where-Object { $_.changedPath }).Count -eq 0
+}
+
+function Get-ExploreNudge([int]$Rounds, [string[]]$Missing, [bool]$NewProject) {
+    <# The note that goes back to Copilot after three rounds (and every three more) of only reading
+       and searching with no change: the file list is complete, write now. '' otherwise. #>
+    if ($Rounds -lt 3 -or $Rounds % 3 -ne 0) { return '' }
+    $m = @($Missing | Where-Object { $_ } | Select-Object -Unique)
+    $gone = if ($m.Count) { " The files you looked for do not exist: $($m -join ', ')." } else { '' }
+    "You have only read and searched for $Rounds rounds and changed nothing.$gone The project context lists every file the project has$(if ($NewProject) { ', and this project has no pages or scripts of its own yet' }): there is nothing more to find. Create the files now with write actions (the main page first), and read only files that are in that list."
+}
+
 function Publish-SetupQuestions {
     <# The setup questions (ProjectSetup.psm1 Get-SetupQuestions: fixed rules on the request and the
        project's files) before a request goes to Copilot: the build form of a new project and every
@@ -2677,6 +2701,9 @@ function Get-ProjectContext($State) {
     $budget = [Math]::Max(2000, [int]($State.Config.promptCharBudget * 0.25))
     $paths = @(Get-ProjectFiles $root | ForEach-Object { $_.path })
     $files = if ($paths.Count) { "Files:`n" + (Format-ProjectTree $root -MaxChars $budget) } else { 'The folder is empty.' }
+    # A project without pages or scripts of its own (only converted data and the kit): said plainly,
+    # so Copilot writes instead of looking for files that are not there.
+    if ($paths.Count -and -not (Test-OwnCode $paths)) { $files += "`nThis project has no pages or scripts of its own yet: the list above is complete (data the helper program converted, and the UI kit). Do not read or search for other files; create the pages and scripts with write actions." }
     $notes = Get-ProjectNotes $root
     $full = "$location`n$files" + $(if ($notes) { "`n`nProject notes (AGENTS.md):`n$notes" } else { '' })
     # The shared instructions of every project in this folder (shared/AGENTS.md beside the projects).
@@ -3717,6 +3744,7 @@ function Invoke-AgentTurn {
         # rounds keep changing files goes on past it, up to three times the budget, and stops as soon
         # as two rounds in a row change nothing (Test-RoundsLeft).
         $round = 0; $lastProgress = 0; $extended = $false
+        $exploreRounds = 0; $missingReads = New-Object System.Collections.Generic.List[string]   # rounds that only looked around, and the files they looked for
         while ($true) {
             $round++
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
@@ -3848,6 +3876,14 @@ function Invoke-AgentTurn {
             if ($isDone) { Add-AgentEvent $State 'done' @{ text = $doneText } }
             $roundChanged = @($results | ForEach-Object { $_.changedPath } | Where-Object { $_ } | Select-Object -Unique)
             if ($roundChanged.Count) { $lastProgress = $round }
+            # Rounds that only look around (reads, searches, listings): after three of them in a row
+            # Copilot is told the file list is complete and asked to write (Get-ExploreNudge).
+            if (Test-ExploreRound $actions $results) {
+                $exploreRounds++
+                foreach ($res in $results) { foreach ($mm in [regex]::Matches("$($res.output)", '(?m)^### (\S+)\s*\n\(file not found')) { [void]$missingReads.Add($mm.Groups[1].Value) } }
+                $nudge = Get-ExploreNudge $exploreRounds @($missingReads) (-not (Test-OwnCode @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object { $_.path })))
+                if ($nudge) { $results.Add(@{ head = '### Nothing changed yet'; output = $nudge }); Add-AgentEvent $State 'status' @{ text = "Round ${round}: Copilot has only read and searched for $exploreRounds rounds; StreamHub asked it to write the files now." } }
+            } else { $exploreRounds = 0 }
             if ($null -ne $State.ChatFiles) { foreach ($f in @($results | ForEach-Object { @($_.readPaths) + @($_.changedPath) } | Where-Object { $_ })) { [void]$State.ChatFiles.Add("$f".Replace('\', '/')) } }
             if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
                 # The project's afterEdit hooks first (a formatter changes the files), so the checks
@@ -4268,7 +4304,7 @@ function Invoke-AgentTurn {
             }
             $left = Test-RoundsLeft ([int]$State.Config.maxRounds) $round $lastProgress
             if ($left.extend -and -not $extended) { $extended = $true; Add-AgentEvent $State 'status' @{ text = "Past $($State.Config.maxRounds) rounds, but the last round still changed files: continuing while files keep changing (up to $($left.hard) rounds)." } }
-            if (-not $left.go) { $endReason = $left.reason; Add-AgentEvent $State 'status' @{ text = "Stopped after $round rounds$(if ($left.idle) { ' (the last two rounds changed no files)' }). Send a message to continue." }; break }
+            if (-not $left.go) { $endReason = $left.reason; Add-AgentEvent $State 'status' @{ text = $(if ($lastProgress -eq 0) { "Stopped after $round rounds: Copilot read and searched but changed nothing. Send a message to continue, for example: write the files now." } else { "Stopped after $round rounds$(if ($left.idle) { ' (the last two rounds changed no files)' }). Send a message to continue." }) }; break }
 
             $message = "Results:`n`n" + (Format-ActionResults $State $results) + "`n`nContinue. Use done when the task is finished."
         }
@@ -4618,4 +4654,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Test-RoundsLeft, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn

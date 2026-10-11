@@ -6,6 +6,26 @@ $env:CCBRIDGE_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewG
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
+Describe 'Rounds that only look around' {
+    It 'knows a round of reads, searches and listings from one that writes, and nudges after three' {
+        $read = @([pscustomobject]@{ type = 'read'; arg = 'index.html'; body = '' }, [pscustomobject]@{ type = 'grep'; arg = 'kit-header'; body = '' })
+        $list = @([pscustomobject]@{ type = 'run'; arg = ''; body = 'dir /b' })
+        $write = @([pscustomobject]@{ type = 'write'; arg = 'index.html'; body = '<html>' })
+        Test-ExploreRound $read @(@{ changedPath = $null }) | Should Be $true
+        Test-ExploreRound $list @(@{ changedPath = $null }) | Should Be $true
+        Test-ExploreRound $write @(@{ changedPath = 'index.html' }) | Should Be $false
+        Test-ExploreRound @([pscustomobject]@{ type = 'run'; arg = ''; body = 'node build.js' }) @(@{ changedPath = $null }) | Should Be $false
+        Test-ExploreRound @() @() | Should Be $false
+        Get-ExploreNudge 2 @() $true | Should Be ''
+        Get-ExploreNudge 4 @() $true | Should Be ''
+        $n = Get-ExploreNudge 3 @('README.md', 'index.html', 'README.md') $true
+        $n | Should Match '^You have only read and searched for 3 rounds and changed nothing\. The files you looked for do not exist: README\.md, index\.html\.'
+        $n | Should Match 'no pages or scripts of its own yet'
+        $n | Should Match 'Create the files now with write actions'
+        Get-ExploreNudge 6 @() $false | Should Not Match 'of its own yet'
+    }
+}
+
 Describe 'Test-RoundsLeft' {
     It 'always goes on within the budget, past it only while files change, never past three times the budget' {
         (Test-RoundsLeft 12 5 0).go | Should Be $true

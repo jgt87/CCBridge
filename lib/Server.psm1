@@ -251,9 +251,10 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ files = $files }
         }
         '^GET /api/file$' {
+            # A file for the viewer; one over 2 MB (a data copy) shows its first part with a note (Get-FileViewText).
             $full = Resolve-ProjectPath $State.ProjectRoot $req.QueryString['path']
-            if ((Get-Item -LiteralPath $full).Length -gt 2MB) { throw 'File is larger than 2 MB' }
-            return Send-Json $Ctx @{ path = $req.QueryString['path']; text = (Read-TextFile $full).Text }
+            $v = Get-FileViewText $full
+            return Send-Json $Ctx @{ path = $req.QueryString['path']; text = $v.text; truncated = $v.truncated; note = $v.note }
         }
         '^GET /api/changeset/file$' {
             # History: one file of a change set, before and right after it (Get-ChangeSetFileDiff).

@@ -91,7 +91,7 @@ export default function App() {
   const queueSeen = useRef(new Map<string, string>());
   const pauseSeen = useRef<string | null | undefined>(undefined);
   const [palette, setPalette] = useState<null | "commands" | "attach">(null);
-  const [viewer, setViewer] = useState<{ path: string; text: string; change?: ViewerChange } | null>(null);
+  const [viewer, setViewer] = useState<{ path: string; text: string; change?: ViewerChange; note?: string } | null>(null);
   const [queuedNote, setQueuedNote] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState("");

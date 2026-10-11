@@ -236,6 +236,20 @@ describe("DataTools", () => {
     expect(DataTools.sheets({ Q1: rows, Q2: [] })).toEqual(["Q1", "Q2"]);
     expect(DataTools.columns(rows)).toEqual(["Date", "Region", "Amount"]);
   });
+  it("formats numbers and dates in the page's language, else the browser's", () => {
+    // No browser here: a stand-in for the page's root element.
+    const g = globalThis as unknown as { document?: unknown };
+    const html = { lang: "" };
+    g.document = { documentElement: html };
+    html.lang = "en";
+    expect(DataTools.formatNumber(8377, 0)).toBe("8,377");
+    expect(DataTools.formatNumber(88.44, 1)).toBe("88.4");
+    expect(DataTools.formatDate("2026-10-09")).toBe("Oct 9, 2026");
+    html.lang = "nl";
+    expect(DataTools.formatNumber(8377, 0)).toBe("8.377");
+    expect(DataTools.formatNumber(88.44, 1)).toBe("88,4");
+    delete g.document;
+  });
   it("filters, sorts with nulls last, and lists distinct values", () => {
     expect(DataTools.where(rows, { Region: "South" })).toHaveLength(1);
     expect(DataTools.where(rows, { Region: ["North", "South"], Amount: (v: number) => v > 30 })).toHaveLength(2);

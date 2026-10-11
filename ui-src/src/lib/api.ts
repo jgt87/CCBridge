@@ -708,7 +708,7 @@ export const api = {
   openProject: (path: string) => call<{ ok: boolean }>("POST", "/api/project/open", { path }),
   files: () => call<{ files: FileInfo[] }>("GET", "/api/files"),
   file: (path: string) =>
-    call<{ path: string; text: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),
+    call<{ path: string; text: string; truncated?: boolean; note?: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),
   changeFile: (changeSet: string, path: string) =>
     call<ChangeFileDiff>("GET", `/api/changeset/file?id=${encodeURIComponent(changeSet)}&path=${encodeURIComponent(path)}`),
   chat: (text: string, opts: ChatOptions = {}) => call<{ ok: boolean }>("POST", "/api/chat", { text, ...opts }),

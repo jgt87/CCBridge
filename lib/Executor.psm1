@@ -31,6 +31,30 @@ function Get-TextEncoding([string]$Name) {
     }
 }
 
+function Get-FileViewText {
+    <# A file for the app's viewer: the whole text up to $Limit bytes; a larger file (a data copy of
+       several MB) gives its first $Cap characters, cut at a line end when the text has lines, with a
+       note saying how much is shown of how much and where the whole file is. Returns
+       @{ text; truncated; note; bytes }. #>
+    param([Parameter(Mandatory)][string]$Path, [long]$Limit = 2MB, [int]$Cap = 1MB)
+    $size = (Get-Item -LiteralPath $Path).Length
+    $info = Read-TextFile $Path
+    if ($size -le $Limit) { return @{ text = $info.Text; truncated = $false; note = ''; bytes = $size } }
+    $text = $info.Text
+    $part = if ($text.Length -gt $Cap) { $text.Substring(0, $Cap) } else { $text }
+    $cut = $part.LastIndexOf("`n")
+    if ($cut -gt $Cap * 0.6) { $part = $part.Substring(0, $cut + 1) }   # whole lines when the file has them
+    $shownLines = ([regex]::Matches($part, "`n")).Count
+    $totalLines = ([regex]::Matches($text, "`n")).Count + 1
+    $mb = { param($n) if ($n -lt 1MB) { [string]([Math]::Round($n / 1KB)) + ' KB' } else { [string]([Math]::Round($n / 1MB, 1)) + ' MB' } }
+    $note = if ($totalLines -gt 1 -and $shownLines -gt 0) {
+        "Showing the first $shownLines of $totalLines lines ($(& $mb $part.Length) of $(& $mb $size)): the file is larger than $(& $mb $Limit). The whole file is in the project folder."
+    } else {
+        "Showing the first $(& $mb $part.Length) of $(& $mb $size), on one line: the file is larger than $(& $mb $Limit). The whole file is in the project folder."
+    }
+    @{ text = $part; truncated = $true; note = $note; bytes = $size }
+}
+
 function Read-TextFile([string]$Path) {
     <# Text with LF line endings, plus how to write it back: its encoding (utf8, utf8bom, ansi,
        utf16le, utf16be), BOM, and CRLF when most of its lines end that way. A Word, PowerPoint or
@@ -1035,6 +1059,28 @@ function Split-ReadPath([string]$Spec) {
     [pscustomobject]@{ Path = $Spec.Trim(); From = 1; To = [int]::MaxValue }
 }
 
+function Get-FolderListing([string]$ProjectRoot, [string]$Rel) {
+    <# A read of a folder ('.' or a folder path): its files with their sizes (at most 200). #>
+    $prefix = "$Rel".Replace('\', '/').Trim('/', '.'); if ($prefix) { $prefix += '/' }
+    $files = @(Get-ProjectFiles $ProjectRoot | Where-Object { -not $prefix -or $_.path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })
+    if (-not $files.Count) { return "(a folder with no files$(if (-not $prefix) { ': the project has no files yet. Create them with write actions' }))" }
+    $shown = @($files | Select-Object -First 200 | ForEach-Object { "$($_.path) ($($_.size) bytes)" })
+    $fence = '```'
+    "(a folder with $($files.Count) file(s)$(if ($files.Count -gt 200) { ', the first 200' }))`n$fence`n$($shown -join "`n")`n$fence"
+}
+
+function Get-ReadNotFoundNote([string]$ProjectRoot, [string]$Rel) {
+    <# A read of a file that is not there: says so, with the file of that name elsewhere, or the
+       project's files when there are few, so the next step is a write, not another guess. #>
+    $files = @(Get-ProjectFiles $ProjectRoot | ForEach-Object { $_.path })
+    $leaf = [IO.Path]::GetFileName("$Rel".Replace('\', '/'))
+    $same = @($files | Where-Object { $leaf -and [IO.Path]::GetFileName($_) -ieq $leaf -and $_ -ne $Rel })
+    $hint = if ($same.Count) { " A file with that name is at: $($same -join ', ')." }
+        elseif ($files.Count -le 40) { " The project's files: $(if ($files.Count) { $files -join ', ' } else { 'none yet' })." }
+        else { " The project has $($files.Count) files (listed in the project context); none is $Rel." }
+    "(file not found: the project has no $Rel.$hint Create it with a write action if it should exist.)"
+}
+
 function Invoke-ReadAction {
     <# File contents for Copilot. A path may carry a line range (PATH:START-END). Long content is
        cut at a whole line, with a note that says which lines are shown and how to read the rest. #>
@@ -1044,20 +1090,24 @@ function Invoke-ReadAction {
             $op = $Matches[1]
             try {
                 $full = Resolve-ProjectPath $ProjectRoot $op
-                if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $op`n(file not found)"; continue }
+                if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $op`n$(Get-ReadNotFoundNote $ProjectRoot $op)"; continue }
                 $text = (Read-TextFile $full).Text
                 if ($full -match '(?i)\.html?$') { $text = Hide-GeneratedBlocks $text }
                 $total = $text.Replace("`r`n", "`n").Split("`n").Length
                 $ol = @(Get-FileOutline $text $full)
-                "### $op (outline, $total lines)`n````n$(if ($ol.Count) { $ol -join "`n" } else { '(no structure found; read the file or a line range)' })`n````"
+                $fence = '```'
+                "### $op (outline, $total lines)`n$fence`n$(if ($ol.Count) { $ol -join "`n" } else { '(no structure found; read the file or a line range)' })`n$fence"
             } catch { "### $op`n(error: $($_.Exception.Message))" }
             continue
         }
         $r = Split-ReadPath $spec
         $p = $r.Path
         try {
+            # A folder ('.', 'src'): its files, instead of an error.
+            if ("$p".Trim() -match '^(\.|\./|\.\\|/|\\)?$') { "### $p`n$(Get-FolderListing $ProjectRoot '')"; continue }
             $full = Resolve-ProjectPath $ProjectRoot $p
-            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $p`n(file not found)"; continue }
+            if (Test-Path -LiteralPath $full -PathType Container) { "### $p`n$(Get-FolderListing $ProjectRoot $p)"; continue }
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $p`n$(Get-ReadNotFoundNote $ProjectRoot $p)"; continue }
             $office = Get-OfficeKind $full
             if ($office -in 'old', 'pdf', 'image') { "### $p`n($(Get-OfficeLabel $full), which cannot be read as text here. The helper program attaches the file to this message when it can: read it from the attachment. To change it, write a new .docx or .csv.)"; continue }
             # Secret files: which keys are set, never the values (SecretFiles.psm1).
@@ -2297,4 +2347,4 @@ function Invoke-RunAction {
 }
 
 Export-ModuleMember -Function Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
-    Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction
+    Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction, Get-FileViewText, Get-FolderListing, Get-ReadNotFoundNote

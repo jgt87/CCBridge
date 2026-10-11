@@ -33,6 +33,14 @@ Describe 'Add-StreamRecord' {
         $s.Done | Should Be $true
         $s.Merger.Text | Should BeExactly 'Hi'
     }
+    It 'ends on an isLastUpdate flag, as some tenants mark the last update' {
+        $s = New-StreamState
+        Add-StreamRecord $s (Rec '{"type":2,"item":{"argument":{"isLastUpdate":false,"messages":[{"author":"bot","text":"Hi"}]}}}')
+        $s.Done | Should Be $false
+        Add-StreamRecord $s (Rec '{"type":2,"item":{"argument":{"isLastUpdate":true,"messages":[{"author":"bot","text":"Hi there"}]}}}')
+        $s.Done | Should Be $true
+        $s.Why | Should Be 'isLastUpdate=true'
+    }
     It 'ends on a completion record after items, and reports a non-success result' {
         $s = New-StreamState
         Add-StreamRecord $s (Rec '{"type":3,"invocationId":"1"}')

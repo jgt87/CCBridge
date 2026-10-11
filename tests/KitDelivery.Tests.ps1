@@ -149,6 +149,9 @@ Describe 'Table header rows are one piece' {
         $r[0] | Should Match "^line 1: column 2 \('Amount'\): the header and the cells do not align the same way \(kit-num on the header but not the cells\)"
         $styled = '<table class="kit-table"><thead><tr><th style="text-align:right">Total</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table>'
         @(Find-TableHeaderIssues 'app.js' '' ('el.innerHTML = `' + $styled + '`;'))[0] | Should Match 'a header cell of this table has a style of its own'
+        # Markup in a script string with escaped quotes: the cells do carry kit-num.
+        $escaped = 'el.innerHTML = "<table class=\"kit-table\"><thead><tr><th>Name</th><th class=\"kit-num\">Prompts</th></tr></thead><tbody>" + rows.map(function (p) { return "<tr><td>" + p.name + "</td><td class=\"kit-num\">" + p.n + "</td></tr>"; }).join("") + "</tbody></table>";'
+        @(Find-TableHeaderIssues 'dashboard.js' '' $escaped).Count | Should Be 0
         @(Find-TableHeaderIssues 'index.html' $mixed $mixed).Count | Should Be 0   # already there: not the change's doing
         Get-CheckLevel $r[0] 'quality' | Should Be 'warning'
     }

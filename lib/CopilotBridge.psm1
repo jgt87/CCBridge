@@ -904,7 +904,7 @@ function New-StreamState {
 $script:LimitPattern = '(?i)daily limit|usage limit|reached (your|the) .{0,30}limit|out of credits|dagelijkse limiet|limiet bereikt'
 $script:PlaceholderPattern = '(?i)^(working on it|taking a look|thinking|searching|generating|one moment|bezig|even kijken)[^\n]{0,40}(\u2026|\.\.\.)\s*$'
 
-$script:StreamFinalFlags = '^(isFinal|isLast|final|isComplete|isCompleted|completed|done|isDone|endOfStream|isEnd|isLastChunk)$'
+$script:StreamFinalFlags = '^(isFinal|isLast|final|isComplete|isCompleted|completed|done|isDone|endOfStream|isEnd|isLastChunk|isLastUpdate|lastUpdate|isLastMessage)$'
 $script:StreamStateFields = '^(state|status|messageState|streamState|phase|eventType|kind)$'
 $script:StreamFinalValues = '(?i)^(complete|completed|final|done|end|ended|finished|endofstream|streamend)$'
 

@@ -6,6 +6,20 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.123] - 2026-10-11
+
+### Changed
+- A kit chart a script writes after the page loaded (a dashboard built once its data arrived) is now drawn too, and drawn again when its data attribute changes; before, only charts in the page at load were drawn, so a dashboard could show empty chart panels.
+- The page check reports a kit chart that drew nothing whatever its size; an empty chart box has no height, which is exactly the case it skipped before.
+- DataTools.formatNumber and formatDate follow the page's language (`html lang`), as the kit's own helpers do; a page in English showed 8.377 and 88,4% on a Dutch computer.
+- On tenants whose stream connection marks the last update with `isLastUpdate`, the reply ends there instead of after a wait for the page's copy (four to nine seconds per reply).
+- At the start of a new project Copilot could spend every round reading files that do not exist (README.md, index.html, js/app.js), searching and listing the folder, and stop after 12 rounds with nothing written. Now a read of `.` or a folder lists its files instead of "Path is outside the project", a read of a missing file says which files exist (or where a file of that name is), the project context says plainly when a project has no pages or scripts of its own yet, and after three rounds of only reading and searching StreamHub tells Copilot the list is complete and to write the files now; the stop line says "read and searched but changed nothing" when that is what happened.
+
+### Fixed
+- A table written from a script with escaped quotes (`<td class=\"kit-num\">`) was reported as a header that does not align with its cells; Copilot disputed it and lost a round.
+- The issue index listed StreamHub's own data-tools.js and kit files as the project's code health problems; they are left out now.
+- Opening a project file over 2 MB from the Files tab (a 5 MB data copy) flashed "File is larger than 2 MB" and showed nothing. The viewer now shows the first part of such a file (its first 1 MB, whole lines when it has them) with a line saying how much of the file that is.
+
 ## [v0.1.122] - 2026-10-11
 
 ### Added
