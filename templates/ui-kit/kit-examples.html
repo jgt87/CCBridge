@@ -141,7 +141,9 @@
 <!-- kit-toolbar, kit-segmented, kit-table-wrap, kit-table, kit-num, kit-badge. With kit.js: data-kit-sort (every header
      sorts; th.kit-num as numbers; data-sort="VALUE" on a cell for dates or formatted numbers) and data-kit-pages="N"
      (a kit-pager under the table); events kit:sort and kit:page. Every table has an empty state: a
-     <tr data-kit-empty> row with a kit-empty block when there are no rows. -->
+     <tr data-kit-empty> row with a kit-empty block when there are no rows. From data, write no rows yourself:
+     give each th data-key="FIELD" (and data-format="number|percent|date") and call KitUI.fillTable(table, rows);
+     a filter select: KitUI.options(select, values, { all: "All ITEMS" }). -->
 <section id="table" class="kit-stack">
   <h2 class="kit-h2">Toolbar and table</h2>
   <div class="kit-toolbar">
@@ -204,14 +206,19 @@
   </div>
 </section>
 
-<!-- kit-tabs, kit-tab -->
+<!-- kit-tabs, kit-tab: tabs with panels; each tab's aria-controls names its panel and kit.js shows the
+     selected one and hides the rest (no script of your own); listens: kit:tab. Without aria-controls
+     the tabs are a choice (kit:select from kit-tabs--animated, or the page's own click handler). -->
 <section id="tabs">
   <h2 class="kit-h2">Tabs</h2>
-  <div class="kit-tabs" role="tablist">
-    <button class="kit-tab" role="tab" aria-selected="true" type="button">Day</button>
-    <button class="kit-tab" role="tab" aria-selected="false" type="button">Week</button>
-    <button class="kit-tab" role="tab" aria-selected="false" type="button">Month</button>
+  <div class="kit-tabs" role="tablist" aria-label="Views">
+    <button class="kit-tab" role="tab" aria-selected="true" aria-controls="tab-overview" type="button">Overview</button>
+    <button class="kit-tab" role="tab" aria-selected="false" aria-controls="tab-details" type="button">Details</button>
+    <button class="kit-tab" role="tab" aria-selected="false" aria-controls="tab-history" type="button">History</button>
   </div>
+  <div id="tab-overview" class="kit-stack"><p class="kit-muted">The main figures and charts.</p></div>
+  <div id="tab-details" class="kit-stack" hidden><p class="kit-muted">A breakdown per group.</p></div>
+  <div id="tab-history" class="kit-stack" hidden><p class="kit-muted">Changes over time.</p></div>
 </section>
 
 <!-- kit-split, kit-nav, kit-panel -->

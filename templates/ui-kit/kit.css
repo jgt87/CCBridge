@@ -16,11 +16,15 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 }
 /* hidden stays hidden: the kit's blocks set display (flex, grid), which would otherwise beat the browser's own rule. */
 .kit-page [hidden] { display: none !important; }
+/* Hidden means hidden for every kit part, inside a kit-page or not (a chart or empty state a script hides). */
+[class*="kit-"][hidden] { display: none !important; }
 .kit-container { max-width: var(--kit-page-width); margin: 0 auto; padding: var(--kit-space-5) var(--kit-page-pad); box-sizing: border-box; }
 /* Page header: a full-width bar whose contents sit on the same edges as the page (kit-container). */
 .kit-header { background: var(--kit-surface); border-bottom: 1px solid var(--kit-border); }
 .kit-header > .kit-container { display: flex; align-items: center; justify-content: space-between; gap: var(--kit-space-4); padding-top: var(--kit-space-3); padding-bottom: var(--kit-space-3); }
 .kit-header__title { margin: 0; font-size: var(--kit-text-lg); font-weight: 650; }
+/* A line under the page title: <p class="kit-header__subtitle">What the page shows</p>. */
+.kit-header__subtitle, .kit-header__title + p { margin: var(--kit-space-1) 0 0; font-size: var(--kit-text-sm); opacity: 0.9; }
 .kit-header--band { background: var(--kit-gradient); border-bottom: 0; color: var(--kit-on-gradient); --kit-title: var(--kit-on-gradient); --kit-icon: var(--kit-on-gradient); }
 .kit-header--band a, .kit-header--band .kit-link { color: var(--kit-on-gradient); }
 .kit-header--band .kit-btn { border-color: var(--kit-on-gradient); }
@@ -130,6 +134,17 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-input::placeholder, .kit-textarea::placeholder, .kit-tags__input::placeholder, .kit-composer textarea::placeholder { color: var(--kit-text-muted); opacity: 1; }
 /* A field beside its label, in a toolbar: <div class="kit-field kit-field--inline"><label class="kit-label" for="ID">Months</label><select class="kit-select" id="ID">...</select></div>. */
 .kit-field--inline { flex-direction: row; align-items: center; gap: var(--kit-space-2); }
+/* A field never pushes the page wider than the screen: a select sized by a long option shrinks (the option text is cut). */
+.kit-input, .kit-select, .kit-textarea { max-width: 100%; }
+.kit-field--inline { min-width: 0; max-width: 100%; }
+.kit-field--inline > .kit-select, .kit-field--inline > .kit-input { flex: 0 1 auto; min-width: 0; }
+/* A toolbar of fields with their labels above: the fields line up at the bottom. On a phone every field in
+   a toolbar takes the whole width, one under the other. */
+.kit-toolbar:has(> .kit-field:not(.kit-field--inline)) { align-items: flex-end; }
+@media (max-width: 640px) {
+  .kit-toolbar > .kit-field { flex: 1 1 100%; }
+  .kit-toolbar > .kit-field > .kit-select, .kit-toolbar > .kit-field > .kit-input { flex: 1 1 auto; width: 100%; }
+}
 .kit-check { display: inline-flex; align-items: center; gap: var(--kit-space-2); font-size: var(--kit-text-sm); }
 .kit-check input { accent-color: var(--kit-accent); width: 1rem; height: 1rem; }
 .kit-form { display: grid; gap: var(--kit-space-4); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }

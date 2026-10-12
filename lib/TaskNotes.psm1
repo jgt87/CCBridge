@@ -38,7 +38,7 @@ function Read-NoteBlock([AllowEmptyString()][string]$Text, [string]$Heading, [in
 
 function Get-DoneWhenAsk {
     # The line that goes with a build or change request: the checks, before any file is written.
-    "Before you change files, write a line 'Done when:' and under it 2 to 5 checks taken from this request that someone could confirm on the page or in the files (for example: '- the page shows a chart of users per tier'), each a '- ' line. You will be asked about each one at the end."
+    "Before you change files, write a line 'Done when:' and under it 2 to 5 checks taken from this request that someone could confirm on the page or in the files (for example: '- the page shows a chart of ITEMS per GROUP'), each a '- ' line. You will be asked about each one at the end. Then go on with the work in the same reply (action blocks): the list alone does not finish the reply."
 }
 
 function Read-DoneWhen([AllowEmptyString()][string]$Text) {
@@ -91,7 +91,7 @@ function Format-AcceptanceReport($Results) {
 # --- Tie-breakers: what the fixed rules cannot tell from the words alone ------------------------
 
 function Get-RequestTypeAsk {
-    "The helper program cannot tell from the words alone whether this request changes how existing parts look, adds or changes what the app does, or both. Before you change files, write one line: 'Request type: look', 'Request type: feature' or 'Request type: both'. The LOOK ASKED FOR rules apply only with look or both, and then only to the parts whose look the request names."
+    "The helper program cannot tell from the words alone whether this request changes how existing parts look, adds or changes what the app does, or both. Before you change files, write one line: 'Request type: look', 'Request type: feature' or 'Request type: both'. The LOOK ASKED FOR rules apply only with look or both, and then only to the parts whose look the request names. Then go on with the work in the same reply."
 }
 
 function Read-RequestType([AllowEmptyString()][string]$Text) {
@@ -122,6 +122,11 @@ function Read-ScopeDecision([AllowEmptyString()][string]$Text) {
         if ($m.Success) { return $m.Groups[1].Value.ToLowerInvariant() }
     }
     ''
+}
+
+function Get-NotesGoAhead {
+    # After a reply with only the notes asked for first: carry out the task now.
+    "Noted. Now carry out the task: read what you still need or write the files, with action blocks. Do not repeat the lists above."
 }
 
 # --- Data notes ------------------------------------------------------------------------------
@@ -172,4 +177,4 @@ function Format-DataNotes([string]$ProjectRoot) {
     "Data notes (what you wrote about this data earlier; read the data again only for what they do not cover):`n" + ((@($have.notes) | ForEach-Object { "- $_" }) -join "`n")
 }
 
-Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision
+Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision, Get-NotesGoAhead

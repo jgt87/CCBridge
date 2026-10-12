@@ -372,7 +372,7 @@ $script:Companions = @{
 }
 # The kit's revision: raise it when the kit changes in a way projects should get (new classes, chart
 # options the rules name). Update-UiKitCatalog brings an older project catalogue up to date.
-$script:KitRevision = 12
+$script:KitRevision = 13
 
 $script:ScanCache = @{ root = ''; at = [datetime]::MinValue; files = @() }
 $script:ScanSkip = '^(node_modules|dist|build|out|\.git|\.streamhub|Source)$'
@@ -680,7 +680,7 @@ function Get-KitExamplesIndex([string]$Text) {
 }
 
 $script:KitFileNotes = [ordered]@{
-    'kit.js'        = 'behaviour by data-kit-* attributes: sortable tables with pages and a search box, progress bars from aria-valuenow, hold to confirm, search with suggestions, file drop zone, animated tabs and choices, side panel and dialog openers, popovers, trees with the arrow keys, filters for several values and for a period, info tips, data-as-of stamps, a print button; KitUI.toast for confirmations, KitUI.confirm and KitUI.alert instead of the browser''s own boxes'
+    'kit.js'        = 'behaviour by data-kit-* attributes: sortable tables with pages and a search box, KitUI.fillTable(table, rows) and KitUI.options(select, values) to fill from data, tab panels by aria-controls, progress bars from aria-valuenow, hold to confirm, search with suggestions, file drop zone, animated tabs and choices, side panel and dialog openers, popovers, trees with the arrow keys, filters for several values and for a period, info tips, data-as-of stamps, a print button; KitUI.toast for confirmations, KitUI.confirm and KitUI.alert instead of the browser''s own boxes'
     'kit-charts.js' = 'charts on the kit colours: bar (grouped, stacked or 100% stacked), line, area, ring, gauge, heatmap, sparkline, barlist (shares, funnels, colours by meaning); target lines; filter the page on a click; KitCharts.palette for canvas code'
     'kit-data.js'   = 'reading a file a person picks or drops: CSV, TSV, Excel, JSON, Word, PowerPoint'
     'kit-sql.js'    = 'SQL in the page: KitSql.open({ name: rows }) then db.query("SELECT ...") (SQLite; load vendor/sqljs/sql-asm.js first; works from disk)'
@@ -1196,6 +1196,21 @@ function Update-UiKitProject {
     $recFiles = if ($rec) { $rec.files } else { @{} }
     $recChanged = $false
     $usage = Get-KitUsage $ProjectRoot
+    # With the shared library the licence texts stay in its catalogue (shared/ui-kit/), beside the kit
+    # files they belong to; the kit files keep their author and licence lines. A licence copy the
+    # project still has as the catalogue's is removed.
+    $sharedKit = [bool](Get-SharedRoot $ProjectRoot)
+    if ($sharedKit -and (Test-Path -LiteralPath $kit)) {
+        foreach ($lf in @(Get-ChildItem -LiteralPath $kit -Recurse -File -Filter 'LICENSE-*.txt' -ErrorAction SilentlyContinue)) {
+            $rel = $lf.FullName.Substring($kit.Length + 1).Replace('\', '/')
+            $src = Get-KitFileSource $ProjectRoot $AppRoot $rel
+            if ($src -and (Get-FileSha $src.path) -eq (Get-FileSha $lf.FullName)) {
+                Remove-Item -LiteralPath $lf.FullName -Force
+                $updated.Add("$(Get-UiKitFolder)/$rel (removed: the licence is in $(Get-UiKitCatalog $ProjectRoot)/)")
+                if ($recFiles.ContainsKey("$(Get-UiKitFolder)/$rel")) { $recFiles.Remove("$(Get-UiKitFolder)/$rel"); $recChanged = $true }
+            }
+        }
+    }
     $queue = New-Object System.Collections.Generic.Queue[string]
     foreach ($r in $usage.refs) { $queue.Enqueue($r) }
     # Files the pages refer to, with what they need (run again for what the stylesheet names).
@@ -1209,6 +1224,7 @@ function Update-UiKitProject {
             if ($name -in 'kit.css', 'tokens.css', 'tokens-neutral.css', 'kit-examples.html', 'VERSION.txt') { continue }
             $src = Get-KitFileSource $ProjectRoot $AppRoot $name
             if (-not $src) { continue }
+            if ($sharedKit -and $src.name -match '(?i)(^|/)LICENSE-[^/]+\.txt$') { continue }   # stays in the shared catalogue
             $to = Join-Path $kit $src.name.Replace('/', '\')
             if (-not (Test-Path -LiteralPath $to)) {
                 $null = New-Item -ItemType Directory -Force -Path (Split-Path $to)
@@ -1253,7 +1269,7 @@ function Update-UiKitProject {
         if ($ic.written -or (Test-Path -LiteralPath (Join-Path $kit 'kit-icons.js'))) {
             $lic = Join-Path $kit 'LICENSE-lucide.txt'
             $ls = Get-KitFileSource $ProjectRoot $AppRoot 'LICENSE-lucide.txt'
-            if (-not (Test-Path -LiteralPath $lic) -and $ls) { Copy-Item -LiteralPath $ls.path -Destination $lic; $added.Add("$(Get-UiKitFolder)/LICENSE-lucide.txt") }
+            if (-not $sharedKit -and -not (Test-Path -LiteralPath $lic) -and $ls) { Copy-Item -LiteralPath $ls.path -Destination $lic; $added.Add("$(Get-UiKitFolder)/LICENSE-lucide.txt") }
         }
         $unknown = @($ic.unknown)
     }

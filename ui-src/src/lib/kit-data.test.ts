@@ -221,6 +221,41 @@ function minimalPdf(lines: string[]): ArrayBuffer {
   return enc.encode(out).buffer;
 }
 
+describe("DataTools joins, bands and counts (v5)", () => {
+  const people = [
+    { Mail: "a.b@x.org", Name: "Ana Bell", Count: 120, A: true, B: 0 },
+    { Mail: "c@x.org", Name: "Ce Dee", Count: 8, A: false, B: 3 },
+    { Mail: "", Name: "Ed  O'Neil", Count: 0, A: true, B: null },
+    { Mail: "z@x.org", Name: "Nobody", Count: 40, A: null, B: 1 },
+  ];
+  const other = [
+    { Email: "A.B@X.ORG", "Full name": "Bell, Ana", Team: "North" },
+    { Email: "c@x.org", "Full name": "Ce Dee", Team: "South" },
+    { Email: "", "Full name": "ed oneil", Team: "East", Count: 999 },
+  ];
+  it("joins by pairs of keys tried in order, loosely, and counts the matches", () => {
+    const j = DataTools.join(people, other, { on: [["Mail", "Email"], ["Name", "Full name"]] });
+    expect(j.map((r: Record<string, unknown>) => r.Team ?? null)).toEqual(["North", "South", "East", null]);
+    expect(j[2].Count).toBe(0);   // a field both have keeps this row's value
+    expect([j.matched, j.unmatched]).toEqual([3, 1]);
+    expect(DataTools.join(people, other, { on: [["Mail", "Email"]], how: "inner" }).length).toBe(2);
+    expect(DataTools.join(people, other, { on: [["Name", "Full name"]], prefix: "Other " })[2]["Other Count"]).toBe(999);
+    expect(DataTools.matchKey("Garcia-Lopez, Ana")).toBe("garcialopezana");
+  });
+  it("puts values in bands from the top, by a minimum or a rule, and cuts the data in equal groups", () => {
+    const bands = [{ label: "High", min: 100 }, { label: "Mid", min: 10 }, { label: "Low", when: (x: number) => x > 0 }];
+    expect([120, 40, 8, 0].map((x) => DataTools.band(x, bands, "None"))).toEqual(["High", "Mid", "Low", "None"]);
+    expect(DataTools.quantiles(people, "Count", 2)).toEqual([24]);
+    expect(DataTools.quantiles([], "Count", 4)).toEqual([]);
+  });
+  it("counts per value and per column in the shape charts read", () => {
+    const rows = [{ T: "x" }, { T: "y" }, { T: "x" }, { T: null }, { T: "z" }];
+    expect(DataTools.countBy(rows, "T")).toEqual([{ label: "x", value: 2 }, { label: "y", value: 1 }, { label: "z", value: 1 }]);
+    expect(DataTools.countBy(rows, "T", { missing: "(none)", top: 1 })).toEqual([{ label: "x", value: 2 }, { label: "Other", value: 3 }]);
+    expect(DataTools.countEach(people, { A: "A", B: "B", Big: (r: { Count: number }) => r.Count > 50 })).toEqual([{ label: "A", value: 2 }, { label: "B", value: 2 }, { label: "Big", value: 1 }]);
+  });
+});
+
 describe("DataTools", () => {
   const rows = [
     { Date: "2024-01-31", Region: "North", Amount: 100 },

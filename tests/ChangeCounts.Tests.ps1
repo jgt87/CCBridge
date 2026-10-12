@@ -51,6 +51,35 @@ Describe 'Line counts per change' {
 }
 
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
+Describe 'Line count of a new large file' {
+    It 'counts the lines of a file too large to compare, in blocks across the buffer edge' {
+        $f = Join-Path $env:TEMP ('ccb-lines-' + [guid]::NewGuid().ToString('N') + '.html')
+        try {
+            $line = 'x' * 999
+            [IO.File]::WriteAllText($f, ((1..3000 | ForEach-Object { $line }) -join [char]10) + [char]10 + 'last')
+            Get-FileLineCount $f | Should Be 3001
+            [IO.File]::WriteAllText($f, ''); Get-FileLineCount $f | Should Be 0
+            [IO.File]::WriteAllText($f, 'a' + [char]10); Get-FileLineCount $f | Should Be 1
+        } finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'Reading a data file the helper program converted' {
+    It 'points to the converted copy and shows its first lines instead of the original' {
+        $p = Join-Path $env:TEMP ('ccb-conv-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory (Join-Path $p 'data'), (Join-Path $p '.streamhub') -Force | Out-Null
+        try {
+            [IO.File]::WriteAllText((Join-Path $p 'Usage.csv'), "a,b`n1,2`n")
+            [IO.File]::WriteAllText((Join-Path $p 'data\usage.json'), "[`n  {""a"": 1, ""b"": 2}`n]`n")
+            [IO.File]::WriteAllText((Join-Path $p '.streamhub\data-imports.json'), '{"version":1,"items":[{"output":"data/usage.json","source":"Usage.csv","hash":"X","js":"data/usage.js","global":"usageData"}]}')
+            $out = (@(Invoke-ReadAction $p @('Usage.csv')) -join "`n")
+            $out | Should Match 'converted this file to data/usage.json'
+            $out | Should Match '### data/usage.json'
+            (@(Invoke-ReadAction $p @('data/usage.json')) -join "`n") | Should Not Match 'converted this file'
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 Describe 'Change set events' {
     It 'carry what asked for them and the lines added and removed per file' {
         $p = Join-Path $env:TEMP ('ccb-cse-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null

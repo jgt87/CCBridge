@@ -1223,8 +1223,90 @@
     if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(".kit-stamp, [data-kit-stamp], [data-kit-stamp-of]"), function (el) { showStamp(el); });
   }
 
+  // Filling parts from data, so a page writes no DOM code of its own for them.
+  // KitUI.options(select, values, { all: "All ITEMS", selected }) writes a select's options:
+  // values are texts or { value, label }; "all" adds a first option with the value "" (no filter);
+  // the current choice stays when it is still among the values. Returns the select.
+  function fillOptions(select, values, opts) {
+    var el = typeof select === "string" ? document.querySelector(select) : select;
+    if (!el) return el;
+    opts = opts || {};
+    var keep = opts.selected !== undefined ? String(opts.selected) : el.value;
+    var frag = document.createDocumentFragment(), seen = {};
+    if (opts.all !== undefined && opts.all !== false) { var a = document.createElement("option"); a.value = ""; a.textContent = opts.all; frag.appendChild(a); seen[""] = true; }
+    (values || []).forEach(function (v) {
+      var val = v && typeof v === "object" ? v.value : v;
+      if (val === null || val === undefined) return;
+      var o = document.createElement("option");
+      o.value = String(val);
+      o.textContent = v && typeof v === "object" && v.label !== undefined ? String(v.label) : String(val);
+      seen[o.value] = true;
+      frag.appendChild(o);
+    });
+    el.replaceChildren(frag);
+    if (seen[keep]) el.value = keep; else if (el.options.length) el.selectedIndex = 0;
+    return el;
+  }
+  // KitUI.fillTable(table, rows, columns?, { id, empty }) writes a table's body from a list of rows.
+  // Without columns, the header cells say what goes in each column: <th data-key="COLUMN"> (the
+  // row's field), class kit-num for numbers, data-format="number|percent|date" for how it shows.
+  // A column given in code: { key, value: function (row), format: "number" | "percent" | "date" |
+  // function (value, row), num: true, missing: "-" }. Numbers and dates get data-sort (the raw
+  // value), so sorting is by value; opts.id names a field for each row's data-id (row selection).
+  // The table's <tr data-kit-empty> row stays (one is made with opts.empty, or "Nothing to show",
+  // when there is none) and shows when the list is empty. Sorting, paging and search follow the
+  // new rows by themselves. Returns the number of rows written.
+  function fillTable(table, list, columns, opts) {
+    var t = typeof table === "string" ? document.querySelector(table) : table;
+    if (!t) return 0;
+    if (columns && !Array.isArray(columns)) { opts = columns; columns = null; }
+    opts = opts || {};
+    var heads = t.tHead ? Array.prototype.slice.call(t.tHead.rows[t.tHead.rows.length - 1].cells).filter(function (th) { return !th.classList.contains("kit-table__select"); }) : [];
+    var cols = columns || heads.map(function (th) {
+      return { key: th.getAttribute("data-key"), format: th.getAttribute("data-format") || (th.classList.contains("kit-num") ? "number" : null), num: th.classList.contains("kit-num") };
+    });
+    var body = t.tBodies[0] || t.appendChild(document.createElement("tbody"));
+    var empty = body.querySelector("tr[data-kit-empty]");
+    if (!empty) {
+      empty = document.createElement("tr");
+      empty.setAttribute("data-kit-empty", "");
+      empty.innerHTML = '<td><div class="kit-empty"><p class="kit-empty__title"></p></div></td>';
+      empty.cells[0].colSpan = Math.max(1, cols.length);
+      empty.querySelector(".kit-empty__title").textContent = opts.empty || "Nothing to show";
+    }
+    var frag = document.createDocumentFragment();
+    (list || []).forEach(function (row) {
+      var tr = document.createElement("tr");
+      if (opts.id && row && row[opts.id] != null) tr.setAttribute("data-id", String(row[opts.id]));
+      cols.forEach(function (c) {
+        var td = document.createElement("td");
+        var v = typeof c.value === "function" ? c.value(row) : c.key ? row[c.key] : "";
+        var f = c.format, text;
+        if (typeof f === "function") text = f(v, row);
+        else if (v === null || v === undefined || v === "") text = c.missing !== undefined ? c.missing : "-";
+        else if (f === "number") text = format.number(v);
+        else if (f === "percent") text = format.percent(v);
+        else if (f === "date") text = format.date(v);
+        else text = String(v);
+        td.textContent = text;
+        var isNum = c.num || f === "number" || f === "percent" || (c.num === undefined && f == null && typeof v === "number");
+        if (isNum) td.className = "kit-num";
+        if ((isNum && typeof v === "number") || f === "date") td.setAttribute("data-sort", v == null ? "" : String(v));
+        tr.appendChild(td);
+      });
+      frag.appendChild(tr);
+    });
+    Array.prototype.slice.call(body.rows).forEach(function (r) { if (r !== empty) body.removeChild(r); });
+    body.insertBefore(frag, body.firstChild);
+    if (empty.parentNode !== body) body.appendChild(empty);
+    empty.hidden = (list || []).length > 0;
+    return (list || []).length;
+  }
+
   window.KitUI = {
     toast: toast,
+    options: fillOptions,
+    fillTable: fillTable,
     confirm: confirmBox,
     alert: alertBox,
     format: format,
@@ -1258,6 +1340,29 @@
     group.kitTabs = true;
     var tabs = function () { return Array.prototype.slice.call(group.querySelectorAll('[role="tab"], .kit-tab')); };
     var roving = function () { var list = tabs(), cur = list.filter(function (b) { return b.getAttribute("aria-selected") === "true"; })[0] || list[0]; list.forEach(function (b) { b.setAttribute("tabindex", b === cur ? "0" : "-1"); }); };
+    // Tab panels: when every tab names its panel (aria-controls="ID"), the selected tab's panel shows
+    // and the others are hidden, with role="tabpanel" and aria-labelledby; "kit:tab" with detail.tab,
+    // panel, value (data-value, else the panel id) and text. Charts in a panel draw when it shows.
+    var panelOf = function (b) { var id = b.getAttribute("aria-controls"); return id ? document.getElementById(id) : null; };
+    var withPanels = function () { var list = tabs(); return list.length > 0 && list.every(panelOf); };
+    var show = function (sel, notify) {
+      if (!sel || !withPanels()) return;
+      tabs().forEach(function (b) {
+        var on = b === sel, p = panelOf(b);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        if (!b.id) b.id = p.id + "-tab";
+        p.setAttribute("role", "tabpanel");
+        p.setAttribute("aria-labelledby", b.id);
+        if (!p.hasAttribute("tabindex")) p.setAttribute("tabindex", "0");
+        p.hidden = !on;
+      });
+      if (notify) group.dispatchEvent(new CustomEvent("kit:tab", { bubbles: true, detail: { tab: sel, panel: panelOf(sel), value: sel.getAttribute("data-value") || sel.getAttribute("aria-controls"), text: sel.textContent.trim() } }));
+    };
+    if (withPanels()) { var first = tabs(); show(first.filter(function (b) { return b.getAttribute("aria-selected") === "true"; })[0] || first[0], false); }
+    group.addEventListener("click", function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('[role="tab"], .kit-tab') : null;
+      if (b && group.contains(b) && !b.disabled) show(b, true);
+    });
     group.addEventListener("keydown", function (e) {
       var list = tabs(), i = list.indexOf(document.activeElement);
       if (i < 0) return;

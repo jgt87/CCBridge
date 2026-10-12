@@ -285,6 +285,67 @@ describe("kit-charts.js scatter", () => {
   });
 });
 
+describe("kit.js filling from data", () => {
+  type Fill = Window & { KitUI: { fillTable: (t: string, rows: unknown[], c?: unknown) => number; options: (s: string, v: unknown[], o?: unknown) => HTMLSelectElement } };
+  it("writes a table from its header cells, keeps the empty row and sorts numbers by value", async () => {
+    document.body.innerHTML = `<table class="kit-table" id="t" data-kit-sort><thead><tr><th data-key="Name">Name</th><th data-key="Count" class="kit-num">Count</th><th data-key="Seen" data-format="date">Seen</th></tr></thead>
+      <tbody><tr data-kit-empty hidden><td colspan="3"><div class="kit-empty"><p class="kit-empty__title">None</p></div></td></tr></tbody></table>`;
+    load(kitJs);
+    await tick();
+    const ui = (window as unknown as Fill).KitUI;
+    expect(ui.fillTable("#t", [{ Name: "B", Count: 1234, Seen: "2026-10-09" }, { Name: "A", Count: null, Seen: null }])).toBe(2);
+    const rows = Array.from(document.querySelectorAll<HTMLTableRowElement>("#t tbody tr:not([data-kit-empty])"));
+    expect(rows.map((r) => r.cells[0].textContent)).toEqual(["B", "A"]);
+    expect(rows[0].cells[1].className).toBe("kit-num");
+    expect(rows[0].cells[1].getAttribute("data-sort")).toBe("1234");
+    expect(rows[1].cells[1].textContent).toBe("-");
+    expect(rows[0].cells[2].textContent).toMatch(/2026/);
+    expect((document.querySelector("#t tr[data-kit-empty]") as HTMLElement).hidden).toBe(true);
+    ui.fillTable("#t", []);
+    expect(document.querySelectorAll("#t tbody tr:not([data-kit-empty])").length).toBe(0);
+    expect((document.querySelector("#t tr[data-kit-empty]") as HTMLElement).hidden).toBe(false);
+  });
+  it("fills a select and keeps the choice while it is still there", async () => {
+    document.body.innerHTML = '<select id="s"><option value="b" selected>b</option></select>';
+    load(kitJs);
+    await tick();
+    const ui = (window as unknown as Fill).KitUI;
+    const sel = ui.options("#s", ["a", "b", { value: "c", label: "See" }], { all: "All" });
+    expect(Array.from(sel.options).map((o) => o.textContent)).toEqual(["All", "a", "b", "See"]);
+    expect(sel.value).toBe("b");
+    ui.options("#s", ["a"], { all: "All" });
+    expect(sel.value).toBe("");
+  });
+});
+
+describe("kit.js tab panels (revision 13)", () => {
+  it("shows the selected tab's panel, hides the rest, and reports the switch", async () => {
+    document.body.innerHTML = `<div class="kit-tabs" role="tablist"><button class="kit-tab" role="tab" aria-selected="false" aria-controls="p1" type="button">One</button><button class="kit-tab" role="tab" aria-selected="true" aria-controls="p2" type="button">Two</button></div>
+      <div id="p1">first</div><div id="p2">second</div>`;
+    load(kitJs);
+    await tick();
+    const p1 = document.getElementById("p1")!, p2 = document.getElementById("p2")!;
+    expect([p1.hidden, p2.hidden]).toEqual([true, false]);
+    expect(p2.getAttribute("role")).toBe("tabpanel");
+    const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".kit-tab"));
+    expect(p2.getAttribute("aria-labelledby")).toBe(tabs[1].id);
+    const seen: string[] = [];
+    document.addEventListener("kit:tab", (e) => seen.push((e as CustomEvent).detail.value));
+    tabs[0].click();
+    expect([p1.hidden, p2.hidden]).toEqual([false, true]);
+    expect(tabs.map((b) => b.getAttribute("aria-selected"))).toEqual(["true", "false"]);
+    expect(seen).toEqual(["p1"]);
+  });
+  it("leaves tabs without panels to the page", async () => {
+    document.body.innerHTML = `<div class="kit-tabs" role="tablist"><button class="kit-tab" role="tab" aria-selected="true" type="button">A</button><button class="kit-tab" role="tab" aria-selected="false" type="button">B</button></div><div id="x">x</div>`;
+    load(kitJs);
+    await tick();
+    (document.querySelectorAll<HTMLButtonElement>(".kit-tab")[1]).click();
+    expect(document.getElementById("x")!.hidden).toBe(false);
+    expect(document.querySelectorAll(".kit-tab")[1].getAttribute("aria-selected")).toBe("false");
+  });
+});
+
 describe("kit.js basics (revision 11)", () => {
   type Basics = Window & { KitUI: { confirm: (t: string, o?: Record<string, unknown>) => Promise<boolean>; alert: (t: string, o?: Record<string, unknown>) => Promise<void> } };
   const b = window as unknown as Basics;

@@ -117,7 +117,12 @@ function ChangeBadge({ node }: { node: TreeNode }) {
   const { added, removed } = changeTotals(node);
   if (!added && !removed) return null;
   return (
-    <ChangePill added={added} className="ml-auto" removed={removed} title={`${added} line(s) added, ${removed} removed since the project was opened`} />
+    <ChangePill
+      added={added}
+      className="ml-auto"
+      removed={removed}
+      title={!node.children && node.created ? `New file: ${added} line(s)` : `${added} line(s) added, ${removed} removed since the project was opened`}
+    />
   );
 }
 

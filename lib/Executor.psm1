@@ -868,6 +868,21 @@ function Get-LastChangeStats {
     $stats
 }
 
+function Get-FileLineCount([string]$Path) {
+    # The lines of a text file counted in blocks, without reading it as text (large one-file pages, data).
+    $fs = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+    try {
+        $buf = New-Object byte[] 1048576; $n = 0; $last = 10; $read = 0
+        while (($read = $fs.Read($buf, 0, $buf.Length)) -gt 0) {
+            $i = 0
+            while (($i = [Array]::IndexOf($buf, [byte]10, $i, $read - $i)) -ge 0) { $n++; $i++ }
+            $last = $buf[$read - 1]
+        }
+        if ($fs.Length -and $last -ne 10) { $n++ }
+        $n
+    } finally { $fs.Dispose() }
+}
+
 function Get-SessionChangeStats {
     <# Per changed file: lines added/removed since $SinceId (a checkpoint id, yyyyMMdd-HHmmss-fff),
        measured against the version before the first change in that period (from the undo backups).
@@ -891,8 +906,11 @@ function Get-SessionChangeStats {
             $full = Resolve-ProjectPath $ProjectRoot $rel
             if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
             $created = -not $baseline[$rel]
-            if ((Get-Item -LiteralPath $full).Length -gt 2MB -or (Test-BinaryFile $full)) {
-                if ($created) { $result[$rel] = @{ added = 0; removed = 0; created = $true } }
+            $len = (Get-Item -LiteralPath $full).Length
+            if ($len -gt 2MB -or (Test-BinaryFile $full)) {
+                # A new large text file (a one-file page with its data, a data file): its lines, counted cheaply.
+                $lines = if ($created -and $len -le 100MB -and -not (Test-BinaryFile $full)) { try { Get-FileLineCount $full } catch { 0 } } else { 0 }
+                if ($created) { $result[$rel] = @{ added = $lines; removed = 0; created = $true } }
                 continue
             }
             $old = if ($baseline[$rel]) { (Read-TextFile $baseline[$rel]).Text } else { '' }
@@ -1081,6 +1099,24 @@ function Get-ReadNotFoundNote([string]$ProjectRoot, [string]$Rel) {
     "(file not found: the project has no $Rel.$hint Create it with a write action if it should exist.)"
 }
 
+function Get-ConvertedDataFile([string]$ProjectRoot, [string]$Rel) {
+    <# The converted copy of a data file (CSV, TSV, Excel) from the import manifest
+       (.streamhub/data-imports.json, DataImport): @{ output; js; global } or $null. Read here
+       directly, since DataImport loads this module. #>
+    if ($Rel -notmatch '(?i)\.(csv|tsv|xlsx|xlsm)$') { return $null }
+    $f = Join-Path $ProjectRoot '.streamhub\data-imports.json'
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    try {
+        $want = $Rel.Replace('\', '/').TrimStart('/')
+        foreach ($it in @(([IO.File]::ReadAllText($f) | ConvertFrom-Json).items)) {
+            if ("$($it.source)" -ieq $want -and $it.hash -and $it.output -and (Test-Path -LiteralPath (Join-Path $ProjectRoot "$($it.output)".Replace('/', '\')))) {
+                return @{ output = "$($it.output)"; js = "$($it.js)"; global = "$($it.global)" }
+            }
+        }
+    } catch { }
+    $null
+}
+
 function Invoke-ReadAction {
     <# File contents for Copilot. A path may carry a line range (PATH:START-END). Long content is
        cut at a whole line, with a note that says which lines are shown and how to read the rest. #>
@@ -1108,6 +1144,13 @@ function Invoke-ReadAction {
             $full = Resolve-ProjectPath $ProjectRoot $p
             if (Test-Path -LiteralPath $full -PathType Container) { "### $p`n$(Get-FolderListing $ProjectRoot $p)"; continue }
             if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { "### $p`n$(Get-ReadNotFoundNote $ProjectRoot $p)"; continue }
+            # A data file the helper program converted: the converted copy, not megabytes of the original.
+            $conv = Get-ConvertedDataFile $ProjectRoot $p
+            if ($conv) {
+                "### $p`n(the helper program converted this file to $($conv.output)$(if ($conv.js) { " (for pages opened from disk: $($conv.js), global $($conv.global))" }): read that one instead, a few lines at a time ($($conv.output):1-5 shows the first rows), or use the columns in the project context. Its first lines:)"
+                Invoke-ReadAction $ProjectRoot @("$($conv.output):1-6") $MaxCharsPerFile
+                continue
+            }
             $office = Get-OfficeKind $full
             if ($office -in 'old', 'pdf', 'image') { "### $p`n($(Get-OfficeLabel $full), which cannot be read as text here. The helper program attaches the file to this message when it can: read it from the attachment. To change it, write a new .docx or .csv.)"; continue }
             # Secret files: which keys are set, never the values (SecretFiles.psm1).
@@ -1124,7 +1167,9 @@ function Invoke-ReadAction {
             # A range that cuts through a block is widened to the whole block, so Copilot sees the
             # code it would change from its first to its last line.
             $widened = ''
-            if ($from -gt 1 -or $to -lt $total) {
+            # Not in data (JSON, CSV, data/ copies) or files over 1 MB: their blocks are records, and walking
+            # every character of megabytes took half a minute on a slow computer for a five-line read.
+            if (($from -gt 1 -or $to -lt $total) -and $raw.Length -le 1MB -and $full -notmatch '(?i)\.(json|csv|tsv)$' -and $p -notmatch '(?i)(^|/)data/') {
                 $w = Expand-ToWholeBlocks $raw $full $from $to
                 if ($w.from -ne $from -or $w.to -ne $to) { $widened = " - lines $from-$to asked; widened to $($w.from)-$($w.to) so every block in it is complete"; $from = $w.from; $to = $w.to }
             }
@@ -2350,5 +2395,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction,
+Export-ModuleMember -Function Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction, Get-FileViewText, Get-FolderListing, Get-ReadNotFoundNote

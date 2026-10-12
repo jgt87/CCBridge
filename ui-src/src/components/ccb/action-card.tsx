@@ -26,6 +26,8 @@ import { countChanges, diffLines } from "@/lib/diff";
 import { ChangePill } from "./change-pill";
 import { ActionOutput } from "./action-output";
 import { DiffView } from "./diff-view";
+import { TodoView } from "./todo-view";
+import { isTodoChange, todoChange } from "@/lib/todo-list";
 import { CodeView } from "./code-block";
 import { languageForPath } from "@/lib/highlight";
 import { formatElapsed, liveLines, parseRunOutput, useRunLive, waitText, type RunLive } from "@/lib/run-live";
@@ -189,6 +191,12 @@ export function ActionCard({ item }: { item: ActionItem }) {
     const lines = diffLines(item.preview.old ?? "", item.preview.new ?? "");
     return lines ? countChanges(lines) : null;
   }, [item.preview]);
+  // A to-do list (TODO.md, or a file of "- [ ]" items): shown as a checklist, not as lines.
+  const todo = useMemo(() => {
+    const p = item.preview;
+    if (!p || item.action === "run" || !isTodoChange(p.path ?? "", p.new ?? "")) return null;
+    return todoChange(p.old ?? "", p.new ?? "");
+  }, [item.preview, item.action]);
 
   return (
     <div
@@ -206,7 +214,13 @@ export function ActionCard({ item }: { item: ActionItem }) {
         {ICONS[item.action] ?? <Play className="h-4 w-4" />}
         <span className="font-medium">{VERBS[item.action] ?? item.action}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground text-xs">{item.target}</span>
-        {counts && <ChangePill added={counts.add} removed={counts.del} />}
+        {todo ? (
+          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="Items done in this list">
+            {todo.done}/{todo.total} done
+          </span>
+        ) : (
+          counts && <ChangePill added={counts.add} removed={counts.del} />
+        )}
         {item.by === "streamhub" && (
           <span className="text-[11px] text-muted-foreground" title="StreamHub made this change itself, not Copilot">
             by StreamHub
@@ -260,7 +274,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
               </div>
             </div>
           ) : (
-            item.preview && <DiffView preview={item.preview} />
+            item.preview && (todo ? <TodoView preview={item.preview} todo={todo} /> : <DiffView preview={item.preview} />)
           )}
           {item.action === "run" &&
             (myLive ? (

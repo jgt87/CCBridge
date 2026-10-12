@@ -67,6 +67,17 @@ Describe 'The shared library beside the projects' {
         $after | Should Match '--kit-accent:\s*#654321;'
         $after | Should Match '--kit-radius:\s*3px;'
     }
+    It 'leaves the licence texts in the central catalogue and removes a project copy that equals it' {
+        [IO.File]::WriteAllText((Join-Path $p2 'index.html'), "<!doctype html><html><head><meta charset=""utf-8""><link rel=""stylesheet"" href=""styles/kit/kit.css""></head><body><h1>x</h1><button class=""kit-btn"">Go</button><script src=""styles/kit/kit.js""></script></body></html>", $utf8)
+        $old = Join-Path $p2 'styles\kit\LICENSE-kokonutui.txt'
+        Copy-Item (Join-Path $shared 'ui-kit\LICENSE-kokonutui.txt') $old
+        $u = Update-UiKitProject $p2 $root
+        @($u.added) -contains 'styles/kit/kit.js' | Should Be $true
+        @($u.added | Where-Object { $_ -match 'LICENSE' }).Count | Should Be 0
+        Test-Path $old | Should Be $false
+        @($u.updated | Where-Object { $_ -match 'LICENSE-kokonutui\.txt \(removed' }).Count | Should Be 1
+        Test-Path (Join-Path $shared 'ui-kit\LICENSE-kokonutui.txt') | Should Be $true
+    }
     It 'moves an older project''s own catalogue into the central one and updates the copies that were its' {
         $local = Join-Path $p3 '.streamhub\ui-kit'
         New-Item -ItemType Directory -Force (Join-Path $p3 'styles\kit') | Out-Null

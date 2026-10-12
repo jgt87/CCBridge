@@ -1,4 +1,4 @@
-/* Data tools v4, from the helper program. Do not edit: a newer version replaces this file.
+/* Data tools v5, from the helper program. Do not edit: a newer version replaces this file.
 
    Helpers for the project's data. Load this file with a script tag before the page's own script
    (<script src="data/data-tools.js"></script>); it sets window.DataTools. It also works as a
@@ -35,6 +35,33 @@
    DataTools.formatNumber(n, decimals?)  with the thousands separator of the page's language (html lang; else the browser's)
    DataTools.formatDate(text, options?)  a date text shown in the page's language (html lang; else the browser's)
    DataTools.percent(part, whole, decimals?)  "12.5%"
+
+   Combining files, bands and counts (write none of these yourself):
+   DataTools.join(rows, other, { on: [["Email", "Mail"], ["Name", "Full name"]] })
+                                         each row with the fields of its match in other (left join:
+                                         rows without a match stay, without them). on is a column
+                                         both lists have, or [this column, other column] pairs tried
+                                         in order (the first pair that matches wins). Keys match
+                                         loosely: case, accents, spaces and punctuation do not count
+                                         (match: "exact" to compare as written). A field both have
+                                         keeps this row's value unless prefix: "Other " names the other's.
+                                         The result has .matched and .unmatched (counts) for a notice.
+                                         how: "inner" keeps only rows with a match.
+   DataTools.matchKey(text)              the loose key join uses ("Garcia-Lopez, Ana" -> "garcialopezana")
+   DataTools.band(x, bands, otherwise?)  the label of the first band x falls in: bands in order from
+                                         the top, each { label, min } (x is a number: x >= min) or
+                                         { label, when: function (x) } (x may be a row, for rules on
+                                         several columns); otherwise when none fits
+   DataTools.quantiles(rows, column, n)  the n-1 cut points that split the column's numbers into n
+                                         groups of equal size (quartiles: n = 4), for bands from the data
+   DataTools.countBy(rows, key, { sort: "desc" | "label" | false, top, missing })
+                                         [{ label, value }] rows per value of a column (or function),
+                                         the shape every chart reads; missing names empty values
+                                         (left out without it); top keeps the largest and adds "Other"
+   DataTools.countEach(rows, { Label: column or function, ... }, { sort })
+                                         [{ label, value }] rows where each column is filled (not empty,
+                                         0 or false) or the function is true: one bar per column, such
+                                         as a count per yes/no or date column
 */
 (function (root, factory) {
   var api = factory();
@@ -404,11 +431,102 @@
     return formatNumber(part / whole * 100, decimals === undefined ? 1 : decimals) + '%';
   }
 
+  // Combining two lists by a key, loosely (case, accents, spaces and punctuation do not count).
+  function matchKey(v) {
+    if (v == null) return '';
+    var t = String(v);
+    if (t.normalize) t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    t = t.toLowerCase().trim();
+    return t.indexOf('@') > 0 ? t.replace(/[^a-z0-9@._-]+/g, '') : t.replace(/[^a-z0-9]+/g, '');   // an e-mail address keeps its dots
+  }
+  function join(list, other, opts) {
+    opts = opts || {};
+    var on = opts.on, pairs;
+    if (Array.isArray(on)) pairs = on.map(function (p) { return Array.isArray(p) ? p : [p, p]; });
+    else pairs = [[on, opts.otherOn || on]];
+    var exact = opts.match === 'exact', prefix = opts.prefix || '';
+    var norm = function (v) { return exact ? (v == null ? '' : String(v)) : matchKey(v); };
+    var maps = pairs.map(function (p) {
+      var m = new Map(), get = keyFn(p[1]);
+      (other || []).forEach(function (r) { var k = norm(get(r)); if (k && !m.has(k)) m.set(k, r); });
+      return { get: keyFn(p[0]), map: m };
+    });
+    var out = [], matched = 0;
+    (list || []).forEach(function (r) {
+      var hit = null;
+      for (var i = 0; i < maps.length && !hit; i++) { var k = norm(maps[i].get(r)); if (k) hit = maps[i].map.get(k) || null; }
+      if (!hit && opts.how === 'inner') return;
+      var row = {};
+      Object.keys(r || {}).forEach(function (k) { row[k] = r[k]; });
+      if (hit) {
+        matched++;
+        Object.keys(hit).forEach(function (k) {
+          if (prefix) row[prefix + k] = hit[k];
+          else if (!(k in row)) row[k] = hit[k];
+        });
+      }
+      out.push(row);
+    });
+    out.matched = matched;
+    out.unmatched = (list || []).length - matched;
+    return out;
+  }
+
+  // Bands (tiers): the first band from the top that x falls in.
+  function band(x, bands, otherwise) {
+    for (var i = 0; i < (bands || []).length; i++) {
+      var b = bands[i];
+      if (typeof b.when === 'function' ? b.when(x) : (typeof x === 'number' && isFinite(x) && x >= b.min)) return b.label;
+    }
+    return otherwise === undefined ? null : otherwise;
+  }
+  function quantiles(list, column, n) {
+    var v = numbers(list, column).sort(function (a, b) { return a - b; }), cuts = [];
+    if (!v.length || !(n > 1)) return cuts;
+    for (var i = 1; i < n; i++) {
+      var pos = (v.length - 1) * i / n, lo = Math.floor(pos), hi = Math.ceil(pos);
+      cuts.push(v[lo] + (v[hi] - v[lo]) * (pos - lo));
+    }
+    return cuts;
+  }
+
+  // Counts in the shape charts read: [{ label, value }].
+  function sortCounts(list, how) {
+    if (how === false) return list;
+    if (how === 'label') return list.sort(function (a, b) { return compare(a.label, b.label); });
+    return list.sort(function (a, b) { return b.value - a.value || compare(a.label, b.label); });
+  }
+  function countBy(list, key, opts) {
+    opts = opts || {};
+    var get = keyFn(key), m = new Map();
+    (list || []).forEach(function (r) {
+      var k = get(r);
+      if (k == null || k === '') { if (opts.missing === undefined) return; k = opts.missing; }
+      m.set(k, (m.get(k) || 0) + 1);
+    });
+    var out = sortCounts(Array.from(m, function (e) { return { label: e[0], value: e[1] }; }), opts.sort === undefined ? 'desc' : opts.sort);
+    if (opts.top > 0 && out.length > opts.top) {
+      var rest = out.slice(opts.top).reduce(function (a, b) { return a + b.value; }, 0);
+      out = out.slice(0, opts.top).concat([{ label: opts.otherLabel || 'Other', value: rest }]);
+    }
+    return out;
+  }
+  function countEach(list, columnsMap, opts) {
+    opts = opts || {};
+    var out = Object.keys(columnsMap || {}).map(function (label) {
+      var c = columnsMap[label];
+      var test = typeof c === 'function' ? c : function (r) { var v = r == null ? null : r[c]; return !(v == null || v === '' || v === 0 || v === false); };
+      return { label: label, value: (list || []).filter(function (r) { return test(r); }).length };
+    });
+    return sortCounts(out, opts.sort === undefined ? 'desc' : opts.sort);
+  }
+
   return {
     load: load, configure: configure, parseCsv: parseCsv,
     rows: rows, sheets: sheets, columns: columns, where: where, sortBy: sortBy, unique: unique,
     sum: sum, avg: avg, min: min, max: max, count: count, groupBy: groupBy, summarize: summarize,
     toDate: toDate, month: month, year: year, byMonth: byMonth,
-    formatNumber: formatNumber, formatDate: formatDate, percent: percent
+    formatNumber: formatNumber, formatDate: formatDate, percent: percent,
+    matchKey: matchKey, join: join, band: band, quantiles: quantiles, countBy: countBy, countEach: countEach
   };
 });

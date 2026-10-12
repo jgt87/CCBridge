@@ -90,7 +90,7 @@ export default function App() {
     });
   const queueSeen = useRef(new Map<string, string>());
   const pauseSeen = useRef<string | null | undefined>(undefined);
-  const [palette, setPalette] = useState<null | "commands" | "attach">(null);
+  const [palette, setPalette] = useState<null | "commands" | "attach" | "logging">(null);
   const [viewer, setViewer] = useState<{ path: string; text: string; change?: ViewerChange; note?: string } | null>(null);
   const [queuedNote, setQueuedNote] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -398,6 +398,26 @@ export default function App() {
     },
   }));
 
+  const LOG_LEVELS = [
+    { id: "info", label: "Info", description: "The normal log: what StreamHub did, without details" },
+    { id: "verbose", label: "Verbose", description: "Every step in detail, for finding a problem" },
+    { id: "trace", label: "Trace", description: "Also the prompt and reply text, which can hold Microsoft 365 data: for a short test only" },
+  ] as const;
+  const loggingActions: Action[] = LOG_LEVELS.map((l) => ({
+    id: `log:${l.id}`,
+    label: l.label,
+    description: l.description,
+    icon: <ScrollText className="h-4 w-4 text-muted-foreground" />,
+    end: (state.logLevel || "info") === l.id ? "Active" : "Logging",
+    onSelect: () =>
+      // The level the server reports back is the one in force.
+      api.setLogging(l.id).then((r) => {
+        const now = r.level ?? l.id;
+        setState((s) => ({ ...s, logLevel: now }));
+        setNotice({ text: now === l.id ? `Logging set to ${now}.` : `Logging asked for ${l.id}, but StreamHub is at ${now}.` });
+      }),
+  }));
+
   const commandActions: Action[] = [
     { id: "new-chat", label: "New chat", description: "Start a fresh Copilot chat; the project stays open", icon: <MessageSquarePlus className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: startNewChat },
     { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: <RotateCcw className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => api.undo() },
@@ -405,24 +425,13 @@ export default function App() {
     { id: "project", label: "Switch project", description: "Open or create a OneDrive project folder", icon: <FolderOpen className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setShowPicker(true) },
     { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: <AtSign className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setPalette("attach"), 0) },
     {
-      // One item that steps through the levels: info -> verbose -> trace -> info.
+      // Opens a second list with the levels to choose from (loggingActions).
       id: "logging",
-      label: state.logLevel === "verbose" ? "Logging: verbose (switch to trace)" : state.logLevel === "trace" ? "Logging: trace (switch back to info)" : "Logging: info (switch to verbose)",
-      description: state.logLevel === "verbose"
-        ? "Trace adds the prompt and reply text, which can hold Microsoft 365 data: use it for a short test; stays on after restarts"
-        : "Detailed diagnostic log, one step per click: info, verbose, trace; stays on after restarts",
+      label: `Logging: ${state.logLevel || "info"}`,
+      description: "Choose how much the diagnostic log records; stays on after restarts",
       icon: <ScrollText className="h-4 w-4 text-muted-foreground" />,
       end: "Diagnostics",
-      onSelect: () => {
-        const level = state.logLevel === "verbose" ? "trace" : state.logLevel === "trace" ? "info" : "verbose";
-        // The level the server reports back is used at once, so the next click steps on from it
-        // without waiting for the next state update.
-        return api.setLogging(level).then((r) => {
-          const now = r.level ?? level;
-          setState((s) => ({ ...s, logLevel: now }));
-          setNotice({ text: now === level ? `Logging set to ${now}.` : `Logging asked for ${level}, but StreamHub is at ${now}.` });
-        });
-      },
+      onSelect: () => setTimeout(() => setPalette("logging"), 0),
     },
     {
       id: "diagnostics",
@@ -801,11 +810,11 @@ export default function App() {
         <ModalBackdrop className="pt-24" onClose={() => setPalette(null)}>
           <div className="kit-dialog w-full max-w-xl px-4 pt-0 pb-4">
             <ActionSearchBar
-              actions={palette === "attach" ? fileActions : commandActions}
+              actions={palette === "attach" ? fileActions : palette === "logging" ? loggingActions : commandActions}
               key={palette}
-              label={palette === "attach" ? "Attach a project file" : "Commands and files"}
+              label={palette === "attach" ? "Attach a project file" : palette === "logging" ? "Logging level" : "Commands and files"}
               onClose={() => setPalette(null)}
-              placeholder={palette === "attach" ? "File name..." : "Type a command or file name..."}
+              placeholder={palette === "attach" ? "File name..." : palette === "logging" ? "Info, verbose or trace..." : "Type a command or file name..."}
             />
           </div>
         </ModalBackdrop>

@@ -3749,6 +3749,7 @@ function Invoke-AgentTurn {
         $doneWhen = @(); $acceptAsked = $false; $acceptResults = $null
         $askChecks = ($kind -in 'coding', 'mixed', 'project') -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.ReviewByCaller -and (Test-BuildRequest $Text) -and $Text -notmatch '^\s*Continue and make the change now'
         if ($askChecks) { $message += "`n`n" + (Get-DoneWhenAsk) }
+        $notesOnlyGo = $false   # a reply with only the notes asked for (no actions) got its short go-ahead
         # Tie-breakers: what the fixed rules cannot tell from the words, Copilot settles in its first reply.
         $scopeAsk = if ($State.ScopeAsk -and $kind -in 'coding', 'mixed', 'project' -and $State.Mode -ne 'plan') { "$($State.ScopeAsk)" } else { '' }
         if ($scopeAsk) { $message += "`n`n" + (Get-ScopeAsk $scopeAsk) }
@@ -3823,10 +3824,11 @@ function Invoke-AgentTurn {
             $lastReply = "$($r.Text)"
             Write-CCBLog verbose agent "Round ${round}: reply parsed" @{ actions = @($actions | ForEach-Object { "$($_.type) $($_.arg)".Trim() }) }
             Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @($r.References) }
+            $notesOnly = $false   # this reply answered one of the helper program's asks (checks, type, scope, data notes, build form)
             if ($typeAsk) {
                 $rt = Read-RequestType "$($r.Text)"
                 if ($rt) {
-                    $typeAsk = $false
+                    $typeAsk = $false; $notesOnly = $true
                     $State.UserLook = $rt -in 'look', 'both'
                     Add-AgentEvent $State 'status' @{ text = "Copilot read this request as $(switch ($rt) { 'look' { 'a new look' } 'feature' { 'new or changed functionality' } default { 'both a new look and new functionality' } }): the kit's look checks $(if ($State.UserLook) { 'rest for the parts it restyles' } else { 'apply as usual' })." }
                     Write-CCBLog info agent 'Request type from Copilot' @{ type = $rt }
@@ -3840,12 +3842,13 @@ function Invoke-AgentTurn {
                     Add-AgentEvent $State 'status' @{ text = "Copilot judged this request too big to build in one go, so it $(if ($scopeAsk -eq 'clarify') { 'asks its questions first' } else { 'plans first' }), as chosen for this project." }
                     break
                 }
+                if ($sd) { $notesOnly = $true }
                 $scopeAsk = ''
             }
             # Copilot's checks for this task ("Done when:"), and its notes on the data ("Data notes:").
             if ($askChecks -and -not $doneWhen.Count) {
                 $doneWhen = @(Read-DoneWhen "$($r.Text)")
-                if ($doneWhen.Count) { Add-AgentEvent $State 'status' @{ text = "Copilot's checks for this task (asked about at the end): " + ($doneWhen -join '; ') } }
+                if ($doneWhen.Count) { $notesOnly = $true; Add-AgentEvent $State 'status' @{ text = "Copilot's checks for this task (asked about at the end): " + ($doneWhen -join '; ') } }
             }
             if ($acceptAsked -and $doneWhen.Count) {
                 $ans = @(Read-AcceptanceAnswers "$($r.Text)" $doneWhen)
@@ -3854,6 +3857,7 @@ function Invoke-AgentTurn {
             if ($notesFor.Count) {
                 $dnLines = @(Read-NoteBlock "$($r.Text)" 'Data notes' 12)
                 if ($dnLines.Count) {
+                    $notesOnly = $true
                     try { Save-DataNotes $State.ProjectRoot $dataMan $notesFor $dnLines; Add-AgentEvent $State 'status' @{ text = "Copilot's notes on the data saved for later tasks (.streamhub/data-notes.json): $($notesFor -join ', ')." } } catch { Write-CCBLogError agent 'data notes' $_ }
                     $notesFor = @()
                 }
@@ -3881,6 +3885,15 @@ function Invoke-AgentTurn {
             }
             foreach ($claim in @($r.ActionClaims)) {
                 Add-AgentEvent $State 'human-required' @{ text = "Copilot's reply says: ""$claim"" StreamHub did not confirm any Microsoft 365 action. Check Outlook / Teams if this is unexpected." }
+            }
+            if (-not $actions.Count -and $notesOnly -and -not $notesOnlyGo -and $State.Mode -ne 'plan' -and -not $State.ScopeUpgrade) {
+                # The reply held only what the helper program asked for first (the checks, the request
+                # type, data notes): a short go-ahead, not the whole task again as for a reply that
+                # explained instead of acting.
+                $notesOnlyGo = $true
+                Write-CCBLog info agent 'Reply held only the notes asked for; asking Copilot to carry out the task'
+                $message = (Get-NotesGoAhead)
+                continue
             }
             if (-not $actions.Count) {
                 if ($State.LastTurnActed -ne $true) { $State.LastTurnActed = $false }

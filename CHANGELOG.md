@@ -6,6 +6,26 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.129] - 2026-10-12
+
+### Added
+- Helpers for what every dashboard run wrote again by hand, kept generic (no column names or data of any one project). In the data tools (data/data-tools.js v5): DataTools.join (combine two lists by a key, case, accents and punctuation ignored, with pairs of key columns tried in order; the result counts what matched), DataTools.band and DataTools.quantiles (tiers or bands by a minimum or a rule, or cut from the data), DataTools.countBy and DataTools.countEach ([{ label, value }], the shape charts read). In the UI kit (kit.js): KitUI.fillTable (a table's rows from a list: each header cell names its field and format, numbers sort by value, the empty row stays) and KitUI.options (a filter select's options, keeping the choice). Copilot is told to use them instead of its own code.
+- UI kit: kit-header__subtitle for a line under the page title; toolbar fields with their labels above line up at the bottom; on a phone every toolbar field takes the whole width; a kit part with the hidden attribute is hidden anywhere, not only inside kit-page.
+- A to-do list Copilot writes or updates (TODO.md, PLAN.md, TASKS.md, or any Markdown file that is mostly '- [ ]' items) shows in its card as a checklist: how many items are done with a bar, items checked off in this change marked "done now", new, reopened and removed items marked, under their headings. The line changes are one click away (Changes).
+- UI kit tabs switch their panels themselves (kit revision 13): give each kit-tab aria-controls="ID" of its panel and kit.js shows the selected one, hides the others, sets the tab panel roles and labels and sends kit:tab. Copilot is told to write no tab script of its own (run 7 wrote one). A chart in a hidden panel draws when its panel shows.
+
+### Fixed
+- A reply that held only what StreamHub asked for first (the Done when checks, the request type, data notes) was taken for a reply that explained instead of acting, and the whole task (40,000 characters) was sent again (runs 8 and 9). It now gets a one-line go-ahead, and the asks tell Copilot to go on with the work in the same reply.
+- Reading a few lines of a large data file took half a minute on a slow PC: the range was widened to whole blocks by walking every character of the file. Data files and files over 1 MB are no longer widened (2.5 s to 0.1 s here).
+- Copilot reading a CSV or Excel file that StreamHub already converted (run 9: two workbooks, two minutes and 60,000 characters) now gets the converted file's first lines and where it is, instead of the whole original.
+- The app asked for the issue report about four times a second, all the time, because a new project object in every state update counted as a project change; it now asks when the project or its issues change.
+- A kit select or field sized by a long option pushed a dashboard sideways on a phone (run 10: 101 px); kit fields now shrink to the screen.
+
+### Changed
+- Logging in the command menu opens a list of the three levels (info, verbose, trace) with the current one marked, instead of stepping through them one click at a time.
+- A new file in the Files tab shows its line count also when it is large (a one-file page with its data, a data file over 2 MB): the lines are counted in blocks instead of compared. Hovering the count says "New file: N lines".
+- Projects that use the shared UI kit no longer get the licence texts (LICENSE-*.txt) copied into styles/kit/: they stay in the shared catalogue beside the kit files they belong to, and the kit files keep their author and licence lines. Copies a project already has that equal the catalogue's are removed at the next kit update. Projects without the shared library keep their copies.
+
 ## [v0.1.128] - 2026-10-12
 
 ### Changed
