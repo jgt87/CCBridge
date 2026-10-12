@@ -189,10 +189,11 @@ function Find-StubCode {
         if ($n) { $before = @($before | Where-Object { $_ -ne $h } ) + @(@($before | Where-Object { $_ -eq $h }) | Select-Object -Skip 1); continue }
         if (-not $out.Contains($h)) { $out.Add($h) }
     }
-    # A new code file with (almost) nothing in it.
+    # A new code file with (almost) nothing in it: at most one line of real code (lines of only
+    # brackets and punctuation, comments and 'use strict' do not count), so a short real function is fine.
     if (-not "$Old".Trim()) {
-        $code = @("$New".Split("`n") | Where-Object { $_.Trim() -and $_.Trim() -notmatch '^(//|#|/\*|\*|<!--|"use strict"|''use strict'')' })
-        if ($code.Count -le 3 -and $Rel -match '(?i)\.(m?js|cjs|jsx|tsx?|py|ps1|psm1)$') { $out.Insert(0, "the file has only $($code.Count) line(s) of code") }
+        $code = @("$New".Split("`n") | Where-Object { $_.Trim() -and $_.Trim() -notmatch '^(//|#|/\*|\*|<!--|"use strict"|''use strict'')' -and $_.Trim() -notmatch '^[\s{}()\[\];,]*$' })
+        if ($code.Count -le 1 -and $Rel -match '(?i)\.(m?js|cjs|jsx|tsx?|py|ps1|psm1)$') { $out.Insert(0, "the file has only $($code.Count) line(s) of code") }
     }
     @($out | Select-Object -First 5)
 }

@@ -127,6 +127,7 @@ Describe 'Plan coverage before done' {
         $old = "function keep() {`n}`n// TODO: old note`nconst a = 1;`nconst b = 2;"
         @(Find-StubCode 'js/app.js' $old ($old + "`nconst c = 3;")).Count | Should Be 0
         @(Find-StubCode 'styles/site.css' '' '/* TODO */').Count | Should Be 0
+        @(Find-StubCode 'app.js' '' "function a() {`n  return 1;`n}`n").Count | Should Be 0   # short, but real
     }
     It 'reports missing plan files and placeholders against the project, as one message' {
         $p = Join-Path $env:TEMP ('ccb-cov-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'js') -Force | Out-Null
