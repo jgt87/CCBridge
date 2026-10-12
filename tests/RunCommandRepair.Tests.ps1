@@ -131,7 +131,7 @@ Describe 'Where scripts go' {
     Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
     It 'tells Copilot: one-off scripts in Work/, scripts to keep in Scripts/, run with -File' {
         Get-PromptPart $root 'rules:folders' | Should Match 'Helper scripts to keep go in Scripts/, one-off scripts in Work/'
-        Get-PromptPart $root 'actions:run' | Should Match '-File PATH'
+        Get-PromptPart $root 'rules:environment' | Should Match 'one-off in Work/, kept in Scripts/\) run with powershell -NoProfile -ExecutionPolicy Bypass -File'
         Get-PromptPart $root 'rules:web' | Should Match 'text block, not ```html'
     }
 }

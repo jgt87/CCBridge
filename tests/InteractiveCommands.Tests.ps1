@@ -35,6 +35,7 @@ Describe 'Commands that need a terminal' {
         (& (Get-Module Agent) { Get-StepFailureInfo 'run' 'ran: exit code 1 some other error' }).code | Should Be 'RUN-FAILED'
     }
     It 'tells Copilot up front that commands cannot answer prompts' {
-        [IO.File]::ReadAllText((Join-Path $root 'prompts\actions-run.md')) | Should Match 'no terminal: use non-interactive forms'
+        [IO.File]::ReadAllText((Join-Path $root 'prompts\actions-run.md')) | Should Match 'WHAT CAN RUN HERE'
+        [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\environment.md')) | Should Match 'no terminal\. Nothing that asks a question'
     }
 }
