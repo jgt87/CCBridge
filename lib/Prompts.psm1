@@ -252,6 +252,8 @@ function Get-PromptModules {
         if ("$($ans['appkind'])" -eq 'desktop' -and -not $ids.Contains('rules:psgui')) { $ids.Add('rules:psgui') }
         if ("$($ans['audience'])" -eq 'sharepoint' -and -not $ids.Contains('rules:sharepoint')) { $ids.Add('rules:sharepoint') }
     }
+    # Converted data in the project: the query action, so numbers come from every row.
+    if ($Context.Databases -or @($Context.Paths | Where-Object { "$_" -match '^(?i)data/[^/]+\.json$' }).Count) { $ids.Add('actions:sql') }
     # Online information: how to use web sources, and the web action for the exact text of a page.
     if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }
     if (@(Get-M365Links $Text).Count) { $ids.Add('rules:m365links') }
@@ -406,6 +408,7 @@ function Get-PromptPart {
         '^actions:run$' { return Read-PromptPart $AppRoot 'actions-run.md' }
         '^actions:project$' { return Read-PromptPart $AppRoot 'actions-project.md' }
         '^actions:web$' { return Read-PromptPart $AppRoot 'actions-web.md' }
+        '^actions:sql$' { return Read-PromptPart $AppRoot 'actions-sql.md' }
         '^m365$'      { return Read-PromptPart $AppRoot 'm365.md' }
         '^save$'      { return Read-PromptPart $AppRoot 'save.md' }
         '^fetch$'     { return Read-PromptPart $AppRoot 'fetch.md' }

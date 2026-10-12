@@ -399,3 +399,30 @@ describe("DataTools min and max", () => {
     expect(DataTools.max(Array.from({ length: 300000 }, (_, i) => ({ n: i })), "n")).toBe(299999);
   });
 });
+
+describe("DataTools.toXlsx (Excel export)", () => {
+  it("makes a workbook with typed cells, a bold header and one sheet per list", async () => {
+    const rows = [
+      { Region: "North", Amount: 1250.5, Day: "2026-01-31", Open: true },
+      { Region: "South & east", Amount: -3, Day: "2026-02-01T10:30:00", Open: false },
+    ];
+    const blob = DataTools.toXlsx({ Orders: rows, Notes: [{ Note: "a <tag>" }] });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    expect(String.fromCharCode(bytes[0], bytes[1])).toBe("PK");
+    const text = new TextDecoder().decode(bytes);
+    expect(text).toContain('<sheet name="Orders" sheetId="1"');
+    expect(text).toContain('<sheet name="Notes" sheetId="2"');
+    expect(text).toContain('<c r="A1" s="1" t="inlineStr"><is><t xml:space="preserve">Region</t>');
+    expect(text).toContain('<c r="B2"><v>1250.5</v></c>');
+    expect(text).toContain('<c r="C2" s="2"><v>46053</v></c>');
+    expect(text).toContain('<c r="D3" t="b"><v>0</v></c>');
+    expect(text).toContain("South &amp; east");
+    expect(text).toContain("a &lt;tag&gt;");
+    expect(text).toContain('<autoFilter ref="A1:D3"/>');
+  });
+  it("takes the columns and their order", async () => {
+    const blob = DataTools.toXlsx([{ a: 1, b: 2 }], [{ key: "b", label: "Second" }, "a"]);
+    const text = new TextDecoder().decode(new Uint8Array(await blob.arrayBuffer()));
+    expect(text).toContain('<t xml:space="preserve">Second</t></is></c><c r="B1" s="1" t="inlineStr"><is><t xml:space="preserve">a</t>');
+  });
+});

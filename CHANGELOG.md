@@ -6,6 +6,20 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.135] - 2026-10-12
+
+### Added
+- Approving a web read for a whole site or part of one: the approval card offers "everything under www.example.com/products/roadmap, from now on" (or the folder above it, or the whole site), and pages under it are then read without asking in that project. Files > Project setup lists the allowed sites, each with Remove. The "always ask" setting still asks every time.
+- Window apps (PowerShell, WPF) can read SQL Server databases from the project's Databases list through the kit's helpers: Start-KitSql (in the background, the window stays responsive) and Invoke-KitSql give rows ready for a table, with the same read-only checks as Copilot's queries (one SELECT, your Windows sign-in, a read-only connection, everything rolled back) and values only as parameters, so text someone types can never change the query. An app that opens a database connection itself, or pastes a value into a query, is reported and sent back to Copilot. No server address or password is stored in the app.
+- Copilot can query the project's data: ACTION sql runs a read-only SQL query over every row of the converted data files (one table per file or sheet, listed in its context) in Edge, so counts, totals and date ranges come from all the data instead of the first rows it read.
+- SQL Server databases: add a database in Files > Project setup > Databases (server and database name; your Windows sign-in, never a password). Copilot can then query it with ACTION sql db:NAME, and every query waits for your approval, showing the SQL. Only one SELECT runs, nothing that writes or runs code, on a read-only connection, with every change rolled back. A result can be kept as Source/Database/NAME.csv for the app, and Scripts/Refresh-Database.ps1 runs the saved queries again for a schedule.
+- Excel files: Copilot writes a real workbook by writing NAME.xlsx with CSV content (typed numbers, dates and true/false; a bold header row that stays in view; filter buttons; a "### NAME" line per sheet), and pages get DataTools.toXlsx and downloadXlsx for an Export to Excel button.
+- A page as a report: command menu > Export page as PDF (the UI kit's print styles) or Export charts to PowerPoint (each chart and the key figures on a slide of its own, titled with its heading), saved in Runbooks/Exports. The first PDF also writes Scripts/Export-Page.ps1, which makes the PDF with Edge alone for a schedule or chain.
+- A data profile with every converted file: per column the empty cells, distinct values, ranges and values far outside the rest, numbers mixed with text, and duplicate rows. The notable points show in the conversion line and go to Copilot with the data, so totals and charts take them into account.
+
+### Changed
+- The approve button says what the step does: Read for a web read, Run query for a database query, Save note for a note, instead of "Create file".
+
 ## [v0.1.134] - 2026-10-12
 
 ### Added

@@ -191,7 +191,7 @@ Describe 'Loading data in a page (DataTools.load)' {
         [IO.File]::WriteAllText($tools, "/* Data tools: small, tested helpers for the data files in this folder */`nold")
         $r = Update-DataImports $p -AppRoot $root
         @($r.items | ForEach-Object { $_.status }) -join ',' | Should Be 'tools-updated'
-        [IO.File]::ReadAllText($tools) | Should Match '^/\* Data tools v5'
+        [IO.File]::ReadAllText($tools) | Should Match '^/\* Data tools v6'
         [IO.File]::WriteAllText($tools, "// my own tools")
         @((Update-DataImports $p -AppRoot $root).items).Count | Should Be 0
         [IO.File]::ReadAllText($tools) | Should Be '// my own tools'
@@ -242,6 +242,40 @@ Describe 'Progress while converting' {
             $null = Update-DataImports $p -AppRoot $root -OnProgress { param($rel, $n, $of) $seen.Add($rel) }.GetNewClosure()
             $seen.Count | Should Be 0
         } finally { Remove-Item $p -Recurse -Force }
+    }
+}
+
+Describe 'Data profile' {
+    It 'profiles each column: empty cells, distinct values, range and values far outside the rest' {
+        $rows = @(, @('region', 'amount', 'day', 'code', 'source'))
+        for ($i = 1; $i -le 20; $i++) { $rows += , @($(if ($i % 4) { 'North' } else { '' }), "$(10 + $i)", ('2026-01-{0:00}' -f $i), $(if ($i -eq 7) { 'unknown' } else { "$(100 + $i)" }), 'export') }
+        $rows += , @('South', '9000', '2026-02-01', '200', 'export')
+        $rows += , @('South', '9000', '2026-02-01', '200', 'export')
+        $t = ConvertTo-DataTable $rows
+        $t.duplicates | Should Be 1
+        $c = @{}; foreach ($x in $t.columns) { $c[$x.name] = $x }
+        $c['region'].profile.empty | Should Be 5
+        $c['amount'].profile.min | Should Be 11
+        $c['amount'].profile.max | Should Be 9000
+        $c['amount'].profile.outliers | Should Be 2
+        $c['day'].profile.min | Should Be '2026-01-01'
+        $c['day'].profile.max | Should Be '2026-02-01'
+        $c['code'].type | Should Be 'text'
+        $c['code'].profile.notNumbers | Should Be 1
+        $c['code'].profile.example | Should Be 'unknown'
+        $c['source'].profile.distinct | Should Be 1
+        $q = @(Get-DataQualityNotes @{ rows = $t.rows; duplicates = $t.duplicates; columns = $t.columns }) -join ' | '
+        $q | Should Match '1 duplicate row\(s\)'
+        $q | Should Match 'region is empty in 23% of rows'
+        $q | Should Match 'amount has 2 value\(s\) far outside the rest \(range 11 to 9000\)'
+        $q | Should Match "code is mostly numbers but 1 value\(s\) are not \(such as 'unknown'\)"
+        $q | Should Match 'source has one value only'
+    }
+    It 'says nothing about a clean table' {
+        $rows = @(, @('name', 'count'))
+        for ($i = 1; $i -le 10; $i++) { $rows += , @("item $i", "$i") }
+        $t = ConvertTo-DataTable $rows
+        @(Get-DataQualityNotes @{ rows = $t.rows; duplicates = $t.duplicates; columns = $t.columns }).Count | Should Be 0
     }
 }
 

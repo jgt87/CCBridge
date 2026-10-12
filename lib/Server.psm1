@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -695,7 +695,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $fromPage = $Ctx.Request.Headers['Origin'] -eq "http://localhost:$($State.Config.port)"
             $by = if ($fromPage -and $b.by -eq 'user') { 'user' } elseif ($b.by -eq 'mcp') { 'mcp' } else { 'api' }
             # skip: the blocks of a change the person left out (Agent Get-LineHunks / Merge-LineHunks).
-            $State.Approvals[[string]$b.id] = @{ decision = [string]$b.decision; note = [string]$b.note; by = $by; skip = @(@($b.skip) | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [int]$_ }) }
+            $State.Approvals[[string]$b.id] = @{ decision = [string]$b.decision; note = [string]$b.note; by = $by; allow = [string]$b.allow; skip = @(@($b.skip) | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [int]$_ }) }
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/mode$' {
@@ -838,6 +838,47 @@ function Invoke-ApiRequest($Ctx, $State) {
             # This run of the app, from its own log (SessionReport.psm1).
             $path = New-SessionReportFile -ProcessId $PID
             return Send-Json $Ctx @{ ok = $true; path = (Protect-LogText $path); fullPath = $path }
+        }
+        '^GET /api/web-allow$' {
+            return Send-Json $Ctx @{ ok = $true; items = @(if ($State.ProjectRoot) { Read-WebAllow $State.ProjectRoot }) }
+        }
+        '^POST /api/web-allow$' {
+            # Removing a site the person allowed (adding happens when approving a read). The StreamHub page only.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            $b = Read-JsonBody $Ctx
+            if ($State.ProjectRoot) { Remove-WebAllow $State.ProjectRoot ([string]$b.remove) }
+            return Send-Json $Ctx @{ ok = $true; items = @(if ($State.ProjectRoot) { Read-WebAllow $State.ProjectRoot }) }
+        }
+        '^GET /api/databases$' {
+            $list = if ($State.ProjectRoot) { @(Get-DbConnections $State.ProjectRoot) } else { @() }
+            return Send-Json $Ctx @{ ok = $true; items = $list }
+        }
+        '^POST /api/databases$' {
+            # Add, remove or test a SQL Server connection (Windows sign-in only). The StreamHub page only.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            switch ("$($b.op)") {
+                'remove' { return Send-Json $Ctx @{ ok = $true; items = @(Remove-DbConnection $State.ProjectRoot ([string]$b.name)) } }
+                'test' {
+                    $c = @(Get-DbConnections $State.ProjectRoot | Where-Object { $_.name -eq [string]$b.name }) | Select-Object -First 1
+                    if (-not $c) { throw "No connection named $($b.name)." }
+                    $r = Invoke-DbQuery $c 'SELECT 1 AS ok' -MaxRows 1 -TimeoutSec 20
+                    return Send-Json $Ctx @{ ok = [bool]$r.ok; error = "$($r.error)" }
+                }
+                default {
+                    $items = @(Save-DbConnection $State.ProjectRoot ([string]$b.name) ([string]$b.server) ([string]$b.database) ([bool]$b.trustCertificate))
+                    return Send-Json $Ctx @{ ok = $true; items = $items }
+                }
+            }
+        }
+        '^POST /api/export$' {
+            # A page as a PDF or PowerPoint deck: a queued task (it takes a few seconds in Edge).
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            $b = Read-JsonBody $Ctx
+            $fmt = if ("$($b.format)" -eq 'pptx') { 'pptx' } else { 'pdf' }
+            $entry = Submit-AgentTask $State @{ kind = 'export'; format = $fmt; page = [string]$b.page } 'user' "Export $([string]$b.page) as $fmt"
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
         }
         '^POST /api/intake$' {
             # The person's choice per type for the files they put in the project (FileIntake.psm1):

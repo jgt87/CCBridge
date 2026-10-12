@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -761,6 +761,50 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     if ($changed) { $Entry.changed = @($changed) }
     $sets = @($events | Where-Object { $_.type -eq 'checkpoint' })
     if ($sets.Count) { $Entry.changeSeq = [int]$sets[-1].seq }   # the History tab's card of this task
+}
+
+function Invoke-ExportJob {
+    <# A project page as a PDF or a PowerPoint deck (PageExport.psm1), in Runbooks/Exports/: the page
+       opens from the page check's address in StreamHub's Edge (a headless Edge of its own when that
+       is not running). The first PDF also writes Scripts/Export-Page.ps1 for schedules and chains. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $page = "$($Task.page)".Replace('\', '/').TrimStart('/')
+    if (-not $page -or -not (Test-Path -LiteralPath (Join-Path $State.ProjectRoot $page.Replace('/', '\')) -PathType Leaf)) { Add-AgentEvent $State 'error' @{ text = "The project has no page $page to export." }; return }
+    $fmt = if ("$($Task.format)" -eq 'pptx') { 'pptx' } else { 'pdf' }
+    $url = if ($State.PreviewPort) { "http://localhost:$($State.PreviewPort)/preview/$($State.PreviewToken)/$page" } else { 'file:///' + (Join-Path $State.ProjectRoot $page.Replace('/', '\')).Replace('\', '/') }
+    $port = [int]$State.Config.cdpPort; $own = $null
+    $prof = Join-Path $env:LOCALAPPDATA 'CCBridge\export-edge'
+    $prev = Enter-Activity $State 'page' "Exporting $page as $(if ($fmt -eq 'pptx') { 'a PowerPoint deck' } else { 'a PDF' })"
+    try {
+        if (-not $port -or -not (Test-CdpEndpoint $port)) {
+            $l = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0); $l.Start(); $port = $l.LocalEndpoint.Port; $l.Stop()
+            $own = Start-CdpEdge -Port $port -ProfileDir $prof -Headless
+        }
+        $rel = Get-ExportName $page $fmt
+        $full = Join-Path $State.ProjectRoot $rel.Replace('/', '\')
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $full)
+        if ($fmt -eq 'pdf') {
+            [IO.File]::WriteAllBytes($full, (Export-PagePdf $port $url))
+            $what = 'a PDF'
+        } else {
+            $parts = @(Get-PageParts $port $url)
+            if (-not $parts.Count) { Add-AgentEvent $State 'status' @{ text = "$page has no charts or figures to put on slides." }; return }
+            $title = [IO.Path]::GetFileNameWithoutExtension($page)
+            [IO.File]::WriteAllBytes($full, (ConvertTo-PptxBytes $title $parts (Get-Date).ToString('yyyy-MM-dd')))
+            $what = "a PowerPoint deck of $($parts.Count) chart(s) and figures"
+        }
+        Add-AgentEvent $State 'status' @{ text = "$page saved as $($what): $rel"; path = $rel }
+        if ($fmt -eq 'pdf' -and -not (Test-Path -LiteralPath (Join-Path $State.ProjectRoot 'Scripts\Export-Page.ps1'))) {
+            $script = Write-ExportScript $State.ProjectRoot
+            Add-OwnChangeEvent $State 'write' $script 'StreamHub wrote Scripts/Export-Page.ps1: it saves a page as a PDF with Edge alone, so a schedule or chain can make the report while StreamHub is closed.'
+        }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Exporting $page failed: $($_.Exception.Message)" }
+    } finally {
+        Exit-Activity $State $prev
+        if ($own) { Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" -ErrorAction SilentlyContinue | Where-Object { "$($_.CommandLine)" -like "*$prof*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }
+    }
 }
 
 function Invoke-TestRunReport {
@@ -2843,6 +2887,12 @@ function Get-ProjectContext($State) {
     $turnAnswers = if ($State.TurnAnswers -is [hashtable]) { $State.TurnAnswers } else { @{} }
     $setupText = try { Format-ProjectSetupContext $root $turnAnswers } catch { '' }
     if ($setupText) { $full += "`n`n$setupText" }
+    # The databases the person connected (SqlServer): Copilot may query them, with approval.
+    $dbText = try { Format-DbContext $root } catch { '' }
+    if ($dbText) { $full += "`n$dbText" }
+    # The tables ACTION sql can query (DataQuery), when the project has converted data.
+    $sqlText = try { Format-QueryTablesContext $root } catch { '' }
+    if ($sqlText) { $full += "`n$sqlText" }
     # Files the person added to the project and what they are for (FileIntake).
     $intakeText = try { Format-IntakeContext $root } catch { '' }
     if ($intakeText) { $full += "`n$intakeText" }
@@ -2851,7 +2901,7 @@ function Get-ProjectContext($State) {
     $tailwind = try { Test-TailwindProject $State.ProjectRoot } catch { $false }
     # A SharePoint HTML page is one file whatever else was chosen: SharePoint shows only that file.
     $build = if ($setup.answers -is [hashtable] -and "$($setup.answers['audience'])" -eq 'sharepoint') { 'single' } else { "$($setup.build)" }
-    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = $build; Live = [bool]$setup.liveSource; Tailwind = $tailwind; Root = $State.ProjectRoot; Answers = $(if ($setup.answers -is [hashtable]) { $setup.answers } else { @{} }) }
+    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = $build; Live = [bool]$setup.liveSource; Tailwind = $tailwind; Root = $State.ProjectRoot; Databases = [bool]$dbText; Answers = $(if ($setup.answers -is [hashtable]) { $setup.answers } else { @{} }) }
 }
 
 function Format-ActionResults {
@@ -3019,6 +3069,53 @@ function Invoke-AgentAction {
             try { Add-CheckDispute $root $path $finding $reason 'copilot' } catch { Write-CCBLogError agent 'check dispute' $_ }
             return @{ ok = $true; summary = "check disputed: $path"; output = "Noted: '$finding' in $path is left out for the rest of this task." }
         }
+        'sql' {
+            # ACTION sql db:NAME [save:FILE]: a query on a SQL Server database the person connected
+            # (SqlServer.psm1): read-only by its checks, and only after the person approves it, since
+            # company data then goes to Copilot. Never without a person (MCP / headless).
+            $dbm = [regex]::Match("$($Action.arg)", '^\s*db:([\w-]+)(?:\s+save:([\w-]+))?\s*(.*)$')
+            if ($dbm.Success) {
+                $dbName = $dbm.Groups[1].Value; $saveAs = $dbm.Groups[2].Value
+                $sql = ("$($dbm.Groups[3].Value)`n$($Action.body)").Trim()
+                $evt.target = "db:$dbName$(if ($saveAs) { " -> Source/Database/$saveAs.csv" })"
+                $conn = @(Get-DbConnections $root | Where-Object { $_.name -eq $dbName }) | Select-Object -First 1
+                if (-not $conn) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = 'unknown database' }); return @{ ok = $false; summary = 'query: unknown database'; output = "error: there is no database connection named $dbName. The user connected: $((@(Get-DbConnections $root) | ForEach-Object { $_.name }) -join ', ')$(if (-not @(Get-DbConnections $root).Count) { 'none (the user adds them in Files > Project setup > Databases)' })." } }
+                $why = Test-DbQuery $sql
+                if ($why) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = $why }); return @{ ok = $false; summary = 'query refused'; output = "error: $why." } }
+                if ($State.Headless) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = 'needs a person' }); return @{ ok = $false; summary = 'query needs a person'; output = 'not run: a database query needs the user''s approval in the StreamHub window.' } }
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; preview = @{ path = "$dbName.sql"; exists = $false; old = $null; new = $sql }; warning = "Copilot wants to run this query on $($conn.database) ($($conn.server)) with your Windows sign-in; the result goes to Copilot$(if ($saveAs) { " and into Source/Database/$saveAs.csv" }). It can only read: one SELECT, a read-only connection, everything rolled back." })
+                $d = Wait-Approval $State $Id $true
+                if ($d.decision -ne 'approve') {
+                    Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }
+                    return @{ ok = $false; summary = 'query rejected'; output = "rejected by the user.$(if ($d.note) { " The user said: $($d.note)" })"; reported = $true }
+                }
+                Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $true; status = 'running'; decidedBy = $d.by }
+                $prevAct = Enter-Activity $State 'page' "Querying $dbName"
+                try { $res = Invoke-DbQuery $conn $sql } finally { Exit-Activity $State $prevAct }
+                Write-CCBLog info agent 'Database query' @{ database = $dbName; ok = [bool]$res.ok; rows = $res.count }
+                if (-not $res.ok) { return @{ ok = $false; summary = 'query failed'; output = "error: $($res.error)" } }
+                $note = ''
+                if ($saveAs) {
+                    try {
+                        $rel = Save-DbResult $root $saveAs $dbName $sql $res
+                        Add-OwnChangeEvent $State 'write' $rel "StreamHub saved the query's $($res.count) row(s) as $rel; the query is kept so Scripts/Refresh-Database.ps1 can run it again."
+                        if (-not (Test-Path -LiteralPath (Join-Path $root 'Scripts\Refresh-Database.ps1'))) { $null = Write-DbRefreshScript $root }
+                        $note = "`nSaved as $rel (it is converted like any data file at the next task; Scripts/Refresh-Database.ps1 runs the saved queries again)."
+                    } catch { $note = "`nThe result could not be saved: $($_.Exception.Message)" }
+                }
+                $view = [pscustomobject]@{ ok = $true; columns = @($res.columns); count = [int]$res.count; rows = @(@($res.rows) | Select-Object -First 200 | ForEach-Object { , @($_) }) }
+                return @{ ok = $true; summary = "query: $($res.count) row(s)$(if ($res.truncated) { ' (cut off)' })"; output = (Format-DataQueryResult $view $sql) + $(if ($res.truncated) { "`n(The query returned more than $($res.count) rows; the rest was not read: aggregate or filter in the query.)" }) + $note }
+            }
+            # A read-only query over every row of the converted data (DataQuery.psm1): no approval,
+            # since nothing is changed and nothing leaves the computer.
+            $sql = ("$($Action.arg)`n$($Action.body)").Trim()
+            $evt.target = if ($sql.Length -gt 120) { $sql.Substring(0, 117) + '...' } else { $sql }
+            Add-AgentEvent $State 'action' $evt
+            $prevAct = Enter-Activity $State 'page' 'Running a query over the data'
+            try { $res = Invoke-DataQuery $root $State.AppRoot $sql -CdpPort ([int]$State.Config.cdpPort) } catch { $res = [pscustomobject]@{ ok = $false; error = "$($_.Exception.Message)" } } finally { Exit-Activity $State $prevAct }
+            $out = Format-DataQueryResult $res $sql
+            return @{ ok = [bool]$res.ok; summary = $(if ($res.ok) { "query: $($res.count) row(s)" } else { 'query failed' }); output = $out }
+        }
         'screenshot' {
             # A screenshot of a project page after the clicks Copilot names (the automatic one shows
             # the page as it first opens). Read-only: the page is served from the preview address.
@@ -3066,10 +3163,17 @@ function Invoke-AgentAction {
             $policy = if ($State.Config.webRead) { "$($State.Config.webRead)" } else { 'named-sites' }
             if ($policy -eq 'off') { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = 'reading web pages is off' }); return @{ ok = $false; summary = 'web pages are off'; output = 'error: reading web pages is turned off in the settings; use your own web search instead.' } }
             $named = @(Get-NamedSites "$($State.TurnText)")
-            $unnamed = @($urls | Where-Object { $policy -eq 'always-ask' -or -not (Test-HostMatch ([Uri]$_).Host $named) })
+            # Sites the person allowed for this project (from an earlier approval) need no approval again.
+            $allowed = if ($policy -eq 'always-ask') { @() } else { @(Read-WebAllow $root) }
+            $unnamed = @($urls | Where-Object { $policy -eq 'always-ask' -or -not ((Test-HostMatch ([Uri]$_).Host $named) -or (Test-WebAllowed $root $_ $allowed)) })
             if ($unnamed.Count) {
-                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; warning = "Copilot wants to read $($unnamed -join ', '). The address is sent to that site; approve only if it is a site you trust and the address holds no project data." })
+                $allowOptions = if ($policy -eq 'always-ask') { @() } else { @(Get-WebAllowCandidates $unnamed) }
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; allowOptions = $allowOptions; warning = "Copilot wants to read $($unnamed -join ', '). The address is sent to that site; approve only if it is a site you trust and the address holds no project data." })
                 $d = Wait-Approval $State $Id $false
+                # Approved with "from now on": the chosen part of the site is allowed for this project.
+                if ($d.decision -eq 'approve' -and "$($d.allow)" -and $allowOptions -contains "$($d.allow)" -and $d.by -eq 'user') {
+                    try { Add-WebAllow $root "$($d.allow)"; Add-AgentEvent $State 'status' @{ text = "From now on, pages under $($d.allow) are read without asking in this project (Files > Project setup lists the allowed sites)." } } catch { Write-CCBLogError agent 'web allow' $_ }
+                }
                 if ($d.decision -ne 'approve') {
                     Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }
                     return @{ ok = $false; summary = 'web rejected'; output = "rejected by the user.$(if ($d.note) { " The user said: $($d.note)" })"; reported = $true }
@@ -4892,6 +4996,7 @@ function Start-AgentWorker {
                 'chain' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ChainJob $State $task.name }
                 'script' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ScriptJob $State $task.name }
                 'testrun-report' { Invoke-TestRunReport $State $task }
+                'export' { Invoke-ExportJob $State $task }
                 'packages' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-PackagesJob $State $task.folder }
                 'review' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ReviewJob $State $task }
                 'ask' {
@@ -4966,4 +5071,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask, Invoke-TestRunReport
+Export-ModuleMember -Function Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask, Invoke-TestRunReport, Invoke-ExportJob

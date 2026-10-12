@@ -1844,6 +1844,22 @@ function Find-DataGlobalIssues {
 # XAML that PowerShell loads with XamlReader cannot have a code-behind class or event attributes.
 $script:XamlEventPattern = '\s(Click|Loaded|Unloaded|Checked|Unchecked|SelectionChanged|TextChanged|MouseDown|MouseUp|MouseDoubleClick|KeyDown|KeyUp|Closing|Closed|ValueChanged|DropDownClosed|LostFocus|GotFocus)\s*=\s*"'
 
+function Find-OwnDbAccess {
+    <# Database access a window app writes itself instead of through the kit's read-only helpers
+       (Invoke-KitSql / Start-KitSql in KitWpf.ps1): its own SqlConnection, OleDb or ODBC connection or
+       Invoke-Sqlcmd, and a query for the helpers with values pasted into its text. Only in PowerShell
+       files of a window app (they load KitWpf.ps1 or WPF); not the helper program's own files. #>
+    param([string]$Path, [AllowEmptyString()][string]$Text)
+    if ($Path -notmatch '(?i)\.ps[md]?1$' -or $Path -match '(?i)^(styles/kit/|Scripts/Refresh-Database\.ps1$)') { return @() }
+    if ($Text -notmatch '(?i)KitWpf\.ps1|PresentationFramework|XamlReader') { return @() }
+    $out = New-Object System.Collections.Generic.List[string]
+    $own = [regex]::Match($Text, '(?i)(Data\.SqlClient\.SqlConnection|\bSqlConnection\b|OleDb\w*Connection|Odbc\w*Connection|\bInvoke-Sqlcmd\b)')
+    if ($own.Success) { $out.Add("line $(LineAt $Text $own.Index): the app opens a database itself ($($own.Value)): read SQL Server data only with Start-KitSql or Invoke-KitSql (KitWpf.ps1) and a database of the project's Databases list; they connect read-only with the user's Windows sign-in and keep the server and password out of the app") }
+    $pasted = [regex]::Match($Text, '(?im)(Invoke|Start)-KitSql\b[^\r\n]*-Query\s+"[^"\r\n]*\$[\w({]')
+    if ($pasted.Success) { $out.Add("line $(LineAt $Text $pasted.Index): a value is pasted into the query text: write @name in the query and pass the value in -Parameters @{ name = ... }, so text a person types can never change the query") }
+    @($out)
+}
+
 function Find-PsGuiIssues {
     <# Mistakes that stop a PowerShell window app (WPF loaded with XamlReader) from opening: x:Class or an
        event attribute in its XAML (a .xaml file in a project without a C# project, or XAML in a script),
@@ -2002,6 +2018,7 @@ function Get-NewFileIssues {
             @(Find-UndefinedCssVars $own.Replace("`r`n", "`n") $Path $ProjectRoot) +
             @(Find-DataGlobalIssues $ProjectRoot $Path $text.Replace("`r`n", "`n") $blockGlobals) +
             @(Find-PsGuiIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
+            @(Find-OwnDbAccess $Path $text.Replace("`r`n", "`n")) +
             @(Find-XamlLayoutIssues $Path $text.Replace("`r`n", "`n") $ProjectRoot) | Where-Object { $_ }
     }
     # The fixed rules; when they find nothing, the language's own syntax check (node, python, when
@@ -2025,4 +2042,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Find-LeakedMarkup, Test-Delimiters, Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences, Find-ChartPlaceholder, Find-ChartsRemoved
+Export-ModuleMember -Function Find-LeakedMarkup, Test-Delimiters, Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences, Find-ChartPlaceholder, Find-ChartsRemoved, Find-OwnDbAccess

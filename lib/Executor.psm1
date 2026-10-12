@@ -82,6 +82,7 @@ function Write-TextFile([string]$Path, [string]$Text, [bool]$Bom = $false, [bool
     }
     # A Word document is written from its Markdown text (Assert-Writable allows only .docx made here).
     if ($Path -match '(?i)\.docx$') { Write-DocxFile $Path $Text; return }
+    if ($Path -match '(?i)\.xlsx$') { Write-XlsxFile $Path $Text; return }
     $dir = Split-Path -Parent $Path
     if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir -Force }
     $t = $Text.Replace("`r`n", "`n")

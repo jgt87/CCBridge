@@ -111,6 +111,78 @@ function Get-ColumnType([string[]]$Values, [string]$Delimiter = ',') {
     @{ type = 'text' }
 }
 
+$script:ProfileDateRe = New-Object regex ('^(\d{1,4})[/.-](\d{1,2})[/.-](\d{1,4})', 'Compiled')
+$script:ProfileNumRe = New-Object regex ('^[-+]?[\d.,]+$', 'Compiled')
+
+function Get-ColumnProfile {
+    <# What a column holds, for the data notes: @{ empty; distinct; min; max; outliers; notNumbers }.
+       empty: missing values; distinct: different values; min/max: numbers and dates (dates as
+       yyyy-MM-dd); outliers: numbers far outside the rest (beyond three times the middle half's spread
+       from it); notNumbers: in a text column whose values are mostly numbers, how many are not (such
+       as n/a), with an example. #>
+    param([string[]]$Values, $Type)
+    $empty = 0; $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+    $nums = New-Object System.Collections.Generic.List[double]
+    $dates = New-Object System.Collections.Generic.List[datetime]
+    $numLike = 0; $notNum = 0; $notNumExample = ''
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    foreach ($v in $Values) {
+        if ($script:MissingRe.IsMatch($v)) { $empty++; continue }
+        if ($seen.Count -lt 100000) { [void]$seen.Add($v) }
+        switch ($Type.type) {
+            'number' {
+                $t = if ($Type.decimal -eq ',') { $v.Replace('.', '').Replace(',', '.') } else { $v.Replace(',', '') }
+                $d = 0.0; if ([double]::TryParse($t, [Globalization.NumberStyles]::Float, $inv, [ref]$d)) { $nums.Add($d) }
+            }
+            'date' {
+                $m = $script:ProfileDateRe.Match($v)
+                if ($m.Success) {
+                    $a = [int]$m.Groups[1].Value; $b = [int]$m.Groups[2].Value; $c = [int]$m.Groups[3].Value
+                    $y, $mo, $da = switch ($Type.order) { 'iso' { $a, $b, $c } 'dmy' { $c, $b, $a } default { $c, $a, $b } }
+                    try { $dates.Add((New-Object datetime $y, $mo, $da)) } catch { }
+                }
+            }
+            default {
+                if ($script:ProfileNumRe.IsMatch($v)) { $numLike++ } else { $notNum++; if (-not $notNumExample) { $notNumExample = $v } }
+            }
+        }
+    }
+    $p = [ordered]@{ empty = $empty; distinct = $seen.Count }
+    if ($nums.Count) {
+        $arr = $nums.ToArray(); [Array]::Sort($arr)
+        $p.min = $arr[0]; $p.max = $arr[-1]
+        if ($arr.Count -ge 8) {
+            $q1 = $arr[[int][Math]::Floor(($arr.Count - 1) * 0.25)]; $q3 = $arr[[int][Math]::Floor(($arr.Count - 1) * 0.75)]
+            $spread = $q3 - $q1
+            if ($spread -gt 0) { $lo = $q1 - 3 * $spread; $hi = $q3 + 3 * $spread; $out = 0; foreach ($x in $arr) { if ($x -lt $lo -or $x -gt $hi) { $out++ } }; $p.outliers = $out }
+        }
+    }
+    if ($dates.Count) { $ds = $dates.ToArray(); [Array]::Sort($ds); $p.min = $ds[0].ToString('yyyy-MM-dd'); $p.max = $ds[-1].ToString('yyyy-MM-dd') }
+    if ($numLike -ge 5 -and $notNum -gt 0 -and $numLike -ge 4 * $notNum) { $p.notNumbers = $notNum; $p.example = $notNumExample }
+    $p
+}
+
+function Get-DataQualityNotes {
+    <# The notable points of a converted table, for Copilot's data lines and the person: columns that are
+       often empty (10% or more), hold one value only, have values far outside the rest or numbers mixed
+       with other text, and duplicate rows. $Sheet: @{ rows; duplicates; columns = @(@{ name; profile }) }. #>
+    param($Sheet, [int]$Max = 8)
+    $rows = [int]$Sheet.rows
+    if ($rows -lt 1) { return @() }
+    $notes = New-Object System.Collections.Generic.List[string]
+    if ([int]$Sheet.duplicates -gt 0) { $notes.Add("$($Sheet.duplicates) duplicate row(s)") }
+    foreach ($c in @($Sheet.columns)) {
+        $p = $c.profile
+        if (-not $p) { continue }
+        $e = [int]$p.empty
+        if ($e -and $e -ge [Math]::Max(1, $rows * 0.1)) { $notes.Add("$($c.name) is empty in $([Math]::Round(100 * $e / $rows))% of rows") }
+        if ($rows -ge 5 -and [int]$p.distinct -eq 1 -and $e -lt $rows) { $notes.Add("$($c.name) has one value only") }
+        if ([int]$p.outliers -gt 0) { $notes.Add("$($c.name) has $($p.outliers) value(s) far outside the rest (range $($p.min) to $($p.max))") }
+        if ([int]$p.notNumbers -gt 0) { $notes.Add("$($c.name) is mostly numbers but $($p.notNumbers) value(s) are not (such as '$($p.example)'): kept as text") }
+    }
+    @($notes | Select-Object -First $Max)
+}
+
 function ConvertTo-TypedJson([string]$Value, $Type) {
     <# One value as JSON text, by its column's type. #>
     if ($Value -match $script:Missing) { return 'null' }
@@ -161,14 +233,18 @@ function ConvertTo-DataTable {
     if (-not $rows.Count) { return @{ columns = @(); json = '[]'; rows = 0; notes = @() } }
     $width = 0; foreach ($r in $rows) { if ($r.Count -gt $width) { $width = $r.Count } }
     $names = @(Get-ColumnNames ([string[]]$rows[0]) $width)
-    $types = @(); $notes = @()
+    $types = @(); $notes = @(); $profiles = @()
     for ($c = 0; $c -lt $width; $c++) {
         $vals = New-Object System.Collections.Generic.List[string]
         for ($i = 1; $i -lt $rows.Count; $i++) { $vals.Add($(if ($c -lt $rows[$i].Count) { "$($rows[$i][$c])".Trim() } else { '' })) }
         $t = Get-ColumnType $vals.ToArray() $Delimiter
         if ($t.note) { $notes += "column $($names[$c]): $($t.note)" }
         $types += , $t
+        $profiles += , (Get-ColumnProfile $vals.ToArray() $t)
     }
+    # Duplicate rows: the same values in every column.
+    $dup = 0; $rowSeen = New-Object 'System.Collections.Generic.HashSet[string]'
+    for ($i = 1; $i -lt $rows.Count; $i++) { if (-not $rowSeen.Add([string]::Join([string][char]31, [string[]]@($rows[$i])))) { $dup++ } }
     $keys = @($names | ForEach-Object { (ConvertTo-JsonString $_) + ': ' })
     $isText = @($types | ForEach-Object { $_.type -eq 'text' })
     $sb = New-Object Text.StringBuilder ([Math]::Min(200MB, $rows.Count * $width * 24))
@@ -187,8 +263,8 @@ function ConvertTo-DataTable {
         [void]$sb.Append('}')
     }
     [void]$sb.Append($(if ($rows.Count -gt 1) { "`n$Indent]" } else { ']' }))
-    $cols = @(for ($c = 0; $c -lt $width; $c++) { @{ name = $names[$c]; type = $types[$c].type } })
-    @{ columns = $cols; json = $sb.ToString(); rows = $rows.Count - 1; notes = $notes }
+    $cols = @(for ($c = 0; $c -lt $width; $c++) { @{ name = $names[$c]; type = $types[$c].type; profile = $profiles[$c] } })
+    @{ columns = $cols; json = $sb.ToString(); rows = $rows.Count - 1; notes = $notes; duplicates = $dup }
 }
 
 function ConvertFrom-DataFile {
@@ -207,7 +283,7 @@ function ConvertFrom-DataFile {
             if (-not $one) { $one = $t.json }
             if ($s.total -gt $s.rows.Count) { $notes += "sheet $($s.name): only the first $($script:MaxRows) rows" }
             $notes += @($t.notes | ForEach-Object { "sheet $($s.name), $_" })
-            $out += @{ name = $s.name; rows = $t.rows; columns = $t.columns }
+            $out += @{ name = $s.name; rows = $t.rows; columns = $t.columns; duplicates = $t.duplicates }
             $parts += "  $(ConvertTo-JsonString $s.name): $($t.json)"
         }
         $json = if ($sheets.Count -eq 1) { $one } else { "{`n" + ($parts -join ",`n") + "`n}" }
@@ -224,7 +300,7 @@ function ConvertFrom-DataFile {
     if ($rows.Count -gt $script:MaxRows + 1) { $rows = $rows[0..$script:MaxRows]; $notes += "only the first $($script:MaxRows) rows" }
     $t = ConvertTo-DataTable $rows $delim
     $dn = switch ($delim) { ',' { 'comma' } ';' { 'semicolon' } "`t" { 'tab' } '|' { 'bar' } }
-    @{ json = $t.json; sheets = @(@{ name = ''; rows = $t.rows; columns = $t.columns }); encoding = $read.encoding; delimiter = $dn; notes = @($notes + $t.notes) }
+    @{ json = $t.json; sheets = @(@{ name = ''; rows = $t.rows; columns = $t.columns; duplicates = $t.duplicates }); encoding = $read.encoding; delimiter = $dn; notes = @($notes + $t.notes) }
 }
 
 function Get-DataGlobalName([string]$Stem) {
@@ -394,10 +470,11 @@ function Update-DataImports {
         $entry.hash = Get-TextHash $text
         $entry.js = $js; $entry.global = $(if ($js) { $global } else { $null })
         $entry.encoding = $conv.encoding; $entry.delimiter = $conv.delimiter
-        $entry.sheets = @($conv.sheets | ForEach-Object { [ordered]@{ name = $_.name; rows = $_.rows; columns = @($_.columns | ForEach-Object { [ordered]@{ name = $_.name; type = $_.type } }) } })
+        $entry.sheets = @($conv.sheets | ForEach-Object { [ordered]@{ name = $_.name; rows = $_.rows; duplicates = [int]$_.duplicates; columns = @($_.columns | ForEach-Object { [ordered]@{ name = $_.name; type = $_.type; profile = $_.profile } }) } })
         $entry.notes = @($conv.notes)
         $man[$out] = [pscustomobject]$entry; $changed = $true
-        $results.Add([pscustomobject]@{ source = $s.rel; output = $out; js = $js; status = $(if ($prev) { 'updated' } else { 'created' }); note = (@($conv.notes) -join '; '); old = $old; new = $text })
+        $quality = @(foreach ($sh in @($entry.sheets)) { foreach ($q in @(Get-DataQualityNotes $sh 4)) { if ($sh.name -and @($entry.sheets).Count -gt 1) { "sheet $($sh.name): $q" } else { $q } } })
+        $results.Add([pscustomobject]@{ source = $s.rel; output = $out; js = $js; status = $(if ($prev) { 'updated' } else { 'created' }); note = (@($conv.notes) -join '; '); quality = $quality; old = $old; new = $text })
     }
     # The data tools (loading, grouping, totals, sorting, dates) next to the converted files: added
     # with the first conversion, replaced by a newer version (never one someone made themselves).
@@ -472,8 +549,8 @@ function Format-DataImportNotes($Result) {
     <# Chat lines for what Update-DataImports did. 'taken' says nothing (the project has its own file). #>
     foreach ($r in @($Result.items)) {
         switch ($r.status) {
-            'created' { "$($r.output) made from $($r.source)$(if ($r.js) { " (and $($r.js) for web pages)" }): Copilot uses it instead of parsing the file itself.$(if ($r.note) { " Note: $($r.note)." })" }
-            'updated' { "$($r.output) made again: $($r.source) changed.$(if ($r.note) { " Note: $($r.note)." })" }
+            'created' { "$($r.output) made from $($r.source)$(if ($r.js) { " (and $($r.js) for web pages)" }): Copilot uses it instead of parsing the file itself.$(if ($r.note) { " Note: $($r.note)." })$(if (@($r.quality).Count) { " Data quality: $(@($r.quality) -join '; ')." })" }
+            'updated' { "$($r.output) made again: $($r.source) changed.$(if ($r.note) { " Note: $($r.note)." })$(if (@($r.quality).Count) { " Data quality: $(@($r.quality) -join '; ')." })" }
             'failed' { "$($r.source) could not be converted to $($r.output): $($r.note)." }
             'too-large' { "$($r.source) is too large to convert ($($r.note); at most $($script:MaxBytes / 1MB) MB)." }
             'tools' { "data/data-tools.js added: DataTools.load reads the data in a page (the file itself when served, the converted copy when opened from disk), plus filter, sort, group, totals, months, number and date formats, so pages do not write their own." }
@@ -500,7 +577,8 @@ function Format-DataImportContext {
             $cols = @($s.columns | Select-Object -First $MaxColumns | ForEach-Object { "$($_.name) ($($_.type))" })
             $more = @($s.columns).Count - $cols.Count
             $head = if ($s.name -and @($it.sheets).Count -gt 1) { 'sheet "' + $s.name + '": ' } else { '' }
-            $head + "$($s.rows) rows; columns: $($cols -join ', ')" + $(if ($more -gt 0) { " and $more more" } else { '' })
+            $q = @(Get-DataQualityNotes $s 6)
+            $head + "$($s.rows) rows; columns: $($cols -join ', ')" + $(if ($more -gt 0) { " and $more more" } else { '' }) + $(if ($q.Count) { "; data quality: $($q -join '; ') (take this into account: totals, empty values, outliers)" } else { '' })
         }
         $shape = if (@($it.sheets).Count -gt 1) { 'an object with one list of rows per sheet' } elseif (@($it.sheets).Count) { 'a list of rows' } else { 'the same JSON' }
         "- $where from $($it.source): $shape$(if ($desc) { '; ' + (@($desc) -join '; ') })"
@@ -511,12 +589,12 @@ function Format-DataImportContext {
     if ($OneFile) {
         $first = "$(@($man.Values | Where-Object { -not $_.status -and -not $_.edited } | Select-Object -First 1).source)"
         $lines = @($lines) + "- In the one-file page, put <script data-streamhub=`"data`" data-source=`"SOURCE PATH`"></script> (for example data-source=`"$first`") before your own script for each data file the page shows, written empty: the helper program fills it with window.NAME (the name above; data-global=`"NAME`" picks another) and keeps it up to date when the file changes. Never fetch the CSV or the JSON and never load the data/ files."
-        if (Test-Path -LiteralPath $tools) { $lines = @($lines) + "- DataTools (rows, where, sortBy, unique, sum, avg, min, max, count, groupBy, summarize, byMonth, toDate, formatNumber, formatDate, percent, join (combine two files by a key, loosely matched, with pairs of key columns tried in order), band and quantiles (tiers or bands), countBy and countEach ([{ label, value }] for charts); its first comment in data/data-tools.js lists them) can be used in the one-file page: once your script calls DataTools, the helper program adds it to the page's kit script block. Use these for filtering, totals, grouping, joining files and tiers instead of writing your own." }
+        if (Test-Path -LiteralPath $tools) { $lines = @($lines) + "- DataTools (rows, where, sortBy, unique, sum, avg, min, max, count, groupBy, summarize, byMonth, toDate, formatNumber, formatDate, percent, join (combine two files by a key, loosely matched, with pairs of key columns tried in order), band and quantiles (tiers or bands), countBy and countEach ([{ label, value }] for charts), toXlsx and downloadXlsx (an Excel export of rows); its first comment in data/data-tools.js lists them) can be used in the one-file page: once your script calls DataTools, the helper program adds it to the page's kit script block. Use these for filtering, totals, grouping, joining files and tiers instead of writing your own." }
     } elseif ($load) {
         $lines = @($lines) + "- In a web page, load the data with DataTools.load(`"SOURCE PATH`") (for example DataTools.load(`"$(@($man.Values | Where-Object { -not $_.status -and -not $_.edited } | Select-Object -First 1).source)`")): a promise of the rows, or of an object with the rows per sheet for a workbook. Include only <script src=`"data/data-tools.js`"></script> before your script (in a page in a subfolder, the right relative path to it). It reads the file itself when the page is served and the converted copy when the page is opened from disk, so the page keeps working both ways and follows the source file. Never fetch the CSV or the JSON yourself and never add the data/NAME.js copies to the page."
-        $lines = @($lines) + "- data/data-tools.js (window.DataTools; its first comment lists the functions) also has rows(data, sheet), where, sortBy, unique, sum, avg, min, max, count, groupBy, summarize, byMonth, toDate, formatNumber, formatDate, percent, join (combine two files by a key, loosely matched, with pairs of key columns tried in order), band and quantiles (tiers or bands), countBy and countEach ([{ label, value }] for charts). Use these for filtering, totals, grouping, joining files and tiers instead of writing your own."
-    } elseif (Test-Path -LiteralPath $tools) { $lines = @($lines) + "- data/data-tools.js (window.DataTools; its first comment lists the functions): DataTools.rows(data, sheet), where, sortBy, unique, sum, avg, min, max, count, groupBy, summarize, byMonth, toDate, formatNumber, formatDate, percent, join (combine two files by a key, loosely matched, with pairs of key columns tried in order), band and quantiles (tiers or bands), countBy and countEach ([{ label, value }] for charts). Use these for filtering, totals, grouping, joining files and tiers instead of writing your own." }
+        $lines = @($lines) + "- data/data-tools.js (window.DataTools; its first comment lists the functions) also has rows(data, sheet), where, sortBy, unique, sum, avg, min, max, count, groupBy, summarize, byMonth, toDate, formatNumber, formatDate, percent, join (combine two files by a key, loosely matched, with pairs of key columns tried in order), band and quantiles (tiers or bands), countBy and countEach ([{ label, value }] for charts), toXlsx and downloadXlsx (an Excel export of rows). Use these for filtering, totals, grouping, joining files and tiers instead of writing your own."
+    } elseif (Test-Path -LiteralPath $tools) { $lines = @($lines) + "- data/data-tools.js (window.DataTools; its first comment lists the functions): DataTools.rows(data, sheet), where, sortBy, unique, sum, avg, min, max, count, groupBy, summarize, byMonth, toDate, formatNumber, formatDate, percent, join (combine two files by a key, loosely matched, with pairs of key columns tried in order), band and quantiles (tiers or bands), countBy and countEach ([{ label, value }] for charts), toXlsx and downloadXlsx (an Excel export of rows). Use these for filtering, totals, grouping, joining files and tiers instead of writing your own." }
     "Data files ready to use (the helper program converted them; numbers, dates as yyyy-MM-dd and true/false are typed, empty cells are null). Never write a CSV or Excel parser for them; change the source file, not the converted files, since they are made again when it changes:`n" + (@($lines) -join "`n")
 }
 
-Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Get-ScriptOwnedSources, Read-DataImportManifest, Update-DataImports, Format-DataImportNotes, Format-DataImportContext, Get-DataToolsSource
+Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Get-ScriptOwnedSources, Read-DataImportManifest, Update-DataImports, Format-DataImportNotes, Format-DataImportContext, Get-DataToolsSource, Get-ColumnProfile, Get-DataQualityNotes

@@ -272,8 +272,12 @@
                                                      "acf8b2528ca4b30f4eae4e33f09401162b424e01a6749ec0843c148a76f82c91"
                                                  ],
                   "wpf/KitWpf.ps1":  [
+                                         "0133a921715f8adc88f3960bc582dcc6c00a06d747be4aea3486280716810df1",
                                          "30b6c2237d1556eff1458b5b723c20f44f1346bc37b62b314aff9736bf6ce965",
-                                         "7b7db20066e079fcf4be2432958e05393e8c6a75c4bd938f4f9d4de51ff65346"
+                                         "6df6d062ebcd3b62e4d12de74c65016cd5fb592da47a662b9281ca088f9f0663",
+                                         "7b7db20066e079fcf4be2432958e05393e8c6a75c4bd938f4f9d4de51ff65346",
+                                         "a895f2efa2a9674810d0b0f83242bc9b05740bf9acc91b4cf8e6c540393f1769",
+                                         "c829c9a38c065392551f878a97376a1475eeaadf783193a0cb9d06c22fbed921"
                                      ]
               }
 }

@@ -195,6 +195,8 @@ export interface AgentEvent {
   status?: string;
   preview?: Preview | null;
   warning?: string | null;
+  /** web: what the person can allow from now on when approving (most specific first). */
+  allowOptions?: string[] | string | null;
   error?: string;
   ok?: boolean;
   summary?: string;
@@ -737,6 +739,10 @@ export const api = {
   unlinkSharePoint: (spItemUrl: string) => call<{ sources: SharePointSource[] | SharePointSource }>("POST", "/api/sharepoint/unlink", { spItemUrl }).then((r) => ({ sources: asList(r.sources) })),
   publishSharePoint: (b: { site: string; file: string; confirm?: boolean; replace?: boolean }) =>
     call<{ target: string; exists: boolean; replaced: boolean; findings: string[] | string }>("POST", "/api/sharepoint/publish", b).then((r) => ({ target: r.target, exists: !!r.exists, replaced: !!r.replaced, findings: asList(r.findings) })),
+  databases: () => call<{ items: DbConnection[] | DbConnection }>("GET", "/api/databases").then((r) => asList(r.items)),
+  dbOp: (b: { op: "add" | "remove" | "test"; name: string; server?: string; database?: string; trustCertificate?: boolean }) =>
+    call<{ ok: boolean; items?: DbConnection[] | DbConnection; error?: string }>("POST", "/api/databases", b).then((r) => ({ ok: r.ok, error: r.error ?? "", items: asList(r.items) })),
+  exportPage: (page: string, format: "pdf" | "pptx") => call<{ ok: boolean; queued: string }>("POST", "/api/export", { page, format }),
   intake: (choices: Record<string, string>) =>
     call<{ ok: boolean; moved: string[] | string; queued: string | null }>("POST", "/api/intake", { choices }).then((r) => ({ moved: asList(r.moved), queued: r.queued })),
   testRuns: () => call<{ items: TestRunItem[] | TestRunItem; dir: string }>("GET", "/api/testruns").then((r) => ({ dir: r.dir, items: asList(r.items) })),
@@ -782,8 +788,10 @@ export const api = {
   chainSteps: (name: string, op: "add" | "remove" | "up" | "down", opts: { kind?: "runbook" | "script" | "download"; target?: string; args?: string; index?: number } = {}) =>
     call<{ ok: boolean }>("POST", "/api/chains/steps", { name, op, ...opts }),
   /** skip: the blocks of a change the person leaves out (approving the rest). */
-  approve: (id: string, decision: "approve" | "reject", note = "", skip: number[] = []) =>
-    call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user", ...(skip.length ? { skip } : {}) }),
+  approve: (id: string, decision: "approve" | "reject", note = "", skip: number[] = [], allow = "") =>
+    call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user", ...(skip.length ? { skip } : {}), ...(allow ? { allow } : {}) }),
+  webAllow: () => call<{ items: string[] | string }>("GET", "/api/web-allow").then((r) => asList(r.items)),
+  removeWebAllow: (remove: string) => call<{ items: string[] | string }>("POST", "/api/web-allow", { remove }).then((r) => asList(r.items)),
   setMode: (mode: Mode) => call<{ ok: boolean }>("POST", "/api/mode", { mode }),
   /** Edge's caches in StreamHub's own profile (never the sign-in). */
   edgeCache: () => call<EdgeCacheInfo>("GET", "/api/edge-cache"),
@@ -887,3 +895,6 @@ export type IntakeGroup = {
   files: string[];
   options: { value: string; label: string; help: string }[];
 };
+
+/** A SQL Server database a project may query (Windows sign-in, read-only). */
+export type DbConnection = { name: string; server: string; database: string; trustCertificate?: boolean };

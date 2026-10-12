@@ -80,6 +80,76 @@ function Test-WebAddress {
     $null
 }
 
+# --- Sites the person allowed for a project: reads under them need no approval ------------------
+
+function ConvertTo-WebPrefix([string]$Url) {
+    # host/path of an address (lower-case host, no query or fragment, no trailing slash), or ''.
+    try { $u = [Uri]$Url } catch { return '' }
+    if ($u.Scheme -notin 'http', 'https') { return '' }
+    ($u.Host.ToLowerInvariant() + $u.AbsolutePath.TrimEnd('/'))
+}
+
+function Get-WebAllowCandidates([string[]]$Urls) {
+    <# What the person can allow from now on when approving a read of $Urls (all on one host): the
+       path they share, the folder above it, and the whole host, most specific first. Nothing for
+       addresses on several hosts (each is approved on its own). #>
+    $prefixes = @($Urls | ForEach-Object { ConvertTo-WebPrefix $_ } | Where-Object { $_ })
+    if (-not $prefixes.Count) { return @() }
+    $hosts = @($prefixes | ForEach-Object { $_.Split('/')[0] } | Select-Object -Unique)
+    if ($hosts.Count -ne 1) { return @() }
+    $seg = @($prefixes | ForEach-Object { , @($_.Split('/') | Select-Object -Skip 1) })
+    $common = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; ; $i++) {
+        $parts = @($seg | ForEach-Object { if ($i -lt $_.Count) { $_[$i] } else { $null } })
+        if (@($parts | Where-Object { $null -eq $_ }).Count -or @($parts | Select-Object -Unique).Count -ne 1) { break }
+        $common.Add($parts[0])
+    }
+    # The shared path, the folder above it, then the whole host.
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($n in @($common.Count, ($common.Count - 1), 0)) {
+        if ($n -lt 0) { continue }
+        $p = $hosts[0] + $(if ($n) { '/' + (@($common | Select-Object -First $n) -join '/') } else { '' })
+        if (-not $out.Contains($p)) { $out.Add($p) }
+    }
+    @($out | Select-Object -First 3)
+}
+
+function Get-WebAllowPath([string]$ProjectRoot) { Join-Path $ProjectRoot '.streamhub\web-allow.json' }
+
+function Read-WebAllow([string]$ProjectRoot) {
+    if (-not $ProjectRoot) { return @() }
+    $f = Get-WebAllowPath $ProjectRoot
+    if (-not (Test-Path -LiteralPath $f)) { return @() }
+    $list = try { [IO.File]::ReadAllText($f) | ConvertFrom-Json } catch { $null }
+    @(foreach ($x in $list) { if ("$x") { "$x" } })
+}
+
+function Save-WebAllow([string]$ProjectRoot, [string[]]$List) {
+    $f = Get-WebAllowPath $ProjectRoot
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $f)
+    [IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject @($List | Select-Object -Unique) -Compress), (New-Object Text.UTF8Encoding($false)))
+}
+
+function Add-WebAllow([string]$ProjectRoot, [string]$Prefix) {
+    if ($Prefix -notmatch '^[a-z0-9.-]+\.[a-z]{2,}(/[^\s?#]*)?$') { throw "Not a site address: $Prefix" }
+    Save-WebAllow $ProjectRoot (@(Read-WebAllow $ProjectRoot) + $Prefix.TrimEnd('/'))
+}
+
+function Remove-WebAllow([string]$ProjectRoot, [string]$Prefix) { Save-WebAllow $ProjectRoot @(Read-WebAllow $ProjectRoot | Where-Object { $_ -ne $Prefix }) }
+
+function Test-WebAllowed([string]$ProjectRoot, [string]$Url, [string[]]$Allowed = $null) {
+    # Whether an address lies under a site the person allowed: the same host, and the path equal to
+    # the allowed one or below it (whole segments: /roadmap does not cover /roadmap-old).
+    $p = ConvertTo-WebPrefix $Url
+    if (-not $p) { return $false }
+    $list = if ($null -ne $Allowed) { $Allowed } else { @(Read-WebAllow $ProjectRoot) }
+    foreach ($a in $list) {
+        $a = "$a".ToLowerInvariant().TrimEnd('/')
+        if ($p.ToLowerInvariant() -eq $a -or $p.ToLowerInvariant().StartsWith($a + '/')) { return $true }
+    }
+    $false
+}
+
 function Get-SourceAddresses {
     <# The addresses a page or script refers to, absolute: for HTML the scripts and stylesheets it
        loads (script src, link href); in any source the quoted addresses that look like data (full
@@ -283,4 +353,4 @@ function Test-SourceSites {
         Where-Object { -not (Test-HostMatch $_ $Sites) } | Select-Object -Unique)
 }
 
-Export-ModuleMember -Function Get-SourceAddresses, Get-ScriptedPageInfo, Test-M365Address, Get-M365Links, Get-NamedSites, Test-HostMatch, Test-WebAddress, ConvertFrom-Html, Invoke-WebFetch, Format-WebResult, Get-WebSourceSpec, New-WebSourceBlock, Test-SourceSites
+Export-ModuleMember -Function ConvertTo-WebPrefix, Get-WebAllowCandidates, Read-WebAllow, Add-WebAllow, Remove-WebAllow, Test-WebAllowed, Get-SourceAddresses, Get-ScriptedPageInfo, Test-M365Address, Get-M365Links, Get-NamedSites, Test-HostMatch, Test-WebAddress, ConvertFrom-Html, Invoke-WebFetch, Format-WebResult, Get-WebSourceSpec, New-WebSourceBlock, Test-SourceSites

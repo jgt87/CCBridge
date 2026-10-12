@@ -23,6 +23,11 @@
   Data         Import-KitData PATH (CSV, TSV, JSON) -> rows;  Export-KitCsv ROWS PATH (opens in Excel)
                Set-KitGrid $ui.Grid ROWS;  Set-KitGridFilter $ui.Grid TEXT (rows with all the words)
   Charts       Set-KitBars $ui.Chart ITEMS -Label NAME -Value NAME   a bar list in a StackPanel, kit colours
+  Database     Invoke-KitSql -Database NAME -Query 'SELECT ... WHERE Region = @region' -Parameters @{ region = $x }
+               -> rows (objects, ready for Set-KitGrid); Start-KitSql (the same, in the background) -OnDone { param($rows) }
+               NAME is a database from the project's Databases list (.streamhub\databases.json: SQL Server,
+               your Windows sign-in). Read-only: one SELECT, a read-only connection, everything rolled
+               back; values only as @name parameters, never pasted into the query text
   Work         Start-KitWork { work } -Arguments @{ } -OnDone { param($result) } [-OnProgress { param($pct, $text) }]
                runs in the background so the window stays responsive; inside: Send-KitProgress PCT TEXT
                Set-KitBusy $ui $true|$false [-Text]   wait cursor, the window disabled, a status text
@@ -277,6 +282,66 @@ function Set-KitBars {
         foreach ($el in $t, $bg, $v) { $null = $grid.Children.Add($el) }
         $null = $Panel.Children.Add($grid)
     }
+}
+
+function Invoke-KitSql {
+    <# Reads rows from a SQL Server database of the project's Databases list (.streamhub\databases.json
+       in the project; -ProjectRoot when the app sits elsewhere) with the person's Windows sign-in.
+       Only one SELECT / WITH statement runs, nothing that writes or runs code, on a read-only
+       connection, inside a transaction that is always rolled back; values go in as parameters (@name
+       in the query, -Parameters @{ name = value }). Returns objects (one per row), at most -MaxRows.
+       While the helper program checks the window (Test-KitGuiTest) it connects to nothing and returns
+       no rows. Self-contained, so Start-KitSql can run it in the background. #>
+    param([Parameter(Mandatory)][string]$Database, [Parameter(Mandatory)][string]$Query, [hashtable]$Parameters = @{}, [int]$MaxRows = 50000, [int]$TimeoutSec = 120, [string]$ProjectRoot = '')
+    if ($env:STREAMHUB_GUI_TEST) { return @() }
+    if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $script:KitHere)) }
+    $cfg = Join-Path $ProjectRoot '.streamhub\databases.json'
+    if (-not (Test-Path -LiteralPath $cfg)) { throw "No databases are set up for this project ($cfg). Add one in StreamHub: Files > Project setup > Databases." }
+    $all = Get-Content -LiteralPath $cfg -Raw -Encoding UTF8 | ConvertFrom-Json   # assigned first: piped on, a JSON array is one object in 5.1
+    $conn = @(foreach ($x in $all) { if ($x.name -eq $Database) { $x } }) | Select-Object -First 1
+    if (-not $conn) { throw "The project has no database named $Database." }
+    # One reading statement: comments, quoted text and quoted names left out before the checks.
+    $bare = [regex]::Replace([regex]::Replace($Query, '(?s)/\*.*?\*/|--[^\n]*', ' '), "'(?:[^']|'')*'", "''")
+    $bare = [regex]::Replace($bare, '\[[^\]]*\]|"[^"]*"', 'x').Trim().TrimEnd(';').Trim()
+    if ($bare -notmatch '^(?i)(select|with)\b') { throw 'Only SELECT (or WITH ... SELECT) queries run: the app only reads the database.' }
+    if ($bare -match ';') { throw 'One statement at a time.' }
+    $bad = [regex]::Match($bare, '(?i)\b(insert|update|delete|merge|drop|alter|create|truncate|grant|revoke|deny|exec|execute|sp_\w+|xp_\w+|openrowset|opendatasource|openquery|bulk|backup|restore|shutdown|dbcc|waitfor|kill|use|declare|set)\b|\binto\b')
+    if ($bad.Success) { throw "The query holds '$($bad.Value)', which can change data or run code: only reading queries run." }
+    foreach ($m in [regex]::Matches($bare, '@(\w+)')) { if (-not $Parameters.ContainsKey($m.Groups[1].Value)) { throw "The query uses @$($m.Groups[1].Value): give it in -Parameters." } }
+    $b = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
+    $b['Data Source'] = "$($conn.server)"; $b['Initial Catalog'] = "$($conn.database)"; $b['Integrated Security'] = $true
+    $b['ApplicationIntent'] = 'ReadOnly'; $b['Connect Timeout'] = 15; $b['Application Name'] = 'StreamHub window app (read-only)'
+    if ($conn.trustCertificate) { $b['TrustServerCertificate'] = $true }
+    $c = New-Object System.Data.SqlClient.SqlConnection $b.ConnectionString
+    try {
+        $c.Open()
+        $tx = $c.BeginTransaction()
+        try {
+            $cmd = $c.CreateCommand(); $cmd.Transaction = $tx; $cmd.CommandText = $Query; $cmd.CommandTimeout = $TimeoutSec
+            foreach ($k in $Parameters.Keys) { $v = $Parameters[$k]; $null = $cmd.Parameters.AddWithValue("@$k", $(if ($null -eq $v) { [DBNull]::Value } else { $v })) }
+            $r = $cmd.ExecuteReader()
+            try {
+                $names = @(for ($i = 0; $i -lt $r.FieldCount; $i++) { $r.GetName($i) })
+                $rows = New-Object System.Collections.Generic.List[object]
+                while ($r.Read() -and $rows.Count -lt $MaxRows) {
+                    $o = [ordered]@{}
+                    for ($i = 0; $i -lt $r.FieldCount; $i++) { $v = $r.GetValue($i); $o[$names[$i]] = $(if ($v -is [DBNull]) { $null } else { $v }) }
+                    $rows.Add([pscustomobject]$o)
+                }
+            } finally { $r.Dispose() }
+        } finally { try { $tx.Rollback() } catch { } }
+        , $rows.ToArray()
+    } finally { $c.Dispose() }
+}
+
+function Start-KitSql {
+    <# Invoke-KitSql in the background (Start-KitWork), so the window stays responsive while the
+       database answers: -OnDone gets the rows, or the error record when the query failed. #>
+    param([Parameter(Mandatory)][string]$Database, [Parameter(Mandatory)][string]$Query, [hashtable]$Parameters = @{}, [scriptblock]$OnDone = {}, [int]$MaxRows = 50000, [string]$ProjectRoot = '')
+    if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $script:KitHere)) }
+    $def = ${function:Invoke-KitSql}.ToString()
+    $work = [scriptblock]::Create("param(`$Spec) `$script:KitHere = '' ; function Invoke-KitSql { $def }`nInvoke-KitSql @Spec")
+    Start-KitWork $work -Arguments @{ Spec = @{ Database = $Database; Query = $Query; Parameters = $Parameters; MaxRows = $MaxRows; ProjectRoot = $ProjectRoot } } -OnDone $OnDone
 }
 
 function Start-KitWork {

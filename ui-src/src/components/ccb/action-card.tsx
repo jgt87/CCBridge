@@ -40,6 +40,8 @@ export interface ActionItem {
   status: string; // running | awaiting | ok | already applied | failed | rejected | skipped | interrupted
   preview?: Preview | null;
   warning?: string | null;
+  /** web: what the person can allow from now on when approving (most specific first). */
+  allowOptions?: string[];
   error?: string;
   summary?: string;
   output?: string;
@@ -167,6 +169,8 @@ export function ActionCard({ item }: { item: ActionItem }) {
   const [sent, setSent] = useState(false);
   // Blocks of a change the person unticked: left out when approving (the rest is written).
   const [skip, setSkip] = useState<number[]>([]);
+  // web: a part of the site to allow from now on with this approval ("" = only these pages).
+  const [allow, setAllow] = useState("");
   const blocks = asBlocks(item.preview?.hunks);
   const awaiting = item.status === "awaiting" && !sent;
   // The command running now: its output as it comes (the card opens to show it).
@@ -182,7 +186,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
   const decide = async (decision: "approve" | "reject") => {
     setSent(true);
     try {
-      await api.approve(item.id, decision, note, decision === "approve" ? skip : []);
+      await api.approve(item.id, decision, note, decision === "approve" ? skip : [], decision === "approve" ? allow : "");
     } catch {
       setSent(false);
     }
@@ -301,6 +305,19 @@ export function ActionCard({ item }: { item: ActionItem }) {
             <OpenInWindow command={item.target} strong={needsTerminal || myLive?.state === "question"} />
           )}
 
+          {awaiting && item.action === "web" && (item.allowOptions?.length ?? 0) > 0 && (
+            <label className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Approve for</span>
+              <select aria-label="What to allow with this approval" className="kit-select h-8 min-h-8 text-xs" onChange={(e) => setAllow(e.target.value)} value={allow}>
+                <option value="">only these pages</option>
+                {item.allowOptions!.map((o) => (
+                  <option key={o} value={o}>
+                    everything under {o}, from now on
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {awaiting && blocks.length > 1 && (
             <fieldset className="kit-fieldset space-y-1 text-xs">
               <legend className="kit-legend">
@@ -341,7 +358,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
               ) : (
                 <GradientButton
                   className="h-10"
-                  label={item.preview?.exists ? "Apply change" : "Create file"}
+                  label={approveLabel(item)}
                   onClick={() => decide("approve")}
                   variant="neutral"
                 />
@@ -378,4 +395,23 @@ export function ActionCard({ item }: { item: ActionItem }) {
 function asBlocks(h: Preview["hunks"]): ChangeBlock[] {
   if (!h) return [];
   return (Array.isArray(h) ? h : [h]).filter((b) => b && typeof b.index === "number");
+}
+
+/** The approve button's words, by the kind of step (a web read is not a file). */
+function approveLabel(item: ActionItem): string {
+  switch (item.action) {
+    case "web":
+      return "Read";
+    case "sql":
+      return "Run query";
+    case "remember":
+      return "Save note";
+    case "runbook":
+      return "Run runbook";
+    case "write":
+    case "edit":
+      return item.preview?.exists ? "Apply change" : "Create file";
+    default:
+      return "Approve";
+  }
 }

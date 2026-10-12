@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Data query</title>
+<!-- The helper program's query page (DataQuery.psm1): the project's converted data as SQL tables
+     in memory (sql.js, the UI kit's pure-JavaScript build), one read-only query, the result back. -->
+<script src="../ui-kit/vendor/sqljs/sql-asm.js"></script>
+</head>
+<body>
+<script>
+(function () {
+  "use strict";
+  var parts = {};
+  window.KitQuery = {
+    ready: false,
+    // A table's JSON text arrives in parts (a large file does not fit one message).
+    add: function (name, chunk) { (parts[name] = parts[name] || []).push(chunk); return true; },
+    run: async function (spec) {
+      try {
+        var SQL = await initSqlJs({});
+        var db = new SQL.Database();
+        var made = [];
+        (spec.tables || []).forEach(function (t) {
+          var rows = JSON.parse((parts[t.name] || []).join(""));
+          if (t.sheet && rows && !Array.isArray(rows)) rows = rows[t.sheet] || [];
+          if (!Array.isArray(rows)) rows = [];
+          var cols = t.columns && t.columns.length ? t.columns : Object.keys(rows[0] || {}).map(function (n) { return { name: n, type: "text" }; });
+          if (!cols.length) return;
+          var q = function (n) { return '"' + String(n).replace(/"/g, '""') + '"'; };
+          var sqlType = function (ty) { return ty === "number" ? "REAL" : ty === "boolean" ? "INTEGER" : "TEXT"; };
+          db.run("CREATE TABLE " + q(t.table) + " (" + cols.map(function (c) { return q(c.name) + " " + sqlType(c.type); }).join(", ") + ")");
+          var ins = db.prepare("INSERT INTO " + q(t.table) + " VALUES (" + cols.map(function () { return "?"; }).join(",") + ")");
+          db.run("BEGIN");
+          rows.forEach(function (r) {
+            ins.run(cols.map(function (c) { var v = r == null ? null : r[c.name]; return v === true ? 1 : v === false ? 0 : v === undefined ? null : v; }));
+          });
+          db.run("COMMIT");
+          ins.free();
+          made.push(t.table);
+        });
+        var res = db.exec(spec.sql);
+        var last = res.length ? res[res.length - 1] : { columns: [], values: [] };
+        var max = spec.max || 200;
+        db.close();
+        return JSON.stringify({ ok: true, tables: made, columns: last.columns, total: last.values.length, rows: last.values.slice(0, max) });
+      } catch (e) {
+        return JSON.stringify({ ok: false, error: String(e && e.message || e) });
+      }
+    }
+  };
+  window.KitQuery.ready = typeof initSqlJs === "function";
+})();
+</script>
+</body>
+</html>

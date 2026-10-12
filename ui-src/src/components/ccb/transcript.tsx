@@ -92,6 +92,7 @@ function mergeAction(e: AgentEvent, ctx: BuildContext) {
     status: e.status ?? "running",
     preview: asPreview(e.preview, e.target) ?? existing?.preview,
     warning: e.warning ?? existing?.warning,
+    allowOptions: e.allowOptions ? (Array.isArray(e.allowOptions) ? e.allowOptions : [e.allowOptions]) : existing?.allowOptions,
     error: e.error ?? existing?.error,
     target: e.target ?? existing?.target ?? "",
     by: (e as AgentEvent & { by?: string }).by ?? existing?.by,

@@ -17,6 +17,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { findAppEntry } from "@/lib/app-entry";
 import { responseChoices } from "@/lib/response-modes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ActionSearchBar, { type Action } from "@/components/kokonutui/action-search-bar";
@@ -436,6 +437,7 @@ export default function App() {
         (e) => setError((e as Error).message)
       ),
   }));
+  const appEntry = useMemo(() => findAppEntry(files.map((f) => f.path)), [files]);
   const saveName = (state.project?.name || "Test").replace(/[^\w .-]/g, "").trim().slice(0, 48) || "Test";
 
   const commandActions: Action[] = [
@@ -453,6 +455,26 @@ export default function App() {
       end: "Diagnostics",
       onSelect: () => setTimeout(() => setPalette("logging"), 0),
     },
+    ...(appEntry
+      ? [
+          {
+            id: "export-pdf",
+            label: "Export page as PDF",
+            description: `${appEntry} as a PDF in Runbooks/Exports (the UI kit's print styles; a script for schedules comes with the first one)`,
+            icon: <FileText className="h-4 w-4 text-muted-foreground" />,
+            end: "Export",
+            onSelect: () => api.exportPage(appEntry, "pdf").then(() => setNotice({ text: `Exporting ${appEntry} as a PDF...` }), (e) => setError((e as Error).message)),
+          },
+          {
+            id: "export-pptx",
+            label: "Export charts to PowerPoint",
+            description: `Every chart and the key figures of ${appEntry}, one slide each, in Runbooks/Exports`,
+            icon: <FileText className="h-4 w-4 text-muted-foreground" />,
+            end: "Export",
+            onSelect: () => api.exportPage(appEntry, "pptx").then(() => setNotice({ text: `Exporting the charts of ${appEntry} to PowerPoint...` }), (e) => setError((e as Error).message)),
+          },
+        ]
+      : []),
     {
       id: "testrun-save",
       label: "Save this chat as a test run",

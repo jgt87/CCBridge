@@ -634,6 +634,143 @@ function Write-DocxFile([string]$Path, [string]$Markdown) {
     [IO.File]::WriteAllBytes($Path, (ConvertTo-DocxBytes $Markdown))
 }
 
+# --- Writing an .xlsx from CSV ------------------------------------------------------------
+
+function Test-OwnXlsx([string]$Path) {
+    <# Whether this .xlsx was written here (and not saved by Excel since): only those are rewritten. #>
+    try {
+        $zip = Open-OfficeZip $Path
+        try { $x = Get-ZipXml $zip 'docProps/app.xml'; $x -and ((@($x.DocumentElement.ChildNodes | Where-Object { $_.LocalName -eq 'Application' }) | Select-Object -First 1).InnerText -eq $script:Maker) }
+        finally { $zip.Dispose() }
+    } catch { $false }
+}
+
+function Read-CsvTable([AllowEmptyString()][string]$Text) {
+    <# CSV text as rows of cells (quotes, doubled quotes, line breaks inside quotes); the delimiter
+       is the comma, semicolon or tab the first line holds most of. #>
+    $t = "$Text".Replace("`r`n", "`n").TrimEnd("`n")
+    if (-not $t) { return @() }
+    $first = $t.Split("`n")[0]
+    $d = ','; $best = ([regex]::Matches($first, ',')).Count
+    foreach ($c in ';', "`t") { $n = ([regex]::Matches($first, [regex]::Escape($c))).Count; if ($n -gt $best) { $d = $c; $best = $n } }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $row = New-Object System.Collections.Generic.List[string]
+    $sb = New-Object Text.StringBuilder
+    $q = $false
+    for ($i = 0; $i -lt $t.Length; $i++) {
+        $ch = $t[$i]
+        if ($q) {
+            if ($ch -eq '"') { if ($i + 1 -lt $t.Length -and $t[$i + 1] -eq '"') { [void]$sb.Append('"'); $i++ } else { $q = $false } }
+            else { [void]$sb.Append($ch) }
+        } elseif ($ch -eq '"' -and $sb.Length -eq 0) { $q = $true }
+        elseif ("$ch" -eq $d) { $row.Add($sb.ToString()); [void]$sb.Clear() }
+        elseif ($ch -eq "`n") { $row.Add($sb.ToString()); [void]$sb.Clear(); $rows.Add($row.ToArray()); $row = New-Object System.Collections.Generic.List[string] }
+        else { [void]$sb.Append($ch) }
+    }
+    $row.Add($sb.ToString()); $rows.Add($row.ToArray())
+    $rows.ToArray()
+}
+
+function Split-XlsxSheets([AllowEmptyString()][string]$Text) {
+    # The CSV blocks of a workbook text: a line "### NAME" starts a sheet; without one, one sheet "Data".
+    $sheets = New-Object System.Collections.Generic.List[object]
+    $name = 'Data'; $buf = New-Object System.Collections.Generic.List[string]
+    foreach ($l in "$Text".Replace("`r`n", "`n").Split("`n")) {
+        $m = [regex]::Match($l, '^#{2,3}\s+(?:Sheet:\s*)?(.+?)\s*$')
+        if ($m.Success) { if (($buf -join '').Trim()) { $sheets.Add(@{ name = $name; csv = ($buf -join "`n") }) }; $name = $m.Groups[1].Value; $buf.Clear(); continue }
+        $buf.Add($l)
+    }
+    if (($buf -join '').Trim() -or -not $sheets.Count) { $sheets.Add(@{ name = $name; csv = ($buf -join "`n") }) }
+    $sheets.ToArray()
+}
+
+function Get-XlsxColumnName([int]$Index) {
+    # 0 -> A, 25 -> Z, 26 -> AA
+    $n = $Index + 1; $s = ''
+    while ($n -gt 0) { $m = ($n - 1) % 26; $s = [char](65 + $m) + $s; $n = [int][Math]::Floor(($n - 1) / 26) }
+    $s
+}
+
+function ConvertTo-XlsxCell([string]$Value, [string]$Ref, [bool]$Header) {
+    # One cell: numbers (a dot as the decimal sign, no leading zero codes), ISO dates and date-times,
+    # true/false typed; the rest as text. The header row is bold text.
+    $v = "$Value"
+    if ($Header) { return "<c r=`"$Ref`" s=`"1`" t=`"inlineStr`"><is><t xml:space=`"preserve`">$(ConvertTo-XmlText $v)</t></is></c>" }
+    if ($v -eq '') { return '' }
+    if ($v -match '^-?(0|[1-9]\d{0,14})(\.\d+)?([eE][-+]?\d+)?$') { return "<c r=`"$Ref`"><v>$v</v></c>" }
+    if ($v -match '^(?i:true|false)$') { return "<c r=`"$Ref`" t=`"b`"><v>$(if ($v -match '^(?i:true)$') { 1 } else { 0 })</v></c>" }
+    $m = [regex]::Match($v, '^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$')
+    if ($m.Success) {
+        try {
+            $dt = New-Object datetime ([int]$m.Groups[1].Value), ([int]$m.Groups[2].Value), ([int]$m.Groups[3].Value), ([int]("0$($m.Groups[4].Value)")), ([int]("0$($m.Groups[5].Value)")), ([int]("0$($m.Groups[6].Value)"))
+            $serial = ($dt - (New-Object datetime 1899, 12, 30)).TotalDays
+            $style = if ($m.Groups[4].Success) { 3 } else { 2 }
+            return "<c r=`"$Ref`" s=`"$style`"><v>$($serial.ToString([Globalization.CultureInfo]::InvariantCulture))</v></c>"
+        } catch { }
+    }
+    "<c r=`"$Ref`" t=`"inlineStr`"><is><t xml:space=`"preserve`">$(ConvertTo-XmlText $v)</t></is></c>"
+}
+
+function ConvertTo-XlsxBytes {
+    <# An Excel workbook (.xlsx bytes) from CSV text: the first row is the header (bold, stays in view
+       while scrolling, with filter buttons), numbers, dates and true/false are typed, columns get a
+       width from their content. Several sheets: a line "### NAME" before each CSV block. #>
+    param([AllowEmptyString()][string]$Text)
+    $sheets = @(Split-XlsxSheets $Text)
+    $sheetXml = @(); $wbSheets = @(); $wbRels = @(); $ctSheets = @(); $names = @{}
+    for ($s = 0; $s -lt $sheets.Count; $s++) {
+        $rows = @(Read-CsvTable $sheets[$s].csv)
+        $width = 0; foreach ($r in $rows) { if (@($r).Count -gt $width) { $width = @($r).Count } }
+        $widths = @(for ($c = 0; $c -lt $width; $c++) { 8 })
+        $sb = New-Object Text.StringBuilder
+        for ($i = 0; $i -lt $rows.Count; $i++) {
+            [void]$sb.Append("<row r=`"$($i + 1)`">")
+            $cells = @($rows[$i])
+            for ($c = 0; $c -lt $cells.Count; $c++) {
+                [void]$sb.Append((ConvertTo-XlsxCell $cells[$c] "$(Get-XlsxColumnName $c)$($i + 1)" ($i -eq 0)))
+                if ("$($cells[$c])".Length + 2 -gt $widths[$c]) { $widths[$c] = [Math]::Min(60, "$($cells[$c])".Length + 2) }
+            }
+            [void]$sb.Append('</row>')
+        }
+        $cols = if ($width) { '<cols>' + ((0..($width - 1) | ForEach-Object { "<col min=`"$($_ + 1)`" max=`"$($_ + 1)`" width=`"$($widths[$_])`" customWidth=`"1`"/>" }) -join '') + '</cols>' } else { '' }
+        $last = if ($width -and $rows.Count) { "$(Get-XlsxColumnName ($width - 1))$($rows.Count)" } else { 'A1' }
+        $filter = if ($rows.Count -gt 1 -and $width) { "<autoFilter ref=`"A1:$last`"/>" } else { '' }
+        $pane = if ($rows.Count -gt 1) { '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' } else { '' }
+        $sheetXml += "<?xml version=`"1.0`" encoding=`"UTF-8`" standalone=`"yes`"?><worksheet xmlns=`"http://schemas.openxmlformats.org/spreadsheetml/2006/main`" xmlns:r=`"$script:R`">$pane$cols<sheetData>$($sb.ToString())</sheetData>$filter</worksheet>"
+        $nm = ("$($sheets[$s].name)" -replace '[\[\]:*?/\\]', ' ').Trim(); if (-not $nm) { $nm = "Sheet$($s + 1)" }; if ($nm.Length -gt 31) { $nm = $nm.Substring(0, 31) }
+        $k = 2; $base = $nm; while ($names.ContainsKey($nm.ToLowerInvariant())) { $nm = "$($base.Substring(0, [Math]::Min(28, $base.Length))) $k"; $k++ }; $names[$nm.ToLowerInvariant()] = $true
+        $wbSheets += "<sheet name=`"$(ConvertTo-XmlText $nm)`" sheetId=`"$($s + 1)`" r:id=`"rId$($s + 1)`"/>"
+        $wbRels += "<Relationship Id=`"rId$($s + 1)`" Type=`"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet`" Target=`"worksheets/sheet$($s + 1).xml`"/>"
+        $ctSheets += "<Override PartName=`"/xl/worksheets/sheet$($s + 1).xml`" ContentType=`"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml`"/>"
+    }
+    $n = $sheets.Count
+    $parts = [ordered]@{
+        '[Content_Types].xml' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>' + ($ctSheets -join '') + '</Types>'
+        '_rels/.rels' = "<?xml version=`"1.0`" encoding=`"UTF-8`" standalone=`"yes`"?><Relationships xmlns=`"$script:PR`"><Relationship Id=`"rId1`" Type=`"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument`" Target=`"xl/workbook.xml`"/><Relationship Id=`"rId2`" Type=`"http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties`" Target=`"docProps/app.xml`"/></Relationships>"
+        'docProps/app.xml' = "<?xml version=`"1.0`" encoding=`"UTF-8`" standalone=`"yes`"?><Properties xmlns=`"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties`"><Application>$script:Maker</Application></Properties>"
+        'xl/workbook.xml' = "<?xml version=`"1.0`" encoding=`"UTF-8`" standalone=`"yes`"?><workbook xmlns=`"http://schemas.openxmlformats.org/spreadsheetml/2006/main`" xmlns:r=`"$script:R`"><sheets>$($wbSheets -join '')</sheets></workbook>"
+        'xl/_rels/workbook.xml.rels' = "<?xml version=`"1.0`" encoding=`"UTF-8`" standalone=`"yes`"?><Relationships xmlns=`"$script:PR`">$($wbRels -join '')<Relationship Id=`"rId$($n + 1)`" Type=`"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles`" Target=`"styles.xml`"/></Relationships>"
+        'xl/styles.xml' = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd hh:mm"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>'
+    }
+    for ($s = 0; $s -lt $n; $s++) { $parts["xl/worksheets/sheet$($s + 1).xml"] = $sheetXml[$s] }
+    $ms = New-Object IO.MemoryStream
+    $zip = New-Object IO.Compression.ZipArchive($ms, [IO.Compression.ZipArchiveMode]::Create, $true)
+    $utf8 = New-Object Text.UTF8Encoding($false)
+    try {
+        foreach ($k in $parts.Keys) {
+            $e = $zip.CreateEntry($k, [IO.Compression.CompressionLevel]::Optimal)
+            $st = $e.Open(); try { $b = $utf8.GetBytes($parts[$k]); $st.Write($b, 0, $b.Length) } finally { $st.Dispose() }
+        }
+    } finally { $zip.Dispose() }
+    , $ms.ToArray()
+}
+
+function Write-XlsxFile([string]$Path, [string]$Text) {
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) { $null = New-Item -ItemType Directory -Path $dir -Force }
+    [IO.File]::WriteAllBytes($Path, (ConvertTo-XlsxBytes $Text))
+}
+
 function Get-OfficeWriteRefusal([string]$Path, [bool]$Exists) {
     <# Why this Office file cannot be written here ($null when it can): only .docx is written, and an
        existing one only when it was written here (not made or saved in Word). #>
@@ -649,7 +786,11 @@ function Get-OfficeWriteRefusal([string]$Path, [bool]$Exists) {
             return $null
         }
         'slides' { return "$name is a PowerPoint file, which cannot be written here. Write the slides as Markdown (one ## heading per slide) in a .md file, or as a .docx." }
-        'sheet' { return "$name is an Excel workbook, which cannot be written here. Write the data as a .csv file (Excel opens it), or as a table in a .docx." }
+        'sheet' {
+            if ($ext -ne '.xlsx') { return "$name cannot be written here (only .xlsx). Write a .xlsx (from CSV) or a .csv instead." }
+            if ($Exists -and -not (Test-OwnXlsx $Path)) { return "$name was made or saved in Excel; writing it from text would lose its formulas, formatting and charts. Leave it as it is and write the new data as a separate .xlsx (from CSV) or .csv." }
+            return $null
+        }
         'old' { return "$name is in an old binary Office format, which cannot be written here. Write a .docx (from Markdown) or a .csv instead." }
         'image' { return "$name is an image, which cannot be written here. Describe the image to the user, or write an SVG (text) when a drawing is needed." }
         'pdf' { return "$name is a PDF, which cannot be written here. Write a .docx (from Markdown) or a .md file instead; the user can save it as PDF from Word." }
@@ -657,4 +798,4 @@ function Get-OfficeWriteRefusal([string]$Path, [bool]$Exists) {
     $null
 }
 
-Export-ModuleMember -Function Get-OfficeKind, Get-OfficeLabel, ConvertFrom-OfficeFile, Read-XlsxSheets, Test-OwnDocx, ConvertTo-DocxBytes, Write-DocxFile, Get-OfficeWriteRefusal, Format-MdTable
+Export-ModuleMember -Function Get-OfficeKind, Get-OfficeLabel, ConvertFrom-OfficeFile, Read-XlsxSheets, Test-OwnDocx, ConvertTo-DocxBytes, Write-DocxFile, Test-OwnXlsx, Read-CsvTable, Split-XlsxSheets, ConvertTo-XlsxBytes, Write-XlsxFile, Get-OfficeWriteRefusal, Format-MdTable

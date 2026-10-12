@@ -1,4 +1,4 @@
-/* Data tools v5, from the helper program. Do not edit: a newer version replaces this file.
+/* Data tools v6, from the helper program. Do not edit: a newer version replaces this file.
 
    Helpers for the project's data. Load this file with a script tag before the page's own script
    (<script src="data/data-tools.js"></script>); it sets window.DataTools. It also works as a
@@ -62,6 +62,13 @@
                                          [{ label, value }] rows where each column is filled (not empty,
                                          0 or false) or the function is true: one bar per column, such
                                          as a count per yes/no or date column
+
+   Exporting to Excel (a real .xlsx: typed numbers, dates and true/false, a bold header row that
+   stays in view, filter buttons; nothing to load):
+   DataTools.toXlsx(rows, columns?, { sheet })   a Blob; columns: the names (or [{ key, label }]) in
+                                         order, default all columns of the rows; or pass
+                                         { Sheet1: rows, Sheet2: rows } for one sheet per list
+   DataTools.downloadXlsx(name, rows, columns?, { sheet })   saves it as NAME.xlsx (a button's click)
 */
 (function (root, factory) {
   var api = factory();
@@ -521,7 +528,98 @@
     return sortCounts(out, opts.sort === undefined ? 'desc' : opts.sort);
   }
 
+  /* ---- Excel export ------------------------------------------------------------------------- */
+
+  var CRC = (function () {
+    var t = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+  })();
+  function crc32(bytes) { var c = 0xFFFFFFFF; for (var i = 0; i < bytes.length; i++) c = CRC[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function zipStored(files) {
+    // A zip of [{ name, data: Uint8Array }] without compression (enough for a workbook).
+    var enc = new TextEncoder(), parts = [], central = [], offset = 0;
+    function u16(v) { return [v & 0xFF, (v >>> 8) & 0xFF]; }
+    function u32(v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; }
+    files.forEach(function (f) {
+      var name = enc.encode(f.name), crc = crc32(f.data), size = f.data.length;
+      var head = [].concat(u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(0), u16(0x21), u32(crc), u32(size), u32(size), u16(name.length), u16(0));
+      parts.push(new Uint8Array(head), name, f.data);
+      central.push(new Uint8Array([].concat(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(0), u16(0x21), u32(crc), u32(size), u32(size), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+      offset += head.length + name.length + size;
+    });
+    var cdSize = central.reduce(function (a, b) { return a + b.length; }, 0);
+    var end = new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(cdSize), u32(offset), u16(0)));
+    return new Blob(parts.concat(central, [end]), { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+  function xmlText(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function colName(i) { var s = ''; i++; while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+  function xlsxCell(v, ref, header) {
+    if (header) return '<c r="' + ref + '" s="1" t="inlineStr"><is><t xml:space="preserve">' + xmlText(v) + '</t></is></c>';
+    if (v == null || v === '') return '';
+    if (typeof v === 'number' && isFinite(v)) return '<c r="' + ref + '"><v>' + v + '</v></c>';
+    if (typeof v === 'boolean') return '<c r="' + ref + '" t="b"><v>' + (v ? 1 : 0) + '</v></c>';
+    if (v instanceof Date && !isNaN(v)) v = v.getFullYear() + '-' + pad(v.getMonth() + 1) + '-' + pad(v.getDate()) + 'T' + pad(v.getHours()) + ':' + pad(v.getMinutes()) + ':' + pad(v.getSeconds());
+    var m = ISO.exec(String(v));
+    if (m) {
+      var serial = (Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)) - Date.UTC(1899, 11, 30)) / 86400000;
+      return '<c r="' + ref + '" s="' + (m[4] ? 3 : 2) + '"><v>' + serial + '</v></c>';
+    }
+    return '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + xmlText(v) + '</t></is></c>';
+  }
+  function sheetXml(list, cols) {
+    var head = cols.map(function (c) { return typeof c === 'object' ? c : { key: c, label: c }; });
+    var widths = head.map(function (h) { return Math.min(60, String(h.label).length + 2); });
+    var out = ['<row r="1">' + head.map(function (h, x) { return xlsxCell(h.label, colName(x) + '1', true); }).join('') + '</row>'];
+    (list || []).forEach(function (r, i) {
+      out.push('<row r="' + (i + 2) + '">' + head.map(function (h, x) {
+        var v = r == null ? null : r[h.key];
+        if (v != null && String(v).length + 2 > widths[x]) widths[x] = Math.min(60, String(v).length + 2);
+        return xlsxCell(v, colName(x) + (i + 2), false);
+      }).join('') + '</row>');
+    });
+    var last = colName(Math.max(0, head.length - 1)) + (list.length + 1);
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      (list.length ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '') +
+      (head.length ? '<cols>' + widths.map(function (w, x) { return '<col min="' + (x + 1) + '" max="' + (x + 1) + '" width="' + w + '" customWidth="1"/>'; }).join('') + '</cols>' : '') +
+      '<sheetData>' + out.join('') + '</sheetData>' + (list.length && head.length ? '<autoFilter ref="A1:' + last + '"/>' : '') + '</worksheet>';
+  }
+  function toXlsx(data, cols, opts) {
+    opts = opts || {};
+    var books = Array.isArray(data) ? [[opts.sheet || 'Data', data, cols]] : Object.keys(data || {}).map(function (k) { return [k, data[k], null]; });
+    var enc = new TextEncoder(), files = [], wb = [], rels = [], ct = [], used = {};
+    books.forEach(function (b, i) {
+      var list = b[1] || [], c = b[2] || columns(list);
+      var name = String(b[0]).replace(/[[\]:*?/\\]/g, ' ').trim().slice(0, 31) || 'Sheet' + (i + 1);
+      while (used[name.toLowerCase()]) name = name.slice(0, 28) + ' ' + (i + 1);
+      used[name.toLowerCase()] = true;
+      files.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: enc.encode(sheetXml(list, c)) });
+      wb.push('<sheet name="' + xmlText(name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>');
+      rels.push('<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>');
+      ct.push('<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
+    });
+    var R = 'http://schemas.openxmlformats.org/package/2006/relationships';
+    files.unshift(
+      { name: '[Content_Types].xml', data: enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + ct.join('') + '</Types>') },
+      { name: '_rels/.rels', data: enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="' + R + '"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>') },
+      { name: 'xl/workbook.xml', data: enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' + wb.join('') + '</sheets></workbook>') },
+      { name: 'xl/_rels/workbook.xml.rels', data: enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="' + R + '">' + rels.join('') + '<Relationship Id="rId' + (books.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>') },
+      { name: 'xl/styles.xml', data: enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd hh:mm"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>') }
+    );
+    return zipStored(files);
+  }
+  function downloadXlsx(name, data, cols, opts) {
+    var blob = toXlsx(data, cols, opts);
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = String(name || 'export').replace(/\.xlsx$/i, '') + '.xlsx';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    return blob;
+  }
+
   return {
+    toXlsx: toXlsx, downloadXlsx: downloadXlsx,
     load: load, configure: configure, parseCsv: parseCsv,
     rows: rows, sheets: sheets, columns: columns, where: where, sortBy: sortBy, unique: unique,
     sum: sum, avg: avg, min: min, max: max, count: count, groupBy: groupBy, summarize: summarize,

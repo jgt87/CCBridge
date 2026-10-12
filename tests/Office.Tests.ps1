@@ -78,6 +78,29 @@ Describe 'PowerPoint and Excel files read as text' {
     }
 }
 
+Describe 'An Excel workbook written from CSV' {
+    It 'types the cells, makes a sheet per block, and is read back the same' {
+        $f = Join-Path $p 'report.xlsx'
+        Get-OfficeWriteRefusal $f $false | Should BeNullOrEmpty
+        Get-OfficeWriteRefusal (Join-Path $p 'macro.xlsm') $false | Should Match 'only \.xlsx'
+        $q = [char]34
+        $csv = "### Orders`nRegion,Amount,Day,Open,Code`nNorth,1250.5,2026-01-31,true,007`n${q}South, east${q},-3,2026-02-01T10:30,false,A1`n### Notes`nNote`n${q}Say ${q}${q}hi${q}${q}${q}"
+        Write-XlsxFile $f $csv
+        Test-OwnXlsx $f | Should Be $true
+        Get-OfficeWriteRefusal $f $true | Should BeNullOrEmpty
+        $s = @(Read-XlsxSheets $f)
+        @($s | ForEach-Object { $_.name }) -join ',' | Should Be 'Orders,Notes'
+        $s[0].rows[1] -join '|' | Should Be 'North|1250.5|2026-01-31|TRUE|007'
+        $s[0].rows[2] -join '|' | Should Be 'South, east|-3|2026-02-01T10:30:00|FALSE|A1'
+        $s[1].rows[1] -join '|' | Should Be "Say ${q}hi${q}"
+    }
+    It 'reads semicolon CSV and a workbook without sheet lines' {
+        @(Read-CsvTable "a;b`n1;2").Count | Should Be 2
+        (@(Read-CsvTable "a;b`n1;2")[1]) -join ',' | Should Be '1,2'
+        @(Split-XlsxSheets "a,b`n1,2")[0].name | Should Be 'Data'
+    }
+}
+
 Describe 'Which Office files are written' {
     It 'writes only .docx, and an existing one only when it was written here' {
         Get-OfficeWriteRefusal (Join-Path $p 'new.docx') $false | Should BeNullOrEmpty
