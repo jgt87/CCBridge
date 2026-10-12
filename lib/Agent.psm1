@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -2814,7 +2814,9 @@ function Get-ProjectContext($State) {
     $setupText = try { Format-ProjectSetupContext $root $turnAnswers } catch { '' }
     if ($setupText) { $full += "`n`n$setupText" }
     $tailwind = try { Test-TailwindProject $State.ProjectRoot } catch { $false }
-    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = "$($setup.build)"; Live = [bool]$setup.liveSource; Tailwind = $tailwind; Root = $State.ProjectRoot; Answers = $(if ($setup.answers -is [hashtable]) { $setup.answers } else { @{} }) }
+    # A SharePoint HTML page is one file whatever else was chosen: SharePoint shows only that file.
+    $build = if ($setup.answers -is [hashtable] -and "$($setup.answers['audience'])" -eq 'sharepoint') { 'single' } else { "$($setup.build)" }
+    @{ Location = $location; Full = $full; Traits = $traits; Paths = $paths; Build = $build; Live = [bool]$setup.liveSource; Tailwind = $tailwind; Root = $State.ProjectRoot; Answers = $(if ($setup.answers -is [hashtable]) { $setup.answers } else { @{} }) }
 }
 
 function Format-ActionResults {
@@ -4171,6 +4173,8 @@ function Invoke-AgentTurn {
                         $prevAct = Enter-Activity $State 'syntax' "Checking $rel$(if ($rel -match '(?i)\.prisma$') { ' (prisma validate)' })"
                         try { $issuesNow = @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot) } finally { Exit-Activity $State $prevAct }
                         foreach ($i in $issuesNow) { $found.Add((ConvertTo-CheckFinding $rel $i $(if ($i -match ' says: ') { 'tool' } else { 'file' }))) }
+                        # A SharePoint HTML page (the project's setup): what the sandbox would block, as errors.
+                        if (Test-SharePointPageProject $State.ProjectRoot) { foreach ($i in @(Find-SharePointPageIssues $rel $before $now.Text)) { $found.Add((ConvertTo-CheckFinding $rel $i 'file')) } }
                         if ($quality) {
                             foreach ($i in @(Find-ChangeSmells $rel $before $now.Text)) { $found.Add((ConvertTo-CheckFinding $rel $i 'smell')) }
                             foreach ($i in @(Find-QualityIssues $rel $before $now.Text -UseKit:((Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $State.ProjectRoot) -and (Get-UiKitColors $State.AppRoot) -ne 'none') -UserLook:([bool]$State.UserLook))) { $found.Add((ConvertTo-CheckFinding $rel $i 'quality')) }

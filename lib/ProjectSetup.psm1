@@ -427,16 +427,19 @@ $script:SetupQuestionDefs = @(
        options = @(
            @{ value = 'me'; label = 'Only me, from disk'; help = 'Opened from the project folder on this computer.' },
            @{ value = 'shared'; label = 'Colleagues, from SharePoint or OneDrive'; help = 'Posted in a shared folder and opened from there; nothing may depend on this computer.' },
-           @{ value = 'served'; label = 'Through the helper program'; help = 'Opened with Open app while the helper program runs (local files and modules work).' })
-       trigger = { param($Text, $Info) $Text -match '(?i)\b(share|sharing|shared|colleagues?|collega''?s|delen|gedeeld|everyone|other users|publish(ed)?|publiceren|intranet|post(ed)? (on|to|in) (sharepoint|onedrive|teams)|for (the|my|our) (team|colleagues|department|afdeling))\b' -and ($Info.hasPages -or $Text -match $script:PageWords -or $Text -match $script:BuildWords) }
+           @{ value = 'served'; label = 'Through the helper program'; help = 'Opened with Open app while the helper program runs (local files and modules work).' },
+           @{ value = 'sharepoint'; label = 'As a SharePoint HTML page'; help = 'Uploaded as an .html page in SharePoint, which shows it in a sandbox: one file of at most 10 MB, everything inline, no network or storage, SharePoint data only through LiveData. The helper program checks every change against these limits.' })
+       trigger = { param($Text, $Info) $Text -match '(?i)\b(sharepoint (html )?pages?|html pages? (in|on) sharepoint|site pages( library)?|upload(ed)? (it )?to (the )?sharepoint|share|sharing|shared|colleagues?|collega''?s|delen|gedeeld|everyone|other users|publish(ed)?|publiceren|intranet|post(ed)? (on|to|in) (sharepoint|onedrive|teams)|for (the|my|our) (team|colleagues|department|afdeling))\b' -and ($Info.hasPages -or $Text -match $script:PageWords -or $Text -match $script:BuildWords) }
        stated = { param($Text)
-           if ($Text -match '(?i)\b(only (for )?me|just me|myself|alleen (voor )?mij)\b') { 'me' }
+           if ($Text -match '(?i)\b(sharepoint (html )?page|html (page|file) (in|on|for) sharepoint|(upload(ed)?|publish(ed)?|host(ed)?|post(ed)?) (it )?(as an? )?(html )?(page )?(in|on|to) sharepoint (site )?pages|site pages library)\b') { 'sharepoint' }
+           elseif ($Text -match '(?i)\b(only (for )?me|just me|myself|alleen (voor )?mij)\b') { 'me' }
            elseif ($Text -match '(?i)\b(post(ed)? (on|to) (sharepoint|onedrive|teams)|shared? (via|on|through|in) (sharepoint|onedrive|teams)|publish(ed)? (on|to) (sharepoint|the intranet))\b') { 'shared' }
            elseif ($Text -match '(?i)\b(served|localhost|on a server|through the helper program)\b') { 'served' } else { '' } }
        context = { param($v) switch ($v) {
            'me' { '- Audience: only the user, opened from disk (file://): no fetch of local files, no server; data through script tags or the one-file blocks.' }
            'shared' { '- Audience: colleagues open it from a SharePoint or OneDrive folder, from disk (file://): no fetch of local files, no server, nothing that depends on this computer; one file travels best.' }
-           'served' { '- Audience: opened through the helper program (served on localhost): DataTools.load, module scripts and local data files work.' } } }
+           'served' { '- Audience: opened through the helper program (served on localhost): DataTools.load, module scripts and local data files work.' }
+           'sharepoint' { '- Audience: opened as a SharePoint HTML page: build one HTML file within the SHAREPOINT HTML PAGE rules; the helper program checks every change against them.' } } }
     },
     @{ id = 'persist'; scope = 'project'; question = 'Where does what people enter stay?'
        options = @(

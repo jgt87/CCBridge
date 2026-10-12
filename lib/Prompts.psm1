@@ -250,6 +250,7 @@ function Get-PromptModules {
     if ($ans -is [hashtable]) {
         if ("$($ans['appkind'])" -eq 'react' -and -not $ids.Contains('rules:react')) { $ids.Add('rules:react') }
         if ("$($ans['appkind'])" -eq 'desktop' -and -not $ids.Contains('rules:psgui')) { $ids.Add('rules:psgui') }
+        if ("$($ans['audience'])" -eq 'sharepoint' -and -not $ids.Contains('rules:sharepoint')) { $ids.Add('rules:sharepoint') }
     }
     # Online information: how to use web sources, and the web action for the exact text of a page.
     if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }

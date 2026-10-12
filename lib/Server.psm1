@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -952,6 +952,16 @@ function Send-PreviewFile($Ctx, $State, [string]$RelPath) {
         # it an opaque origin (its requests carry "Origin: null", which the API refuses, and the app's
         # page with the session token is unreadable to it), while the page's own files stay readable.
         $res.Headers['Content-Security-Policy'] = $script:PreviewPolicy
+        # A SharePoint HTML page (the project's setup): SharePoint's own policy on top, so the page
+        # check sees what SharePoint blocks, and its LiveData from the project's copies of the files.
+        if ($ext -in '.html', '.htm' -and (Test-SharePointPageProject $State.ProjectRoot)) {
+            $res.Headers['Content-Security-Policy'] = "$($script:PreviewPolicy); $(Get-SharePointPolicy)"
+            try {
+                $html = (New-Object Text.UTF8Encoding($false)).GetString($bytes)
+                $stand = Get-LiveDataStandIn $State.ProjectRoot $html
+                if ($stand) { $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes((Add-LiveDataStandIn $html $stand)) }
+            } catch { Write-CCBLogError server 'LiveData stand-in' $_ }
+        }
         $res.Headers['Access-Control-Allow-Origin'] = '*'
         $res.ContentLength64 = $bytes.Length
         $res.OutputStream.Write($bytes, 0, $bytes.Length)

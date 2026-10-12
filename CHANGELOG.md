@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.133] - 2026-10-12
+
+### Added
+- SharePoint HTML pages: a project can be set to be opened as an HTML page in SharePoint (Project setup, "Who opens it, and from where?" > "As a SharePoint HTML page", also read from a request that says so). SharePoint shows such a page in a sandbox where anything it blocks fails silently, so with this choice:
+  - Copilot gets SharePoint's rules: one file of at most 10 MB with every script and style inline, images and fonts only embedded, no network, storage, frames, workers or form posts, links opening in a new tab, and SharePoint data only through its LiveData manifest (window.__LD_RESULTS__), handling a file it could not read.
+  - The page is built as one file, with the UI kit and the data inside it.
+  - Every change to a page is checked against those limits, and what SharePoint would block is sent back as an error (what is only lost, such as browser storage or alert(), as a warning). The LiveData manifest is checked too: valid JSON, real drive and item ids, file names with their extension, at most 32 items.
+  - The page check opens the page under SharePoint's own security policy, with the project's copy of each LiveData file standing in for the SharePoint file, so it shows what SharePoint will show.
+
 ## [v0.1.132] - 2026-10-12
 
 ### Added
