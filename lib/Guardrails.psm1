@@ -261,11 +261,11 @@ function Find-LargeCode {
     <# A code file that a change makes longer than $MaxLines (split it), and a block of inline data
        of more than $MaxDataLines lines (move it to a data file). Data folders, tests, JSON and
        generated files are not counted. #>
-    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [int]$MaxLines = 400, [int]$MaxDataLines = 120)
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [int]$MaxLines = 800, [int]$MaxDataLines = 120)
     if ($Rel -notmatch '(?i)\.(m?js|cjs|jsx|tsx?|vue|svelte|py|ps[md]?1|cs|java|kt|go|rs|php|rb)$' -or $Rel -match $script:TestPathPattern -or $Rel -match '(?i)(^|/)data/|\.min\.|\.d\.ts$') { return }
     $count = { param($t) if ("$t") { "$t".Replace("`r`n", "`n").TrimEnd("`n").Split("`n").Length } else { 0 } }
     $n = & $count $New; $o = & $count $Old
-    if ($n -gt $MaxLines -and $o -le $MaxLines) { "the file now has $n lines (over $MaxLines): split it into smaller files with one part each, joined by imports" }
+    if ($n -gt $MaxLines -and $o -le $MaxLines) { "the file now has $n lines (over $MaxLines). If it holds clearly separate parts (data loading, charts, tables, filters), consider moving them into files of their own (imports, or script tags in order for a page opened from disk); one file with one job may stay long. Not a must: say so if it fits better as one file" }
     $run = {
         param($t)
         $best = 0; $cur = 0

@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.128] - 2026-10-12
+
+### Changed
+- A code file is no longer flagged for splitting at 400 lines but at 800, and the note is now a suggestion: split only when the file holds clearly separate parts; a file with one job may stay long, and Copilot can say so.
+
 ## [v0.1.127] - 2026-10-12
 
 ### Added

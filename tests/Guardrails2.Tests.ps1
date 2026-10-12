@@ -41,9 +41,10 @@ Describe 'Find-PersonalPaths' {
 }
 
 Describe 'Find-LargeCode' {
-    It 'reports a code file that a change makes longer than 400 lines, once' {
-        $big = (1..450 | ForEach-Object { "const v$_ = compute($_);" }) -join "`n"
-        @(Find-LargeCode 'src/app.js' 'const a = 1;' $big)[0] | Should Match 'now has 450 lines'
+    It 'reports a code file that a change makes longer than 800 lines, once, and leaves 450 lines alone' {
+        $big = (1..850 | ForEach-Object { "const v$_ = compute($_);" }) -join "`n"
+        @(Find-LargeCode 'src/app.js' 'const a = 1;' $big)[0] | Should Match 'now has 850 lines'
+        @(Find-LargeCode 'src/app.js' 'const a = 1;' (($big -split "`n")[0..449] -join "`n")).Count | Should Be 0
         @(Find-LargeCode 'src/app.js' $big "$big`nconst z = 0;").Count | Should Be 0
         @(Find-LargeCode 'tests/app.test.js' '' $big).Count | Should Be 0
     }
