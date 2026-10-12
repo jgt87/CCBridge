@@ -99,6 +99,17 @@ function Sync-LogLevel($State) {
     Get-CCBLogLevel
 }
 
+function Test-ClientGone($Exception) {
+    <# Whether an error only says the browser closed the connection before the answer was written
+       (HttpListener: network name no longer available 64, connection aborted 1229, operation
+       aborted 995, or the same words in the message). #>
+    for ($e = $Exception; $e; $e = $e.InnerException) {
+        if ($e -is [System.Net.HttpListenerException] -and $e.ErrorCode -in 64, 995, 1229, 10053, 10054) { return $true }
+        if ("$($e.Message)" -match '(?i)network name is no longer available|connection was aborted|forcibly closed by the remote host|I/O operation has been aborted') { return $true }
+    }
+    $false
+}
+
 function Get-StateSnapshot($State) {
     @{
         project = $(if ($State.ProjectRoot) { @{ name = (Split-Path $State.ProjectRoot -Leaf); path = $State.ProjectRoot; location = @(Get-ProjectLocation $State.ProjectRoot) } } else { $null })
@@ -129,7 +140,7 @@ function Get-StateSnapshot($State) {
         appInEdge = (Get-AppInEdge $State)   # links then open through Edge (Split screen sends them to the other pane)
         hints = (Get-UiHints $State)
         previewBase = "/preview/$($State.PreviewToken)/"   # images in Markdown files (read-only project files)
-        issueStamp = $(if ($State.ProjectRoot) { $p = Get-IssueIndexPath $State.ProjectRoot; if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTimeUtc.Ticks.ToString() } else { '' } } else { '' })
+        issueStamp = $(if ($State.ProjectRoot) { $t = [IO.File]::GetLastWriteTimeUtc((Get-IssueIndexPath $State.ProjectRoot)); if ($t.Year -gt 1601) { $t.Ticks.ToString() } else { '' } } else { '' })   # one call: the file may be replaced in between (1601 = not there)
     }
 }
 
@@ -1052,6 +1063,12 @@ function Start-CCBridgeServer {
                     Send-StaticFile $ctx $uiDir $token
                 }
             } catch {
+                if (Test-ClientGone $_.Exception) {
+                    # The page went away before its answer was written (a reload, a closed or sleeping tab): nothing to report.
+                    Write-CCBLog verbose server "$($ctx.Request.HttpMethod) $reqPath`: the page closed the connection before the answer was sent"
+                    try { $ctx.Response.Abort() } catch { }
+                    continue
+                }
                 $errId = New-CCBErrorId
                 $help = Get-CCBErrorHelp $_.Exception.Message
                 Write-CCBLogError server "$errId [$($help.code)] $($ctx.Request.HttpMethod) $reqPath" $_
@@ -1068,4 +1085,4 @@ function Start-CCBridgeServer {
     }
 }
 
-Export-ModuleMember -Function Start-CCBridgeServer
+Export-ModuleMember -Function Start-CCBridgeServer, Test-ClientGone

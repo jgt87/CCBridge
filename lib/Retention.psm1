@@ -67,7 +67,8 @@ function Invoke-ProjectRetention {
     $r = Get-RetentionSettings $Config
     $removed = [ordered]@{ history = 0; evidence = 0; reviews = 0; charts = 0; screenshots = 0; backups = 0 }
     if (-not (Test-Path -LiteralPath $ProjectRoot -PathType Container)) { return $removed }
-    $apply = { param($kind, $items) foreach ($x in @($items)) { if (-not $WhatIf) { Remove-RetentionItem $x }; $removed[$kind]++ } }
+    # Nothing expired arrives as $null, and @($null) is one item in 5.1: only real items count.
+    $apply = { param($kind, $items) foreach ($x in @($items | Where-Object { $_ -and @($_.Paths | Where-Object { $_ }).Count })) { if (-not $WhatIf) { Remove-RetentionItem $x }; $removed[$kind]++ } }
 
     # History/: per runbook or fetch prompt (NAME-yyyyMMdd-HHmmss.ext).
     $hist = Join-Path $ProjectRoot ((Get-LayoutPath History).Replace('/', '\'))

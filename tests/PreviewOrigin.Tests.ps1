@@ -19,6 +19,14 @@ function New-FakeCtx([string]$Method, [string]$Path, $Body = $null, [string]$Ori
 }
 function Get-FakeJson($Ctx) { [Text.Encoding]::UTF8.GetString($Ctx.Response.OutputStream.ToArray()) | ConvertFrom-Json }
 
+Describe 'A page that went away before its answer (Test-ClientGone)' {
+    It 'tells a closed connection from a real error' {
+        Test-ClientGone (New-Object System.Net.HttpListenerException 64) | Should Be $true
+        Test-ClientGone (New-Object Exception('Exception calling "Write" with "3" argument(s)', (New-Object Exception('The specified network name is no longer available')))) | Should Be $true
+        Test-ClientGone (New-Object Exception('File is larger than 2 MB')) | Should Be $false
+    }
+}
+
 Describe 'Preview pages are not the StreamHub page' {
     $p = Join-Path $env:TEMP ('ccb-prev-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory $p | Out-Null

@@ -72,6 +72,22 @@ function Save-ProjectSetup {
     $s
 }
 
+function Get-ProjectDataSize([string]$ProjectRoot) {
+    # The size of the project's converted data (data/*.json), in bytes: how heavy a one-file page would be.
+    $d = Join-Path $ProjectRoot 'data'
+    if (-not (Test-Path -LiteralPath $d)) { return 0 }
+    [long](@(Get-ChildItem -LiteralPath $d -Filter *.json -File -ErrorAction SilentlyContinue) | Measure-Object -Property Length -Sum).Sum
+}
+
+function Read-BuildDecision([AllowEmptyString()][string]$Text) {
+    <# The build form Copilot states in a reply when the user left it to Copilot: a line
+       "Build form: one file" or "Build form: separate files" (bold, a list mark or a colon variant
+       allowed). 'single', 'modular' or ''. #>
+    $m = [regex]::Match("$Text", '(?im)^[\s>*_\-]*build form\W{0,4}\s*(one(\s+html)?\s+file|single(\s+html)?\s+file|separate\s+files|several\s+files|multiple\s+files)\b')
+    if (-not $m.Success) { return '' }
+    if ($m.Groups[1].Value -match '(?i)^(one|single)') { 'single' } else { 'modular' }
+}
+
 function Get-StatedBuild([AllowEmptyString()][string]$Text) {
     # The build form a request names itself: 'single', 'modular' or ''.
     if ("$Text" -match $script:SinglePattern) { return 'single' }
@@ -307,10 +323,16 @@ function Format-ProjectSetupContext {
     param([Parameter(Mandatory)][string]$ProjectRoot, [hashtable]$TurnAnswers = @{})
     $s = Get-ProjectSetup $ProjectRoot
     $lines = New-Object System.Collections.Generic.List[string]
+    $who = if ($s.chosenBy -eq 'copilot') { 'you chose this for the project' } else { 'the user chose this for the project' }
     switch ($s.build) {
-        'single' { $lines.Add('- Build form: one HTML file (the user chose this for the project). Everything the page needs is in that file; see the one-file rules.') }
-        'modular' { $lines.Add('- Build form: separate files (the user chose this for the project): the page, its styles, scripts and data each in their own file.') }
-        'copilot' { $lines.Add('- Build form: the user left it to you; keep to what the project already has.') }
+        'single' { $lines.Add("- Build form: one HTML file ($who). Everything the page needs is in that file; see the one-file rules.") }
+        'modular' { $lines.Add("- Build form: separate files ($who): the page, its styles, scripts and data each in their own file.") }
+        'copilot' {
+            # The user left the choice to Copilot: ask for it, with what decides it, and read it back from the reply (Read-BuildDecision).
+            $mb = [Math]::Round((Get-ProjectDataSize $ProjectRoot) / 1MB, 1)
+            $data = if ($mb -gt 0) { " The project's data is $mb MB as JSON; in one file all of it is inside the page, which makes a page over a few MB slow to open and to change." } else { '' }
+            $lines.Add("- Build form: the user left it to you. Choose it now, before you write any file: one HTML file (opens with a double click and can be sent as one file; the helper program puts the UI kit and the data inside it) or separate files (index.html with its own style, script and data files). If the project already has pages, keep to the form they have.$data Put your choice on its own line in your reply, exactly 'Build form: one file' or 'Build form: separate files', with one sentence why; the helper program keeps it for the next tasks.")
+        }
     }
     if ($s.liveSource) {
         $rel = Get-LiveCopyRel $s.liveSource
@@ -548,6 +570,14 @@ function Test-BigRequest([AllowEmptyString()][string]$Text) {
     "$Text".Length -gt $script:BigRequestChars -or "$Text" -match '(?i)\b(build|create|make|develop|bouw|maak) (?:(?:me|us|een|an?) )*(whole|complete|full|entire|hele|volledige) (app|application|system|tool|website|applicatie|systeem)\b'
 }
 
+function Test-BigUnclear([AllowEmptyString()][string]$Text) {
+    <# Near the big-request line without crossing it (Copilot settles it, TaskNotes Read-ScopeDecision):
+       over half the length of a big request, or three or more listed asks. #>
+    if (Test-BigRequest $Text) { return $false }
+    $items = @("$Text" -split "`r?`n" | Where-Object { $_ -match '^\s*([-*+]|\d+[.)])\s+\S' }).Count
+    ("$Text".Length -gt ($script:BigRequestChars / 2)) -or $items -ge 3
+}
+
 function Get-SetupQuestionDef([string]$Id) { @($script:SetupQuestionDefs | Where-Object { $_.id -eq $Id }) | Select-Object -First 1 }
 
 function Get-SetupInfo {
@@ -625,6 +655,6 @@ function Get-SetupTextPrefix([hashtable]$Turn) {
     $out
 }
 
-Export-ModuleMember -Function Test-BigRequest, Get-SetupQuestionDef, Get-SetupInfo, Get-TriggeredQuestions, Get-SetupAnswerLabel, Get-SetupAnswerList, Get-SetupAnswerContext, Get-SetupTextPrefix,
-    Get-ProjectSetup, Save-ProjectSetup, Get-StatedBuild, Get-NamedOutsideFile, Test-OwnCode, Get-SetupQuestions, Test-LiveSourcePath, Get-LiveCopyRel, Sync-LiveSource,
+Export-ModuleMember -Function Test-BigRequest, Get-SetupQuestionDef, Get-SetupInfo, Get-TriggeredQuestions, Get-SetupAnswerLabel, Get-SetupAnswerList, Get-SetupAnswerContext, Get-SetupTextPrefix, Test-BigUnclear,
+    Get-ProjectSetup, Save-ProjectSetup, Get-ProjectDataSize, Read-BuildDecision, Get-StatedBuild, Get-NamedOutsideFile, Test-OwnCode, Get-SetupQuestions, Test-LiveSourcePath, Get-LiveCopyRel, Sync-LiveSource,
     Get-DataBlockText, Get-KitBlockTexts, Get-OneFilePages, Update-OneFilePages, Format-ProjectSetupContext, Get-RefreshScriptText, Write-RefreshScript, Invoke-LiveRefresh

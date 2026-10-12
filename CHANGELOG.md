@@ -6,6 +6,24 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.127] - 2026-10-12
+
+### Added
+- Copilot breaks the tie where StreamHub's fixed rules cannot tell from the words alone. Whether a request asks for a new look or for new functionality ("add a dark mode", "add a chart and make the bars blue"): Copilot states it in its first reply, and the kit's look checks follow its answer. Whether a request is big enough to plan first, in a project that chose to clarify or plan big requests: for a request near that size Copilot decides, and when it says plan, the request goes the project's clarify or plan way. Clear cases are still decided by the rules, without asking.
+- Copilot sets the checks a task must pass and answers them at the end. With a request to build or change something, Copilot is asked to list 2 to 5 checks under 'Done when:' before it writes files; at done it answers each as MET or NOT MET against the files and the screenshot (in the review message it already gets, so usually no extra message), fixes what is not met first, and the answers go into the task report. This targets work that ended as done while parts were missing (run 5's replaced charts, run 6's open TODO items).
+- Copilot writes short notes on the project's data once, and StreamHub keeps them: with the first message after a data file was converted (or its data changed), Copilot is asked for a 'Data notes:' block (what a row is, the key columns, how the files join, values to watch for). StreamHub saves it in .streamhub/data-notes.json and sends it with every later task, so Copilot no longer spends its first rounds reading the data again.
+- The page check reports numbers of four or more digits shown without thousands separators in tables and figures (seen: 8377 users and 2195 prompts next to 1,035,344 on the same page), as a warning that names the UI kit's number format; years and codes with leading zeros are left alone.
+
+### Fixed
+- The log recorded an unexpected error, with an error id, every time the app page went away before StreamHub had written its answer (a reload, a closed or sleeping tab: "The specified network name is no longer available", 31 times in eleven days of one PC's logs). That is now a verbose line, not an error.
+- Saving the import index failed when another program (OneDrive, a virus scanner) held the file for a moment; it is now tried a few times. Reading the time of the issue file could fail when the file was being replaced at that moment; it is now read in one step.
+- Building an approved plan for a feature ("any additional graphs you can include?") was sent with the rules for a look request, because the plan Copilot wrote names layout and colours. Whether a message asks for a new look is now decided on the person's request only, not on the plan.
+- Retention counted one removed item of each kind after every task when nothing had expired, and logged three "Could not remove" errors with no path (nothing was actually removed). Only real items are counted and removed now.
+- "Let Copilot decide" for how a project is built did not ask Copilot anything: it only told Copilot to keep to what the project had, which a new project does not have. Copilot is now asked to choose one file or separate files before it writes, with the size of the project's data (inline data makes a big one-file page slow), and to state its choice; StreamHub saves the stated choice for the project (Files > Project setup) so the next tasks get the matching rules.
+
+### Changed
+- The limitations note on the start screen also says that StreamHub includes no compilers or SDKs: it uses the ones already installed, Settings can install Node.js, Python or the .NET SDK, and React and TypeScript web apps are built by its own builder in Edge.
+
 ## [v0.1.126] - 2026-10-12
 
 ### Fixed

@@ -165,7 +165,16 @@ function Save-ImportIndex([string]$ProjectRoot, $Index) {
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $p)
     $tmp = "$p.tmp"
     [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $Index -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
-    if (Test-Path -LiteralPath $p) { [IO.File]::Replace($tmp, $p, [NullString]::Value) } else { [IO.File]::Move($tmp, $p) }
+    # OneDrive or a virus scanner may hold the file for a moment: a few tries, then the next round writes it.
+    for ($try = 1; $try -le 4; $try++) {
+        try {
+            if (Test-Path -LiteralPath $p) { [IO.File]::Replace($tmp, $p, [NullString]::Value) } else { [IO.File]::Move($tmp, $p) }
+            return
+        } catch [System.IO.IOException] {
+            if ($try -eq 4) { try { [IO.File]::Delete($tmp) } catch { }; return }
+            Start-Sleep -Milliseconds (150 * $try)
+        }
+    }
 }
 
 function Update-ImportEntry([string]$ProjectRoot, $Index, [string]$Rel) {

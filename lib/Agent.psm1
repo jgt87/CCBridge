@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -948,14 +948,20 @@ function Use-BigTaskPreference {
     <# A project whose setup says big requests are clarified or planned first (question bigtask): a
        big request that comes in plain becomes a Clarify first or Plan first task. #>
     param($State, $Task)
+    $State.ScopeAsk = ''
     $pref = "$((Get-ProjectSetup $State.ProjectRoot).answers['bigtask'])"
-    if ($pref -notin 'clarify', 'plan' -or $Task.clarify -or $Task.planFirst -or $Task.setup -or -not (Test-BigRequest "$($Task.text)")) { return }
+    if ($pref -notin 'clarify', 'plan' -or $Task.clarify -or $Task.planFirst -or $Task.planBuild -or $Task.setup -or $Task.issueFix) { return }
+    if (-not $Task.bigByCopilot -and -not (Test-BigRequest "$($Task.text)")) {
+        # Near the line: Copilot decides in its first reply (Read-ScopeDecision), the turn ends on 'plan'.
+        if ($Task.kind -eq 'chat' -and (Test-BigUnclear "$($Task.text)")) { $State.ScopeAsk = $pref }
+        return
+    }
     if ($pref -eq 'clarify') { $Task.clarify = $true; $Task.request = $Task.text }
     else {
         $Task.planFirst = $true; $Task.mode = 'plan'; $State.Mode = 'plan'; $Task.forceKind = 'coding'; $Task.request = $Task.text
         $Task.text = (Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + $Task.text
     }
-    Add-AgentEvent $State 'status' @{ text = "A big request: $(if ($pref -eq 'clarify') { 'Copilot asks its questions first' } else { 'Copilot plans first' }), as chosen for this project (Project setup in the Files tab changes it)." }
+    Add-AgentEvent $State 'status' @{ text = "A big request$(if ($Task.bigByCopilot) { ' (Copilot judged it so)' }): $(if ($pref -eq 'clarify') { 'Copilot asks its questions first' } else { 'Copilot plans first' }), as chosen for this project (Project setup in the Files tab changes it)." }
 }
 
 function Invoke-ClarifyStep {
@@ -1033,6 +1039,10 @@ function Save-TaskEvidence {
     if (@($Ev.kitEdits).Count) { [void]$sb.AppendLine("- UI kit files changed directly: $(@($Ev.kitEdits) -join ', ') (the kit is meant to be restyled through tokens.css and the project's own CSS)") }
     if ($Ev.unfinished) { [void]$sb.AppendLine("- Not finished: Copilot $($Ev.unfinished). StreamHub checked the changed files at the end: $(if (@($Ev.final).Count) { "$(@($Ev.final).Count) problem(s): " + (@($Ev.final) -join '; ') } else { 'no problems found' })") }
     [void]$sb.AppendLine("- Copilot consistency review: $(if ($Ev.reviewed) { 'done' } else { 'not needed' })")
+    if (@($Ev.acceptance).Count) {
+        [void]$sb.AppendLine().AppendLine("## Done when (Copilot's checks, answered at the end)").AppendLine()
+        foreach ($l in @(Format-AcceptanceReport $Ev.acceptance)) { [void]$sb.AppendLine($l) }
+    }
     $vf = if (-not $Ev.verify -and $null -ne $Ev.page -and -not @($Ev.page).Count) { 'no verify command in AGENTS.md; the page check passed' } elseif (-not $Ev.verify) { 'not configured (add a "verify: COMMAND" line to AGENTS.md)' } elseif ($Ev.verify.skipped) { "not run: $($Ev.verify.skipped)" } elseif ($Ev.verify.passed) { "passed (``$($Ev.verify.command)``)" } else { "FAILED (``$($Ev.verify.command)``, exit $($Ev.verify.exit))" }
     [void]$sb.AppendLine("- Verify: $vf")
     if ($Ev.verify -and $Ev.verify.tail) { [void]$sb.AppendLine().AppendLine('Verify output (end):').AppendLine('```').AppendLine($Ev.verify.tail).AppendLine('```') }
@@ -2737,6 +2747,8 @@ function Get-ProjectContext($State) {
     if (Test-DataImportOn $State.AppRoot) {
         $ready = try { Format-DataImportContext $root -OneFile:((Get-ProjectSetup $root).build -eq 'single') } catch { Write-CCBLogError agent 'data context' $_; '' }
         if ($ready) { $full += "`n`n$ready" }
+        $dn = try { Format-DataNotes $root } catch { Write-CCBLogError agent 'data notes' $_; '' }
+        if ($dn) { $full += "`n`n$dn" }
     }
     # Pages a project script builds from a template (OneFile Get-TemplateBuilds): output, never edited.
     $built = @(try { Get-TemplateBuilds $root } catch { Write-CCBLogError agent 'built pages' $_; @() })
@@ -3731,6 +3743,23 @@ function Invoke-AgentTurn {
         Write-CCBLog info agent "Task kind: $kind" @{ partsAdded = $State.SentParts.Count - $partsBefore; chars = $message.Length }
         $State.LastTurnActed = $null
         $message += Get-PinnedFiles $State.ProjectRoot $Text
+        # What Copilot writes down for the helper program (TaskNotes): the checks this task must pass,
+        # and notes on data files that have none yet (or whose data changed). Asked with this message,
+        # read from the replies; no extra message.
+        $doneWhen = @(); $acceptAsked = $false; $acceptResults = $null
+        $askChecks = ($kind -in 'coding', 'mixed', 'project') -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.ReviewByCaller -and (Test-BuildRequest $Text) -and $Text -notmatch '^\s*Continue and make the change now'
+        if ($askChecks) { $message += "`n`n" + (Get-DoneWhenAsk) }
+        # Tie-breakers: what the fixed rules cannot tell from the words, Copilot settles in its first reply.
+        $scopeAsk = if ($State.ScopeAsk -and $kind -in 'coding', 'mixed', 'project' -and $State.Mode -ne 'plan') { "$($State.ScopeAsk)" } else { '' }
+        if ($scopeAsk) { $message += "`n`n" + (Get-ScopeAsk $scopeAsk) }
+        $typeAsk = ($kind -in 'coding', 'mixed', 'project') -and -not $State.IssueFix -and (Test-LookUnclear $Text) -and (Test-UiKitOn $State.AppRoot) -and (Test-UiKitInProject $State.ProjectRoot)
+        if ($typeAsk) { $message += "`n`n" + (Get-RequestTypeAsk) }
+        $notesFor = @()
+        if ($kind -ne 'chat' -and $State.ProjectRoot -and -not $State.IssueFix -and (Test-DataImportOn $State.AppRoot)) {
+            $dataMan = try { Read-DataImportManifest $State.ProjectRoot } catch { @{} }
+            $notesFor = @(try { Get-DataNotesNeeded $State.ProjectRoot $dataMan } catch { Write-CCBLogError agent 'data notes' $_ })
+            if ($notesFor.Count) { $message += "`n`n" + (Get-DataNotesAsk $notesFor) }
+        }
 
         $nudges = 0   # times this message was sent again because Copilot explained instead of acting
         $failSeen = @{}; $stopLoop = $false   # the same step failing the same way: warn at 2, stop at 3
@@ -3794,6 +3823,52 @@ function Invoke-AgentTurn {
             $lastReply = "$($r.Text)"
             Write-CCBLog verbose agent "Round ${round}: reply parsed" @{ actions = @($actions | ForEach-Object { "$($_.type) $($_.arg)".Trim() }) }
             Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @($r.References) }
+            if ($typeAsk) {
+                $rt = Read-RequestType "$($r.Text)"
+                if ($rt) {
+                    $typeAsk = $false
+                    $State.UserLook = $rt -in 'look', 'both'
+                    Add-AgentEvent $State 'status' @{ text = "Copilot read this request as $(switch ($rt) { 'look' { 'a new look' } 'feature' { 'new or changed functionality' } default { 'both a new look and new functionality' } }): the kit's look checks $(if ($State.UserLook) { 'rest for the parts it restyles' } else { 'apply as usual' })." }
+                    Write-CCBLog info agent 'Request type from Copilot' @{ type = $rt }
+                }
+            }
+            if ($scopeAsk) {
+                $sd = Read-ScopeDecision "$($r.Text)"
+                if ($sd) { Write-CCBLog info agent 'Scope from Copilot' @{ scope = $sd } }
+                if ($sd -eq 'plan' -and -not @($actions | Where-Object { $_.type -in 'write', 'edit', 'run' }).Count) {
+                    $State.ScopeUpgrade = $scopeAsk
+                    Add-AgentEvent $State 'status' @{ text = "Copilot judged this request too big to build in one go, so it $(if ($scopeAsk -eq 'clarify') { 'asks its questions first' } else { 'plans first' }), as chosen for this project." }
+                    break
+                }
+                $scopeAsk = ''
+            }
+            # Copilot's checks for this task ("Done when:"), and its notes on the data ("Data notes:").
+            if ($askChecks -and -not $doneWhen.Count) {
+                $doneWhen = @(Read-DoneWhen "$($r.Text)")
+                if ($doneWhen.Count) { Add-AgentEvent $State 'status' @{ text = "Copilot's checks for this task (asked about at the end): " + ($doneWhen -join '; ') } }
+            }
+            if ($acceptAsked -and $doneWhen.Count) {
+                $ans = @(Read-AcceptanceAnswers "$($r.Text)" $doneWhen)
+                if (@($ans | Where-Object { $null -ne $_.met }).Count) { $acceptResults = $ans; $ev.acceptance = $ans }
+            }
+            if ($notesFor.Count) {
+                $dnLines = @(Read-NoteBlock "$($r.Text)" 'Data notes' 12)
+                if ($dnLines.Count) {
+                    try { Save-DataNotes $State.ProjectRoot $dataMan $notesFor $dnLines; Add-AgentEvent $State 'status' @{ text = "Copilot's notes on the data saved for later tasks (.streamhub/data-notes.json): $($notesFor -join ', ')." } } catch { Write-CCBLogError agent 'data notes' $_ }
+                    $notesFor = @()
+                }
+            }
+            # The user left the build form to Copilot: the form it states is kept for the project.
+            if ($State.ProjectRoot -and "$($r.Text)" -match '(?i)build form') {
+                try {
+                    $pick = Read-BuildDecision "$($r.Text)"
+                    if ($pick -and (Get-ProjectSetup $State.ProjectRoot).build -eq 'copilot') {
+                        $null = Save-ProjectSetup $State.ProjectRoot @{ build = $pick; chosenBy = 'copilot' }
+                        Add-AgentEvent $State 'status' @{ text = "Copilot chose $(if ($pick -eq 'single') { 'one HTML file' } else { 'separate files' }) for this project; StreamHub keeps it for the next tasks (Files > Project setup)." }
+                        Write-CCBLog info setup 'Build form chosen by Copilot' @{ build = $pick }
+                    }
+                } catch { Write-CCBLogError agent 'build decision' $_ }
+            }
             if ($r.Result -and $r.Result -ne 'Success') { Add-AgentEvent $State 'error' @{ text = "Copilot answered with '$($r.Result)': $($r.ResultMessage)" }; break }
             if (-not "$($r.Text)".Trim()) {
                 Add-AgentEvent $State 'error' @{ text = 'Copilot finished without a reply. Check the Copilot window in Edge; if it shows an answer there, turn on verbose logging, try again and export diagnostics.' }
@@ -4286,6 +4361,7 @@ function Invoke-AgentTurn {
                         Add-AgentEvent $State 'status' @{ text = "Big change: asking Copilot to review $(@($changes).Count) changed file(s) for leftovers, dead code and broken references$(if ($issues.Count) { " ($($issues.Count) problem(s) found by the local checks)" })." }
                         $message = New-ReviewMessage $State $changes $issues
                         if ($attach.Count) { $message += "`n`nAttached: a screenshot of the page as it looks now. Check it against the request too. $(Get-ScreenshotHint $State.LastShotPage)" + $(if ($shotNote) { "`n`n$shotNote" } else { '' }) }
+                        if ($doneWhen.Count -and -not $acceptAsked) { $acceptAsked = $true; $message += "`n`n" + (New-AcceptanceAsk $doneWhen) }
                         continue
                     }
                 } elseif ($pagesToRecheck.Count -and $pageRechecks -lt [Math]::Max(1, [int]$enf.errorTries) -and -not $State.Cancel) {
@@ -4314,7 +4390,19 @@ function Invoke-AgentTurn {
                 }
                 if ($attach.Count) {
                     $message = "Attached: a screenshot of the page as it looks now, after your changes. Compare it with what was asked (layout, parts that are missing, overlap or are cut off, colours, text). If something is wrong, fix it, then send done again. If it looks right, send done. $(Get-ScreenshotHint $State.LastShotPage)" + $(if ($shotNote) { "`n`n$shotNote" } else { '' })
+                    if ($doneWhen.Count -and -not $acceptAsked) { $acceptAsked = $true; $message += "`n`n" + (New-AcceptanceAsk $doneWhen) }
                     continue
+                }
+                # The checks Copilot set at the start, asked once at the end when no message above carried them.
+                if ($doneWhen.Count -and -not $acceptAsked -and $checkpoint.Files.Count -and -not $State.Cancel) {
+                    $acceptAsked = $true
+                    Add-AgentEvent $State 'status' @{ text = "Before finishing: Copilot checks its $($doneWhen.Count) 'Done when' line(s) against the result." }
+                    $message = New-AcceptanceAsk $doneWhen
+                    continue
+                }
+                if ($acceptResults) {
+                    $notMet = @($acceptResults | Where-Object { $_.met -eq $false })
+                    Add-AgentEvent $State 'status' @{ text = $(if ($notMet.Count) { "Copilot's checks: $($notMet.Count) of $(@($acceptResults).Count) not met: " + (@($notMet | ForEach-Object { $_.check }) -join '; ') } else { "Copilot's checks: all $(@($acceptResults).Count) met." }) }
                 }
                 $doneFinished = $true
                 break
@@ -4543,6 +4631,7 @@ function Start-AgentWorker {
         $foreign = $task.source -and $task.source -ne 'user'
         if ($task.mode) { $State.Mode = $task.mode }
         # A big request in a project that chose to clarify or plan first (setup question bigtask).
+        $State.ScopeAsk = ''
         if ($State.ProjectRoot -and -not $State.Headless -and (-not $task.source -or $task.source -eq 'user')) { try { Use-BigTaskPreference $State $task } catch { Write-CCBLogError agent 'big task preference' $_ } }
         if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook', 'chain', 'script', 'review' -and $task.projectRoot -ne $State.ProjectRoot) {
             if (-not (Test-Path -LiteralPath $task.projectRoot -PathType Container)) { $task.missingProject = $true }
@@ -4586,14 +4675,23 @@ function Start-AgentWorker {
                         if ($task.setup) { $sa = Save-SetupAnswer $State $task.setup; if ($sa.textPrefix) { $task.text = $sa.textPrefix + $task.text } }
                         $State.IssueFix = $task.issueFix; $State.IssueFixHandled = $false; $State.IssueFixFromSeq = $fromSeq
                         if ($task.freshChat) { $State.NeedNewChat = $true }
+                        $State.ScopeUpgrade = ''
                         try { Invoke-AgentTurn $State $task.text $force }
                         finally {
+                            $State.ScopeAsk = ''
                             $State.TurnAnswers = @{}
                             $State.IssueFix = $null
                             # Stopped or failed before the rescan: its issues go back to open (no retry).
                             if ($task.issueFix -and -not $State.IssueFixHandled) { try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError agent 'issue fix reset' $_ } }
                         }
-                        if ($task.planFirst) { Publish-PlanReady $State $task $fromSeq }
+                        if ($State.ScopeUpgrade) {
+                            # Copilot judged it a big request: the same request again as Clarify first or Plan first.
+                            $State.ScopeUpgrade = ''
+                            $next = @{ kind = 'chat'; text = "$($task.text)"; bigByCopilot = $true }
+                            if ($task.projectRoot) { $next.projectRoot = $task.projectRoot }
+                            $null = Submit-AgentTask $State $next 'user'
+                        }
+                        elseif ($task.planFirst) { Publish-PlanReady $State $task $fromSeq }
                         elseif (-not $task.planBuild -and -not $task.issueFix -and -not $State.Stop) { try { $null = Publish-ProposalPlan $State $task $fromSeq } catch { Write-CCBLogError agent 'proposal plan' $_ } }
                         if ($task.planBuild -and $task.planId) { Write-PlanResult $State "$($task.planId)" $fromSeq }
                     }

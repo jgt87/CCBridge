@@ -103,6 +103,29 @@ Describe 'One-file pages: the helper program''s blocks never cause file-check fi
     }
 }
 
+Describe 'Let Copilot decide the build form' {
+    It 'asks Copilot for the choice with the data size, and reads the stated form back' {
+        $p = Join-Path $env:TEMP ('ccb-build-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'data') -Force | Out-Null
+        try {
+            [IO.File]::WriteAllBytes((Join-Path $p 'data\usage.json'), (New-Object byte[] (3MB)))
+            $null = Save-ProjectSetup $p @{ build = 'copilot'; chosenBy = 'user' }
+            $c = Format-ProjectSetupContext $p
+            $c | Should Match 'Choose it now, before you write any file'
+            $c | Should Match "The project's data is 3 MB"
+            $c | Should Match "'Build form: one file' or 'Build form: separate files'"
+            $null = Save-ProjectSetup $p @{ build = (Read-BuildDecision "Plan first.`n**Build form: separate files** - the data is large.`n"); chosenBy = 'copilot' }
+            Format-ProjectSetupContext $p | Should Match 'separate files \(you chose this for the project\)'
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'reads only a stated build form line' {
+        Read-BuildDecision 'Build form: one file, since it is small.' | Should Be 'single'
+        Read-BuildDecision "- Build form: one HTML file" | Should Be 'single'
+        Read-BuildDecision "Build form - separate files" | Should Be 'modular'
+        Read-BuildDecision 'I could use one file or separate files.' | Should Be ''
+        Read-BuildDecision 'The build form is up to you.' | Should Be ''
+    }
+}
+
 Describe 'The saved project setup' {
     It 'keeps the build form and the live data file, and ignores an unknown form' {
         $p = New-SetupProject

@@ -165,7 +165,7 @@ The parts a coding harness (an agent that reads, changes and runs a project for 
 | Hooks | Your own commands at fixed moments | `.streamhub/hooks.json`: after Copilot edits a matching file, before a task counts as done (a failure goes back to Copilot), after a task; approved once per version, paused with a setting |
 | Web access | Reading pages from the internet | The `web` action: public pages only, sites the message names are read at once, other sites need approval |
 | Other programs | Using the harness from another tool | An MCP server (`mcp/ccbridge-mcp.ps1`) and a local HTTP API; tasks from other programs show in the same queue |
-| Records and logs | Seeing what happened | Chat history per project, a task report per task that changed files (`.streamhub/Evidence/`), a log with levels, and Export diagnostics |
+| Records and logs | Seeing what happened | Chat history per project, a task report per task that changed files (`.streamhub/Evidence/`, with the checks Copilot set for the task at its start and answered at the end), Copilot's notes on the project's data (`.streamhub/data-notes.json`, sent with every task), a log with levels, and Export diagnostics |
 | Reliability | Coping with a flaky model page | Replies rebuilt from the raw stream (Copilot's link filter damages code), a lost request is sent again, a cut-off last block is not applied, and the same failing step stops after three tries |
 | Settings | Adjusting how it works | Settings in the app (saved per computer, kept across updates) |
 | Version control | Commits, branches, pull requests | Not covered: StreamHub has no Git features (see [Limitations](#limitations)) |

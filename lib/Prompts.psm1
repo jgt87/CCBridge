@@ -123,6 +123,7 @@ function Get-EnvironmentText {
 # A request for a look of the person's own (a follow-up that changes how something looks): words for a
 # look (colour, size, shape, font, effects, a colour name) plus a word that asks for a change.
 $script:LookWords = '(?i)(\b(gui|ui|user interface|interface|layout|design|appearance|visuals?|styling|look and feel|uitstraling|vormgeving|opmaak|weergave|colou?rs?|kleur(en)?|background|achtergrond|fonts?|lettertype|bold|vet(ter)?|italic|cursief|bigger|larger|smaller|wider|narrower|taller|groter|kleiner|breder|smaller|rounded|round(er)?|ronde?r?|square|vierkant|corners?|hoeken|radius|shadows?|schaduw|borders?|randen?|gradient|verloop|darker|lighter|brighter|donkerder|lichter|feller|spacing|padding|margins?|ruimte|thicker|thinner|dikker|dunner|style|stijl|look|uiterlijk|theme|thema|dark mode|donkere modus|light mode|opacity|transparant|transparent|underlined?|onderstreept|uppercase|hoofdletters|size|grootte|blue|red|green|yellow|orange|purple|pink|grey|gray|black|white|navy|teal|blauw|rood|groen|geel|oranje|paars|roze|grijs|zwart|wit)\b|#[0-9a-f]{3,8}\b)'
+$script:FeatureAddWords = '(?i)\b(add|adds|new|create|build|implement|introduce|toevoegen|voeg|nieuwe?|bouw|maak een)\b'
 $script:LookVerbs = '(?i)\b(make|change|set|use|turn|give|should be|switch|replace|want|instead|more|less|adjust|tweak|restyle|redesign|improve|polish|moderni[sz]e|tidy|maak|verander|wijzig|zet|gebruik|moet|liever|in plaats van|meer|minder|aanpassen|pas(\s+\S+){1,6}\s+aan|verbeter\w*|mooier)\b'
 
 # A report that a page shows its markup or script as text (English and Dutch): the helper program
@@ -144,13 +145,35 @@ function Test-LeakReport([AllowEmptyString()][string]$Text) {
     -not ($Text -match $script:LeakReportNot -and $Text -notmatch $script:LeakReportSign)
 }
 
+function Test-BuildRequest([string]$Text) {
+    # Whether a message asks to build or change something (the pattern that sends the quality rules).
+    [bool]("$Text" -match $script:BuildPattern)
+}
+
 function Test-LookRequest {
     <# The message asks to change how something looks (a fixed rule on its words): then the person's
        look wins over the UI kit's for this change (rules/userlook.md, and the kit's look checks rest). #>
     param([string]$Text)
+    # A plan being built (the plan card's Build or Continue): only what the person asked counts, not
+    # the plan Copilot wrote (which names layout, colours and the like for any feature).
+    $m = [regex]::Match("$Text", '(?s)^(?:Build this now|Continue and make the change now)\b.*?\nRequest:\s*(.*?)\r?\n\r?\n(?:Approved plan|What you said you would do):')
+    if ($m.Success) { $Text = $m.Groups[1].Value }
     # Words that ask for a new look on their own (restyle the figures, herontwerp de pagina).
     if ($Text -match '(?i)\b(restyle|re-style|redesign|re-design|reskin|herontwerp\w*|restylen)\b') { return $true }
     [bool]($Text -match $script:LookWords -and $Text -match $script:LookVerbs)
+}
+
+function Test-LookUnclear {
+    <# The look rule cannot tell from the words alone (Copilot settles it, TaskNotes Read-RequestType):
+       look words with a build or change word but none of the look verbs ("add a dark mode"), or a look
+       request that also adds something ("add a chart and make the bars blue"). A redesign word is clear. #>
+    param([string]$Text)
+    $m = [regex]::Match("$Text", '(?s)^(?:Build this now|Continue and make the change now)\b.*?\nRequest:\s*(.*?)\r?\n\r?\n(?:Approved plan|What you said you would do):')
+    if ($m.Success) { $Text = $m.Groups[1].Value }
+    if ($Text -notmatch $script:LookWords) { return $false }
+    if ($Text -match '(?i)\b(restyle|re-style|redesign|re-design|reskin|herontwerp\w*|restylen)\b') { return $false }
+    if (Test-LookRequest $Text) { return [bool]($Text -match $script:FeatureAddWords) }
+    [bool]($Text -match $script:BuildPattern)
 }
 
 function Get-PromptModules {
@@ -200,7 +223,7 @@ function Get-PromptModules {
     }
     # A change to how something looks, in a project with the UI kit (setting on): the kit first (its part,
     # variant, option or token for that element), the person's own look where it goes beyond the kit.
-    if ((Test-LookRequest $Text) -and @($Context.Paths) -contains 'styles/kit/tokens.css' -and (Test-UiKitOn (Split-Path -Parent $PSScriptRoot))) {
+    if (((Test-LookRequest $Text) -or (Test-LookUnclear $Text)) -and @($Context.Paths) -contains 'styles/kit/tokens.css' -and (Test-UiKitOn (Split-Path -Parent $PSScriptRoot))) {
         if ($ids -notcontains 'rules:uikit') { $ids.Add('rules:uikit') }
         if ($ids -notcontains 'rules:userlook') { $ids.Add('rules:userlook') }
     }
@@ -463,4 +486,4 @@ function Get-AutoAgent {
     @{ agent = ''; why = '' }
 }
 
-Export-ModuleMember -Function Test-LeakReport, Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage
+Export-ModuleMember -Function Test-LeakReport, Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage, Test-BuildRequest, Test-LookUnclear

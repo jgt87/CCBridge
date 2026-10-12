@@ -384,4 +384,19 @@ describe("page check: kit classes without a rule", () => {
     const out2 = JSON.parse(await (new Function("return (\n" + pageCheck + "\n)")() as Promise<string>)) as { kind: string }[];
     expect(out2.some((f) => f.kind === "kitcss")).toBe(false);
   });
+  it("reports numbers of four or more digits without thousands separators, not years, codes or grouped numbers (run 7)", async () => {
+    document.head.innerHTML = "";
+    // jsdom has no layout: every element gets one box, so the check sees it as shown.
+    const rects = Element.prototype.getClientRects;
+    Element.prototype.getClientRects = function () { return [{}] as unknown as DOMRectList; };
+    document.body.innerHTML = '<div class="kit-figure__value">8377</div><div class="kit-figure__value">1,035,344</div><table><caption>Power users</caption><tbody><tr><td>Shunta Takao</td><td>2195</td><td>2026</td><td>00123</td><td>16</td></tr></tbody></table>';
+    const out = JSON.parse(await (new Function("return (\n" + pageCheck + "\n)")() as Promise<string>)) as { kind: string; text: string }[];
+    const num = out.find((f) => f.kind === "number");
+    expect(num).toBeDefined();
+    expect(num!.text).toMatch(/^shows 2 numbers of four or more digits without thousands separators \(such as '8377'/);
+    document.body.innerHTML = '<div class="kit-figure__value">8,377</div><table><tbody><tr><td>2,195</td><td>2026</td></tr></tbody></table>';
+    const out2 = JSON.parse(await (new Function("return (\n" + pageCheck + "\n)")() as Promise<string>)) as { kind: string }[];
+    expect(out2.some((f) => f.kind === "number")).toBe(false);
+    Element.prototype.getClientRects = rects;
+  });
 });

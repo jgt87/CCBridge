@@ -23,6 +23,17 @@ Describe 'Select-Expired' {
 }
 
 Describe 'Invoke-ProjectRetention' {
+    It 'reports nothing removed when nothing has expired (no empty item counted, no error logged)' {
+        $p = New-RetentionProject
+        try {
+            Add-Aged (Join-Path $p '.streamhub\Evidence\task-20261012-015706.md') 0
+            New-Item -ItemType Directory (Join-Path $p '.streamhub\Screenshots') -Force | Out-Null
+            Add-Aged (Join-Path $p '.streamhub\Screenshots\page-20261012-015652-index.html.png') 0
+            $r = Invoke-ProjectRetention $p $null
+            ($r.Values | Measure-Object -Sum).Sum | Should Be 0
+            Test-Path (Join-Path $p '.streamhub\Evidence\task-20261012-015706.md') | Should Be $true
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
     It 'cleans History per item, evidence and reviews, and leaves other files alone' {
         $p = New-RetentionProject
         foreach ($i in 1..4) { Add-Aged (Join-Path $p ".streamhub\History\meetings-2026100$i-080000.json") (4 - $i) }

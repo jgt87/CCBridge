@@ -8,5 +8,6 @@ export const LIMITATIONS: Limitation[] = [
   { title: "No Git integration", detail: "StreamHub has no Git features: it does not commit, branch or push. Use your own Git tools for that." },
   { title: "No MCP support", detail: "MCP servers cannot be connected to StreamHub, so their tools are not available in a task." },
   { title: "No skill support", detail: "No reusable skill packages; project notes (AGENTS.md) and runbooks carry instructions." },
+  { title: "No compilers included", detail: "StreamHub ships no compilers or SDKs (C#, Java, Go, C/C++, Rust...). It uses the ones already installed; Settings can install Node.js, Python or the .NET SDK. React and TypeScript web apps are built by its own builder in Edge." },
   { title: "No artifact generator", detail: "No generated documents or slides; Copilot writes text and code files. Charts in Analyst answers are saved as images." },
 ];

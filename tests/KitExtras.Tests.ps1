@@ -126,6 +126,11 @@ Describe 'A look the person asks for' {
         foreach ($t in 'Add a chart of sales per month', 'Fix the error in the filter', 'Why is the total wrong?', 'Show the colour field in the table') { Test-LookRequest $t | Should Be $false }
         foreach ($t in 'Change the look of the header', 'Adjust the GUI of the settings page', 'Improve the user interface of the dashboard', 'Tweak the layout of the filters', 'Pas de opmaak van de tabel aan', 'Restyle the figures') { Test-LookRequest $t | Should Be $true }
         foreach ($t in 'Update the data of the dashboard', 'Improve the performance of the filter') { Test-LookRequest $t | Should Be $false }
+        # A plan build: only the request counts, not the plan Copilot wrote (run 7: more graphs, plan naming layout and colours).
+        $plan = "Build this now, following the approved plan below. Change files with action blocks.`n`nRequest: any additional graphs you can include?`n`nApproved plan:`n1. Licence use by sector: a bar chart; adjust the layout of the chart grid and improve the colours of the legend."
+        Test-LookRequest $plan | Should Be $false
+        Test-LookRequest ($plan -replace 'any additional graphs you can include\?', 'Change the look of the header') | Should Be $true
+        Test-LookRequest "Continue and make the change now: read what you still need.`n`nRequest: add a sector filter`n`nWhat you said you would do:`nRestyle the filter bar." | Should Be $false
     }
     It 'sends the look rule in a project with the kit, and lets the kit''s look checks rest' {
         $ids = @(Get-PromptModules 'Make the header blue' @{ Traits = @('web', 'code'); Paths = @('index.html', 'styles/kit/tokens.css') })
