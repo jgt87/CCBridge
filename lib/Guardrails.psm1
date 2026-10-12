@@ -519,6 +519,15 @@ function Find-UnsortedTables {
         $t = $m.Value
         if ($before.ContainsKey(($t -replace '\s+', ' ')) -or $t -match '(?i)\brole\s*=\s*["''](presentation|none)') { continue }
         $line = Get-LineIndex "$New" $m.Index
+        # A small reference table written out in the markup (a legend, definitions: at most six rows,
+        # nothing a script fills in) has nothing to sort.
+        $whole = [regex]::Match("$New".Substring($m.Index), '(?is)^<table\b.*?</table>')
+        if ($whole.Success) {
+            $bodyRows = @([regex]::Matches($whole.Value, '(?is)<tr\b[^>]*>\s*<td\b') | Where-Object { $_.Value -notmatch 'data-kit-empty' })
+            $emptyRow = $whole.Value -match 'data-kit-empty'
+            $literal = $Rel -match '(?i)\.html?$' -and $whole.Value -notmatch '[{}]|<%|\+\s*["''`]|["''`]\s*\+'   # markup as written, not built by code or a template
+            if ($literal -and $bodyRows.Count -ge 1 -and $bodyRows.Count -le 6 -and -not $emptyRow) { continue }
+        }
         if ($t -match '(?i)\bkit-table\b') {
             if ($t -notmatch '(?i)\bdata-kit-sort\b') {
                 if ($ownSort) { return "line ${line}: this kit-table is sorted by code of its own (aria-sort, sort buttons or a sort call in the file): use the kit's sorting instead: data-kit-sort on the table (th.kit-num on number columns); for rows your code writes, data-kit-rows=""external"" with data-key on each th and your rows sorted on kit:sort; then drop the own sort code" }

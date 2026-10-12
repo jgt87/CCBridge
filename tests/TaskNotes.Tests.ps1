@@ -21,6 +21,11 @@ Describe 'Done when: the checks Copilot sets at the start' {
         (@(Format-AcceptanceReport $r) -join "`n") | Should Match '- the status filter changes every chart: NOT MET \(the list ignores it\)'
         (@(Format-AcceptanceReport $r2) -join "`n") | Should Match 'numbers show thousands separators: not answered'
     }
+    It 'takes the last answer when a reply answers a check twice (not met, fixed, met)' {
+        $checks = @('the page shows figures and charts', 'the table sorts')
+        $ans = "NOT MET: the page shows figures and charts - percentages were wrong`nFixed the percentages.`nMET: the page shows figures and charts`nMET: the table sorts"
+        @(Read-AcceptanceAnswers $ans $checks | ForEach-Object { $_.met }) -join ',' | Should Be 'True,True'
+    }
     It 'asks for the checks and for each answer on its own line' {
         Get-DoneWhenAsk | Should Match "line 'Done when:'"
         New-AcceptanceAsk @('a', 'b') | Should Match "'MET: CHECK' or 'NOT MET: CHECK - why'"

@@ -213,7 +213,7 @@ function ActionSearchBar({
                 {result.actions.map((action, index) => (
                   <motion.li
                     aria-selected={activeIndex === index}
-                    className={`flex cursor-pointer items-center justify-between rounded-md px-3 py-2 hover:bg-gray-200 dark:hover:bg-white/5 ${
+                    className={`flex cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-gray-200 dark:hover:bg-white/5 ${
                       activeIndex === index ? "bg-black/5 dark:bg-white/10" : ""
                     }`}
                     id={`action-${action.id}`}
@@ -222,18 +222,21 @@ function ActionSearchBar({
                     onClick={() => choose(action)}
                     onMouseEnter={() => setActiveIndex(index)}
                     role="option"
+                    // The whole text on hover when the description is cut off.
+                    title={action.description ? `${action.label}: ${action.description}` : action.label}
                     variants={ANIMATION_VARIANTS.item}
                   >
-                    <div className="flex min-w-0 items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span aria-hidden="true" className="text-muted-foreground">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <span aria-hidden="true" className="shrink-0 text-muted-foreground">
                           {action.icon}
                         </span>
-                        <span className="truncate font-medium text-foreground text-sm">
+                        {/* The item first: it keeps its width (up to most of the row); the description gives way. */}
+                        <span className="max-w-[70%] shrink-0 truncate font-medium text-foreground text-sm">
                           {action.label}
                         </span>
                         {action.description && (
-                          <span className="truncate text-muted-foreground text-xs">
+                          <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
                             {action.description}
                           </span>
                         )}

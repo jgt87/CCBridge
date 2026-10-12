@@ -6,6 +6,16 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.130] - 2026-10-12
+
+### Changed
+- A small reference table written out in a page (a legend or definitions: at most six rows, nothing a script fills in) is no longer reported as a table that cannot be sorted.
+- A custom property with a size name on a numbered scale (var(--kit-space-lg) where the kit has --kit-space-1 to 7) now suggests the step of about that size (lg: --kit-space-5, md: --kit-space-4), not the first two steps by spelling.
+- The command menu and its lists (logging levels, files) show each item's name in full first; its description takes the room that is left and is cut off instead ("Tra..." was cut while the description stayed whole). Hovering an item shows its whole name and description. The type on the right (Command, Active) keeps a gap from the description.
+
+### Fixed
+- A reply that answered a Done when check twice (NOT MET, then MET after fixing it in the same reply) was reported as not met (run 11: "1 of 5 not met" while Copilot ended with all five met). The last answer to a check now counts.
+
 ## [v0.1.129] - 2026-10-12
 
 ### Added

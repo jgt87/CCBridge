@@ -81,6 +81,12 @@ Describe 'PowerShell files without -Encoding' {
 }
 
 Describe 'Find-UnsortedTables' {
+    It 'leaves a small reference table written out in the page alone, but not one a script fills' {
+        $legend = '<table class="kit-table"><thead><tr><th>Band</th><th>Rule</th></tr></thead><tbody><tr><td>High</td><td>10+</td></tr><tr><td>Low</td><td>under 10</td></tr></tbody></table>'
+        Find-UnsortedTables 'index.html' '' $legend | Should BeNullOrEmpty
+        Find-UnsortedTables 'index.html' '' '<table class="kit-table"><thead><tr><th>A</th></tr></thead><tbody><tr data-kit-empty hidden><td>None</td></tr></tbody></table>' | Should Match 'data-kit-sort'
+        Find-UnsortedTables 'js/app.js' '' "el.innerHTML = '<table class=`"kit-table`"><tbody><tr><td>' + name + '</td></tr></tbody></table>';" | Should Match 'data-kit-sort'
+    }
     It 'reports a kit-table without data-kit-sort, also written from a script' {
         Find-UnsortedTables 'index.html' '' '<table class="kit-table"><thead><tr><th>A</th></tr></thead></table>' | Should Match 'line 1: a table that cannot be sorted.*data-kit-sort'
         Find-UnsortedTables 'js/app.js' '' "el.innerHTML = '<table class=`"kit-table`">' + rows + '</table>';" | Should Match 'data-kit-sort'

@@ -1484,6 +1484,20 @@ function Get-ProjectCssVarNames([string]$ProjectRoot) {
     , $names
 }
 
+function Get-CssVarSizeGuess([string]$Name, $Defs) {
+    <# A size name (xs, sm, md, lg, xl, 2xl) on a scale the project numbers (--space-1, --space-2, ...):
+       the numbered step of about that size, by the usual 4 / 8 / 16 / 24 / 32 / 48 px ladder on a
+       1-7 scale. Nothing when the project has no such numbered scale. #>
+    $m = [regex]::Match($Name, '^(.+-)(3xs|2xs|xxs|xs|sm|md|lg|xl|2xl|xxl|3xl)$')
+    if (-not $m.Success) { return @() }
+    $prefix = $m.Groups[1].Value
+    $steps = @($Defs | Where-Object { $_ -match ('^' + [regex]::Escape($prefix) + '(\d+)$') } | ForEach-Object { [int]($_.Substring($prefix.Length)) } | Sort-Object)
+    if (-not $steps.Count) { return @() }
+    $want = switch ($m.Groups[2].Value) { '3xs' { 1 } '2xs' { 1 } 'xxs' { 1 } 'xs' { 1 } 'sm' { 2 } 'md' { 4 } 'lg' { 5 } 'xl' { 6 } default { 7 } }
+    $best = $steps | Sort-Object { [Math]::Abs($_ - $want) } | Select-Object -First 1
+    @("$prefix$best")
+}
+
 function Find-UndefinedCssVars([string]$Text, [string]$Path, [string]$ProjectRoot) {
     <# var(--name) without a fallback where nothing in the project defines --name: it has no value.
        Names of common libraries (--tw-, --bs-, ...) and pages that load stylesheets from the web are
@@ -1500,7 +1514,8 @@ function Find-UndefinedCssVars([string]$Text, [string]$Path, [string]$ProjectRoo
         $n = $u.Groups[1].Value
         if ($said.ContainsKey($n) -or $defs.Contains($n) -or $local.Contains($n) -or $n -match $script:LibVarPrefix) { continue }
         $said[$n] = $true
-        $like = @($defs | Where-Object { $_ -ne $n -and ($_.Replace('-', '') -eq $n.Replace('-', '') -or ($n.Length -ge 6 -and $_.StartsWith($n.Substring(0, [Math]::Min($n.Length, $n.Length - 2))))) } | Select-Object -First 2)
+        $like = @(Get-CssVarSizeGuess $n $defs)
+        if (-not $like.Count) { $like = @($defs | Where-Object { $_ -ne $n -and ($_.Replace('-', '') -eq $n.Replace('-', '') -or ($n.Length -ge 6 -and $_.StartsWith($n.Substring(0, [Math]::Min($n.Length, $n.Length - 2))))) } | Select-Object -First 2) }
         "line $(LineAt $Text $u.Index): var(--$n) is not defined anywhere in the project (no --${n}: in a stylesheet), so it has no value$(if ($like.Count) { "; did you mean --$($like -join ' or --')?" } else { ': define it, or fix the name' })"
     }
 }

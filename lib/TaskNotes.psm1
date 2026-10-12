@@ -54,7 +54,8 @@ function New-AcceptanceAsk([string[]]$Checks) {
 
 function Read-AcceptanceAnswers([AllowEmptyString()][string]$Text, [string[]]$Checks) {
     <# The MET / NOT MET lines of a reply, matched to the checks (by the check's text, else in order).
-       @(@{ check; met; note }) for every check; met is $null for a check the reply did not answer. #>
+       @(@{ check; met; note }) for every check; met is $null for a check the reply did not answer. A check
+       answered twice (NOT MET, then MET after the fix in the same reply) takes the last answer. #>
     $answers = @(foreach ($l in "$Text".Replace("`r`n", "`n").Split("`n")) {
         $m = [regex]::Match($l, '^[\s>*_\-]*(NOT\s+MET|MET)\s*[:\-]\s*\**\s*(.+?)\s*$')
         if ($m.Success) { @{ met = ($m.Groups[1].Value -notmatch '(?i)^NOT'); text = $m.Groups[2].Value } }
@@ -64,7 +65,7 @@ function Read-AcceptanceAnswers([AllowEmptyString()][string]$Text, [string[]]$Ch
     foreach ($c in @($Checks)) {
         $hit = $null
         $key = ($c -replace '[^\w ]', '').Trim().ToLowerInvariant()
-        for ($k = 0; $k -lt $answers.Count; $k++) {
+        for ($k = $answers.Count - 1; $k -ge 0; $k--) {   # the last answer to a check wins: a reply may say NOT MET, fix it, then say MET
             if ($used[$k]) { continue }
             $a = ($answers[$k].text -replace '[^\w ]', '').Trim().ToLowerInvariant()
             if ($key -and ($a.StartsWith($key.Substring(0, [Math]::Min(30, $key.Length))))) { $hit = $k; break }
