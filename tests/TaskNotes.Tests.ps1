@@ -85,3 +85,23 @@ Describe 'A reply with only the notes asked for' {
         Get-RequestTypeAsk | Should Match 'same reply'
     }
 }
+
+Describe 'Open items in the project to-do list at done' {
+    It 'finds open items in TODO.md at the root or in docs/, not in code blocks, and words the Continue message' {
+        $p = Join-Path $env:TEMP ('ccb-todo-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'docs'), (Join-Path $p '.streamhub') -Force | Out-Null
+        try {
+            [IO.File]::WriteAllText((Join-Path $p 'TODO.md'), "# Work`n- [x] Load the data`n- [ ] Add a filter`n1. [ ] Add an export`n" + '```' + "`n- [ ] not an item`n" + '```' + "`n")
+            [IO.File]::WriteAllText((Join-Path $p 'docs\TASKS.md'), "- [x] all done`n")
+            [IO.File]::WriteAllText((Join-Path $p '.streamhub\PLAN.md'), "- [ ] the helper's own plan`n")
+            $o = @(Get-OpenTodoItems $p)
+            $o.Count | Should Be 1
+            $o[0].file | Should Be 'TODO.md'
+            @($o[0].items) -join '|' | Should Be 'Add a filter|Add an export'
+            $c = Get-OpenTodoContinue $o
+            $c | Should Match 'TODO.md: - Add a filter'
+            $c | Should Match 'tick each one off'
+            [IO.File]::WriteAllText((Join-Path $p 'TODO.md'), "- [x] done`n")
+            @(Get-OpenTodoItems $p).Count | Should Be 0
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}

@@ -130,6 +130,34 @@ function Get-NotesGoAhead {
     "Noted. Now carry out the task: read what you still need or write the files, with action blocks. Do not repeat the lists above."
 }
 
+# --- Open items in the project's to-do list ----------------------------------------------------
+
+function Get-OpenTodoItems([string]$ProjectRoot) {
+    <# The project's to-do lists (TODO.md, TASKS.md, PLAN.md at the root or in docs/; not StreamHub's
+       own .streamhub/PLAN.md) with the '- [ ]' items still open, outside code blocks:
+       @(@{ file; items = @(text) }) for the files that have any. #>
+    $out = New-Object System.Collections.Generic.List[object]
+    foreach ($dir in '', 'docs') {
+        $base = if ($dir) { Join-Path $ProjectRoot $dir } else { $ProjectRoot }
+        if (-not (Test-Path -LiteralPath $base -PathType Container)) { continue }
+        foreach ($f in @(Get-ChildItem -LiteralPath $base -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(TODO|TO-DO|TASKS|PLAN)\.md$' })) {
+            $open = New-Object System.Collections.Generic.List[string]; $fence = $false
+            foreach ($l in ([IO.File]::ReadAllText($f.FullName) -split "`r?`n")) {
+                if ($l -match '^\s*(```|~~~)') { $fence = -not $fence; continue }
+                if (-not $fence -and $l -match '^\s*(?:[-*+]|\d+[.)])\s*\[ \]\s*(\S.*)$') { $open.Add($Matches[1].Trim()) }
+            }
+            if ($open.Count) { $out.Add(@{ file = $(if ($dir) { "$dir/$($f.Name)" } else { $f.Name }); items = $open.ToArray() }) }
+        }
+    }
+    $out.ToArray()
+}
+
+function Get-OpenTodoContinue($Open) {
+    # The message the Continue button sends for open to-do items.
+    $parts = @(foreach ($o in @($Open)) { "$($o.file): " + ((@($o.items) | Select-Object -First 12 | ForEach-Object { "- $_" }) -join "`n") })
+    "Continue with the items still open in the to-do list:`n" + ($parts -join "`n") + "`nDo them now and tick each one off ([x]) in the file when it is done. If one is not needed, tick it off and say why in your summary."
+}
+
 # --- Data notes ------------------------------------------------------------------------------
 
 function Get-DataNotesPath([string]$ProjectRoot) { Join-Path $ProjectRoot '.streamhub\data-notes.json' }
@@ -178,4 +206,4 @@ function Format-DataNotes([string]$ProjectRoot) {
     "Data notes (what you wrote about this data earlier; read the data again only for what they do not cover):`n" + ((@($have.notes) | ForEach-Object { "- $_" }) -join "`n")
 }
 
-Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision, Get-NotesGoAhead
+Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision, Get-NotesGoAhead, Get-OpenTodoItems, Get-OpenTodoContinue

@@ -1484,18 +1484,59 @@ function Get-ProjectCssVarNames([string]$ProjectRoot) {
     , $names
 }
 
+# Size names in custom properties, smallest first, on one ladder (md, base, default and a bare name
+# are the middle); numbered scales (1-7) map onto it as 4 / 8 / 12 / 16 / 24 / 32 / 48 px steps do.
+$script:SizeRank = @{ '3xs' = -3; 'xxxs' = -3; '2xs' = -2; 'xxs' = -2; 'xs' = -1; 'sm' = 0; 'small' = 0; 's' = 0; 'md' = 1; 'm' = 1; 'medium' = 1; 'base' = 1; 'default' = 1; 'normal' = 1; '' = 1; 'lg' = 2; 'l' = 2; 'large' = 2; 'xl' = 3; '2xl' = 4; 'xxl' = 4; '3xl' = 5; 'xxxl' = 5; '4xl' = 6 }
+$script:StepRank = @{ 1 = -1; 2 = 0; 3 = 0.5; 4 = 1; 5 = 2; 6 = 3; 7 = 4; 8 = 5; 9 = 6 }
+# Other words for the same family: font sizes are --kit-text-*, spacing --kit-space-*, corners --kit-radius-*.
+$script:SizeFamilies = @(
+    @{ re = '(font-?size|fontsize|fs|size|font|type|txt|text)'; family = 'text' },
+    @{ re = '(spacing|spacer|space|gap|gutter|padding|pad|margin|inset|sp)'; family = 'space' },
+    @{ re = '(radius|radii|rounded|round|corner|corners|r)'; family = 'radius' },
+    @{ re = '(shadow|elevation|elev)'; family = 'shadow' }
+)
+
 function Get-CssVarSizeGuess([string]$Name, $Defs) {
-    <# A size name (xs, sm, md, lg, xl, 2xl) on a scale the project numbers (--space-1, --space-2, ...):
-       the numbered step of about that size, by the usual 4 / 8 / 16 / 24 / 32 / 48 px ladder on a
-       1-7 scale. Nothing when the project has no such numbered scale. #>
-    $m = [regex]::Match($Name, '^(.+-)(3xs|2xs|xxs|xs|sm|md|lg|xl|2xl|xxl|3xl)$')
-    if (-not $m.Success) { return @() }
-    $prefix = $m.Groups[1].Value
-    $steps = @($Defs | Where-Object { $_ -match ('^' + [regex]::Escape($prefix) + '(\d+)$') } | ForEach-Object { [int]($_.Substring($prefix.Length)) } | Sort-Object)
-    if (-not $steps.Count) { return @() }
-    $want = switch ($m.Groups[2].Value) { '3xs' { 1 } '2xs' { 1 } 'xxs' { 1 } 'xs' { 1 } 'sm' { 2 } 'md' { 4 } 'lg' { 5 } 'xl' { 6 } default { 7 } }
-    $best = $steps | Sort-Object { [Math]::Abs($_ - $want) } | Select-Object -First 1
-    @("$prefix$best")
+    <# A size the project spells another way: var(--kit-space-lg) on a numbered scale, --kit-text-base
+       or --kit-font-size-sm on a named one, --kit-radius-md where the default is the bare name,
+       --kit-text-3 on a named scale. Finds the family (same start, or another word for it: font size
+       = text, gap or padding = space, rounded = radius) and returns the member of about that size, by
+       one ladder for names and numbers. Nothing when the name holds no size or no family fits. #>
+    $m = [regex]::Match($Name, '^(.*?)-?((?:\d?x{0,3}(?:s|l)|sm|md|lg|small|medium|large|base|default|normal|\d+))$')
+    $want = $null; $stem = $Name
+    if ($m.Success -and $m.Groups[1].Value) {
+        $sz = $m.Groups[2].Value
+        if ($sz -match '^\d+$') { $want = if ($script:StepRank.ContainsKey([int]$sz)) { $script:StepRank[[int]$sz] } else { 6 } }
+        elseif ($script:SizeRank.ContainsKey($sz)) { $want = $script:SizeRank[$sz] }
+        if ($null -ne $want) { $stem = $m.Groups[1].Value }
+    }
+    if ($null -eq $want) { return @() }
+    # The family: names in the project with the same stem, else the stem's word swapped for its family.
+    $members = {
+        param($prefix)
+        @(foreach ($d in $Defs) {
+            if ($d -eq $prefix) { @{ name = $d; rank = 1 } ; continue }
+            if (-not $d.StartsWith("$prefix-")) { continue }
+            $rest = $d.Substring($prefix.Length + 1)
+            if ($rest -match '^\d+$') { if ($script:StepRank.ContainsKey([int]$rest)) { @{ name = $d; rank = $script:StepRank[[int]$rest] } } }
+            elseif ($script:SizeRank.ContainsKey($rest)) { @{ name = $d; rank = $script:SizeRank[$rest] } }
+        })
+    }
+    $found = @(& $members $stem)
+    if (-not $found.Count) {
+        $head = [regex]::Match($stem, '^(.*?-)?([a-z-]+)$')
+        $pre = if ($head.Success) { "$($head.Groups[1].Value)" } else { '' }
+        $word = if ($head.Success) { $head.Groups[2].Value } else { $stem }
+        foreach ($f in $script:SizeFamilies) {
+            if ($word -notmatch ('^' + $f.re + '$')) { continue }
+            $found = @(& $members ($pre + $f.family))
+            if ($found.Count) { break }
+        }
+    }
+    if (-not $found.Count) { return @() }
+    $best = $found | Sort-Object { [Math]::Abs($_.rank - $want) }, { $_.rank } | Select-Object -First 1
+    if ($best.name -eq $Name) { return @() }
+    @($best.name)
 }
 
 function Find-UndefinedCssVars([string]$Text, [string]$Path, [string]$ProjectRoot) {

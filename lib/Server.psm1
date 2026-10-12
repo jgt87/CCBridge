@@ -675,6 +675,7 @@ function Invoke-ApiRequest($Ctx, $State) {
                 $task.planBuild = $true
                 $task.text += "`n`nEvery decision for this task (questions, answers, plan versions) is in .streamhub/PLAN.md, in the section marked plan:$planId. Read it (read .streamhub/PLAN.md) if you need it."
             }
+            if ($b.approve) { Set-PlanBuildTask $State $task }   # building an approved plan: out of Plan only mode, and Copilot told so
             if ($b.thinkDeeper) { $task.responseMode = 'deep' }
             $entry = Submit-AgentTask $State $task 'user' $title
             return Send-Json $Ctx @{ ok = $true; queued = $entry.id }

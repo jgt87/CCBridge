@@ -2306,6 +2306,22 @@ function Get-ProcessTreeCpu([int]$RootPid) {
     $sum
 }
 
+function ConvertFrom-ConsoleBytes([AllowEmptyString()][string]$Raw) {
+    <# Command output read byte for byte (Latin-1, so every byte is one char) as text: UTF-8 when it is
+       valid UTF-8 (Node.js, Python with UTF-8 mode, most tools of today; a sequence cut off at the end
+       of what came so far is left for the next read), else the console's code page (cmd, Windows
+       PowerShell, older tools). Plain ASCII is the same either way. #>
+    if (-not $Raw) { return '' }
+    $bytes = [Text.Encoding]::GetEncoding(28591).GetBytes($Raw)
+    $strict = New-Object Text.UTF8Encoding($false, $true)
+    for ($cut = 0; $cut -le 3 -and $cut -lt $bytes.Length; $cut++) {
+        try { return $strict.GetString($bytes, 0, $bytes.Length - $cut) } catch { }
+        if ($bytes[$bytes.Length - 1 - $cut] -lt 0x80) { break }   # not a cut-off sequence: not UTF-8
+    }
+    $oem = try { [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage) } catch { [Text.Encoding]::GetEncoding(437) }
+    $oem.GetString($bytes)
+}
+
 function Invoke-RunAction {
     <# Runs a command with cmd.exe in the project folder. Output is trimmed to head + tail.
        -OnProgress gets, about twice a second while it runs: @{ elapsed; lines (the last 20, secrets
@@ -2333,6 +2349,10 @@ function Invoke-RunAction {
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    # Bytes as they are (Latin-1 maps each byte to one char); ConvertFrom-ConsoleBytes decides between
+    # UTF-8 and the console's code page once the text is there.
+    $psi.StandardOutputEncoding = [Text.Encoding]::GetEncoding(28591)
+    $psi.StandardErrorEncoding = [Text.Encoding]::GetEncoding(28591)
     $psi.RedirectStandardInput = $true
     $psi.CreateNoWindow = $true
     $p = [Diagnostics.Process]::Start($psi)
@@ -2375,7 +2395,7 @@ function Invoke-RunAction {
                 $cpuIdle = ($lastCpu -ge 0 -and $cpu -ge 0 -and ($cpu - $lastCpu) -lt 0.05)
                 $lastCpu = $cpu; $cpuAt = Get-Date
             } elseif ($quiet -lt 25) { $lastCpu = -1.0; $cpuIdle = $false }
-            $tail = @(Get-RunTail $all.ToString())
+            $tail = @(Get-RunTail (ConvertFrom-ConsoleBytes $all.ToString()))
             $shown = @(Hide-ProjectSecrets $ProjectRoot ($tail -join "`n")) -join "`n"
             try { & $OnProgress @{ elapsed = [int]((Get-Date) - $started).TotalSeconds; lines = @($shown.Split("`n")); quietSec = [int]$quiet; state = (Get-RunWaitState $tail $quiet $cpuIdle) } } catch { }
         }
@@ -2384,7 +2404,7 @@ function Invoke-RunAction {
     # What is still on its way (the process has ended: the pipes close).
     $until = (Get-Date).AddSeconds(5)
     while (@($streams | Where-Object { -not $_.eof }).Count -and (Get-Date) -lt $until) { if (-not (& $pump)) { Start-Sleep -Milliseconds 20 } }
-    $text = $all.ToString().Replace("`r`n", "`n").TrimEnd()
+    $text = (ConvertFrom-ConsoleBytes $all.ToString()).Replace("`r`n", "`n").TrimEnd()
     Write-CCBLog verbose exec "run finished" @{ command = $Command; exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; outputChars = $text.Length }
     if ($text.Length -gt $MaxChars) {
         $head = [int]($MaxChars * 0.25)
@@ -2395,5 +2415,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile,
+Export-ModuleMember -Function Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction, Get-FileViewText, Get-FolderListing, Get-ReadNotFoundNote

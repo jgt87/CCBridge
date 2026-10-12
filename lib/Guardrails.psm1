@@ -345,7 +345,46 @@ $script:MarkupColorPattern = '(?i)(\bstyle\s*=\s*["''{][^>]*?(#[0-9a-f]{3,8}\b|\
 # Type, corners and shadows written into styles instead of the kit's tokens (font-family, font-size in px/rem/pt,
 # box-shadow with sizes, border-radius other than 0, a circle or a pill).
 $script:FontFamilyPattern = '(?i)\bfont-?family\s*:\s*(?!\s*["'']?\s*(var\(|inherit\b|initial\b|unset\b))\S'
-$script:FontSizePattern = '(?i)\bfont-?size\s*:\s*["'']?\s*\d*\.?\d+\s*(px|rem|pt)\b'
+$script:FontSizePattern = '(?i)(\bfont-?size\s*:\s*["'']?\s*\d*\.?\d+\s*(px|rem|pt)\b|(^|[\s;{"''])font\s*:(?![^;]*var\()[^;]*?\b\d*\.?\d+(px|rem|pt)\b)'
+# The kit's size tokens with their values in px, read from the kit's own tokens.css (light block):
+# @{ space = @(@{ name; px }); text = ...; radius = ... }, so a finding names the nearest step.
+$script:KitSizeTokens = $null
+function Get-KitSizeTokens {
+    if ($script:KitSizeTokens) { return $script:KitSizeTokens }
+    $out = @{ space = @(); text = @(); radius = @() }
+    $f = Join-Path (Split-Path -Parent $PSScriptRoot) 'templates\ui-kit\tokens.css'
+    if (Test-Path -LiteralPath $f) {
+        $seen = @{}
+        foreach ($m in [regex]::Matches([IO.File]::ReadAllText($f), '--(kit-(space|text|radius)(-[a-z0-9]+)?)\s*:\s*(\d*\.?\d+)(px|rem)\s*;')) {
+            $name = $m.Groups[1].Value
+            if ($seen.ContainsKey($name)) { continue }   # the first (light) value
+            $seen[$name] = $true
+            $px = [double]::Parse($m.Groups[4].Value, [Globalization.CultureInfo]::InvariantCulture) * $(if ($m.Groups[5].Value -eq 'rem') { 16 } else { 1 })
+            $out[$m.Groups[2].Value] += @{ name = $name; px = $px }
+        }
+    }
+    $script:KitSizeTokens = $out
+    $out
+}
+
+function Get-NearestKitToken([string]$Kind, [string]$Text) {
+    <# The kit token nearest to the first size in $Text (px, rem, em or pt), as 'var(--NAME)', or ''. #>
+    $m = $null; $px = 0
+    foreach ($c in [regex]::Matches($Text, '(?<![\w.-])(\d*\.?\d+)(px|rem|em|pt)\b')) {   # the first size over a 2px hairline
+        $v = [double]::Parse($c.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
+        $px = switch ($c.Groups[2].Value) { 'px' { $v } 'pt' { $v * 4 / 3 } default { $v * 16 } }
+        if ($px -gt 2) { $m = $c; break }
+    }
+    if (-not $m) { return '' }
+    $list = @((Get-KitSizeTokens)[$Kind])
+    if (-not $list.Count) { return '' }
+    $best = $list | Sort-Object { [Math]::Abs($_.px - $px) }, { if ($_.name -match '^kit-(radius|space-4|text-md)$') { 0 } else { 1 } }, { $_.px } | Select-Object -First 1   # a tie: the kit's default step
+    "$($m.Value) is about var(--$($best.name))"
+}
+
+# Spacing set in numbers instead of the kit's steps: padding, margin, gap and inset with a value over
+# 2px (0, 1px and 2px hairlines, auto and percentages are fine; a value with var() is the token's).
+$script:SpacingPattern = '(?i)(^|[\s;{"''])(padding|margin|gap|row-gap|column-gap|inset)(-(top|bottom|left|right|block|inline)(-(start|end))?)?\s*:(?![^;]*var\()[^;]*?(?<![\d.])([3-9]|\d{2,}|\d*\.\d+)(px|rem|em)\b'
 $script:ShadowPattern = '(?i)\bbox-?shadow\s*:\s*(?!\s*["'']?\s*(var\(|none\b|inherit\b|initial\b|unset\b))[^;]*?\d+(px|rem)'
 $script:RadiusPattern = '(?i)\bborder-?(top-?|bottom-?)?(left-?|right-?)?radius\s*:\s*(?!\s*["'']?\s*(var\(|0(px)?\s*($|[;"''}])|50%|100%|9{3,}px|inherit\b|initial\b|unset\b))[^;]*?\d*\.?\d+(px|rem|em)\b'
 # An emoji (pictographs, symbols, dingbats, arrows) as the first content of a button, heading, label, link or option.
@@ -397,9 +436,10 @@ function Find-UiSlop {
         if ($slop -and -not $found.caps -and ($t -match '(?i)text-transform\s*:\s*uppercase' -or $t -cmatch '<(h[1-6]|th|label|button|legend|summary)\b[^>]*>\s*[A-Z][A-Z0-9&/ .-]{3,}\s*</')) { $found.caps = "line ${n}: a heading or label in capitals; write it in sentence case (Totals, not TOTALS) and leave out text-transform: uppercase" }
         if ($slop -and $UseKit -and -not $tokensFile -and ($isStyle -or $isMarkup)) {
             if (-not $found.font -and $t -match $script:FontFamilyPattern) { $found.font = "line ${n}: a font of your own; the kit's type is var(--kit-font) (var(--kit-font-mono) for code), already set on kit-page: leave font-family out or use the token" }
-            if (-not $found.fontsize -and $t -match $script:FontSizePattern) { $found.fontsize = "line ${n}: a hard-coded font size; use the kit's steps var(--kit-text-xs), -sm, -md, -lg, -xl (or the classes kit-h1, kit-h2, kit-h3, kit-small)" }
+            if (-not $found.fontsize -and $t -match $script:FontSizePattern) { $near = Get-NearestKitToken 'text' $Matches[0]; $found.fontsize = "line ${n}: a hard-coded font size$(if ($near) { " ($near)" }); use the kit's steps var(--kit-text-2xs), -xs, -sm, -md, -lg, -xl (or the classes kit-h1, kit-h2, kit-h3, kit-small)" }
+            if (-not $found.spacing -and $t -match $script:SpacingPattern) { $near = Get-NearestKitToken 'space' ($Matches[0] -replace '^[^:]*:', ''); $found.spacing = "line ${n}: spacing set in numbers$(if ($near) { " ($near)" }); use the kit's steps var(--kit-space-1) to var(--kit-space-7) (layout classes such as kit-stack and kit-grid space their parts already)" }
             if (-not $found.shadow -and $t -notmatch 'var\(--kit-' -and $t -match $script:ShadowPattern) { $found.shadow = "line ${n}: a shadow of your own; use var(--kit-shadow), or none (the kit's surfaces have a 1px border instead)" }
-            if (-not $found.radius -and $t -match $script:RadiusPattern) { $found.radius = "line ${n}: hard-coded rounded corners; use var(--kit-radius) or var(--kit-radius-lg) (999px for a pill)" }
+            if (-not $found.radius -and $t -match $script:RadiusPattern) { $near = Get-NearestKitToken 'radius' ($Matches[0] -replace '^[^:]*:', ''); $found.radius = "line ${n}: hard-coded rounded corners$(if ($near) { " ($near)" }); use var(--kit-radius-sm), var(--kit-radius) or var(--kit-radius-lg) (999px for a pill)" }
         }
         if ($slop -and $isMarkup -and -not $found.emoji -and $t -match $script:EmojiIconPattern) {
             $found.emoji = if ($UseKit -and (Test-UiKitPart 'icons')) { "line ${n}: an emoji used as an icon (in a button, heading, label or link); use a kit icon, <span data-kit-icon=`"NAME`" aria-hidden=`"true`"></span> with a Lucide name, or leave it out" }

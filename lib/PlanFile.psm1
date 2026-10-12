@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 
 $script:PlanFileName = '.streamhub\PLAN.md'   # StreamHub's own record (Layout: Plan)
-$script:PlanHeader = "# PLAN`n`nEvery request made with Clarify first: Copilot's questions, the answers, each version of the plan, the changes asked for, the approval and the result. Newest at the bottom.`n"
+$script:PlanHeader = "# PLAN`n`nThe plans behind the work, newest at the bottom: requests made with Clarify first or Plan first (Copilot's questions, the answers, each version of the plan, the changes asked for, the approval), Copilot's proposals, plans written in Plan only mode, and the steps and Done when checks Copilot set for a build or change, each with its result.`n"
 
 function Get-PlanSlug([string]$Text) {
     $s = ("$Text".ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')

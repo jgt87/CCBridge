@@ -101,6 +101,14 @@ describe("kit-charts.js", () => {
     load(chartsJs);
     return [document.getElementById("c")!, document.getElementById("d")!];
   };
+  it("writes a ring's centre number like its legend, and a legend that reads with spaces even without styles", () => {
+    const [c] = host();
+    document.documentElement.lang = "en";
+    w.KitCharts.ring(c, { items: [{ label: "Low", value: 1375 }, { label: "Medium", value: 11 }], center: 1386, legend: "values" });
+    expect(c.querySelector(".kit-chart__center")!.textContent).toBe("1,386");
+    const li = c.querySelector(".kit-chart__legend--values li")!;
+    expect(li.textContent!.trim()).toBe("Low 1,375 99.2%");
+  });
   it("draws a line through a missing value and gives a chart below zero an axis below zero", () => {
     const [c] = host();
     w.KitCharts.line(c, { labels: ["Jan", "Feb", "Mar", "Apr"], series: [{ name: "A", values: [3, "n/a", 5, -2] }] });

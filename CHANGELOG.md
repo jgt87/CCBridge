@@ -8,12 +8,22 @@ Nothing yet.
 
 ## [v0.1.130] - 2026-10-12
 
+### Added
+- When Copilot reports a task as done while the project's to-do list (TODO.md, TASKS.md or PLAN.md at the root or in docs/) still has open '- [ ]' items, the chat shows a card with the open items and a Continue button that sends them to Copilot to finish, ticking each off. StreamHub never continues by itself; you decide. (Copilot already got one reminder for a to-do list the task itself wrote.)
+- Plans are kept for later reference in .streamhub/PLAN.md for every task that had one, not only Clarify first, Plan first and proposals: a build or change records the steps Copilot listed (as they stood at the end, done or not) and its Done when checks with their answers, then the result; a reply in Plan only mode is recorded as Copilot's plan, marked as not built. The chat says "Plan saved for later reference" with a link to the file.
+
 ### Changed
+- In Plan only mode a command is refused with a pointer to the read-only actions (read, glob, grep, find, and web for a public page), so Copilot can still look something up for the plan instead of giving up on it.
+- A custom property spelled with another size word now gets the matching kit token for every size family, not only spacing: --kit-text-base or --kit-font-size-sm -> --kit-text-md / -sm, --kit-text-2xl -> --kit-text-xl, --kit-radius-md -> --kit-radius, --kit-rounded-lg -> --kit-radius-lg, --kit-gap-md -> --kit-space-4, a number on a named scale (--kit-text-3) and the reverse. Generic: it maps onto whatever size names or numbers the project defines.
+- With the UI kit on and in the project, spacing written in numbers (padding, margin, gap, inset over 2px) is now reported like font sizes and corners already were, and a font size in the font shorthand (font: 600 14px/1.4 ...) counts too. Each such finding names the nearest kit token for the value it found (12px is about var(--kit-space-3), 14px about var(--kit-text-sm), 8px about var(--kit-radius)), read from the kit's own tokens.css. Without the kit none of these are reported.
 - A small reference table written out in a page (a legend or definitions: at most six rows, nothing a script fills in) is no longer reported as a table that cannot be sorted.
 - A custom property with a size name on a numbered scale (var(--kit-space-lg) where the kit has --kit-space-1 to 7) now suggests the step of about that size (lg: --kit-space-5, md: --kit-space-4), not the first two steps by spelling.
 - The command menu and its lists (logging levels, files) show each item's name in full first; its description takes the room that is left and is cut off instead ("Tra..." was cut while the description stayed whole). Hovering an item shows its whole name and description. The type on the right (Command, Active) keeps a gap from the description.
 
 ### Fixed
+- A ring chart's centre number now has the same thousands separator as its legend (1,386, not 1386), and the legend's label, count and share are separated by spaces, so a legend without the kit's styles reads "Low 1,375 99.2%" instead of "Low1,37599.2%" (which looked like a share over 100%).
+- Approve and build on a plan stayed in Plan only mode when that mode was selected: every change was skipped and Copilot answered with a plan again, so the build never started. A task that builds an approved plan now runs in Ask before changes when Plan only is selected, and the message tells Copilot that planning is over, since the chat still holds the plan-first instructions.
+- Output of commands that write UTF-8 (Node.js and its test runner, most current tools) showed broken characters (Γ£ö instead of ✔). Output is now read as UTF-8 when it is valid UTF-8, else in the console's code page (cmd, Windows PowerShell).
 - A reply that answered a Done when check twice (NOT MET, then MET after fixing it in the same reply) was reported as not met (run 11: "1 of 5 not met" while Copilot ended with all five met). The last answer to a check now counts.
 
 ## [v0.1.129] - 2026-10-12

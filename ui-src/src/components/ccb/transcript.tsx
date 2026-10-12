@@ -318,7 +318,7 @@ function UnfinishedCard({ item, onSend }: { item: Extract<TranscriptItem, { kind
       )}
       {!item.restored && (
         <div className="flex flex-wrap items-center gap-2">
-          <GradientButton className="h-10 min-w-44" disabled={sent || !onSend || !item.continueText} label={sent ? "Sent to Copilot" : "Continue"} onClick={() => { setSent(true); onSend?.(item.continueText, {}); }} variant="neutral" />
+          <GradientButton className="h-10 min-w-44" disabled={sent || !onSend || !item.continueText} label={sent ? "Sent to Copilot" : "Continue"} onClick={() => { setSent(true); onSend?.(item.continueText, { asCoding: true }); }} variant="neutral" />
         </div>
       )}
     </div>

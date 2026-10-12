@@ -3,6 +3,29 @@
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 foreach ($m in 'Executor', 'RunWindow') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
+Describe 'Command output in UTF-8 or the console code page' {
+    It 'shows UTF-8 output (Node.js test marks) and console code page output both as written' {
+        $check = [string][char]0x2714; $info = [string][char]0x2139
+        $raw = [Text.Encoding]::GetEncoding(28591).GetString([Text.Encoding]::UTF8.GetBytes("$check passes`n$info tests 5"))
+        ConvertFrom-ConsoleBytes $raw | Should Be "$check passes`n$info tests 5"
+        $oem = [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
+        $e = [string][char]0xE9
+        $raw2 = [Text.Encoding]::GetEncoding(28591).GetString($oem.GetBytes("caf$e ok"))
+        ConvertFrom-ConsoleBytes $raw2 | Should Be "caf$e ok"
+        # a UTF-8 character cut in two between reads: the start is shown, the rest comes with the next read
+        $b = [Text.Encoding]::UTF8.GetBytes("ok $check"); $cut = [Text.Encoding]::GetEncoding(28591).GetString($b, 0, $b.Length - 1)
+        ConvertFrom-ConsoleBytes $cut | Should Be 'ok '
+    }
+    It 'reads a command''s real UTF-8 output without mangling it' {
+        $p = Join-Path $env:TEMP ('ccb-enc-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        try {
+            $check = [string][char]0x2714
+            [IO.File]::WriteAllText((Join-Path $p 'out.txt'), "$check pass 5", (New-Object Text.UTF8Encoding($false)))
+            (Invoke-RunAction $p 'type out.txt' -TimeoutSec 30).output | Should Be "$check pass 5"
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 Describe 'What a running command looks like' {
     It 'asks a question, waits without CPU, is quiet, or just runs' {
         Get-RunWaitState @('Building...', 'Do you want to continue? (y/N)') 4 $false | Should Be 'question'

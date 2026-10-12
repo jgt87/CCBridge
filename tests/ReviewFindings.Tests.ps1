@@ -53,11 +53,16 @@ Describe 'The UI kit''s tokens used without loading them' {
 Describe 'Custom properties nobody defines' {
     It 'suggests the numbered step of about that size for a size name (md, lg) on a numbered scale' {
         $p = New-WebProject
-        [IO.File]::WriteAllText((Join-Path $p 'css\theme.css'), ':root { --kit-space-1: 4px; --kit-space-2: 8px; --kit-space-3: 12px; --kit-space-4: 16px; --kit-space-5: 24px; --kit-space-6: 32px; --kit-space-7: 48px; }')
+        [IO.File]::WriteAllText((Join-Path $p 'css\theme.css'), ':root { --kit-space-1: 4px; --kit-space-2: 8px; --kit-space-3: 12px; --kit-space-4: 16px; --kit-space-5: 24px; --kit-space-6: 32px; --kit-space-7: 48px; --kit-text-xs: 1px; --kit-text-sm: 2px; --kit-text-md: 3px; --kit-text-lg: 4px; --kit-text-xl: 5px; --kit-radius: 6px; --kit-radius-sm: 4px; --kit-radius-lg: 9px; }')
         $r = @(Find-UndefinedCssVars '.a { margin: var(--kit-space-lg); padding: var(--kit-space-md); gap: var(--kit-space-xs); }' 'css/site.css' $p)
         $r[0] | Should Match 'did you mean --kit-space-5\?'
         $r[1] | Should Match 'did you mean --kit-space-4\?'
         $r[2] | Should Match 'did you mean --kit-space-1\?'
+        $t = @(Find-UndefinedCssVars '.b { font-size: var(--kit-text-base); line-height: var(--kit-font-size-sm); border-radius: var(--kit-radius-md); margin: var(--kit-gap-lg); }' 'css/site.css' $p)
+        $t[0] | Should Match 'did you mean --kit-text-md\?'
+        $t[1] | Should Match 'did you mean --kit-text-sm\?'
+        $t[2] | Should Match 'did you mean --kit-radius\?'
+        $t[3] | Should Match 'did you mean --kit-space-5\?'
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
     }
     It 'reports var(--name) without a value, with a close name, and skips fallbacks and libraries' {

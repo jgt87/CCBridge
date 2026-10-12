@@ -406,7 +406,7 @@
       arcs.push(p);
       a0 = a1;
     });
-    if (data.center !== undefined) svgEl("text", { x: cx, y: cy + 6, "text-anchor": "middle", class: "kit-chart__center" }, svg).textContent = data.center;
+    if (data.center !== undefined) svgEl("text", { x: cx, y: cy + 6, "text-anchor": "middle", class: "kit-chart__center" }, svg).textContent = typeof data.center === "number" ? fmt(data.center, data) : data.center;   // a number in the same format as the legend
     var hover = function (i) { arcs.forEach(function (x, xi) { if (x) x.classList.toggle("is-faded", i >= 0 && xi !== i); }); };
     var pick = function (i) { return { chart: "ring", part: "legend", value: items[i].label, index: i }; };
     if (data.legend === "values") {
@@ -418,7 +418,7 @@
         li.style.setProperty("--kit-legend-color", it.color);
         if (isOff(data.selected, it.label)) li.classList.add("is-off");
         li.innerHTML = '<span class="kit-chart__swatch" style="background:' + it.color + '"></span><span class="kit-chart__legend-label">' + esc(it.label) +
-          '</span><span class="kit-chart__legend-value">' + esc(fmt(it.value, data)) + '</span><span class="kit-chart__legend-share">' + share(it.value) + "</span>";
+          '</span> <span class="kit-chart__legend-value">' + esc(fmt(it.value, data)) + '</span> <span class="kit-chart__legend-share">' + share(it.value) + "</span>";   // spaces: readable as text too
         li.addEventListener("mouseenter", function () { hover(i); });
         li.addEventListener("mouseleave", function () { hover(-1); });
         pickable(host, data, li, pick(i));

@@ -763,6 +763,49 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     if ($sets.Count) { $Entry.changeSeq = [int]$sets[-1].seq }   # the History tab's card of this task
 }
 
+function Set-PlanBuildTask {
+    <# A task that builds an approved plan (the plan card's Approve and build): never in Plan only mode,
+    which would skip every change and leave Copilot planning again; such a task asks before changes
+    instead. Copilot is told planning is over, since the chat still holds the plan-first instructions. #>
+    param($State, [hashtable]$Task)
+    if ($State.Mode -eq 'plan' -or $Task.mode -eq 'plan') { $Task.mode = 'ask' }
+    $Task.text = "$($Task.text)`n`nTHE PLAN IS APPROVED: planning is over. From this message on you change files and run commands as needed; carry out the plan now with action blocks."
+}
+
+function Write-TurnPlan {
+    <# A turn that had a plan, written to PLAN.md for later reference: the steps Copilot listed (its
+       todo list, as they stood at the end) and its Done when checks with their answers for a build or
+       change, or Copilot's plan in Plan only mode; then the result (Write-PlanResult). Requests that
+       went through Clarify first, Plan first or a proposal are written by those already. Returns the
+       plan id or ''. #>
+    param($State, $Task, [int]$FromSeq)
+    if (-not $State.ProjectRoot -or $Task.planFirst -or $Task.planBuild -or $Task.issueFix -or $Task.clarify) { return '' }
+    $p = $State.LastTurnPlan
+    $todos = @(if ($p) { $p.todos }); $checks = @(if ($p) { $p.doneWhen })
+    $planMode = $State.Mode -eq 'plan'
+    $events = @(Get-AgentEvents $State $FromSeq)
+    if (@($events | Where-Object { $_.type -eq 'plan-ready' }).Count) { return '' }   # a proposal: written already
+    $planText = ''
+    if ($planMode) {
+        $last = @($events | Where-Object { $_.type -eq 'assistant' -and "$($_.text)".Trim() } | Select-Object -Last 1)
+        if ($last.Count) { $planText = ("$($last[0].text)" -replace '(?s)`{3,}.*?`{3,}', '').Trim() }
+    }
+    if (-not $todos.Count -and -not $checks.Count -and -not $planText) { return '' }
+    try {
+        $request = ("$($Task.request)", "$($Task.text)" | Where-Object { $_ } | Select-Object -First 1)
+        $id = New-PlanEntry $State.ProjectRoot $request
+        if ($planText) { Add-PlanSection $State.ProjectRoot $id "Copilot's plan (Plan only mode)" $planText 'plan only: nothing built' }
+        if ($todos.Count) { Add-PlanSection $State.ProjectRoot $id "Steps" ((@($todos | ForEach-Object { "- [$(if ($_.done) { 'x' } else { ' ' })] $($_.text)" })) -join "`n") 'in progress' }
+        if ($checks.Count) {
+            $lines = if ($p.acceptance) { @(Format-AcceptanceReport $p.acceptance) } else { @($checks | ForEach-Object { "- $_" }) }
+            Add-PlanSection $State.ProjectRoot $id "Done when (Copilot's checks)" ($lines -join "`n") 'in progress'
+        }
+        if (-not $planMode) { Write-PlanResult $State $id $FromSeq }
+        Add-AgentEvent $State 'status' @{ text = "Plan saved for later reference: .streamhub/PLAN.md"; path = '.streamhub/PLAN.md' }
+        $id
+    } catch { Write-CCBLogError agent 'PLAN.md turn plan' $_; '' }
+}
+
 function Write-PlanResult {
     <# The result of an approved build in PLAN.md: Copilot's summary, the files changed and the
        evidence file. #>
@@ -3225,7 +3268,7 @@ function Invoke-AgentAction {
 
     if ($mode -eq 'plan') {
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; preview = $preview })
-        return @{ ok = $false; summary = "$($Action.type) skipped (plan mode)"; output = 'not executed: plan mode is on (read-only). Describe the plan instead of changing files or running commands.' }
+        return @{ ok = $false; summary = "$($Action.type) skipped (plan mode)"; output = $(if ($Action.type -eq 'run') { 'not executed: plan mode is on (read-only), so no commands run. To look at something for the plan, use the read-only actions: read, glob, grep and find for project files, web for a public web page (not a command that downloads it). Then describe the plan.' } else { 'not executed: plan mode is on (read-only). Describe the plan instead of changing files or running commands.' }) }
     }
 
     if ($needsApproval) {
@@ -3747,6 +3790,7 @@ function Invoke-AgentTurn {
         # and notes on data files that have none yet (or whose data changed). Asked with this message,
         # read from the replies; no extra message.
         $doneWhen = @(); $acceptAsked = $false; $acceptResults = $null
+        $State.LastTurnPlan = $null   # the steps and checks of this turn, for PLAN.md (Write-TurnPlan)
         $askChecks = ($kind -in 'coding', 'mixed', 'project') -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.ReviewByCaller -and (Test-BuildRequest $Text) -and $Text -notmatch '^\s*Continue and make the change now'
         if ($askChecks) { $message += "`n`n" + (Get-DoneWhenAsk) }
         $notesOnlyGo = $false   # a reply with only the notes asked for (no actions) got its short go-ahead
@@ -4418,6 +4462,18 @@ function Invoke-AgentTurn {
                     Add-AgentEvent $State 'status' @{ text = $(if ($notMet.Count) { "Copilot's checks: $($notMet.Count) of $(@($acceptResults).Count) not met: " + (@($notMet | ForEach-Object { $_.check }) -join '; ') } else { "Copilot's checks: all $(@($acceptResults).Count) met." }) }
                 }
                 $doneFinished = $true
+                # Copilot says done while the project's to-do list still has open items: the person
+                # decides whether to go on (a Continue card), never StreamHub by itself.
+                if (-not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.ReviewByCaller -and -not $State.Headless -and -not $State.Cancel) {
+                    try {
+                        $openTodo = @(Get-OpenTodoItems $State.ProjectRoot)
+                        if ($openTodo.Count) {
+                            $n = (@($openTodo | ForEach-Object { @($_.items).Count }) | Measure-Object -Sum).Sum
+                            $list = @(foreach ($o in $openTodo) { foreach ($it in (@($o.items) | Select-Object -First 10)) { "$($o.file): $it" } })
+                            Add-AgentEvent $State 'task-unfinished' @{ text = "Copilot reported the task as done, but the to-do list still has $n open item(s) ($((@($openTodo | ForEach-Object { $_.file })) -join ', ')). Continue to have Copilot do them."; findings = @($list); continueText = (Get-OpenTodoContinue $openTodo) }
+                        }
+                    } catch { Write-CCBLogError agent 'open to-do items' $_ }
+                }
                 break
             }
             $left = Test-RoundsLeft ([int]$State.Config.maxRounds) $round $lastProgress
@@ -4467,6 +4523,7 @@ function Invoke-AgentTurn {
         if (-not $doneFinished -and $checkpoint.Files.Count -and -not $State.Cancel -and $State.Mode -ne 'plan' -and -not $State.ReviewByCaller -and -not $State.IssueFix) {
             try { Invoke-FinalChecks $State $checkpoint $ev $endReason } catch { Write-CCBLogError agent 'final checks' $_ }
         }
+        $State.LastTurnPlan = @{ todos = @($State.Todos | Where-Object { $_ }); doneWhen = @($doneWhen); acceptance = $acceptResults }
         if ($checkpoint.Files.Count -and "$($State.Config.evidence)" -ne 'off' -and $State.Mode -ne 'plan') {
             try {
                 $chg = @(Get-CheckpointChanges $State.ProjectRoot $checkpoint | Where-Object { $_.added -or $_.removed -or $_.created -or $_.deleted })
@@ -4697,6 +4754,7 @@ function Start-AgentWorker {
                             # Stopped or failed before the rescan: its issues go back to open (no retry).
                             if ($task.issueFix -and -not $State.IssueFixHandled) { try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError agent 'issue fix reset' $_ } }
                         }
+                        if (-not $State.ScopeUpgrade -and -not $State.Stop) { $null = Write-TurnPlan $State $task $fromSeq }
                         if ($State.ScopeUpgrade) {
                             # Copilot judged it a big request: the same request again as Clarify first or Plan first.
                             $State.ScopeUpgrade = ''
@@ -4788,4 +4846,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn
+Export-ModuleMember -Function Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask

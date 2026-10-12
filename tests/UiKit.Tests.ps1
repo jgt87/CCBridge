@@ -205,6 +205,14 @@ Describe 'Find-UiSlop' {
         @(Find-UiSlop 'styles/app.css' '' '.t { border-radius: 50%; box-shadow: none; border-radius: 0; }' -UseKit).Count | Should Be 0
         @(Find-UiSlop 'styles/app.css' '' '.title { font-family: Georgia; }').Count | Should Be 0   # only with the kit
     }
+    It 'reports spacing set in numbers and a font size in the font shorthand, not hairlines, auto or tokens' {
+        @(Find-UiSlop 'styles/app.css' '' '.card { padding: 12px 16px; }' -UseKit) -join ' ' | Should Match '12px is about var\(--kit-space-3\)'
+        @(Find-UiSlop 'styles/app.css' '' '.row { gap: 1.5rem; }' -UseKit) -join ' ' | Should Match 'spacing set in numbers'
+        @(Find-UiSlop 'styles/app.css' '' '.t { font: 600 14px/1.4 sans-serif; }' -UseKit) -join ' ' | Should Match 'hard-coded font size \(14px is about var\(--kit-text-sm\)\)'
+        @(Find-UiSlop 'styles/app.css' '' '.t { border-radius: 8px; margin: 1px 20px; }' -UseKit) -join ' ' | Should Match '8px is about var\(--kit-radius\).*20px is about var\(--kit-space-4\)|20px is about var\(--kit-space-4\).*8px is about var\(--kit-radius\)'
+        @(Find-UiSlop 'styles/app.css' '' '.t { margin: 0 auto; padding: 1px 2px; gap: var(--kit-space-2); margin-top: calc(var(--kit-space-4) + 2px); width: 50%; }' -UseKit).Count | Should Be 0
+        @(Find-UiSlop 'styles/app.css' '' '.card { padding: 12px; }').Count | Should Be 0   # only with the kit
+    }
     It 'reports an emoji used as an icon in a button, heading, label or link' {
         $rocket = [char]::ConvertFromUtf32(0x1F680); $check = [string][char]0x2705
         @(Find-UiSlop 'index.html' '' "<button class=`"kit-btn`">$rocket Launch</button>" -UseKit) -join ' ' | Should Match 'data-kit-icon'

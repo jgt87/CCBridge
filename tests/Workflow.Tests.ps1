@@ -186,6 +186,63 @@ Describe 'PLAN.md' {
         { Add-PlanSection $p '../evil' 'X' 'y' } | Should Throw 'Not a plan id'
         cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
     }
+    It 'keeps the steps and Done when checks of an ordinary build, and a Plan only answer, for later reference' {
+        $p = New-Proj @{ 'a.txt' = 'x' }
+        $config = Get-CCBridgeConfig harness $root
+        $s = New-AgentState -Config $config -AppRoot $root
+        $s.ProjectRoot = $p; $s.Mode = 'auto'
+        $from = [int]$s.Seq
+        $s.LastTurnPlan = @{ todos = @([pscustomobject]@{ done = $true; text = 'Load the data' }, [pscustomobject]@{ done = $false; text = 'Add a filter' }); doneWhen = @('the table sorts'); acceptance = @(@{ check = 'the table sorts'; met = $true; note = '' }) }
+        Add-AgentEvent $s 'done' @{ text = 'Built the page.' }
+        $id = & (Get-Module Agent) { param($st, $f) Write-TurnPlan $st @{ kind = 'chat'; text = 'Build a page' } $f } $s $from
+        $id | Should Match 'build-a-page'
+        $md = [IO.File]::ReadAllText((Join-Path $p '.streamhub\PLAN.md'))
+        $md | Should Match '(?s)### Request
+
+Build a page
+
+### Steps
+
+- \[x\] Load the data
+- \[ \] Add a filter
+
+### Done when \(Copilot''s checks\)
+
+- the table sorts: MET
+
+### Result'
+        $md | Should Match 'Status: done'
+        # Plan only mode: Copilot's plan text, nothing built
+        $s.Mode = 'plan'; $s.LastTurnPlan = @{ todos = @(); doneWhen = @(); acceptance = $null }
+        $from = [int]$s.Seq
+        Add-AgentEvent $s 'assistant' @{ text = ("1. Read the site`n2. Build the table`n" + '```text' + "`nACTION run x`n" + '```') }
+        $null = & (Get-Module Agent) { param($st, $f) Write-TurnPlan $st @{ kind = 'chat'; text = 'Plan a release page' } $f } $s $from
+        $md = [IO.File]::ReadAllText((Join-Path $p '.streamhub\PLAN.md'))
+        $md | Should Match "(?s)### Copilot's plan \(Plan only mode\)
+
+1\. Read the site
+2\. Build the table
+"
+        $md | Should Match 'Status: plan only: nothing built'
+        $md | Should Not Match 'ACTION run'
+        # nothing to keep: no steps, no checks, not plan mode
+        $s.Mode = 'auto'; $s.LastTurnPlan = @{ todos = @(); doneWhen = @(); acceptance = $null }
+        & (Get-Module Agent) { param($st, $f) Write-TurnPlan $st @{ kind = 'chat'; text = 'hi' } $f } $s ([int]$s.Seq) | Should Be ''
+        cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
+    }
+    It 'builds an approved plan outside Plan only mode and tells Copilot planning is over' {
+        $config = Get-CCBridgeConfig harness $root
+        $s = New-AgentState -Config $config -AppRoot $root
+        $s.Mode = 'plan'
+        $t = @{ kind = 'chat'; text = 'Build this now, following the approved plan below.' }
+        Set-PlanBuildTask $s $t
+        $t.mode | Should Be 'ask'
+        $t.text | Should Match '^Build this now'
+        $t.text | Should Match 'THE PLAN IS APPROVED: planning is over'
+        $s.Mode = 'auto'; $t2 = @{ kind = 'chat'; text = 'x' }
+        Set-PlanBuildTask $s $t2
+        $t2.ContainsKey('mode') | Should Be $false   # the selected mode stays
+    }
     It 'writes the result of the build' {
         $p = New-Proj @{ 'a.txt' = 'x' }
         $config = Get-CCBridgeConfig harness $root
