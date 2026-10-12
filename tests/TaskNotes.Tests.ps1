@@ -112,6 +112,8 @@ Describe 'Plan coverage before done' {
         $files = @(Get-PlanFiles $plan)
         $files -join ',' | Should Be 'index.html,js/app-data.js,css/layout.css,tests/app-data.test.js'
         @(Get-PlanFiles "1. Write Scripts/Export-Items.ps1`n2. Delete the scratch file temp/a.js`n3. Version 1.2 notes") -join ',' | Should Be 'Scripts/Export-Items.ps1'
+        # Seen: the build message names .streamhub/PLAN.md; without its dot it was taken for a missing streamhub/PLAN.md.
+        @(Get-PlanFiles "Every decision is in .streamhub/PLAN.md. Read it (read .streamhub/PLAN.md) if you need it.`n- ./js/app.js") -join ',' | Should Be 'js/app.js'
     }
     It 'finds placeholder code a change adds, in several languages' {
         (@(Find-StubCode 'js/app.js' '' "function loadItems() {`n  // TODO: read the data`n}`nfunction draw(items) { return items.length; }") -join '|') | Should Match 'function loadItems has an empty body'
@@ -141,5 +143,36 @@ Describe 'Plan coverage before done' {
             $m | Should Match '(?s)does not have them:.*- js/report\.js.*placeholders.*Build them now'
             Format-PlanCoverage @{ missing = @(); stubs = @() } | Should Be ''
         } finally { Remove-Item $p -Recurse -Force }
+    }
+}
+
+Describe 'To-do and plan lists are changed without approval' {
+    It 'knows the lists by name, not the helper program''s own plan' {
+        Test-TaskListFile 'TODO.md' | Should Be $true
+        Test-TaskListFile 'docs/PLAN.md' | Should Be $true
+        Test-TaskListFile 'notes\tasks.md' | Should Be $true
+        Test-TaskListFile 'To-Do.md' | Should Be $true
+        Test-TaskListFile '.streamhub/PLAN.md' | Should Be $false
+        Test-TaskListFile 'README.md' | Should Be $false
+        Test-TaskListFile 'TODO.txt' | Should Be $false
+    }
+    It 'applies them in Ask before changes mode without a card to approve; other files still ask' {
+        Import-Module (Join-Path $root 'lib\Config.psm1') -Force
+        Import-Module (Join-Path $root 'lib\Agent.psm1') -Force -DisableNameChecking
+        $p = Join-Path $env:TEMP ('ccb-todoauto-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        try {
+            [IO.File]::WriteAllText((Join-Path $p 'TODO.md'), "- [ ] First`n- [ ] Second`n")
+            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'ask'
+            # Answers ready, so a wrong approval card cannot hang the test; the check is that none was shown.
+            $s.Approvals['t1'] = @{ decision = 'approve'; note = ''; by = 'user' }; $s.Approvals['t2'] = @{ decision = 'approve'; note = ''; by = 'user' }
+            $edit = [pscustomobject]@{ type = 'write'; arg = 'TODO.md'; body = "- [x] First`n- [ ] Second`n"; content = "- [x] First`n- [ ] Second`n"; closed = $true }
+            $r = & (Get-Module Agent) { param($st, $a) Invoke-AgentAction $st $a 't1' $null 0 } $s $edit
+            $r.ok | Should Be $true
+            [IO.File]::ReadAllText((Join-Path $p 'TODO.md')) | Should Match '\[x\] First'
+            @($s.Events | Where-Object { $_.type -eq 'action' -and $_.status -eq 'awaiting' }).Count | Should Be 0
+            $other = [pscustomobject]@{ type = 'write'; arg = 'notes.md'; body = 'x'; content = 'x'; closed = $true }
+            $null = & (Get-Module Agent) { param($st, $a) Invoke-AgentAction $st $a 't2' $null 0 } $s $other
+            @($s.Events | Where-Object { $_.type -eq 'action' -and $_.status -eq 'awaiting' }).Count | Should Be 1
+        } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }

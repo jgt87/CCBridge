@@ -434,11 +434,22 @@ function Sync-SourceVault {
 
 function Restore-SourceData {
     <# Called after AGENT activity: puts back changed or deleted source files and moves files the
-       agent added to Source/ into Work/. Returns a list of what was fixed. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot)
+       agent added to Source/ into Work/. Returns a list of what was fixed. -Accept: paths in Source/
+       (Source/Web/x.json) the helper program itself wrote (web data it saved, or its own refresh
+       script): taken into the vault as they are now instead. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Accept = @())
     $src = Get-SourceDir $ProjectRoot
     $vault = Get-SourceVaultDir $ProjectRoot
     $fixed = New-Object System.Collections.Generic.List[string]
+    foreach ($a in @($Accept | Where-Object { "$_" -match '^Source/' })) {
+        $rel = ($a -replace '^Source/', '').Replace('/', '\')
+        $s = Join-Path $src $rel; $v = Join-Path $vault $rel
+        if ($rel -match '(^|\\)\.\.(\\|$)' -or -not (Test-Path -LiteralPath $s)) { continue }
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $v)
+        if (Test-Path -LiteralPath $v) { Set-ReadOnly $v $false }
+        [IO.File]::Copy($s, $v, $true)
+        Set-ReadOnly $s $true
+    }
     try { foreach ($x in @(Restore-ProtectedFiles $ProjectRoot)) { $fixed.Add($x) } } catch { Write-CCBLog info source "Protected files not checked: $($_.Exception.Message)" }
     if (-not (Test-Path -LiteralPath $vault)) { return @($fixed) }
     $vaultFiles = Get-RelativeFiles $vault

@@ -78,6 +78,12 @@ Describe 'Web pages read by a command go to the web action' {
         Get-WebDownloadCommand 'npm install --no-fund --no-audit' | Should BeNullOrEmpty
         Get-WebDownloadCommand 'git log --oneline' | Should BeNullOrEmpty
         Get-WebDownloadCommand 'node --test tests/*.test.js' | Should BeNullOrEmpty
+        # Seen: node --check on a page script whose own fetch() reads an API: a syntax check runs nothing.
+        $pj = Join-Path $env:TEMP ('ccb-webdl3-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $pj 'js') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $pj 'js\data.js'), 'fetch("https://items.example.com/api/items").then((r) => r.json());')
+        Get-WebDownloadCommand 'node --check js/data.js' $pj | Should BeNullOrEmpty
+        Get-WebDownloadCommand 'node js/data.js' $pj | Should Match 'the script js/data\.js reads'
+        Remove-Item $pj -Recurse -Force
     }
     It 'is not run; Copilot is pointed to ACTION web and ACTION web source' {
         $p = Join-Path $env:TEMP ('ccb-webdl2-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null

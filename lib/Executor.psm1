@@ -243,7 +243,8 @@ function Get-WebDownloadCommand {
        left to the normal approval; package managers (npm, pip, winget) do not match. #>
     param([AllowEmptyString()][string]$Command, [string]$ProjectRoot = '')
     $texts = @(@{ name = ''; text = "$Command" })
-    if ($ProjectRoot) {
+    # A syntax check runs nothing: the files it names are not scripts that download.
+    if ($ProjectRoot -and "$Command" -notmatch '(?i)\bnode(\.exe)?\s+(--check|-c)\b|\bpython\S*\s+-m\s+py_compile\b') {
         foreach ($t in @("$Command" -split '[\s"'']+' | Where-Object { $_ -match '(?i)\.(ps1|py|js|mjs|cjs)$' } | Select-Object -Unique)) {
             $full = try { Resolve-ProjectPath $ProjectRoot $t } catch { $null }
             if ($full -and (Test-Path -LiteralPath $full -PathType Leaf) -and (Get-Item -LiteralPath $full).Length -le 500000) { $texts += @{ name = $t; text = [IO.File]::ReadAllText($full) } }

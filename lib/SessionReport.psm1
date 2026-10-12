@@ -17,6 +17,7 @@ $script:NudgePatterns = [ordered]@{
     'page errors sent back' = 'Checking .* again after the fix'
     'files nothing loads' = 'New file\(s\) that no page or script loads'
     'Done when not met' = 'not met'
+    'stopped without done' = 'Copilot did not report the task as done'
 }
 
 function Read-LogEntries {
@@ -65,9 +66,11 @@ function Get-SessionReport {
     $byId = @{}
     $codes = @{}; $codeExample = @{}
     $nudges = [ordered]@{}; foreach ($k in $script:NudgePatterns.Keys) { $nudges[$k] = 0 }
+    $awaitAt = @{}
     $typing = @(); $noAnswer = @(); $lost = @(); $errors = @(); $slowSends = @(); $slowApi = @{}; $gets = @{}; $attach = @()
     foreach ($x in $e) {
         if (-not $Build -and $x.msg -match '^StreamHub v\S+ \(commit \w+\)') { $Build = ($x.msg -replace ': lines with process.*$', '') }
+        if (-not $Build -and $x.msg -match '^Web app started on ') { $v = Get-LogValue $x.data 'ccbridge'; if ($v) { $Build = "StreamHub $v" } }
         if ($x.comp -eq 'server') {
             $m = [regex]::Match($x.msg, '^(GET|POST) (\S+) \((\d+) ms\)')
             if ($m.Success) {
@@ -79,7 +82,7 @@ function Get-SessionReport {
         }
         $m = [regex]::Match($x.msg, '^Queued (q-\w+) \(([\w-]+), from (\w+)\)')
         if ($m.Success) {
-            $t = [pscustomobject]@{ id = $m.Groups[1].Value; kind = $m.Groups[2].Value; source = $m.Groups[3].Value; title = "$(Get-LogValue $x.data 'title')"; queued = $x.time; started = $null; ended = $null; mode = ''; taskKind = ''; rounds = 0; messages = 0; actions = @{}; failed = New-Object System.Collections.Generic.List[string]; notes = New-Object System.Collections.Generic.List[string]; pageProblems = 0 }
+            $t = [pscustomobject]@{ id = $m.Groups[1].Value; kind = $m.Groups[2].Value; source = $m.Groups[3].Value; title = "$(Get-LogValue $x.data 'title')"; queued = $x.time; started = $null; ended = $null; mode = ''; taskKind = ''; rounds = 0; messages = 0; actions = @{}; failed = New-Object System.Collections.Generic.List[string]; notes = New-Object System.Collections.Generic.List[string]; pageProblems = 0; waitMs = 0; webReads = 0; webCut = 0 }
             $tasks.Add($t); $open.Add($t); $byId[$t.id] = $t
             continue
         }
@@ -109,6 +112,12 @@ function Get-SessionReport {
             foreach ($k in $script:NudgePatterns.Keys) { if ($st -match $script:NudgePatterns[$k]) { $nudges[$k]++; if ($cur -and -not $cur.notes.Contains($k)) { $cur.notes.Add($k) } } }
             if ($st -match '^A big request: Copilot plans first' -and $cur -and $cur.title -match '^(Build this now|Continue and make the change now)') { if ($cur) { $cur.notes.Add('PLANNED AGAIN after approval') } }
         }
+        # Waiting for the person: from a step's "-> awaiting" to its result (every kind of approval).
+        $aw = [regex]::Match($x.msg, '^action (\S+) \S+ -> awaiting')
+        if ($aw.Success) { $awaitAt[$aw.Groups[1].Value] = $x.time }
+        $rs = [regex]::Match($x.msg, '^result (\S+) ')
+        if ($rs.Success -and $awaitAt.ContainsKey($rs.Groups[1].Value)) { if ($cur) { $cur.waitMs += [int]($x.time - $awaitAt[$rs.Groups[1].Value]).TotalMilliseconds }; $awaitAt.Remove($rs.Groups[1].Value) }
+        if ($x.comp -eq 'web' -and $x.msg -eq 'Read a web page' -and $cur) { $cur.webReads++; if ((Get-LogValue $x.data 'truncated') -eq 'true') { $cur.webCut++ } }
         if ($x.msg -match 'message box holds \d+ characters|Message box content does not match') { $typing += $x }
         if ($x.msg -match "answered with 'NoAnswer'|Copilot answered with" -or (Get-LogValue $x.data 'result') -eq 'NoAnswer') { $noAnswer += $x }
         if ($x.msg -match '(?i)\blost\b.*(resend|again)|sending it again|typing again') { $lost += $x }
@@ -133,6 +142,14 @@ function Get-SessionReport {
     foreach ($ep in @($slowApi.Keys | Sort-Object)) { $find.Add("**Slow request:** $ep took up to $([Math]::Round($slowApi[$ep] / 1000, 1)) s") }
     foreach ($ep in @($gets.Keys | Sort-Object)) { $rate = $gets[$ep] / $minutes; if ($rate -ge 20) { $find.Add("**Polling noise:** $ep about $([int]$rate) times a minute") } }
     if ($errors.Count) { $find.Add("**Errors in the log: $($errors.Count)** (first: $($errors[0].comp) $($errors[0].msg))") }
+    $open = @($tasks | Where-Object { -not $_.ended })
+    if ($open.Count) { $find.Add("**Did not finish: $($open.Count) task(s)** ($(($open | ForEach-Object { "$($_.queued.ToString('HH:mm')) " + ($_.title -replace '\s+', ' ').Substring(0, [Math]::Min(50, ($_.title -replace '\s+', ' ').Length)) }) -join '; ')): the app stopped, or it was still running when the log ends") }
+    $waits = [int](@($tasks | ForEach-Object { $_.waitMs }) | Measure-Object -Sum).Sum
+    $longWait = @($tasks | Sort-Object waitMs -Descending | Select-Object -First 1)
+    if ($waits -ge 120000) { $find.Add("**Waiting for approvals: $([Math]::Round($waits / 60000, 1)) min in all** (most in the task at $($longWait[0].queued.ToString('HH:mm')): $([Math]::Round($longWait[0].waitMs / 60000, 1)) min); approvals that repeat for the same site can be given once for the whole site") }
+    $cut = [int](@($tasks | ForEach-Object { $_.webCut }) | Measure-Object -Sum).Sum
+    if ($cut) { $find.Add("**Web reads cut off at the size limit: $cut** (the data did not fit in the chat; saving it with ACTION web save gets all of it)") }
+    foreach ($t in @($tasks | Where-Object { $_.webReads -ge 8 })) { $find.Add("**Many web reads: $($t.webReads) in the task at $($t.queued.ToString('HH:mm'))** ($($t.webCut) cut off)") }
     if (-not @($e | Where-Object { $_.level -in 'VERBOSE', 'TRACE' }).Count) { $find.Add('**The log level was info:** set Logging to verbose (command menu) for rounds, actions and timings in the next report') }
     if ($Metrics) {
         return @{
@@ -162,6 +179,8 @@ function Get-SessionReport {
         $notes = @($t.notes)
         if ($t.failed.Count) { $notes += "failed: $((@($t.failed | Group-Object | ForEach-Object { if ($_.Count -gt 1) { "$($_.Name) x$($_.Count)" } else { $_.Name } })) -join ', ')" }
         if ($t.pageProblems) { $notes += "page problems: $($t.pageProblems)" }
+        if ($t.waitMs -ge 60000) { $notes += "waited $([Math]::Round($t.waitMs / 60000, 1)) min for approvals" }
+        if ($t.webReads) { $notes += "web reads: $($t.webReads)$(if ($t.webCut) { " ($($t.webCut) cut off)" })" }
         $title = ($t.title -replace '\|', '/' -replace '\s+', ' ').Trim(); if ($title.Length -gt 70) { $title = $title.Substring(0, 67) + '...' }
         [void]$sb.AppendLine("| $($t.queued.ToString('HH:mm:ss')) | $($t.kind)/$($t.source)$(if ($t.taskKind) { " ($($t.taskKind))" }) | $title | $($t.mode) | $($t.rounds) | $($t.messages) | $took | $acts | $(($notes -join '; ')) |")
     }

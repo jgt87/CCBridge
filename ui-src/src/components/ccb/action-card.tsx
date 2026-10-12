@@ -252,7 +252,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
               {item.warning}
             </div>
           )}
-          {item.error && <div className="kit-error-text">{item.error}</div>}
+          {item.error && <div className="kit-error-text">{shortError(item.error)}</div>}
           {item.reasons && item.reasons.length > 0 && (
             <div className="kit-notice flex-col space-y-1 p-2 text-xs">
               <div className="flex items-center gap-2">
@@ -414,4 +414,10 @@ function approveLabel(item: ActionItem): string {
     default:
       return "Approve";
   }
+}
+
+/** The card's red line: the reason only. Code and current lines stay in the output below it. */
+function shortError(text: string): string {
+  const first = text.split(/\n|\s(?:Current lines|The closest place|What differs:)/)[0].trim();
+  return first.length > 320 ? `${first.slice(0, 317)}...` : first;
 }

@@ -6,10 +6,27 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.136] - 2026-10-12
+
+### Added
+- Saving web data into the project: `ACTION web save:NAME` with an address saves the whole response (up to 50 MB, the same site approvals as a read) as Source/Web/NAME.json or .csv, converts it at once and tells Copilot the rows and columns, so a dashboard is built on all the data instead of a few records Copilot copied from a cut-off read. Scripts/Refresh-Web-Data.ps1 downloads it again, for a schedule. A web read that is cut off now says to save it instead.
+- JSON data files that are a table (a list of records, or an object holding one such as { items: [...] }) are converted like a CSV: typed columns, the data profile and SQL queries work on them.
+- When Copilot reports done while some of its own Done when checks are not met, a Continue card lists them with Copilot's reasons.
+- The session report names tasks that never finished, the time spent waiting for approvals, web reads cut off at the size limit and tasks with many web reads, and reads the version from the app start line when the log has no header.
+
+### Fixed
+- The check that compares what was built with the plan took the helper program's own .streamhub/PLAN.md, named in the build message, for a missing streamhub/PLAN.md, so Copilot created a stray streamhub folder. Names that start with a dot keep it.
+- A syntax check (node --check) on a page script that fetches data from a site was refused as a command that downloads from the internet: a syntax check runs nothing, so the scripts it names are no longer read for that. Such a refusal now has its own explanation on the card (RUN-WEB) instead of "no specific explanation yet".
+- Copilot wrote server-side code (a serverless API function in api/NAME.js), which nothing on this computer runs and a page cannot call, and StreamHub then asked it to load that file from a page. Server-side code (API functions, API routes, Express, Node http servers) is now reported as an error with where the data can come from instead (project files, the web action, SharePoint LiveData, an export), "What can run here" says so, and such a file is no longer taken for a script a page should load. A project that runs its own Node server (package.json with a server package) is left alone.
+- An action card's red error line shows the reason only, not the code that comes with it (that stays in the output below).
+
+### Changed
+- Changes Copilot makes to a to-do or plan list (TODO.md, TO-DO.md, TASKS.md, PLAN.md, in any folder) are applied without asking for approval, also in Ask before changes mode, so ticking items off does not stop the work. Plan only mode still changes nothing.
+
 ## [v0.1.135] - 2026-10-12
 
 ### Added
-- Approving a web read for a whole site or part of one: the approval card offers "everything under www.example.com/products/roadmap, from now on" (or the folder above it, or the whole site), and pages under it are then read without asking in that project. Files > Project setup lists the allowed sites, each with Remove. The "always ask" setting still asks every time.
+- Approving a web read for a whole site or part of one: the approval card offers "everything under www.example.com/docs/guide, from now on" (or the folder above it, or the whole site), and pages under it are then read without asking in that project. Files > Project setup lists the allowed sites, each with Remove. The "always ask" setting still asks every time.
 - Window apps (PowerShell, WPF) can read SQL Server databases from the project's Databases list through the kit's helpers: Start-KitSql (in the background, the window stays responsive) and Invoke-KitSql give rows ready for a table, with the same read-only checks as Copilot's queries (one SELECT, your Windows sign-in, a read-only connection, everything rolled back) and values only as parameters, so text someone types can never change the query. An app that opens a database connection itself, or pastes a value into a query, is reported and sent back to Copilot. No server address or password is stored in the app.
 - Copilot can query the project's data: ACTION sql runs a read-only SQL query over every row of the converted data files (one table per file or sheet, listed in its context) in Edge, so counts, totals and date ranges come from all the data instead of the first rows it read.
 - SQL Server databases: add a database in Files > Project setup > Databases (server and database name; your Windows sign-in, never a password). Copilot can then query it with ACTION sql db:NAME, and every query waits for your approval, showing the SQL. Only one SELECT runs, nothing that writes or runs code, on a read-only connection, with every change rolled back. A result can be kept as Source/Database/NAME.csv for the app, and Scripts/Refresh-Database.ps1 runs the saved queries again for a schedule.

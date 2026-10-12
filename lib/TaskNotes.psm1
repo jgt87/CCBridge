@@ -146,7 +146,7 @@ function Get-PlanFiles([AllowEmptyString()][string]$Text) {
         if ($l -match '^\s*(#+\s*)?[A-Z][A-Z /&-]{3,}:?\s*$' -or $l -match '^\s*#+\s') { $skipSection = $l -match '(?i)\b(remove|delete|clean ?up|temporary|discovery|obsolete)\b' }
         if ($skipSection -or $l -match '(?i)\b(remove|delete|deleted|temporary|scratch|clean ?up|obsolete|if created)\b' -or $l -match '(?i)https?://') { continue }
         foreach ($m in [regex]::Matches($l, $script:PlanPathPattern)) {
-            $p = $m.Groups[1].Value.TrimStart('.', '/')
+            $p = $m.Groups[1].Value -replace '^\./', ''   # ./x only: a leading dot is part of the name (.streamhub/)
             if ($p -match '(?i)^(Work|Source|\.streamhub|node_modules|styles/kit|dist|build)/' -or $p -match '^\d' -or $p -notmatch '[A-Za-z]') { continue }
             if (-not $out.Contains($p)) { $out.Add($p) }
         }
@@ -231,6 +231,13 @@ function Format-PlanCoverage($Coverage) {
 
 # --- Open items in the project's to-do list ----------------------------------------------------
 
+function Test-TaskListFile([string]$Path) {
+    # A to-do or plan list of the project (TODO.md, TO-DO.md, TASKS.md, PLAN.md in any folder; not the
+    # helper program's own .streamhub/PLAN.md): Copilot changes these without the person's approval.
+    $p = "$Path".Replace('\', '/').TrimStart('/')
+    [bool]($p -notmatch '(?i)^\.streamhub/' -and $p -match '(?i)(^|/)(TODO|TO-DO|TASKS|PLAN)\.md$')
+}
+
 function Get-OpenTodoItems([string]$ProjectRoot) {
     <# The project's to-do lists (TODO.md, TASKS.md, PLAN.md at the root or in docs/; not StreamHub's
        own .streamhub/PLAN.md) with the '- [ ]' items still open, outside code blocks:
@@ -249,6 +256,12 @@ function Get-OpenTodoItems([string]$ProjectRoot) {
         }
     }
     $out.ToArray()
+}
+
+function Get-UnmetChecksContinue($NotMet) {
+    # The message the Continue button sends for Done when checks Copilot answered NOT MET.
+    $lines = @(foreach ($c in @($NotMet)) { "- $($c.check)$(if ($c.note) { " (you said: $($c.note))" })" })
+    "These checks you set for this task are not met yet:`n" + ($lines -join "`n") + "`nMake them met now. If one cannot be met here, say why in one line and what would make it possible, and leave it out."
 }
 
 function Get-OpenTodoContinue($Open) {
@@ -305,4 +318,4 @@ function Format-DataNotes([string]$ProjectRoot) {
     "Data notes (what you wrote about this data earlier; read the data again only for what they do not cover):`n" + ((@($have.notes) | ForEach-Object { "- $_" }) -join "`n")
 }
 
-Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision, Get-NotesGoAhead, Get-OpenTodoItems, Get-OpenTodoContinue, Get-PlanFiles, Find-StubCode, Get-PlanCoverage, Format-PlanCoverage
+Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision, Get-NotesGoAhead, Get-OpenTodoItems, Get-OpenTodoContinue, Get-PlanFiles, Find-StubCode, Get-PlanCoverage, Format-PlanCoverage, Test-TaskListFile, Get-UnmetChecksContinue

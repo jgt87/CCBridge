@@ -267,6 +267,50 @@ function ConvertTo-DataTable {
     @{ columns = $cols; json = $sb.ToString(); rows = $rows.Count - 1; notes = $notes; duplicates = $dup }
 }
 
+function Get-JsonRecords($Parsed) {
+    <# The records of a JSON document that is a table: a list of objects, or an object holding one (the
+       largest list of objects among its properties, one level down too, such as { items: [...] } or
+       { data: { rows: [...] } }). Returns @{ path; records } or $null. #>
+    $isRecords = { param($v) $v -is [array] -and $v.Count -and @($v | Select-Object -First 20 | Where-Object { $_ -is [System.Management.Automation.PSCustomObject] }).Count -eq [Math]::Min(20, $v.Count) }
+    if (& $isRecords $Parsed) { return @{ path = ''; records = $Parsed } }
+    if ($Parsed -isnot [System.Management.Automation.PSCustomObject]) { return $null }
+    $best = $null
+    foreach ($p in $Parsed.PSObject.Properties) {
+        $cands = @(@{ path = $p.Name; value = $p.Value })
+        if ($p.Value -is [System.Management.Automation.PSCustomObject]) { foreach ($q in $p.Value.PSObject.Properties) { $cands += @{ path = "$($p.Name).$($q.Name)"; value = $q.Value } } }
+        foreach ($c in $cands) { if ((& $isRecords $c.value) -and (-not $best -or $c.value.Count -gt $best.records.Count)) { $best = @{ path = $c.path; records = $c.value } } }
+    }
+    $best
+}
+
+function ConvertTo-JsonTableRows($Records, [int]$MaxColumns = 200) {
+    <# Records as rows of text with a header row (columns in first-seen order): text, numbers and
+       true/false as they are, a list of plain values joined with '; ', a nested object or list of
+       objects as compact JSON, null as empty. #>
+    $cols = New-Object System.Collections.Generic.List[string]
+    $seen = @{}
+    foreach ($r in $Records) { foreach ($p in $r.PSObject.Properties) { if (-not $seen.ContainsKey($p.Name) -and $cols.Count -lt $MaxColumns) { $seen[$p.Name] = $true; $cols.Add($p.Name) } } }
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $cell = {
+        param($v)
+        if ($null -eq $v) { return '' }
+        if ($v -is [string]) { return $v }
+        if ($v -is [bool]) { return $(if ($v) { 'true' } else { 'false' }) }
+        if ($v -is [datetime]) { return $v.ToString('yyyy-MM-ddTHH:mm:ss') }
+        if ($v -is [IFormattable] -and $v -isnot [System.Management.Automation.PSCustomObject]) { return $v.ToString($null, $inv) }
+        if ($v -is [array] -and -not @($v | Where-Object { $_ -is [System.Management.Automation.PSCustomObject] -or $_ -is [array] }).Count) { return (@($v | ForEach-Object { "$_" }) -join '; ') }
+        ConvertTo-Json -InputObject $v -Depth 6 -Compress
+    }
+    $rows = New-Object System.Collections.Generic.List[object]
+    $rows.Add([string[]]$cols.ToArray())
+    foreach ($r in $Records) {
+        $vals = New-Object string[] $cols.Count
+        for ($i = 0; $i -lt $cols.Count; $i++) { $vals[$i] = & $cell ($r.($cols[$i])) }
+        $rows.Add($vals)
+    }
+    $rows.ToArray()
+}
+
 function ConvertFrom-DataFile {
     <# A CSV, TSV, Excel or JSON file as JSON text: @{ json; sheets = @(@{ name; rows; columns });
        encoding; notes }. A workbook with one sheet with data is a list; with more, an object with a
@@ -291,7 +335,18 @@ function ConvertFrom-DataFile {
     }
     $read = Read-DataText ([IO.File]::ReadAllBytes($Path))
     if ($ext -eq '.json') {
-        try { $null = $read.text | ConvertFrom-Json } catch { throw 'not valid JSON' }
+        $parsed = $null
+        try { $parsed = ConvertFrom-Json $read.text } catch { throw 'not valid JSON' }
+        # A table (a list of records, or an object holding one): typed rows like a CSV, so the profile,
+        # the column types and ACTION sql work on it. Any other JSON stays as it is.
+        $rec = Get-JsonRecords $parsed
+        if ($rec) {
+            $list = @($rec.records)
+            if ($list.Count -gt $script:MaxRows) { $list = $list[0..($script:MaxRows - 1)]; $notes += "only the first $($script:MaxRows) records" }
+            $t = ConvertTo-DataTable (ConvertTo-JsonTableRows $list) ','
+            if ($rec.path) { $notes += "the rows are the records of its $($rec.path) list" }
+            return @{ json = $t.json; sheets = @(@{ name = ''; rows = $t.rows; columns = $t.columns; duplicates = $t.duplicates }); encoding = $read.encoding; notes = @($notes + $t.notes) }
+        }
         return @{ json = $read.text.Trim(); sheets = @(); encoding = $read.encoding; notes = @() }
     }
     $delim = Get-CsvDelimiter $read.text $ext
@@ -597,4 +652,4 @@ function Format-DataImportContext {
     "Data files ready to use (the helper program converted them; numbers, dates as yyyy-MM-dd and true/false are typed, empty cells are null). Never write a CSV or Excel parser for them; change the source file, not the converted files, since they are made again when it changes:`n" + (@($lines) -join "`n")
 }
 
-Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Get-ScriptOwnedSources, Read-DataImportManifest, Update-DataImports, Format-DataImportNotes, Format-DataImportContext, Get-DataToolsSource, Get-ColumnProfile, Get-DataQualityNotes
+Export-ModuleMember -Function Read-DataText, Get-CsvDelimiter, Read-CsvRows, Get-ColumnType, ConvertTo-DataTable, ConvertFrom-DataFile, Get-DataGlobalName, Get-DataImportSources, Get-ScriptOwnedSources, Read-DataImportManifest, Update-DataImports, Format-DataImportNotes, Format-DataImportContext, Get-DataToolsSource, Get-ColumnProfile, Get-DataQualityNotes, Get-JsonRecords, ConvertTo-JsonTableRows

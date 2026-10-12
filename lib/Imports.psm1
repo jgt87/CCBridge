@@ -249,6 +249,8 @@ function Get-ImportUsers {
     @($out | Select-Object -First $Max)
 }
 
+Import-Module (Join-Path $PSScriptRoot 'Lint.psm1')   # Get-ServerCodeKind
+
 $script:NotLoadedSkip = '(?i)(^|/)(node_modules|dist|build|out|coverage|styles/kit|data|Scripts|Work|tests?|__tests__|e2e|\.streamhub|Runbooks|Source|Logs|public|static|assets)/|\.(test|spec|stories|config|d)\.[cm]?[jt]sx?$|(^|/)(vite|webpack|rollup|eslint|tailwind|postcss|babel|jest|vitest|playwright|prettier|svelte|next|nuxt|astro)\.config\.|(^|/)(server|sw|service-worker|worker|setupTests)\.[cm]?[jt]s$'
 
 function Find-UnloadedFiles {
@@ -269,6 +271,7 @@ function Find-UnloadedFiles {
     $ix = Read-ImportIndex $ProjectRoot
     foreach ($p in $cands) {
         if (-not $texts.ContainsKey($p)) { continue }   # gone again
+        if (Get-ServerCodeKind $texts[$p]) { continue }   # server-side code is not loaded by a page (Lint Find-ServerCode reports it)
         if (@(Get-ImportUsers $ProjectRoot $p $ix 1).Count) { continue }
         $leaf = [IO.Path]::GetFileName($p); $stem = [IO.Path]::GetFileNameWithoutExtension($p)
         $named = $false

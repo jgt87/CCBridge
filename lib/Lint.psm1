@@ -1844,6 +1844,44 @@ function Find-DataGlobalIssues {
 # XAML that PowerShell loads with XamlReader cannot have a code-behind class or event attributes.
 $script:XamlEventPattern = '\s(Click|Loaded|Unloaded|Checked|Unchecked|SelectionChanged|TextChanged|MouseDown|MouseUp|MouseDoubleClick|KeyDown|KeyUp|Closing|Closed|ValueChanged|DropDownClosed|LostFocus|GotFocus)\s*=\s*"'
 
+# Server-side code: what only a server or a hosting service runs (an API route or serverless function,
+# an Express app, a Node http server). Nothing on a locked-down computer runs it and a page opened from
+# disk cannot call it.
+$script:ServerCodePatterns = [ordered]@{
+    'a serverless API function (export default handler(request, response))' = '(?m)export\s+default\s+(async\s+)?function\s*\w*\s*\(\s*(req|request)\b[^)]*,\s*(res|response)\b'
+    'a serverless API function (module.exports = (req, res) => ...)' = '(?m)module\.exports\s*=\s*(async\s+)?(function\s*\w*)?\s*\(\s*(req|request)\b[^)]*,\s*(res|response)\b'
+    'a hosted function (exports.handler)' = '(?m)(exports\.handler\s*=|export\s+(const|async\s+function|function)\s+handler\s*[=(])'
+    'an API route (export function GET / POST)' = '(?m)export\s+(async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\s*\('
+    'an Express server' = '(?m)(require\(\s*[''"]express[''"]\s*\)|from\s+[''"]express[''"])'
+    'a Node http server' = '(?m)(http|https)\.createServer\s*\(|\.listen\(\s*(process\.env\.PORT|\d{2,5})'
+}
+
+function Get-ServerCodeKind([AllowEmptyString()][string]$Text) {
+    # Which kind of server-side code a script is ('' when it is none).
+    foreach ($k in $script:ServerCodePatterns.Keys) { if ("$Text" -match $script:ServerCodePatterns[$k]) { return $k } }
+    ''
+}
+
+function Test-NodeServerProject([string]$ProjectRoot) {
+    # A project that runs its own Node server (package.json with a server package or a start script).
+    if (-not $ProjectRoot) { return $false }
+    $pj = Join-Path $ProjectRoot 'package.json'
+    if (-not (Test-Path -LiteralPath $pj)) { return $false }
+    $t = try { [IO.File]::ReadAllText($pj) } catch { '' }
+    [bool]($t -match '"(express|fastify|koa|hapi|@hapi/hapi|next|nuxt|@sveltejs/kit|@vercel/node|@netlify/functions)"\s*:' -or $t -match '"start"\s*:\s*"[^"]*\bnode\b')
+}
+
+function Find-ServerCode {
+    <# A script a change makes into server-side code, in a project that does not run a server of its own:
+       an error, with where data can come from instead. "line N: ..." or nothing. #>
+    param([string]$ProjectRoot, [string]$Path, [AllowEmptyString()][string]$Text)
+    if ($Path -notmatch '(?i)\.(m?js|cjs|ts)$' -or $Path -match '(?i)(^|/)(styles/kit|node_modules|tests?|__tests__)/|\.(test|spec)\.') { return @() }
+    $kind = Get-ServerCodeKind $Text
+    if (-not $kind -or (Test-NodeServerProject $ProjectRoot)) { return @() }
+    $m = [regex]::Match($Text, $script:ServerCodePatterns[$kind])
+    @("line $(LineAt $Text $m.Index): this is server-side code ($kind): nothing on this computer runs it and a page cannot call it (no server, no hosting here). Get the data another way: a data file in the project (the helper program converts it), ACTION web or ACTION web source for a public page, a SharePoint file through LiveData, or ask the user for an export. Then remove this file.")
+}
+
 function Find-OwnDbAccess {
     <# Database access a window app writes itself instead of through the kit's read-only helpers
        (Invoke-KitSql / Start-KitSql in KitWpf.ps1): its own SqlConnection, OleDb or ODBC connection or
@@ -2019,6 +2057,7 @@ function Get-NewFileIssues {
             @(Find-DataGlobalIssues $ProjectRoot $Path $text.Replace("`r`n", "`n") $blockGlobals) +
             @(Find-PsGuiIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
             @(Find-OwnDbAccess $Path $text.Replace("`r`n", "`n")) +
+            @(Find-ServerCode $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
             @(Find-XamlLayoutIssues $Path $text.Replace("`r`n", "`n") $ProjectRoot) | Where-Object { $_ }
     }
     # The fixed rules; when they find nothing, the language's own syntax check (node, python, when
@@ -2042,4 +2081,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Find-LeakedMarkup, Test-Delimiters, Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences, Find-ChartPlaceholder, Find-ChartsRemoved, Find-OwnDbAccess
+Export-ModuleMember -Function Find-LeakedMarkup, Test-Delimiters, Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences, Find-ChartPlaceholder, Find-ChartsRemoved, Find-OwnDbAccess, Get-ServerCodeKind, Test-NodeServerProject, Find-ServerCode

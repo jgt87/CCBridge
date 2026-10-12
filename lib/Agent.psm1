@@ -1842,7 +1842,13 @@ function Invoke-ChainScript {
     $watch = New-RunWatch $State $id "$($sc.path)" $sc.command
     try { $r = Invoke-RunAction $root $sc.command -TimeoutSec $State.Config.commandTimeoutSec -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure()) -OnProgress $watch } finally { Stop-RunWatch $State $id }
     if ($snap) { try { $null = Complete-RunSnapshot $cp $root $snap } catch { Write-CCBLogError agent 'run snapshot' $_ } }
-    $fixed = @(Restore-SourceData $root)
+    # The helper program's own refresh script downloads the saved web data again into Source/Web/: kept.
+    $accept = @()
+    if ("$($sc.path)" -eq 'Scripts/Refresh-Web-Data.ps1') {
+        $saves = try { [IO.File]::ReadAllText((Join-Path $root '.streamhub\web-saves.json')) | ConvertFrom-Json } catch { $null }
+        $accept = @(foreach ($w in $saves) { "$($w.file)" })
+    }
+    $fixed = @(Restore-SourceData $root -Accept $accept)
     $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } else { "exit code $($r.exitCode)" }
     $ok = (-not $r.timedOut) -and (-not $r.cancelled) -and ($r.exitCode -eq 0)
     $out = "$status`n$($r.output)"
@@ -2299,6 +2305,7 @@ function Get-StepFailureInfo {
         'no SEARCH/REPLACE pairs' { @{ code = 'EDIT-FORMAT'; reasons = @('Copilot''s edit block had no ####### SEARCH / ####### REPLACE / ####### END markers (or they were not at the start of a line).', 'Copilot meant to replace the whole file; that needs a write block.'); next = "Nothing was changed. $copilotRetries" }; break }
         'needs the lines read in this task|changed since your read|were not among the lines you read' { @{ code = 'EDIT-STALE'; reasons = @('Copilot sent an edit by line numbers (ACTION edit PATH:START-END) without reading those lines in this task, or the file changed since that read (an earlier edit, or a repair by the helper program).'); next = $copilotRetries } }
         'SEARCH text not found' { @{ code = 'EDIT-NOT-FOUND'; reasons = @('The file changed since Copilot read it: an earlier edit in this task, or you edited it.', 'Copilot''s SEARCH lines differ slightly from the file: spaces, quotes, or a line it remembered differently.', 'The change was already made earlier, but with different text.', 'Copilot shortened SEARCH without a line containing only ... (only its first lines were given).'); next = "Nothing was changed. Copilot gets the reason plus the file's closest current lines. $copilotRetries" }; break }
+        'reads .* from the internet itself' { @{ code = 'RUN-WEB'; reasons = @('The command, or a project script it runs, reads a web page, script or JSON from the internet itself (curl, Invoke-WebRequest, fetch...), which would skip the rules for reading the web.'); next = 'Copilot is told to use the web action instead (ACTION web, or ACTION web source for the data as sent); sites you did not name still ask first.' }; break }
         'plan mode' { @{ code = 'PLAN-MODE'; reasons = @('"Plan only" mode is on, so changes and commands are not carried out.'); next = 'Switch the mode to "Ask before changes" or "Auto-accept edits" and ask again to carry out the plan.' }; break }
         'is in Source/|read-only' { @{ code = 'SOURCE-DATA'; reasons = @('The step tried to change a file in Source/, which holds your source data and is read-only.'); next = 'Nothing was changed. Copilot is told to write its result elsewhere (for example Work/ or output/).' }; break }
         'file not found|\(file not found\)' { @{ code = 'FILE-NOT-FOUND'; reasons = @('The path does not exist in the project: a typo, another folder, or a file that was never created.', 'For a new file Copilot should use a write block, not an edit.'); next = $copilotRetries }; break }
@@ -3150,8 +3157,11 @@ function Invoke-AgentAction {
             # ACTION web source: the page, script or JSON as the site sends it, with the addresses it
             # refers to (WebFetch -Source); same site rules as a plain read.
             $srcMode = "$($Action.arg)" -match '^(?i)\s*source\b'
-            $urls = @(@("$($Action.arg)" -split '\s+') + @("$($Action.body)".Split("`n")) | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^(?i)https?://\S+$' } | Select-Object -Unique -First 3)
-            $evt.target = "$(if ($srcMode) { 'source: ' })$($urls -join ', ')"
+            # ACTION web save:NAME: the whole response (one address) saved as Source/Web/NAME.EXT, where it
+            # is converted like any data file, instead of read into the chat in parts.
+            $saveName = [regex]::Match("$($Action.arg)", '^(?i)\s*save:([A-Za-z][\w-]{0,60})\b').Groups[1].Value
+            $urls = @(@("$($Action.arg)" -split '\s+') + @("$($Action.body)".Split("`n")) | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^(?i)https?://\S+$' } | Select-Object -Unique -First $(if ($saveName) { 1 } else { 3 }))
+            $evt.target = "$(if ($srcMode) { 'source: ' } elseif ($saveName) { "save as Source/Web/$($saveName): " })$($urls -join ', ')"
             if (-not $urls.Count) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed' }); return @{ ok = $false; summary = 'web without an address'; output = 'error: put one full address (https://...) per line in the web block' } }
             # Microsoft 365 files (SharePoint, OneDrive...): the helper program only gets a sign-in
             # page; Copilot opens them itself, with the user's access.
@@ -3168,8 +3178,10 @@ function Invoke-AgentAction {
             $unnamed = @($urls | Where-Object { $policy -eq 'always-ask' -or -not ((Test-HostMatch ([Uri]$_).Host $named) -or (Test-WebAllowed $root $_ $allowed)) })
             if ($unnamed.Count) {
                 $allowOptions = if ($policy -eq 'always-ask') { @() } else { @(Get-WebAllowCandidates $unnamed) }
+                $waitWatch = [Diagnostics.Stopwatch]::StartNew()
                 Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; allowOptions = $allowOptions; warning = "Copilot wants to read $($unnamed -join ', '). The address is sent to that site; approve only if it is a site you trust and the address holds no project data." })
                 $d = Wait-Approval $State $Id $false
+                Write-CCBLog verbose agent "approval ${Id}: $($d.decision) by $($d.by) after $($waitWatch.ElapsedMilliseconds) ms"
                 # Approved with "from now on": the chosen part of the site is allowed for this project.
                 if ($d.decision -eq 'approve' -and "$($d.allow)" -and $allowOptions -contains "$($d.allow)" -and $d.by -eq 'user') {
                     try { Add-WebAllow $root "$($d.allow)"; Add-AgentEvent $State 'status' @{ text = "From now on, pages under $($d.allow) are read without asking in this project (Files > Project setup lists the allowed sites)." } } catch { Write-CCBLogError agent 'web allow' $_ }
@@ -3180,6 +3192,26 @@ function Invoke-AgentAction {
                 }
                 Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $true; status = 'running'; decidedBy = $d.by }
             } else { Add-AgentEvent $State 'action' $evt }
+            if ($saveName) {
+                $res = Invoke-WebFetch $urls[0] -Source -MaxBytes 50MB -MaxChars ([int]::MaxValue) -TimeoutSec 60
+                if (-not $res.ok) { return @{ ok = $false; summary = 'web save failed'; output = "error: $($urls[0]) was not saved: $($res.error)." } }
+                if ($res.truncated) { return @{ ok = $false; summary = 'web save failed (too large)'; output = "error: $($urls[0]) is larger than 50 MB, the most the helper program saves. Ask the user for an export of the data instead." } }
+                try { $saved = Save-WebData $root $saveName $res } catch { return @{ ok = $false; summary = 'web save failed'; output = "error: $($_.Exception.Message)" } }
+                # Source/ is read-only for Copilot's commands: the saved file is taken in as source data.
+                try { $null = Restore-SourceData $root -Accept @($saved.rel) } catch { Write-CCBLogError agent 'web save source' $_ }
+                Add-OwnChangeEvent $State 'write' $saved.rel "StreamHub saved $($urls[0]) ($([Math]::Round($saved.bytes / 1KB)) KB) as $($saved.rel); Scripts/Refresh-Web-Data.ps1 downloads it again."
+                if (-not (Test-Path -LiteralPath (Join-Path $root 'Scripts\Refresh-Web-Data.ps1'))) { try { $null = Write-WebRefreshScript $root } catch { Write-CCBLogError agent 'web refresh script' $_ } }
+                # Converted now, so this task can query it and pages can load it.
+                $null = Sync-DataImports $State -NoLive
+                $man = try { Read-DataImportManifest $root } catch { @{} }
+                $conv = @($man.Keys | Where-Object { "$($man[$_].source)" -eq $saved.rel }) | Select-Object -First 1
+                $about = if ($conv) {
+                    $it = $man[$conv]
+                    $sh = @($it.sheets) | Select-Object -First 1
+                    "It is converted to $conv$(if ($it.js) { " (for pages opened from disk: $($it.js), window.$($it.global))" })$(if ($sh) { ": $($sh.rows) rows; columns: $((@($sh.columns) | Select-Object -First 25 | ForEach-Object { "$($_.name) ($($_.type))" }) -join ', ')" }). Query it with ACTION sql (the table is listed in the project context) and build on that file; never copy its rows into a page or script by hand."
+                } else { 'It is kept as it is (not a table the helper program converts); read parts of it with read, or grep it.' }
+                return @{ ok = $true; summary = "saved as $($saved.rel)"; output = "Saved $($urls[0]) as $($saved.rel) ($([Math]::Round($saved.bytes / 1KB)) KB, the whole response). $about Scripts/Refresh-Web-Data.ps1 downloads it again (for a schedule)." }
+            }
             $per = [Math]::Max(4000, [int]([int]$State.Config.resultCharBudget / ($urls.Count + 1)))
             $parts = foreach ($u in $urls) { Format-WebResult (Invoke-WebFetch $u -MaxChars $per -Source:$srcMode) }
             $okCount = @($parts | Where-Object { $_ -notmatch '^error:' }).Count
@@ -3343,8 +3375,9 @@ function Invoke-AgentAction {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "damaged HTML on line $($bad.line) ($($bad.why)): $($bad.text)" })
             return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (damaged HTML tag)"; output = "error: not written: $(Format-DamagedHtml $bad)" }
         }
-        # A write that makes an existing file much shorter needs a person, also in auto mode.
-        if (-not $riskWarning -and $Action.type -eq 'write' -and $oldText.Length -gt 3000 -and $newText.Length -lt $oldText.Length * 0.4) {
+        # A write that makes an existing file much shorter needs a person, also in auto mode (not a
+        # to-do or plan list: ticking items off and clearing done ones is what those are for).
+        if (-not $riskWarning -and $Action.type -eq 'write' -and -not (Test-TaskListFile $Action.arg) -and $oldText.Length -gt 3000 -and $newText.Length -lt $oldText.Length * 0.4) {
             $oldLines = $oldText.Split("`n").Length; $newLines = "$newText".Split("`n").Length
             $riskWarning = "This write makes $($Action.arg) much shorter ($oldLines -> $newLines lines). If Copilot left code out, it would be lost. Approve only if that is what you want."
         }
@@ -3357,6 +3390,8 @@ function Invoke-AgentAction {
             return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (runbook rules)"; output = "error: not written: $why. A runbook is one file Runbooks/NAME.runbook.md that starts with the template's header block; send the complete file again with a write block." }
         }
         $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0) -or [bool]$riskWarning
+        # A to-do or plan list (TODO.md, PLAN.md...): applied without asking, in every mode but Plan only.
+        if (Test-TaskListFile $Action.arg) { $needsApproval = $false }
     } elseif ($Action.type -eq 'run') {
         $evt.target = Repair-RunCommand $Action.body.Trim()   # &lt;/&gt; and [Type\]:: from the chat put back
         if (-not $evt.target) {
@@ -4696,6 +4731,13 @@ function Invoke-AgentTurn {
                             Add-AgentEvent $State 'task-unfinished' @{ text = "Copilot reported the task as done, but the to-do list still has $n open item(s) ($((@($openTodo | ForEach-Object { $_.file })) -join ', ')). Continue to have Copilot do them."; findings = @($list); continueText = (Get-OpenTodoContinue $openTodo) }
                         }
                     } catch { Write-CCBLogError agent 'open to-do items' $_ }
+                    # Copilot's own Done when checks answered NOT MET: the same Continue card.
+                    if ($acceptResults) {
+                        $unmet = @($acceptResults | Where-Object { $_.met -eq $false })
+                        if ($unmet.Count) {
+                            Add-AgentEvent $State 'task-unfinished' @{ text = "Copilot reported the task as done, but $($unmet.Count) of its $(@($acceptResults).Count) own checks are not met. Continue to have Copilot meet them, or explain why one cannot be met here."; findings = @($unmet | ForEach-Object { "$($_.check)$(if ($_.note) { ": $($_.note)" })" }); continueText = (Get-UnmetChecksContinue $unmet) }
+                        }
+                    }
                 }
                 break
             }
