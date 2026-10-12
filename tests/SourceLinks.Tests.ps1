@@ -37,6 +37,21 @@ Describe 'Source/ and links' {
         (Get-CommandRisk 'New-Item -ItemType Junction -Path Source\x -Target C:\x').destructive | Should Be $true
         (Get-CommandRisk 'New-Item -ItemType Directory build').destructive | Should Be $false
     }
+    It 'counts only junctions and symbolic links as links, not OneDrive folders and files' {
+        # OneDrive (Files On-Demand) marks every folder and file as a reparse point with a cloud tag:
+        # a walk that skipped every reparse point never entered a project's subfolders there.
+        $null = cmd /c mklink /J "$proj\Source\lnk2" "$outside" 2>&1
+        Test-LinkPath "$proj\Source\lnk2" | Should Be $true
+        Test-LinkPath (Join-Path $proj 'Source') | Should Be $false
+        Test-LinkPath (Join-Path $proj 'Source\real.txt') | Should Be $false
+        $od = @($env:OneDriveCommercial, $env:OneDrive) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+        if ($od) {
+            foreach ($d in @(Get-ChildItem -LiteralPath $od -Directory -Force -ErrorAction SilentlyContinue | Where-Object { -not $_.LinkType } | Select-Object -First 3)) {
+                Test-LinkPath $d.FullName | Should Be $false
+            }
+        }
+        cmd /c rmdir "$proj\Source\lnk2" 2>&1 | Out-Null
+    }
 }
 cmd /c rmdir "$proj\Source\lnk" 2>&1 | Out-Null
 Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue

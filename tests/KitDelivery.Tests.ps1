@@ -198,3 +198,24 @@ Describe 'A project from an older kit gets the new tokens' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
+
+Describe 'kit-page belongs on the body (UI kit on)' {
+    It 'reports kit-page on another tag and a kit page whose body lacks it, only what the change adds' {
+        $onMain = "<!doctype html>`n<html><head><title>x</title></head>`n<body>`n<header class=`"kit-header`"></header>`n<main class=`"kit-page kit-container`"></main>`n</body></html>"
+        $r = @(Find-KitPageIssues 'index.html' '' $onMain)
+        $r.Count | Should Be 2
+        $r[0] | Should Match '^line 5: kit-page is on a <main>: it belongs on <body>'
+        $r[1] | Should Match '^line 3: the page uses the UI kit but its <body> has no kit-page class'
+        $ok = "<!doctype html>`n<html><body class=`"kit-page`">`n<main class=`"kit-container`"></main>`n</body></html>"
+        @(Find-KitPageIssues 'index.html' '' $ok).Count | Should Be 0
+        @(Find-KitPageIssues 'index.html' $onMain $onMain).Count | Should Be 0   # already there: not the change's doing
+        @(Find-KitPageIssues 'src/App.tsx' '' 'return <div className="kit-page"><Header /></div>;')[0] | Should Match 'kit-page is on a <div>.*index\.html'
+        @(Find-KitPageIssues 'index.html' '' "<html><body>`n<p>No kit here</p></body></html>").Count | Should Be 0
+        @(Find-KitPageIssues 'styles/kit/kit-examples.html' '' $onMain).Count | Should Be 0
+    }
+    It 'runs only with the UI kit on' {
+        $onMain = "<html><body>`n<main class=`"kit-page`"></main></body></html>"
+        (@(Find-QualityIssues 'index.html' '' $onMain -UseKit) -join "`n") | Should Match 'kit-page is on a <main>'
+        (@(Find-QualityIssues 'index.html' '' $onMain) -join "`n") | Should Not Match 'kit-page'
+    }
+}

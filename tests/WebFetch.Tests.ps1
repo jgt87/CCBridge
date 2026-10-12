@@ -36,6 +36,31 @@ Describe 'Test-WebAddress' {
     }
 }
 
+Describe 'Pages built by JavaScript' {
+    It 'says the page has no text of its own and passes on the JSON it embeds' {
+        $app = '<html><head><title>Items</title><script src="/app.js"></script></head><body><div id="root"></div>' +
+            '<script id="DATA" type="application/json">{"items":[{"id":"A1","name":"First item"}]}</script></body></html>'
+        $h = ConvertFrom-Html $app 'https://items.example.com/'
+        $i = Get-ScriptedPageInfo $app $h.Text
+        $i.scripted | Should Be $true
+        $i.data | Should Match '"name":"First item"'
+        $r = [pscustomobject]@{ ok = $true; url = 'https://items.example.com/'; type = 'text/html'; title = 'Items'; text = "Data embedded in the page (JSON):`n$($i.data)"; chars = 60; scripted = $true }
+        $f = Format-WebResult $r
+        $f | Should Match 'built by JavaScript in the browser'
+        $f | Should Match 'apart from the data the page embeds'
+        $f | Should Match 'ask the user for an export'
+        $empty = '<html><head><script src="/app.js"></script></head><body><div id="root"></div></body></html>'
+        (Get-ScriptedPageInfo $empty '').scripted | Should Be $true
+        (Get-ScriptedPageInfo $empty '').data | Should Be ''
+    }
+    It 'leaves a page with text of its own alone' {
+        $page = '<html><body><script src="/a.js"></script><p>' + ('Plenty of readable text on this page. ' * 12) + '</p></body></html>'
+        $h = ConvertFrom-Html $page 'https://news.example.com/'
+        (Get-ScriptedPageInfo $page $h.Text).scripted | Should Be $false
+        Format-WebResult ([pscustomobject]@{ ok = $true; url = 'https://news.example.com/'; type = 'text/html'; text = $h.Text; chars = $h.Text.Length }) | Should Not Match 'built by JavaScript'
+    }
+}
+
 Describe 'ConvertFrom-Html' {
     It 'gives readable text: headings, lists, tables and links, no scripts' {
         $html = '<html><head><title>Prices</title><script>evil()</script></head><body><h1>Plans</h1><p>Two plans.</p><ul><li>Basic</li><li>Pro</li></ul><table><tr><td>Basic</td><td>5 EUR</td></tr></table><a href="/terms">Terms</a> &amp; more</body></html>'

@@ -185,6 +185,7 @@ Describe 'Why a step failed (Get-StepFailureInfo)' {
             'edit failed error: this edit would leave a <style> block half open or half closed in the file' = 'EDIT-HALF-BLOCK'
             'edit failed error: ... but styles.css does not contain them yet (only 0 of 22 found)' = 'EDIT-MOVE-ORDER'
             'edit refused (source data) error: source/x.csv is in source/, which holds the user''s source data and is read-only' = 'SOURCE-DATA'
+            'write skipped (plan mode) not executed: plan mode is on (read-only). Describe the plan instead of changing files or running commands.' = 'PLAN-MODE'
             'ran: exit code 1 exit code 1 ~~~~ build failed' = 'RUN-FAILED'
             'ran: timed out after 180s' = 'RUN-TIMEOUT'
             'edit failed error: file not found: app.js (use write to create it)' = 'FILE-NOT-FOUND'

@@ -398,7 +398,7 @@ function Get-KitScanFiles {
             foreach ($p in $files) { $list.Add((New-Object IO.FileInfo $p)) }
             foreach ($sub in $dirs) {
                 if ((Split-Path $sub -Leaf) -match $script:ScanSkip) { continue }
-                try { if (([IO.File]::GetAttributes($sub) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue } } catch { continue }
+                if (Test-LinkPath $sub) { continue }   # a junction or link; OneDrive folders are walked
                 $stack.Push($sub)
             }
         }

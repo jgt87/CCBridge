@@ -145,6 +145,9 @@ export default function App() {
     ).finally(() => {
       if (shown) window.setTimeout(() => setFilesRefreshing(false), Math.max(0, 600 - (Date.now() - started)));
     });
+    // The lists of runbooks, fetches and chains change with files Copilot or the person writes:
+    // after such a change (not quiet) and on focus, never with the timer while StreamHub works.
+    if (opts?.quiet) return;
     api.fetchList().then(setFetchItems, () => {});
     api.runbooks().then((r) => {
       setRunbooks(r.runbooks);

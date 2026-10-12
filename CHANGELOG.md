@@ -6,6 +6,21 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.131] - 2026-10-12
+
+### Fixed
+- Projects in OneDrive: StreamHub never looked inside a project's subfolders when it decided which UI kit rules a page needs, because OneDrive marks every folder and file as a reparse point, the same mark a junction or link has. Classes used only in scripts (js/, src/) got no rules in styles/kit/kit.css, so parts of a page fell back to the browser's own look: unstyled figures, panel headings, chips and notices, and a chart legend that ran together. Only real junctions and symbolic links are skipped now. The same check kept Source/'s files out of the copy StreamHub restores them from.
+- The page check's net for kit classes without a rule never fired on a page StreamHub serves: such a page runs sandboxed, and the browser does not let it read its stylesheets' rules. The check now reads a stylesheet's text when it cannot read its rules, so a missing rule is added to kit.css again.
+- Approve and build on a plan that the project's "plan big requests first" setting started was planned again, every time, each time with the previous text inside it. That plan now gets its own PLAN.md section, and the build is never planned again.
+- A question about the project's own to-do list ("are there items pending in TODO.md?") no longer asks how the app gets its Microsoft 365 data: only Microsoft To Do spelled as such counts.
+- A change skipped in Plan only mode was reported as a change to Source/ (code SOURCE-DATA); it is PLAN-MODE again.
+- A task report without Copilot's checks showed an empty "Done when" line (": not answered").
+
+### Changed
+- With the UI kit on, kit-page on another tag than <body> (a main or a div) is reported, and so is a page that uses kit classes while its <body> has no kit-page: that class sets the whole page's font, colours and background, so with it on a main the header showed in the browser's serif font. The kit's rule now says to put it on the body tag.
+- A web page built by JavaScript in the browser (almost no text of its own) no longer reaches Copilot as an empty result: it is told the page's content is not there, gets the data the page embeds as JSON when there is any, and is asked to get an export or the data's address from you instead of guessing.
+- While StreamHub works, the app refreshes the file tree every few seconds but no longer asks for the runbook, fetch and chain lists each time; those refresh after a change to the files and when you come back to the window.
+
 ## [v0.1.130] - 2026-10-12
 
 ### Added

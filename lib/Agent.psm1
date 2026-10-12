@@ -994,6 +994,9 @@ function Use-BigTaskPreference {
     $State.ScopeAsk = ''
     $pref = "$((Get-ProjectSetup $State.ProjectRoot).answers['bigtask'])"
     if ($pref -notin 'clarify', 'plan' -or $Task.clarify -or $Task.planFirst -or $Task.planBuild -or $Task.setup -or $Task.issueFix) { return }
+    # The text of a plan card's build button (Approve and build, Continue and build) is a build, not a
+    # new request, also when it arrives without its flag (an older page).
+    if ("$($Task.text)" -match '^(Build this now, following the approved plan|Continue and make the change now)') { return }
     if (-not $Task.bigByCopilot -and -not (Test-BigRequest "$($Task.text)")) {
         # Near the line: Copilot decides in its first reply (Read-ScopeDecision), the turn ends on 'plan'.
         if ($Task.kind -eq 'chat' -and (Test-BigUnclear "$($Task.text)")) { $State.ScopeAsk = $pref }
@@ -1002,6 +1005,8 @@ function Use-BigTaskPreference {
     if ($pref -eq 'clarify') { $Task.clarify = $true; $Task.request = $Task.text }
     else {
         $Task.planFirst = $true; $Task.mode = 'plan'; $State.Mode = 'plan'; $Task.forceKind = 'coding'; $Task.request = $Task.text
+        # Its own PLAN.md section, so the plan card carries an id and its approval is recorded.
+        if (-not $Task.planId) { try { $Task.planId = New-PlanEntry $State.ProjectRoot "$($Task.text)" } catch { Write-CCBLogError agent 'PLAN.md big request' $_ } }
         $Task.text = (Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + $Task.text
     }
     Add-AgentEvent $State 'status' @{ text = "A big request$(if ($Task.bigByCopilot) { ' (Copilot judged it so)' }): $(if ($pref -eq 'clarify') { 'Copilot asks its questions first' } else { 'Copilot plans first' }), as chosen for this project (Project setup in the Files tab changes it)." }
@@ -1082,7 +1087,7 @@ function Save-TaskEvidence {
     if (@($Ev.kitEdits).Count) { [void]$sb.AppendLine("- UI kit files changed directly: $(@($Ev.kitEdits) -join ', ') (the kit is meant to be restyled through tokens.css and the project's own CSS)") }
     if ($Ev.unfinished) { [void]$sb.AppendLine("- Not finished: Copilot $($Ev.unfinished). StreamHub checked the changed files at the end: $(if (@($Ev.final).Count) { "$(@($Ev.final).Count) problem(s): " + (@($Ev.final) -join '; ') } else { 'no problems found' })") }
     [void]$sb.AppendLine("- Copilot consistency review: $(if ($Ev.reviewed) { 'done' } else { 'not needed' })")
-    if (@($Ev.acceptance).Count) {
+    if ($Ev.acceptance -and @($Ev.acceptance).Count) {   # @($null) counts 1
         [void]$sb.AppendLine().AppendLine("## Done when (Copilot's checks, answered at the end)").AppendLine()
         foreach ($l in @(Format-AcceptanceReport $Ev.acceptance)) { [void]$sb.AppendLine($l) }
     }
@@ -2220,10 +2225,10 @@ function Get-StepFailureInfo {
         'no SEARCH/REPLACE pairs' { @{ code = 'EDIT-FORMAT'; reasons = @('Copilot''s edit block had no ####### SEARCH / ####### REPLACE / ####### END markers (or they were not at the start of a line).', 'Copilot meant to replace the whole file; that needs a write block.'); next = "Nothing was changed. $copilotRetries" }; break }
         'needs the lines read in this task|changed since your read|were not among the lines you read' { @{ code = 'EDIT-STALE'; reasons = @('Copilot sent an edit by line numbers (ACTION edit PATH:START-END) without reading those lines in this task, or the file changed since that read (an earlier edit, or a repair by the helper program).'); next = $copilotRetries } }
         'SEARCH text not found' { @{ code = 'EDIT-NOT-FOUND'; reasons = @('The file changed since Copilot read it: an earlier edit in this task, or you edited it.', 'Copilot''s SEARCH lines differ slightly from the file: spaces, quotes, or a line it remembered differently.', 'The change was already made earlier, but with different text.', 'Copilot shortened SEARCH without a line containing only ... (only its first lines were given).'); next = "Nothing was changed. Copilot gets the reason plus the file's closest current lines. $copilotRetries" }; break }
+        'plan mode' { @{ code = 'PLAN-MODE'; reasons = @('"Plan only" mode is on, so changes and commands are not carried out.'); next = 'Switch the mode to "Ask before changes" or "Auto-accept edits" and ask again to carry out the plan.' }; break }
         'is in Source/|read-only' { @{ code = 'SOURCE-DATA'; reasons = @('The step tried to change a file in Source/, which holds your source data and is read-only.'); next = 'Nothing was changed. Copilot is told to write its result elsewhere (for example Work/ or output/).' }; break }
         'file not found|\(file not found\)' { @{ code = 'FILE-NOT-FOUND'; reasons = @('The path does not exist in the project: a typo, another folder, or a file that was never created.', 'For a new file Copilot should use a write block, not an edit.'); next = $copilotRetries }; break }
         'without a path' { @{ code = 'STEP-FORMAT'; reasons = @('The block had no file name after the action name (for example ACTION edit with nothing after it).'); next = $copilotRetries }; break }
-        'plan mode' { @{ code = 'PLAN-MODE'; reasons = @('"Plan only" mode is on, so changes and commands are not carried out.'); next = 'Switch the mode to "Ask before changes" or "Auto-accept edits" and ask again to carry out the plan.' }; break }
         'commands are not allowed' { @{ code = 'RUN-NOT-ALLOWED'; reasons = @('Commands are not allowed for this task (MCP task started without permission to run commands).'); next = 'Copilot is told to finish without running commands.' }; break }
         'needs a person|refused' { @{ code = 'RUN-NEEDS-PERSON'; reasons = @('The command would act on Microsoft 365 or delete data; that always needs a person.'); next = 'Run it yourself if you really want it; Copilot is told not to work around it.' }; break }
         'stopped by the user' { @{ code = 'STOPPED'; reasons = @('You pressed Stop.'); next = 'Changes made so far in this message can be undone (Changes > Undo last change set).' }; break }

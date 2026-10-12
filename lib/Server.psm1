@@ -670,9 +670,11 @@ function Invoke-ApiRequest($Ctx, $State) {
                 elseif ($b.skipped) { & $planNote 'Your answers' 'Skipped: Copilot plans with its own assumptions.' 'planning' }
                 if ("$($b.feedback)".Trim()) { & $planNote 'Change requested' ([string]$b.feedback) 'planning' }
             }
+            # Approve and build: the build itself, never a new big request to plan first (with or without
+            # a PLAN.md section for it).
+            if ($b.approve) { $task.planBuild = $true }
             if ($b.approve -and $planId) {
                 & $planNote 'Approved' "Approved on $((Get-Date).ToString('yyyy-MM-dd HH:mm')); building started." 'building'
-                $task.planBuild = $true
                 $task.text += "`n`nEvery decision for this task (questions, answers, plan versions) is in .streamhub/PLAN.md, in the section marked plan:$planId. Read it (read .streamhub/PLAN.md) if you need it."
             }
             if ($b.approve) { Set-PlanBuildTask $State $task }   # building an approved plan: out of Plan only mode, and Copilot told so

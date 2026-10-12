@@ -619,6 +619,41 @@ function Find-TableHeaderIssues {
     @(Get-TableHeaderFindings $New | Where-Object { $before -notcontains ($_ -replace '^line \d+: ', '') })
 }
 
+function Get-KitPageFindings([AllowEmptyString()][string]$Text, [string]$Rel) {
+    <# Where the kit's page class sits. kit-page gives the whole page the kit's font, colours and
+       background, so it belongs on <body>: on another tag (a main or a div) everything outside that
+       tag, such as the header, shows in the browser's own look (a serif font). A full page (a <body>
+       tag) that uses kit classes without kit-page on its body is reported too. "line N: ..." #>
+    $out = New-Object System.Collections.Generic.List[string]
+    $t = "$Text"
+    if ($t -notmatch 'kit-') { return @() }
+    $lineOf = { param($i) ([regex]::Matches($t.Substring(0, $i), "`n")).Count + 1 }
+    $tagRe = '(?is)<([A-Za-z][\w.-]*)\b[^<>]*?\bclass(?:Name)?\s*=\s*(?:"[^"]*|''[^'']*|\{[^}]*)\bkit-page(?![\w-])'
+    $seen = @{}
+    foreach ($m in [regex]::Matches($t, $tagRe)) {
+        $tag = $m.Groups[1].Value.ToLowerInvariant()
+        if ($tag -eq 'body' -or $seen.ContainsKey($tag)) { continue }
+        $seen[$tag] = $true
+        $out.Add("line $(& $lineOf $m.Index): kit-page is on a <$tag>: it belongs on <body> (<body class=`"kit-page`">$(if ($Rel -match '(?i)\.(jsx|tsx|vue|svelte)$') { ' in the page that loads the app, such as index.html' })), since it sets the font, colours and background of the whole page; on a <$tag> everything outside it, such as the page header, shows in the browser's own look (a serif font). Move it to <body> and leave it off the <$tag>.")
+    }
+    if ($Rel -match '(?i)\.(html?|cshtml|php)$') {
+        $body = [regex]::Match($t, '(?is)<body\b[^>]*>')
+        if ($body.Success -and $body.Value -notmatch '\bkit-page(?![\w-])' -and $t -match '\bkit-(?!page(?![\w-]))[a-z]') {
+            $out.Add("line $(& $lineOf $body.Index): the page uses the UI kit but its <body> has no kit-page class: write <body class=`"kit-page`">, so the whole page gets the kit's font, colours and background (without it the browser's own look, a serif font, shows where no kit part sets its own).")
+        }
+    }
+    @($out)
+}
+
+function Find-KitPageIssues {
+    <# kit-page problems a change adds (Get-KitPageFindings), with the UI kit on: markup files and
+       components, not the kit's own files. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(html?|cshtml|razor|php|jsx|tsx|vue|svelte|astro)$' -or $Rel -match '(?i)(^|/)(styles/kit|\.streamhub|node_modules|dist|build)/') { return }
+    $before = @(Get-KitPageFindings $Old $Rel | ForEach-Object { $_ -replace '^line \d+: ', '' })
+    @(Get-KitPageFindings $New $Rel | Where-Object { $before -notcontains ($_ -replace '^line \d+: ', '') })
+}
+
 function Find-PageBuildScript {
     <# A script that builds a page from a template page (OneFile Get-TemplateBuildPairs) without
        writing the Generated line first: the built page would be checked, reviewed and edited as
@@ -640,7 +675,7 @@ function Find-QualityIssues {
     # A one-file page: the helper program's kit and data blocks are not the change's own text.
     if ($Rel -match '(?i)\.html?$') { $loads = Find-OneFileLoads $Rel $Old $New; $Old = Hide-GeneratedBlocks $Old; $New = Hide-GeneratedBlocks $New } else { $loads = $null }
     if ($Rel -match '(?i)\.html?$' -and (Get-GeneratedPageInfo $New)) { return @($loads) }   # a page a script built: its template is checked
-    @($loads) + @(if ($UseKit) { Find-TableHeaderIssues $Rel $Old $New }) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageBuildScript $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
+    @($loads) + @(if ($UseKit) { Find-TableHeaderIssues $Rel $Old $New; Find-KitPageIssues $Rel $Old $New }) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageBuildScript $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {
@@ -693,4 +728,4 @@ function Get-DoneReminders {
     "Before finishing, one check:`n- " + ($notes -join "`n- ") + "`nThen send done again."
 }
 
-Export-ModuleMember -Function Find-TailwindSlop, Find-RoundedBarBase, Find-UnsortedTables, Find-TableHeaderIssues, Get-TableHeaderFindings, Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders, Find-PageBuildScript, Test-LiteralHtmlAssign
+Export-ModuleMember -Function Find-TailwindSlop, Find-RoundedBarBase, Find-UnsortedTables, Find-TableHeaderIssues, Get-TableHeaderFindings, Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders, Find-PageBuildScript, Test-LiteralHtmlAssign, Get-KitPageFindings, Find-KitPageIssues

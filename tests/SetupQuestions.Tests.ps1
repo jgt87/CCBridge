@@ -32,6 +32,10 @@ Describe 'Which questions a request triggers' {
         (Get-SetupQuestions 'Build a dashboard of the Teams messages, refreshed daily by a runbook' @() $none).stated.m365data | Should Be 'runbook'
         (Get-SetupQuestions 'Build a dashboard from the Excel export of SharePoint list items' @() $none).stated.m365data | Should Be 'file'
         & $ids (Get-SetupQuestions 'Build a dashboard of the sales file' @('Source/sales.csv') $none) | Should Be 'build'
+        & $ids (Get-SetupQuestions 'Build a page of my open tasks in Microsoft To Do' @() $none) | Should Be 'build,m365data'
+        # A to-do list file or todo items of the project are not Microsoft 365 data.
+        & $ids (Get-SetupQuestions 'are there any items still pending in TODO.md, and was everything from PLAN.md built?' $pages $none) | Should Be ''
+        & $ids (Get-SetupQuestions 'Build the remaining todo items on the dashboard' $pages $none) | Should Not Match 'm365data'
     }
     It 'asks who opens it when sharing comes up, and how to build without data' {
         & $ids (Get-SetupQuestions 'Build a dashboard of the sales to share with my colleagues' @('Source/sales.csv') $none) | Should Be 'build,audience'

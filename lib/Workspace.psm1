@@ -299,6 +299,16 @@ function Get-FileFingerprint([string]$Path) {
     try { [BitConverter]::ToString($sha.ComputeHash($fs)) } finally { $fs.Dispose() }
 }
 
+function Test-LinkPath([string]$Path) {
+    <# True for a junction or symbolic link, which a walk must not follow. OneDrive marks its files and
+       folders as reparse points too (Files On-Demand: a cloud tag, no link type), so the attribute
+       alone is not enough: every project folder under OneDrive has it. Only an item with the
+       attribute is looked at more closely (Get-Item's LinkType reads the reparse tag). #>
+    try { if (([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::ReparsePoint) -eq 0) { return $false } } catch { return $true }
+    try { $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop } catch { return $true }
+    "$($item.LinkType)" -in 'Junction', 'SymbolicLink'
+}
+
 function Get-RelativeFiles([string]$Dir) {
     <# The files under a folder as relative paths. Junctions and symbolic links are not followed: a link
        inside Source/ to a folder elsewhere must never make the vault or the restore touch files
@@ -311,11 +321,11 @@ function Get-RelativeFiles([string]$Dir) {
     while ($stack.Count) {
         $d = $stack.Pop()
         foreach ($f in [IO.Directory]::GetFiles($d)) {
-            if (([IO.File]::GetAttributes($f) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            if (Test-LinkPath $f) { continue }
             $out.Add($f.Substring($base))
         }
         foreach ($sub in [IO.Directory]::GetDirectories($d)) {
-            if (([IO.File]::GetAttributes($sub) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            if (Test-LinkPath $sub) { continue }
             $stack.Push($sub)
         }
     }
@@ -475,6 +485,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile, Get-FileFingerprint, Get-SharedRoot, Get-SharedPrefix, Initialize-SharedRoot, Get-SharedNotes

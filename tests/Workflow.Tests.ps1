@@ -79,6 +79,7 @@ Describe 'Save-TaskEvidence' {
         $t | Should Match 'Copilot consistency review: done'
         $t | Should Match 'Verify: FAILED \(`npm test`, exit 1\)'
         $t | Should Match 'Copilot messages: 4'
+        $t | Should Not Match 'Done when'   # no checks this task: no empty section
         cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
     }
 }
@@ -242,6 +243,30 @@ Build a page
         $s.Mode = 'auto'; $t2 = @{ kind = 'chat'; text = 'x' }
         Set-PlanBuildTask $s $t2
         $t2.ContainsKey('mode') | Should Be $false   # the selected mode stays
+    }
+    It 'plans a big request first with its own PLAN.md section, and never plans the approved build again' {
+        Import-Module (Join-Path $root 'lib\ProjectSetup.psm1') -Force
+        $p = New-Proj @{ 'index.html' = '<!doctype html><title>x</title>' }
+        Save-ProjectSetup $p @{ answers = @{ bigtask = 'plan' } }
+        $config = Get-CCBridgeConfig harness $root
+        $s = New-AgentState -Config $config -AppRoot $root
+        $s.ProjectRoot = $p
+        $big = 'Build a dashboard of the items a web page lists. ' + ('Each item has a product, a period and an impact; filter on several products, show charts and a table, and assess every item. ' * 6)
+        $t = @{ kind = 'chat'; text = $big }
+        Use-BigTaskPreference $s $t
+        $t.planFirst | Should Be $true
+        $t.planId | Should Match '^\d{8}-\d{4}-'
+        [IO.File]::ReadAllText((Join-Path $p '.streamhub\PLAN.md')) | Should Match ([regex]::Escape("<!-- plan:$($t.planId) -->"))
+        # The plan card's build text, as long as the plan, comes back as a build: no new plan.
+        $s.Mode = 'auto'
+        $b = @{ kind = 'chat'; text = "Build this now, following the approved plan below. Change files with action blocks.`n`nRequest: $big`n`nApproved plan:`n- step" }
+        Use-BigTaskPreference $s $b
+        $b.planFirst | Should Be $null
+        $b.mode | Should Be $null
+        $c = @{ kind = 'chat'; text = $b.text; planBuild = $true }
+        Use-BigTaskPreference $s $c
+        $c.planFirst | Should Be $null
+        Remove-Item $p -Recurse -Force
     }
     It 'writes the result of the build' {
         $p = New-Proj @{ 'a.txt' = 'x' }
