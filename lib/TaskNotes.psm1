@@ -130,6 +130,104 @@ function Get-NotesGoAhead {
     "Noted. Now carry out the task: read what you still need or write the files, with action blocks. Do not repeat the lists above."
 }
 
+# --- Plan coverage: what the plan names and placeholder code, before done ----------------------
+
+$script:CodeExt = '(?i)\.(m?js|cjs|jsx|tsx?|vue|svelte|py|ps1|psm1|cs|java|kt|go|php|rb)$'
+$script:PlanPathPattern = '(?<![\w/.:-])((?:[\w.-]+/)*[\w-][\w.-]*\.(?:html?|css|m?js|cjs|jsx|tsx?|vue|svelte|py|ps1|psm1|cs|json|md|csv|xaml))(?![\w-])'
+
+function Get-PlanFiles([AllowEmptyString()][string]$Text) {
+    <# The files a plan or step list says to create or change: path-like names with an extension, not
+       on lines about removing, deleting or temporary files, not web addresses, not under Work/, Source/
+       or the helper program's folders. #>
+    $out = New-Object System.Collections.Generic.List[string]
+    $skipSection = $false
+    foreach ($l in "$Text".Split("`n")) {
+        # A heading starts a section; one about removing or temporary files is skipped as a whole.
+        if ($l -match '^\s*(#+\s*)?[A-Z][A-Z /&-]{3,}:?\s*$' -or $l -match '^\s*#+\s') { $skipSection = $l -match '(?i)\b(remove|delete|clean ?up|temporary|discovery|obsolete)\b' }
+        if ($skipSection -or $l -match '(?i)\b(remove|delete|deleted|temporary|scratch|clean ?up|obsolete|if created)\b' -or $l -match '(?i)https?://') { continue }
+        foreach ($m in [regex]::Matches($l, $script:PlanPathPattern)) {
+            $p = $m.Groups[1].Value.TrimStart('.', '/')
+            if ($p -match '(?i)^(Work|Source|\.streamhub|node_modules|styles/kit|dist|build)/' -or $p -match '^\d' -or $p -notmatch '[A-Za-z]') { continue }
+            if (-not $out.Contains($p)) { $out.Add($p) }
+        }
+    }
+    $out.ToArray()
+}
+
+function Find-StubCode {
+    <# Placeholder code in a code file's text that the old text did not have: functions with an empty
+       body or one that only throws "not implemented" or passes, and TODO / FIXME / placeholder markers.
+       Returns short descriptions ("function loadData has an empty body"), at most 5. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch $script:CodeExt -or $Rel -match '(?i)(^|/)(tests?|__tests__|spec)/|\.(test|spec)\.|\.Tests\.ps1$') { return @() }
+    $find = {
+        param([string]$t)
+        $hits = New-Object System.Collections.Generic.List[string]
+        $named = '(?:function\s+([\w$]+)\s*\([^)]*\)|(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s*)?(?:function\s*)?\([^)]*\)\s*(?:=>)?|^\s*(?:async\s+)?([\w$]+)\s*\([^)]*\))'
+        if ($Rel -match '(?i)\.(m?js|cjs|jsx|tsx?|vue|svelte|cs|java|kt|go|php)$') {
+            foreach ($m in [regex]::Matches($t, "(?m)$named\s*\{\s*(?://[^\n]*\s*|/\*[\s\S]*?\*/\s*)*\}")) {
+                $n = @($m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value) | Where-Object { $_ } | Select-Object -First 1
+                if ($n -and $n -notmatch '^(if|for|while|switch|catch|function|noop|nothing)$') { $hits.Add("function $n has an empty body") }
+            }
+            foreach ($m in [regex]::Matches($t, '(?i)throw\s+new\s+\w*Error\(\s*[''"`][^''"`]*(not (yet )?implemented|todo|implement (me|this|later))')) { $hits.Add("code that throws 'not implemented'") }
+        }
+        if ($Rel -match '(?i)\.py$') {
+            foreach ($m in [regex]::Matches($t, '(?m)^\s*def\s+(\w+)\s*\([^)]*\)[^:]*:\s*\n(?:\s*(?:#[^\n]*|"{3}[\s\S]*?"{3})\s*\n)*\s*(pass|\.\.\.|raise\s+NotImplementedError\b)')) { $hits.Add("function $($m.Groups[1].Value) only does $($m.Groups[2].Value)") }
+        }
+        if ($Rel -match '(?i)\.psm?1$') {
+            foreach ($m in [regex]::Matches($t, '(?im)^\s*function\s+([\w-]+)\s*(?:\([^)]*\))?\s*\{\s*(?:#[^\n]*\s*)*\}')) { $hits.Add("function $($m.Groups[1].Value) has an empty body") }
+            foreach ($m in [regex]::Matches($t, '(?i)throw\s+[''"][^''"]*not (yet )?implemented')) { $hits.Add("code that throws 'not implemented'") }
+        }
+        foreach ($m in [regex]::Matches($t, '(?im)(//|#|/\*|<!--|\*)\s*(TODO|FIXME|XXX)\b[:\s]*([^\n]{0,60})')) { $hits.Add("a $($m.Groups[2].Value.ToUpperInvariant()) marker: $($m.Groups[3].Value.Trim())") }
+        foreach ($m in [regex]::Matches($t, '(?im)(//|#|/\*|<!--)[^\n]*\b(placeholder (logic|implementation|function|code)|stub(bed)? (function|implementation|code)|implement (this )?later|not (yet )?implemented)\b')) { $hits.Add("a placeholder note: $($m.Value.Trim())") }
+        $hits.ToArray()
+    }
+    $before = @(& $find "$Old")
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($h in @(& $find "$New")) {
+        $n = @($before | Where-Object { $_ -eq $h }).Count
+        if ($n) { $before = @($before | Where-Object { $_ -ne $h } ) + @(@($before | Where-Object { $_ -eq $h }) | Select-Object -Skip 1); continue }
+        if (-not $out.Contains($h)) { $out.Add($h) }
+    }
+    # A new code file with (almost) nothing in it.
+    if (-not "$Old".Trim()) {
+        $code = @("$New".Split("`n") | Where-Object { $_.Trim() -and $_.Trim() -notmatch '^(//|#|/\*|\*|<!--|"use strict"|''use strict'')' })
+        if ($code.Count -le 3 -and $Rel -match '(?i)\.(m?js|cjs|jsx|tsx?|py|ps1|psm1)$') { $out.Insert(0, "the file has only $($code.Count) line(s) of code") }
+    }
+    @($out | Select-Object -First 5)
+}
+
+function Get-PlanCoverage {
+    <# Before done: what the approved plan or Copilot's own steps name that the project does not have,
+       and placeholder code the task added (Find-StubCode against the task's backups). $Files: rel ->
+       'new' | 'existed' (the task's change set); $BackupDir: the checkpoint folder (old texts).
+       Returns @{ missing = @(paths); stubs = @("PATH: what") }. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, $Files, [string]$BackupDir = '', [AllowEmptyString()][string]$PlanText = '')
+    $missing = @(foreach ($p in @(Get-PlanFiles $PlanText)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot $p.Replace('/', '\')))) { $p }
+    })
+    $stubs = New-Object System.Collections.Generic.List[string]
+    foreach ($rel in @($Files.Keys)) {
+        $r = "$rel".Replace('\', '/')
+        if ($r -notmatch $script:CodeExt) { continue }
+        $full = Join-Path $ProjectRoot $r.Replace('/', '\')
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (Get-Item -LiteralPath $full).Length -gt 2MB) { continue }
+        $old = ''
+        if ($Files[$rel] -eq 'existed' -and $BackupDir) { $bk = Join-Path $BackupDir $r.Replace('/', '\'); if (Test-Path -LiteralPath $bk) { $old = [IO.File]::ReadAllText($bk) } }
+        foreach ($h in @(Find-StubCode $r $old ([IO.File]::ReadAllText($full)))) { $stubs.Add("${r}: $h") }
+    }
+    @{ missing = @($missing); stubs = $stubs.ToArray() }
+}
+
+function Format-PlanCoverage($Coverage) {
+    # The message to Copilot for what the coverage check found ('' when nothing).
+    $parts = New-Object System.Collections.Generic.List[string]
+    if (@($Coverage.missing).Count) { $parts.Add("The plan names these files, and the project does not have them:`n" + ((@($Coverage.missing) | Select-Object -First 12 | ForEach-Object { "- $_" }) -join "`n")) }
+    if (@($Coverage.stubs).Count) { $parts.Add("These parts are placeholders, not the working code the task needs:`n" + ((@($Coverage.stubs) | Select-Object -First 12 | ForEach-Object { "- $_" }) -join "`n")) }
+    if (-not $parts.Count) { return '' }
+    "Before finishing, the helper program compared what was built with the plan.`n" + ($parts -join "`n") + "`nBuild them now, with working code. If one is not needed (the plan changed, or it is done elsewhere), say which and why in your summary, then send done again."
+}
+
 # --- Open items in the project's to-do list ----------------------------------------------------
 
 function Get-OpenTodoItems([string]$ProjectRoot) {
@@ -206,4 +304,4 @@ function Format-DataNotes([string]$ProjectRoot) {
     "Data notes (what you wrote about this data earlier; read the data again only for what they do not cover):`n" + ((@($have.notes) | ForEach-Object { "- $_" }) -join "`n")
 }
 
-Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision, Get-NotesGoAhead, Get-OpenTodoItems, Get-OpenTodoContinue
+Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision, Get-NotesGoAhead, Get-OpenTodoItems, Get-OpenTodoContinue, Get-PlanFiles, Find-StubCode, Get-PlanCoverage, Format-PlanCoverage

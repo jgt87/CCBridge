@@ -49,6 +49,28 @@ Describe 'Format-ActionResults' {
         $msg | Should Match 'Read index\.html:\d+-400 for the rest'
         $msg | Should Match '### 2\. run\no+\n\(truncated: 14000 more characters\)'
     }
+    It 'cuts a very long line of a read (one-line data) and says how to read it' {
+        $one = '[' + ((1..5000 | ForEach-Object { '{"id":' + $_ + ',"name":"item ' + $_ + '"}' }) -join ',') + ']'
+        [IO.File]::WriteAllText((Join-Path $proj 'items.json'), $one)
+        $out = @(Invoke-ReadAction $proj @('items.json'))[0]
+        $out.Length -lt 3000 | Should Be $true
+        $out | Should Match 'more characters on this line\)'
+        $out | Should Match 'line\(s\) longer than 2000 characters are cut: this is one-line data'
+        $out | Should Match "the helper program's converted copy"
+    }
+    It 'keeps the whole results block within the budget, cutting the largest part first' {
+        $state = @{ Config = [pscustomobject]@{ resultCharBudget = 12000 }; ProjectRoot = $proj }
+        $results = @(
+            @{ head = '### 1. web'; output = ('w' * 6000); readPaths = $null },
+            @{ head = '### 2. run'; output = ('o' * 6000); readPaths = $null },
+            @{ head = '### 3. grep'; output = ('g' * 6000); readPaths = $null },
+            @{ head = '### 4. find'; output = ('f' * 6000); readPaths = $null }
+        )
+        $msg = & (Get-Module Agent) { param($s, $r) Format-ActionResults $s $r } $state $results
+        $msg.Length -le 16000 + 400 | Should Be $true
+        $msg | Should Match 'cut to keep the message within its size'
+        $msg | Should Match '### 4\. find'
+    }
 }
 
 Describe '@file:START-END in a message' {

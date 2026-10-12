@@ -6,6 +6,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.134] - 2026-10-12
+
+### Added
+- Session report (command menu > Session report, and in Export diagnostics): one page of what happened since StreamHub started, from its own log: every task with its request, mode, rounds, actions and failed steps, and what needs a look, such as an approved plan planned again, the same request sent again and again, a step failing the same way, repeated corrections of Copilot, typing or no-answer errors, slow steps and polling noise.
+- Test runs: "Save this chat as a test run" keeps the project's requests with its data files and setup; "Test runs" runs one again unattended in a fresh project and ends with a report that puts its numbers (messages, rounds, corrections, failed steps, page problems) next to the last run of the same test, so a new version can be compared on the same work.
+- Before accepting done, StreamHub compares what was built with the plan: files the approved plan or Copilot's own steps name that the project does not have, and placeholder code the task added (empty functions, "not implemented", new TODO notes, a near-empty new code file) go back to Copilot, at most twice per task.
+- Approving a change in parts: when a change to an existing file touches several places, the approval card lists each block with a tick box; unticked blocks stay as they were, the rest is written, and Copilot is told which were left out.
+- SharePoint HTML pages: link a SharePoint file or list in Files > Project setup and StreamHub looks it up with your own sign-in in its Edge, so Copilot gets the exact LiveData entry; and publish a page to a site's Site Pages: first a check of where it goes, whether a page of that name is there and what the checks still find, then the upload only after you hold to confirm.
+- A new project that already holds your files: when it opens, StreamHub lists them by type and asks what they are for (data for the app, analysed now or left; documents as reference, made into a page or summarised; code to build on or an example; images for the app or a picture of the look). Data for the app moves into Source/, the roles go to Copilot with every task, what is to be done now is sent as one request, and each file is asked about once.
+
+### Changed
+- A read no longer fills a message with one very long line (a one-line JSON or CSV, minified code): such lines are cut at 2000 characters with a note on how to read the data, and the whole results block of a message stays within its size, cutting the largest parts first.
+
 ## [v0.1.133] - 2026-10-12
 
 ### Added

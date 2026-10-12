@@ -4,6 +4,7 @@ import HoldButton from "@/components/kokonutui/hold-button";
 import type { BuildForm, ChatOptions, ProjectSetup, SetupChoice } from "@/lib/api";
 import { BUILD_FORMS } from "@/lib/build-forms";
 import { cn } from "@/lib/utils";
+import { SharePointSection } from "./sharepoint-section";
 
 
 const LIVE_HELP =
@@ -251,6 +252,7 @@ export function ProjectSetupPanel({ projectPath }: { projectPath: string }) {
           ))}
         </div>
       )}
+      {setup.answers?.some((a) => a.id === "audience" && a.value === "sharepoint") && <SharePointSection projectPath={projectPath} />}
       {note && <div className="text-muted-foreground">{note}</div>}
     </div>
   );

@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -763,6 +763,35 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     if ($sets.Count) { $Entry.changeSeq = [int]$sets[-1].seq }   # the History tab's card of this task
 }
 
+function Invoke-TestRunReport {
+    <# The end of a test run: the session report of the run's time span in this run of the app, its
+       numbers next to the last run of the same test, written to the run's project
+       (.streamhub/TestRun-report.md) and beside the test (TestRuns/NAME/report-STAMP.md). #>
+    param($State, $Task)
+    $tr = $Task.testRun
+    $log = Join-Path (Join-Path $env:LOCALAPPDATA 'CCBridge\logs') ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
+    $since = [datetime]::ParseExact("$($tr.started)", 's', [Globalization.CultureInfo]::InvariantCulture)
+    $entries = @(if (Test-Path -LiteralPath $log) { Read-LogEntries ([IO.File]::ReadAllLines($log)) $PID | Where-Object { $_.time -ge $since } })
+    $build = Format-CCBBuild (Get-CCBridgeBuild $State.AppRoot)
+    $page = Get-SessionReport $entries "StreamHub $build"
+    $now = Get-SessionReport $entries "StreamHub $build" -Metrics
+    $now.when = (Get-Date).ToString('yyyy-MM-dd HH:mm'); $now.project = Split-Path -Leaf "$($tr.project)"
+    $before = @(Read-TestRunHistory "$($tr.projectsRoot)" "$($tr.name)") | Select-Object -Last 1
+    $text = "# Test run: $($tr.title)`n`n- Test: $($tr.name) ($($tr.steps) step(s)), project: $($now.project)`n`n## Compared with the last run`n`n" + (Format-TestRunComparison $now $before) + "`n" + ($page -replace '^# Session report', '## Session report' -replace '(?m)^## (Findings|Tasks|Failed steps)', '### $1')
+    $enc = New-Object Text.UTF8Encoding($false)
+    $rel = '.streamhub/TestRun-report.md'
+    try {
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path "$($tr.project)" '.streamhub')
+        [IO.File]::WriteAllText((Join-Path "$($tr.project)" $rel.Replace('/', '\')), $text, $enc)
+        $dir = Join-Path (Get-TestRunsDir "$($tr.projectsRoot)") "$($tr.name)"
+        $null = New-Item -ItemType Directory -Force -Path $dir
+        [IO.File]::WriteAllText((Join-Path $dir "report-$((Get-Date).ToString('yyyyMMdd-HHmm')).md"), $text, $enc)
+        Add-TestRunHistory "$($tr.projectsRoot)" "$($tr.name)" $now
+    } catch { Write-CCBLogError agent 'test run report' $_ }
+    $delta = if ($before) { " Last run: $($before.messages) messages, $($before.nudges) nudges, $($before.failedSteps) failed steps." } else { '' }
+    Add-AgentEvent $State 'status' @{ text = "Test run '$($tr.title)' finished: $($now.tasks) task(s), $($now.messages) Copilot messages, $($now.nudges) nudges, $($now.failedSteps) failed steps.$delta Report: $rel"; path = $rel }
+}
+
 function Set-PlanBuildTask {
     <# A task that builds an approved plan (the plan card's Approve and build): never in Plan only mode,
     which would skip every change and leave Copilot planning again; such a task asks before changes
@@ -1084,6 +1113,7 @@ function Save-TaskEvidence {
     if ($Ev.pageLeft) { $pg += ' (still there when the task ended: Copilot said done anyway)' }
     [void]$sb.AppendLine("- Page check: $pg")
     if (@($Ev.unloaded).Count) { [void]$sb.AppendLine("- New files nothing loads: $(@($Ev.unloaded) -join ', ')") }
+    if ($Ev.coverage -and @($Ev.coverage).Count) { [void]$sb.AppendLine("- Plan coverage (left when the task ended): $(@($Ev.coverage) -join '; ')") }
     if (@($Ev.kitEdits).Count) { [void]$sb.AppendLine("- UI kit files changed directly: $(@($Ev.kitEdits) -join ', ') (the kit is meant to be restyled through tokens.css and the project's own CSS)") }
     if ($Ev.unfinished) { [void]$sb.AppendLine("- Not finished: Copilot $($Ev.unfinished). StreamHub checked the changed files at the end: $(if (@($Ev.final).Count) { "$(@($Ev.final).Count) problem(s): " + (@($Ev.final) -join '; ') } else { 'no problems found' })") }
     [void]$sb.AppendLine("- Copilot consistency review: $(if ($Ev.reviewed) { 'done' } else { 'not needed' })")
@@ -2813,6 +2843,11 @@ function Get-ProjectContext($State) {
     $turnAnswers = if ($State.TurnAnswers -is [hashtable]) { $State.TurnAnswers } else { @{} }
     $setupText = try { Format-ProjectSetupContext $root $turnAnswers } catch { '' }
     if ($setupText) { $full += "`n`n$setupText" }
+    # Files the person added to the project and what they are for (FileIntake).
+    $intakeText = try { Format-IntakeContext $root } catch { '' }
+    if ($intakeText) { $full += "`n$intakeText" }
+    # SharePoint files and lists the person linked for a SharePoint HTML page's LiveData.
+    if (Test-SharePointPageProject $root) { $spText = try { Format-SharePointLinksContext $root } catch { '' }; if ($spText) { $full += "`n$spText" } }
     $tailwind = try { Test-TailwindProject $State.ProjectRoot } catch { $false }
     # A SharePoint HTML page is one file whatever else was chosen: SharePoint shows only that file.
     $build = if ($setup.answers -is [hashtable] -and "$($setup.answers['audience'])" -eq 'sharepoint') { 'single' } else { "$($setup.build)" }
@@ -2839,6 +2874,24 @@ function Format-ActionResults {
             else { (Invoke-ReadAction $State.ProjectRoot @($r.readPaths) -MaxCharsPerFile $perFile) -join "`n`n" }
         } else { $otherText[$r.head] }
         "$($r.head)`n$out".TrimEnd()
+    }
+    # The whole block within the budget (plus room for the heads): what still does not fit is cut from
+    # the largest parts first, each with a note, so one result never crowds out the rest or makes a
+    # message too long to type.
+    $parts = @($parts)
+    $limit = $budget + 4000
+    $total = ($parts | Measure-Object -Property Length -Sum).Sum
+    if ($total -gt $limit) {
+        $order = @(0..($parts.Count - 1) | Sort-Object { $parts[$_].Length } -Descending)
+        foreach ($k in $order) {
+            if ($total -le $limit) { break }
+            $over = $total - $limit
+            $keep = [Math]::Max(1500, $parts[$k].Length - $over)
+            if ($keep -ge $parts[$k].Length) { continue }
+            $cut = $parts[$k].Length - $keep
+            $parts[$k] = $parts[$k].Substring(0, $keep) + "`n(cut to keep the message within its size: $cut more characters. Ask for a narrower range or use grep.)"
+            $total -= $cut
+        }
     }
     $parts -join "`n`n"
 }
@@ -3305,6 +3358,11 @@ function Invoke-AgentAction {
         $warn = $null
         if ($Uncertain -gt 0) { $warn = 'Copilot''s reply had to be repaired after its link filter removed text; check this change carefully.' }
         if ($riskWarning) { $warn = $riskWarning }
+        # A change to an existing file in several places: the card offers each block on its own.
+        if ($Action.type -in 'write', 'edit' -and $preview -and $preview.exists -and "$oldText".Length -le 200000 -and "$newText".Length -le 200000) {
+            $hunks = @(try { Get-LineHunks "$oldText" "$newText" } catch { Write-CCBLogError agent 'change blocks' $_ })
+            if ($hunks.Count -ge 2) { $preview.hunks = $hunks }
+        }
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'awaiting'; preview = $preview; warning = $warn })
         $waitWatch = [Diagnostics.Stopwatch]::StartNew()
         $d = Wait-Approval $State $Id $personOnly
@@ -3315,6 +3373,20 @@ function Invoke-AgentAction {
             return @{ ok = $false; summary = "$($Action.type) rejected"; output = "rejected by the user.$why" ; reported = $true }
         }
         Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $true; status = 'running'; decidedBy = $d.by }
+        # Approved in part: only the blocks the person kept are written; Copilot is told which were left out.
+        $skip = @(@($d.skip) | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [int]$_ })
+        if ($skip.Count -and $Action.type -in 'write', 'edit' -and $preview -and $preview.hunks) {
+            $all = @($preview.hunks)
+            $merged = Merge-LineHunks "$oldText" "$newText" $skip
+            $before = "$oldText"
+            $out = Invoke-WriteAction $root $Action.arg $merged $Checkpoint
+            try { Add-CheckpointCount $Checkpoint $Action.arg $before (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text } catch { Write-CCBLogError agent 'line counts' $_ }
+            $left = @($all | Where-Object { $skip -contains [int]$_.index } | ForEach-Object { "lines $($_.oldStart)-$($_.oldStart + [Math]::Max(0, $_.oldCount - 1)) of the old file ($($_.first))" })
+            $note = "The user approved $($all.Count - $left.Count) of the $($all.Count) changed blocks and left these as they were: $($left -join '; '). Do not make those changes again unless the user asks."
+            $view = try { $now = (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text; Get-ChangedView $before $now (Resolve-ProjectPath $root $Action.arg) $Action.arg } catch { '' }
+            try { Register-ReadStamp $State $root ("$($Action.arg)".Replace('\', '/').TrimStart('/').ToLowerInvariant()) -Seen } catch { }
+            return @{ ok = $true; summary = "$out (in part: $($all.Count - $left.Count) of $($all.Count) blocks)"; output = "$out`n$note$(if ($view) { "`n$view" })"; changed = $true; path = $Action.arg }
+        }
     } else {
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ preview = $preview })
     }
@@ -3819,6 +3891,7 @@ function Invoke-AgentTurn {
         # and notes on data files that have none yet (or whose data changed). Asked with this message,
         # read from the replies; no extra message.
         $doneWhen = @(); $acceptAsked = $false; $acceptResults = $null
+        $coverageNudges = 0   # plan coverage check before done (Get-PlanCoverage), at most twice
         $State.LastTurnPlan = $null   # the steps and checks of this turn, for PLAN.md (Write-TurnPlan)
         $askChecks = ($kind -in 'coding', 'mixed', 'project') -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.ReviewByCaller -and (Test-BuildRequest $Text) -and $Text -notmatch '^\s*Continue and make the change now'
         if ($askChecks) { $message += "`n`n" + (Get-DoneWhenAsk) }
@@ -4260,6 +4333,21 @@ function Invoke-AgentTurn {
                         $message = $reminder
                         continue
                     }
+                }
+                # What the plan names and placeholder code (Get-PlanCoverage): the approved plan (a plan
+                # build) and Copilot's own steps against the project, at most twice per task.
+                if ($coverageNudges -lt 2 -and $checkpoint.Files.Count -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.Cancel) {
+                    $planText = ([regex]::Match("$($State.TurnText)", '(?s)(?:Approved plan|What you said you would do):\s*(.*)$').Groups[1].Value) + "`n" + ((@($State.Todos | Where-Object { $_ } | ForEach-Object { "$($_.text)" })) -join "`n")
+                    $cov = try { Get-PlanCoverage $State.ProjectRoot $checkpoint.Files $checkpoint.Dir $planText } catch { Write-CCBLogError agent 'plan coverage' $_; $null }
+                    $covText = if ($cov) { Format-PlanCoverage $cov } else { '' }
+                    if ($covText) {
+                        $coverageNudges++
+                        $ev.coverage = @(@($cov.missing | ForEach-Object { "missing: $_" }) + @($cov.stubs))
+                        Add-AgentEvent $State 'status' @{ text = "Before finishing: $(@($cov.missing).Count) file(s) the plan names are missing and $(@($cov.stubs).Count) placeholder(s) found; Copilot is asked to build them." }
+                        $message = $covText
+                        continue
+                    }
+                    $ev.coverage = @()
                 }
                 # New script and style files that no page, script or stylesheet loads: they have no effect.
                 if (-not $unloadedChecked -and $checkpoint.Files.Count -and $State.Mode -ne 'plan' -and -not $State.Cancel) {
@@ -4803,6 +4891,7 @@ function Start-AgentWorker {
                 'agent' { Invoke-AgentRun $State ([string]$task.agent) ([string]$task.text) -FollowUp:([bool]$task.followUp) -AutoWhy ([string]$task.autoWhy) }
                 'chain' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ChainJob $State $task.name }
                 'script' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ScriptJob $State $task.name }
+                'testrun-report' { Invoke-TestRunReport $State $task }
                 'packages' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-PackagesJob $State $task.folder }
                 'review' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ReviewJob $State $task }
                 'ask' {
@@ -4877,4 +4966,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask
+Export-ModuleMember -Function Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask, Invoke-TestRunReport

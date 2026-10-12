@@ -105,3 +105,40 @@ Describe 'Open items in the project to-do list at done' {
         } finally { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
+
+Describe 'Plan coverage before done' {
+    It 'takes the files a plan creates or changes, not the ones it removes or temporary ones' {
+        $plan = "Files to create:`n- index.html`n- js/app-data.js and css/layout.css`n- tests/app-data.test.js`nFILES TO REMOVE AFTER DISCOVERY`n- Work/probe.js`n- notes/old-list.md`nHOW TO CHECK`n- Open index.html and check the totals`n- Read https://example.com/x.js for reference"
+        $files = @(Get-PlanFiles $plan)
+        $files -join ',' | Should Be 'index.html,js/app-data.js,css/layout.css,tests/app-data.test.js'
+        @(Get-PlanFiles "1. Write Scripts/Export-Items.ps1`n2. Delete the scratch file temp/a.js`n3. Version 1.2 notes") -join ',' | Should Be 'Scripts/Export-Items.ps1'
+    }
+    It 'finds placeholder code a change adds, in several languages' {
+        (@(Find-StubCode 'js/app.js' '' "function loadItems() {`n  // TODO: read the data`n}`nfunction draw(items) { return items.length; }") -join '|') | Should Match 'function loadItems has an empty body'
+        (@(Find-StubCode 'js/app.js' '' "const parse = (text) => {`n}`nexport function total() { throw new Error('Not implemented'); }") -join '|') | Should Match "function parse has an empty body\|code that throws 'not implemented'"
+        (@(Find-StubCode 'tool.py' '' "def load(path):`n    `"`"`"Read it.`"`"`"`n    pass`n`ndef run():`n    raise NotImplementedError`n") -join '|') | Should Match 'function load only does pass\|function run only does raise NotImplementedError'
+        (@(Find-StubCode 'Scripts/Get-Items.ps1' '' "function Get-Items {`n    # later`n}`n") -join '|') | Should Match 'function Get-Items has an empty body'
+        (@(Find-StubCode 'js/app.js' 'let a = 1;' "let a = 1; // FIXME: rounding`nlet b = 2;`nlet c = 3;`nlet d = 4;") -join '|') | Should Match 'a FIXME marker: rounding'
+        (@(Find-StubCode 'js/new.js' '' "'use strict';`nwindow.App = {};") -join '|') | Should Match 'the file has only 1 line'
+    }
+    It 'leaves working code, tests, callbacks and what was already there alone' {
+        @(Find-StubCode 'js/app.js' '' "function sum(a, b) { return a + b; }`nbutton.addEventListener('click', () => {});`nconst x = 1;`nconst y = 2;").Count | Should Be 0
+        @(Find-StubCode 'tests/app.test.js' '' 'function helper() {}').Count | Should Be 0
+        $old = "function keep() {`n}`n// TODO: old note`nconst a = 1;`nconst b = 2;"
+        @(Find-StubCode 'js/app.js' $old ($old + "`nconst c = 3;")).Count | Should Be 0
+        @(Find-StubCode 'styles/site.css' '' '/* TODO */').Count | Should Be 0
+    }
+    It 'reports missing plan files and placeholders against the project, as one message' {
+        $p = Join-Path $env:TEMP ('ccb-cov-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'js') -Force | Out-Null
+        try {
+            [IO.File]::WriteAllText((Join-Path $p 'index.html'), '<!doctype html><title>x</title>')
+            [IO.File]::WriteAllText((Join-Path $p 'js\app.js'), "function loadItems() {`n}`nconst a = 1;`nconst b = 2;")
+            $cov = Get-PlanCoverage $p @{ 'index.html' = 'new'; 'js/app.js' = 'new' } '' "Files to create:`n- index.html`n- js/app.js`n- js/report.js"
+            @($cov.missing) -join ',' | Should Be 'js/report.js'
+            @($cov.stubs) -join '|' | Should Match '^js/app\.js: function loadItems has an empty body'
+            $m = Format-PlanCoverage $cov
+            $m | Should Match '(?s)does not have them:.*- js/report\.js.*placeholders.*Build them now'
+            Format-PlanCoverage @{ missing = @(); stubs = @() } | Should Be ''
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+}

@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -694,7 +694,8 @@ function Invoke-ApiRequest($Ctx, $State) {
             # deleting data can only be approved by "user" (Wait-Approval).
             $fromPage = $Ctx.Request.Headers['Origin'] -eq "http://localhost:$($State.Config.port)"
             $by = if ($fromPage -and $b.by -eq 'user') { 'user' } elseif ($b.by -eq 'mcp') { 'mcp' } else { 'api' }
-            $State.Approvals[[string]$b.id] = @{ decision = [string]$b.decision; note = [string]$b.note; by = $by }
+            # skip: the blocks of a change the person left out (Agent Get-LineHunks / Merge-LineHunks).
+            $State.Approvals[[string]$b.id] = @{ decision = [string]$b.decision; note = [string]$b.note; by = $by; skip = @(@($b.skip) | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [int]$_ }) }
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/mode$' {
@@ -833,6 +834,109 @@ function Invoke-ApiRequest($Ctx, $State) {
             $zip = & (Join-Path $State.AppRoot 'tools\collect-diagnostics.ps1') -NoOpen
             return Send-Json $Ctx @{ ok = $true; path = (Protect-LogText $zip); fullPath = $zip }
         }
+        '^POST /api/session-report$' {
+            # This run of the app, from its own log (SessionReport.psm1).
+            $path = New-SessionReportFile -ProcessId $PID
+            return Send-Json $Ctx @{ ok = $true; path = (Protect-LogText $path); fullPath = $path }
+        }
+        '^POST /api/intake$' {
+            # The person's choice per type for the files they put in the project (FileIntake.psm1):
+            # moves into Source/ as own-change cards, the roles recorded, and what is to be done now
+            # sent to Copilot as one request. Only from the StreamHub page itself.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $choices = @{}
+            if ($b.choices) { foreach ($p in $b.choices.PSObject.Properties) { $choices[$p.Name] = [string]$p.Value } }
+            $r = Save-IntakeChoices $State.ProjectRoot $choices
+            if (@($r.moved).Count) { Add-OwnChangeEvent $State 'move' "$(@($r.moved).Count) data file(s) to Source/" 'StreamHub moved the data files for the app into Source/, where they stay read-only.' -Output (@($r.moved) -join "`n") }
+            $queued = $null
+            if ($r.request) { $queued = (Submit-AgentTask $State @{ kind = 'chat'; text = $r.request; forceKind = 'coding' } 'user' 'Files added to the project').id }
+            return Send-Json $Ctx @{ ok = $true; moved = @($r.moved); queued = $queued }
+        }
+        '^GET /api/sharepoint$' {
+            if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ ok = $true; sources = @(); site = ''; page = ''; pages = @() } }
+            $l = Get-SharePointLinks $State.ProjectRoot
+            $pages = @(Get-ChildItem -LiteralPath $State.ProjectRoot -Filter '*.htm*' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+            return Send-Json $Ctx @{ ok = $true; sources = @($l.sources); site = $l.site; page = $l.page; pages = $pages }
+        }
+        '^POST /api/sharepoint/link$' {
+            # A SharePoint file or list the person links for the page's LiveData, resolved with their
+            # own sign-in in StreamHub's Edge. Only from the StreamHub page itself.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $src = Resolve-SharePointSource ([string]$b.url) -Port ([int]$State.Config.cdpPort)
+            $l = Add-SharePointLink $State.ProjectRoot $src
+            Write-CCBLog info server 'SharePoint source linked' @{ kind = $src.kind; name = "$($src.label)" }
+            return Send-Json $Ctx @{ ok = $true; source = $src; sources = @($l.sources) }
+        }
+        '^POST /api/sharepoint/unlink$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            $b = Read-JsonBody $Ctx
+            $l = Remove-SharePointLink $State.ProjectRoot ([string]$b.spItemUrl)
+            return Send-Json $Ctx @{ ok = $true; sources = @($l.sources) }
+        }
+        '^POST /api/sharepoint/publish$' {
+            # Publishing is the person's own action: first a look (where it goes, whether it is there),
+            # then the upload only with confirm, and replacing only with replace. Never from Copilot,
+            # MCP, a chain or a schedule: the StreamHub page's Origin only.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $file = [IO.Path]::GetFileName([string]$b.file)
+            $full = Resolve-ProjectPath $State.ProjectRoot $file
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "The project has no page named $file." }
+            $l = Get-SharePointLinks $State.ProjectRoot; $l.site = [string]$b.site; $l.page = $file; Save-SharePointLinks $State.ProjectRoot $l
+            if (-not $b.confirm) {
+                $look = Publish-SharePointPage -Site ([string]$b.site) -FileName $file -WhatIf -Port ([int]$State.Config.cdpPort)
+                $issues = @(Get-SharePointPageFindings ([IO.File]::ReadAllText($full)))
+                return Send-Json $Ctx @{ ok = $true; target = $look.target; exists = $look.exists; findings = $issues }
+            }
+            $r = Publish-SharePointPage -Site ([string]$b.site) -FileName $file -Html ([IO.File]::ReadAllText($full)) -Replace:([bool]$b.replace) -Port ([int]$State.Config.cdpPort)
+            Write-CCBLog info server 'Page published to SharePoint' @{ page = $file; replaced = $r.replaced }
+            Add-AgentEvent $State 'status' @{ text = "$file published to SharePoint$(if ($r.replaced) { ', replacing the page there' }): $($r.target)" }
+            return Send-Json $Ctx @{ ok = $true; target = $r.target; replaced = $r.replaced }
+        }
+        '^GET /api/testruns$' {
+            $pr = Get-ProjectsRoot $State.Config.projectsFolder
+            return Send-Json $Ctx @{ ok = $true; items = @(Get-TestRuns $pr); dir = (Get-TestRunsDir $pr) }
+        }
+        '^POST /api/testruns/save$' {
+            # The requests of the open project's chat (since the history was last cleared), without the
+            # texts the plan cards make, as a test run with the project's data files and setup.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $events = @(Read-ChatHistory $State.ProjectRoot)
+            $cut = -1; for ($i = 0; $i -lt $events.Count; $i++) { if ($events[$i].type -eq 'history-cleared') { $cut = $i } }
+            $reqs = @(for ($i = $cut + 1; $i -lt $events.Count; $i++) {
+                $t = "$($events[$i].text)"
+                if ($events[$i].type -eq 'user' -and $t.Trim() -and $t -notmatch '^(Build this now|Continue and make the change now|Change the plan|You stopped before|Continue with the items still open)') { $t }
+            })
+            $path = Save-TestRun (Get-ProjectsRoot $State.Config.projectsFolder) ([string]$b.name) $reqs $State.ProjectRoot (Get-ProjectSetup $State.ProjectRoot) ([string]$b.title)
+            return Send-Json $Ctx @{ ok = $true; path = (Protect-LogText $path); fullPath = $path; steps = $reqs.Count }
+        }
+        '^POST /api/testruns/run$' {
+            # A fresh project with the test's files and setup, one task per step, then the report.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            $b = Read-JsonBody $Ctx
+            $pr = Get-ProjectsRoot $State.Config.projectsFolder
+            if (-not (Test-TestRunName ([string]$b.name))) { throw 'Unknown test run.' }
+            $file = Join-Path (Get-TestRunsDir $pr) "$([string]$b.name).testrun.md"
+            if (-not (Test-Path -LiteralPath $file)) { throw "No test run named $($b.name)." }
+            $run = Read-TestRun $file
+            if (-not @($run.steps).Count) { throw 'The test run has no steps.' }
+            $proj = New-TestRunProject $pr $run
+            Set-Project $State $proj
+            $started = (Get-Date).ToString('s')
+            $info = @{ name = $run.name; title = $run.title; steps = @($run.steps).Count; started = $started; project = $proj; projectsRoot = $pr }
+            for ($i = 0; $i -lt @($run.steps).Count; $i++) {
+                $null = Submit-AgentTask $State @{ kind = 'chat'; text = [string]$run.steps[$i]; mode = $run.mode; testRun = $info } 'testrun' "Test run $($run.name) $($i + 1)/$(@($run.steps).Count): $([string]$run.steps[$i])"
+            }
+            $null = Submit-AgentTask $State @{ kind = 'testrun-report'; testRun = $info } 'testrun' "Test run $($run.name): report"
+            return Send-Json $Ctx @{ ok = $true; project = $proj; steps = @($run.steps).Count }
+        }
         '^POST /api/project/show$' {
             if ($State.ProjectRoot -and (Test-Path -LiteralPath $State.ProjectRoot)) { Start-Process explorer.exe "`"$($State.ProjectRoot)`"" }
             return Send-Json $Ctx @{ ok = $true }
@@ -908,6 +1012,14 @@ function Set-Project($State, [string]$Path) {
         $new = try { (Read-TextFile (Join-Path $State.ProjectRoot $f.path.Replace('/', ''))).Text } catch { $null }
         Add-OwnChangeEvent $State 'edit' $f.path "$($f.count) link(s) or reference(s) now point at the new folders. The earlier version is kept in $($re.backup)." @{ path = $f.path; exists = $true; old = $old; new = $new }
     }
+    # A project that has had no request yet, with files the person put in it: what are they for?
+    try {
+        $asked = @(Read-ChatHistory $State.ProjectRoot | Where-Object { $_.type -eq 'user' }).Count
+        if (-not $asked) {
+            $groups = @(Get-IntakeGroups $State.ProjectRoot)
+            if ($groups.Count) { Add-AgentEvent $State 'files-intake' @{ groups = $groups; text = "This project already has $((@($groups | ForEach-Object { $_.count }) | Measure-Object -Sum).Sum) file(s) of yours. What are they for?" } }
+        }
+    } catch { Write-CCBLogError server 'file intake' $_ }
     # Data files converted and data copies following their JSON: by the worker at its next idle
     # moment, since a large data file takes a minute and the open must answer at once.
     $State.OpenSync = $State.ProjectRoot

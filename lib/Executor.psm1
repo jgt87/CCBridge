@@ -1170,6 +1170,84 @@ function Get-ConvertedDataFile([string]$ProjectRoot, [string]$Rel) {
     $null
 }
 
+function Get-LineHunks {
+    <# The changes from $Old to $New as blocks of lines ("hunks"), for approving a change in parts:
+       @(@{ index; oldStart; oldCount; newStart; newCount; first }) in order (1-based line numbers;
+       first = the first changed line, for the card). Lines are compared whole (a CR stays part of its
+       line). The common start and end are skipped; the middle is compared line by line when it is
+       small enough (a longest common subsequence), else it is one block. -Ops also returns the
+       operations Merge-LineHunks applies. #>
+    param([AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [switch]$Ops, [int]$MaxCells = 250000)
+    $a = "$Old".Split("`n"); $b = "$New".Split("`n")
+    $pre = 0
+    while ($pre -lt $a.Length -and $pre -lt $b.Length -and $a[$pre] -ceq $b[$pre]) { $pre++ }
+    $suf = 0
+    while ($suf -lt ($a.Length - $pre) -and $suf -lt ($b.Length - $pre) -and $a[$a.Length - 1 - $suf] -ceq $b[$b.Length - 1 - $suf]) { $suf++ }
+    $n = $a.Length - $pre - $suf; $m = $b.Length - $pre - $suf
+    # ops over the middle: 'e' equal, 'd' delete (old line), 'i' insert (new line)
+    $opList = New-Object System.Collections.Generic.List[char]
+    if ($n -gt 0 -and $m -gt 0 -and ($n * $m) -le $MaxCells) {
+        $w = $m + 1
+        $L = New-Object 'int[]' (($n + 1) * $w)
+        for ($i = $n - 1; $i -ge 0; $i--) {
+            for ($j = $m - 1; $j -ge 0; $j--) {
+                $L[$i * $w + $j] = if ($a[$pre + $i] -ceq $b[$pre + $j]) { $L[($i + 1) * $w + $j + 1] + 1 } else { [Math]::Max($L[($i + 1) * $w + $j], $L[$i * $w + $j + 1]) }
+            }
+        }
+        $i = 0; $j = 0
+        while ($i -lt $n -and $j -lt $m) {
+            if ($a[$pre + $i] -ceq $b[$pre + $j]) { $opList.Add('e'); $i++; $j++ }
+            elseif ($L[($i + 1) * $w + $j] -ge $L[$i * $w + $j + 1]) { $opList.Add('d'); $i++ }
+            else { $opList.Add('i'); $j++ }
+        }
+        while ($i -lt $n) { $opList.Add('d'); $i++ }
+        while ($j -lt $m) { $opList.Add('i'); $j++ }
+    } else {
+        for ($i = 0; $i -lt $n; $i++) { $opList.Add('d') }
+        for ($j = 0; $j -lt $m; $j++) { $opList.Add('i') }
+    }
+    # Blocks: runs of d/i between equal lines.
+    $hunks = New-Object System.Collections.Generic.List[object]
+    $oi = $pre; $ni = $pre; $k = 0
+    while ($k -lt $opList.Count) {
+        if ($opList[$k] -eq 'e') { $oi++; $ni++; $k++; continue }
+        $h = @{ index = $hunks.Count; oldStart = $oi + 1; newStart = $ni + 1; oldCount = 0; newCount = 0; first = ''; from = $k }
+        while ($k -lt $opList.Count -and $opList[$k] -ne 'e') {
+            if ($opList[$k] -eq 'd') { if (-not $h.first) { $h.first = "- $($a[$oi].Trim())" }; $h.oldCount++; $oi++ } else { if (-not $h.first -or $h.first.StartsWith('- ') -and -not $h.newCount) { if (-not $h.first) { $h.first = "+ $($b[$ni].Trim())" } }; $h.newCount++; $ni++ }
+            $k++
+        }
+        $h.to = $k
+        if ($h.first.Length -gt 90) { $h.first = $h.first.Substring(0, 87) + '...' }
+        $hunks.Add($h)
+    }
+    if ($Ops) { return @{ hunks = $hunks.ToArray(); ops = $opList.ToArray(); pre = $pre; suf = $suf; a = $a; b = $b } }
+    @(foreach ($h in $hunks) { @{ index = $h.index; oldStart = $h.oldStart; oldCount = $h.oldCount; newStart = $h.newStart; newCount = $h.newCount; first = $h.first } })
+}
+
+function Merge-LineHunks {
+    <# $New with the blocks in $Skip (their index from Get-LineHunks) left as they were in $Old: the
+       change a person approved only in part. #>
+    param([AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New, [int[]]$Skip = @())
+    $d = Get-LineHunks $Old $New -Ops
+    $skipSet = @{}; foreach ($s in @($Skip)) { $skipSet[[int]$s] = $true }
+    $out = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $d.pre; $i++) { $out.Add($d.a[$i]) }
+    $oi = $d.pre; $ni = $d.pre; $k = 0; $hi = 0
+    while ($k -lt $d.ops.Count) {
+        if ($d.ops[$k] -eq 'e') { $out.Add($d.a[$oi]); $oi++; $ni++; $k++; continue }
+        $keepOld = $skipSet.ContainsKey($hi)
+        while ($k -lt $d.ops.Count -and $d.ops[$k] -ne 'e') {
+            if ($d.ops[$k] -eq 'd') { if ($keepOld) { $out.Add($d.a[$oi]) }; $oi++ } else { if (-not $keepOld) { $out.Add($d.b[$ni]) }; $ni++ }
+            $k++
+        }
+        $hi++
+    }
+    for ($i = $d.a.Length - $d.suf; $i -lt $d.a.Length; $i++) { $out.Add($d.a[$i]) }
+    $out.ToArray() -join "`n"
+}
+
+$script:MaxReadLineChars = 2000   # longer lines in a read are cut (one-line data, minified code)
+
 function Invoke-ReadAction {
     <# File contents for Copilot. A path may carry a line range (PATH:START-END). Long content is
        cut at a whole line, with a note that says which lines are shown and how to read the rest. #>
@@ -1228,18 +1306,23 @@ function Invoke-ReadAction {
             }
             $sb = New-Object Text.StringBuilder
             $last = $from - 1
+            $longLines = 0
             for ($i = $from; $i -le $to; $i++) {
                 $line = $lines[$i - 1]
+                # A very long line (minified code, a JSON or CSV file on one line) is cut: its first part
+                # shows the shape, and the rest would fill the whole message with one line.
+                if ($line.Length -gt $script:MaxReadLineChars) { $longLines++; $line = $line.Substring(0, $script:MaxReadLineChars) + " ... ($($line.Length - $script:MaxReadLineChars) more characters on this line)" }
                 if ($sb.Length -gt 0 -and $sb.Length + $line.Length + 1 -gt $MaxCharsPerFile) { break }
                 if ($sb.Length -gt 0) { [void]$sb.Append("`n") }
                 [void]$sb.Append($line)
                 $last = $i
             }
-            $whole = ($from -eq 1 -and $last -eq $total)
+            $whole = ($from -eq 1 -and $last -eq $total -and -not $longLines)
             $head = if ($whole) { "### $p" } else { "### $p (lines $from-$last of $total$widened)" }
             # Part of a PowerShell file: the parameters of the function it is in (header not shown).
             if (-not $whole -and -not $office) { $scope = try { Get-PsScopeNote $raw $full $from $last } catch { '' }; if ($scope) { $head += "`n$scope" } }
             if ($secret) { $head += "`n(holds secrets: the values are shown as <hidden>; this file is changed by the user, not by you)" }
+            if ($longLines) { $head += "`n($longLines line(s) longer than $script:MaxReadLineChars characters are cut: this is one-line data or minified code. Do not read it whole; use grep for what you need$(if ($full -match '(?i)\.(json|csv|tsv)$') { ', or the helper program''s converted copy and data notes' }), and never edit such a line by hand.)" }
             if ($office) {
                 # Shown as Markdown; a .docx made here can be changed with write/edit on this text.
                 $how = if ($office -eq 'word' -and (Test-OwnDocx $full)) { 'write or edit this text to change it' } elseif ($office -eq 'word') { 'made in Word: not rewritten here' } else { 'read only here' }
@@ -2468,5 +2551,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-WebDownloadCommand, Get-CmdQuoteBreak, Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes,
+Export-ModuleMember -Function Get-WebDownloadCommand, Get-CmdQuoteBreak, Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes, Get-LineHunks, Merge-LineHunks,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction, Get-FileViewText, Get-FolderListing, Get-ReadNotFoundNote

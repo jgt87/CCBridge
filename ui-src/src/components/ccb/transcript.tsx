@@ -1,4 +1,6 @@
 import { openExternal } from "@/lib/links";
+import { IntakeCard } from "./intake-card";
+import type { IntakeGroup } from "@/lib/api";
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
 import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard, type PlanVariant } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
@@ -26,6 +28,7 @@ export type TranscriptItem =
   | { kind: "runbookChoice"; seq: number; name: string; title: string; request: string; restored: boolean }
   | SetupChoiceItem
   | { kind: "packages"; seq: number; folder: string; text: string; npm: boolean; restored: boolean }
+  | { kind: "intake"; seq: number; text: string; groups: IntakeGroup[]; restored: boolean }
   | { kind: "unfinished"; seq: number; text: string; findings: string[]; continueText: string; restored: boolean }
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string; path?: string }
@@ -125,6 +128,11 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
       continueText: e.continueText ?? "",
       restored: Boolean(e.restored),
     }),
+  "files-intake": (e, ctx) => {
+    const list = (v: unknown) => (Array.isArray(v) ? v : v ? [v] : []);
+    const groups = list(e.groups).map((g: IntakeGroup) => ({ ...g, files: list(g.files) as string[], options: list(g.options) as IntakeGroup["options"] }));
+    ctx.items.push({ kind: "intake", seq: e.seq, text: e.text ?? "", groups, restored: Boolean(e.restored) });
+  },
   "packages-needed": (e, ctx) =>
     ctx.items.push({ kind: "packages", seq: e.seq, folder: e.folder ?? "", text: e.text ?? "", npm: e.npm !== false, restored: Boolean(e.restored) }),
   "setup-choice": (e, ctx) =>
@@ -511,6 +519,8 @@ function TranscriptRow({
       return <SetupChoiceCard item={item} onSend={onSend} />;
     case "packages":
       return <PackagesCard item={item} />;
+    case "intake":
+      return <IntakeCard groups={item.groups} restored={item.restored} text={item.text} />;
     case "unfinished":
       return <UnfinishedCard item={item} onSend={onSend} />;
     case "action":

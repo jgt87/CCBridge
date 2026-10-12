@@ -281,4 +281,4 @@ function Open-SsoSettingsPage([int]$Port = 9333) {
     $true
 }
 
-Export-ModuleMember -Function Select-SsoSwitch, Get-CopilotSignInState, Get-OtherPageHost, Test-ProfileSsoAuto, Get-ProfileAccount, Get-TabAddresses, Get-SsoStatus, Set-ProfileSso, Invoke-SsoSetup, Open-SsoSettingsPage
+Export-ModuleMember -Function Select-SsoSwitch, Get-CopilotSignInState, Get-OtherPageHost, Test-ProfileSsoAuto, Get-ProfileAccount, Get-TabAddresses, Get-SsoStatus, Set-ProfileSso, Invoke-SsoSetup, Open-SsoSettingsPage, Open-BackgroundTab, Close-BackgroundTab

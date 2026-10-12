@@ -49,6 +49,18 @@ export interface Preview {
   exists: boolean;
   old: string | null;
   new: string | null;
+  /** A change to an existing file in several places: its blocks, to approve each on its own. */
+  hunks?: ChangeBlock[] | ChangeBlock | null;
+}
+
+/** One block of a change (StreamHub's Get-LineHunks): where it is and its first changed line. */
+export interface ChangeBlock {
+  index: number;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  first: string;
 }
 
 /** One file of a change set, before and right after it (History). */
@@ -168,7 +180,9 @@ export interface AgentEvent {
     /** Settings > Privacy > Clear chat history: the chat shows nothing from before it. */
     | "history-cleared"
     /** A new project's first request builds a page without saying how: StreamHub asks first. */
-    | "setup-choice";
+    | "setup-choice"
+    /** A new project already holds files of the person's: what are they for (by type)? */
+    | "files-intake";
   time: string;
   text?: string;
   uncertain?: number;
@@ -218,6 +232,8 @@ export interface AgentEvent {
   /** setup-choice: the questions, whether a live data file can be chosen, a path the request named,
    * and whether the message went with Clarify first (the answer keeps it). */
   choices?: SetupChoice[] | SetupChoice;
+  /** files-intake: the person's files by type, with the uses for each type. */
+  groups?: IntakeGroup[] | IntakeGroup;
   live?: boolean;
   suggest?: string;
   clarify?: boolean;
@@ -716,6 +732,17 @@ export const api = {
   setResponseMode: (value: string) => call<{ ok: boolean }>("POST", "/api/response-mode", { value }),
   /** The app's theme, so the Copilot tab can show the same (setting copilotTheme). */
   setCopilotTheme: (theme: "light" | "dark" | "system") => call<{ ok: boolean }>("POST", "/api/copilot-theme", { theme }),
+  sharePoint: () => call<{ sources: SharePointSource[] | SharePointSource; site: string; page: string; pages: string[] | string }>("GET", "/api/sharepoint").then((r) => ({ sources: asList(r.sources), site: r.site ?? "", page: r.page ?? "", pages: asList(r.pages) })),
+  linkSharePoint: (url: string) => call<{ source: SharePointSource; sources: SharePointSource[] | SharePointSource }>("POST", "/api/sharepoint/link", { url }).then((r) => ({ source: r.source, sources: asList(r.sources) })),
+  unlinkSharePoint: (spItemUrl: string) => call<{ sources: SharePointSource[] | SharePointSource }>("POST", "/api/sharepoint/unlink", { spItemUrl }).then((r) => ({ sources: asList(r.sources) })),
+  publishSharePoint: (b: { site: string; file: string; confirm?: boolean; replace?: boolean }) =>
+    call<{ target: string; exists: boolean; replaced: boolean; findings: string[] | string }>("POST", "/api/sharepoint/publish", b).then((r) => ({ target: r.target, exists: !!r.exists, replaced: !!r.replaced, findings: asList(r.findings) })),
+  intake: (choices: Record<string, string>) =>
+    call<{ ok: boolean; moved: string[] | string; queued: string | null }>("POST", "/api/intake", { choices }).then((r) => ({ moved: asList(r.moved), queued: r.queued })),
+  testRuns: () => call<{ items: TestRunItem[] | TestRunItem; dir: string }>("GET", "/api/testruns").then((r) => ({ dir: r.dir, items: asList(r.items) })),
+  saveTestRun: (name: string) => call<{ ok: boolean; path: string; fullPath: string; steps: number }>("POST", "/api/testruns/save", { name }),
+  runTestRun: (name: string) => call<{ ok: boolean; project: string; steps: number }>("POST", "/api/testruns/run", { name }),
+  sessionReport: () => call<{ ok: boolean; path: string; fullPath: string }>("POST", "/api/session-report"),
   fetchList: () => call<{ items: FetchItem[] }>("GET", "/api/fetch").then((r) => (Array.isArray(r.items) ? r.items : [])),
   saveFetch: (name: string, prompt: string, web?: FetchWeb) => call<{ ok: boolean; item: FetchItem }>("POST", "/api/fetch", { name, prompt, ...(web ?? {}) }),
   runFetch: (name: string) => call<{ ok: boolean }>("POST", "/api/fetch/run", { name }),
@@ -754,8 +781,9 @@ export const api = {
   /** Add a runbook, script or download step to a chain, or remove / move one (index from 0). */
   chainSteps: (name: string, op: "add" | "remove" | "up" | "down", opts: { kind?: "runbook" | "script" | "download"; target?: string; args?: string; index?: number } = {}) =>
     call<{ ok: boolean }>("POST", "/api/chains/steps", { name, op, ...opts }),
-  approve: (id: string, decision: "approve" | "reject", note = "") =>
-    call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user" }),
+  /** skip: the blocks of a change the person leaves out (approving the rest). */
+  approve: (id: string, decision: "approve" | "reject", note = "", skip: number[] = []) =>
+    call<{ ok: boolean }>("POST", "/api/approve", { id, decision, note, by: "user", ...(skip.length ? { skip } : {}) }),
   setMode: (mode: Mode) => call<{ ok: boolean }>("POST", "/api/mode", { mode }),
   /** Edge's caches in StreamHub's own profile (never the sign-in). */
   edgeCache: () => call<EdgeCacheInfo>("GET", "/api/edge-cache"),
@@ -842,4 +870,20 @@ export const api = {
       xhr.onerror = () => reject(new Error("Upload failed"));
       xhr.send(file);
     }),
+};
+
+/** A saved test run (TestRuns/NAME.testrun.md in the library beside the projects). */
+export type TestRunItem = { name: string; title: string; steps: number; path: string; lastRun: string };
+
+/** A SharePoint file or list linked for a SharePoint HTML page's LiveData. */
+export type SharePointSource = { kind: "file" | "list"; spItemUrl: string; fileName: string; label: string; webUrl?: string; listId?: string };
+
+/** A type of file a person put in a new project, and what it can be used for (StreamHub's FileIntake). */
+export type IntakeGroup = {
+  kind: string;
+  label: string;
+  default: string;
+  count: number;
+  files: string[];
+  options: { value: string; label: string; help: string }[];
 };

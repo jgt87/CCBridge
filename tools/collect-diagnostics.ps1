@@ -17,6 +17,7 @@ Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
 Import-Module (Join-Path $root 'lib\Log.psm1')
 Import-Module (Join-Path $root 'lib\Cdp.psm1')
+Import-Module (Join-Path $root 'lib\SessionReport.psm1')
 
 $stamp = (Get-Date).ToString('yyyyMMdd-HHmm')
 $stage = Join-Path $env:TEMP "ccbridge-diagnostics-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 4))"
@@ -60,6 +61,10 @@ if ($envInfo.edgeDebugPortOpen) {
 $logDir = Get-CCBLogDir
 $logs = @(Get-ChildItem $logDir -Filter 'ccbridge-*.log' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge (Get-Date).Date.AddDays(1 - $Days) })
 if ($logs.Count) { $null = New-Item -ItemType Directory -Path (Join-Path $stage 'logs'); $logs | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stage 'logs') } }
+
+# 3a. A session report of the last run in the newest log: what happened, in one page.
+$newest = $logs | Sort-Object LastWriteTime | Select-Object -Last 1
+if ($newest) { try { $null = New-SessionReportFile -LogFile $newest.FullName -OutDir $stage; Get-ChildItem $stage -Filter 'session-*.md' | Rename-Item -NewName 'session-report.md' } catch { } }
 
 # 3b. False alarms of the file checks (disputed by Copilot or ignored by you), per project: to turn
 #     into test samples so the same false alarm cannot come back.

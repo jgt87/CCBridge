@@ -20,7 +20,7 @@ import { cardOpen, useCardView } from "@/lib/card-view";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import HoldButton from "@/components/kokonutui/hold-button";
 import { Input } from "@/components/ui/input";
-import { api, type Preview } from "@/lib/api";
+import { api, type ChangeBlock, type Preview } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { countChanges, diffLines } from "@/lib/diff";
 import { ChangePill } from "./change-pill";
@@ -165,6 +165,9 @@ export function ActionCard({ item }: { item: ActionItem }) {
   const view = useCardView();
   const [note, setNote] = useState("");
   const [sent, setSent] = useState(false);
+  // Blocks of a change the person unticked: left out when approving (the rest is written).
+  const [skip, setSkip] = useState<number[]>([]);
+  const blocks = asBlocks(item.preview?.hunks);
   const awaiting = item.status === "awaiting" && !sent;
   // The command running now: its output as it comes (the card opens to show it).
   const { live, windows } = useRunLive();
@@ -179,7 +182,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
   const decide = async (decision: "approve" | "reject") => {
     setSent(true);
     try {
-      await api.approve(item.id, decision, note);
+      await api.approve(item.id, decision, note, decision === "approve" ? skip : []);
     } catch {
       setSent(false);
     }
@@ -298,6 +301,31 @@ export function ActionCard({ item }: { item: ActionItem }) {
             <OpenInWindow command={item.target} strong={needsTerminal || myLive?.state === "question"} />
           )}
 
+          {awaiting && blocks.length > 1 && (
+            <fieldset className="kit-fieldset space-y-1 text-xs">
+              <legend className="kit-legend">
+                Changes in this step ({blocks.length - skip.length} of {blocks.length} kept): untick one to leave it out
+              </legend>
+              {blocks.map((b) => (
+                <label className="flex min-w-0 items-center gap-2" key={b.index}>
+                  <input
+                    checked={!skip.includes(b.index)}
+                    className="kit-check"
+                    onChange={(e) => setSkip((s) => (e.target.checked ? s.filter((x) => x !== b.index) : [...s, b.index]))}
+                    type="checkbox"
+                  />
+                  <span className="shrink-0 text-muted-foreground">
+                    {b.oldCount ? `line ${b.oldStart}${b.oldCount > 1 ? `-${b.oldStart + b.oldCount - 1}` : ""}` : `after line ${b.oldStart - 1}`}
+                    {` (+${b.newCount} -${b.oldCount})`}
+                  </span>
+                  <span className="min-w-0 truncate font-mono" title={b.first}>
+                    {b.first}
+                  </span>
+                </label>
+              ))}
+              {skip.length === blocks.length && <div className="text-muted-foreground">Nothing is kept: reject the step instead, with a note for Copilot.</div>}
+            </fieldset>
+          )}
           {awaiting && (
             <div className="flex flex-wrap items-center gap-2">
               {item.action === "run" ? (
@@ -344,4 +372,10 @@ export function ActionCard({ item }: { item: ActionItem }) {
       )}
     </div>
   );
+}
+
+/** The blocks of a change from the preview (one object or a list, as PowerShell sends them). */
+function asBlocks(h: Preview["hunks"]): ChangeBlock[] {
+  if (!h) return [];
+  return (Array.isArray(h) ? h : [h]).filter((b) => b && typeof b.index === "number");
 }

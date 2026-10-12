@@ -4,6 +4,7 @@ import {
   ClipboardList,
   FileCode2,
   FileArchive,
+  FileText,
   FolderOpen,
   Menu as MenuIcon,
   ScrollText,
@@ -36,7 +37,7 @@ import { openExternal, setLinksThroughEdge } from "@/lib/links";
 import { SplitViewHint } from "@/components/ccb/split-view-hint";
 import { ModalBackdrop } from "@/components/ccb/modal-backdrop";
 import { notifyEvents, notifyQueue } from "@/lib/notify";
-import type { ChatOptions, ScheduleItem } from "@/lib/api";
+import type { ChatOptions, ScheduleItem, TestRunItem } from "@/lib/api";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
 import { type AgentEvent, type AppState, api, type ChainItem, type ChangeSetView, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
@@ -90,7 +91,8 @@ export default function App() {
     });
   const queueSeen = useRef(new Map<string, string>());
   const pauseSeen = useRef<string | null | undefined>(undefined);
-  const [palette, setPalette] = useState<null | "commands" | "attach" | "logging">(null);
+  const [palette, setPalette] = useState<null | "commands" | "attach" | "logging" | "testruns">(null);
+  const [testRuns, setTestRuns] = useState<TestRunItem[]>([]);
   const [viewer, setViewer] = useState<{ path: string; text: string; change?: ViewerChange; note?: string } | null>(null);
   const [queuedNote, setQueuedNote] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -421,6 +423,21 @@ export default function App() {
       }),
   }));
 
+  // Test runs: the saved ones to start (a fresh project, every step, then the report).
+  const testRunActions: Action[] = testRuns.map((t) => ({
+    id: `testrun:${t.name}`,
+    label: t.title,
+    description: `${t.steps} step(s)${t.lastRun ? `, last run ${t.lastRun}` : ", not run yet"}: runs them in a new project, then writes a report compared with the last run`,
+    icon: <ClipboardList className="h-4 w-4 text-muted-foreground" />,
+    end: "Test run",
+    onSelect: () =>
+      api.runTestRun(t.name).then(
+        (r) => setNotice({ text: `Test run started in a new project (${r.steps} step(s)). The report comes at the end, in .streamhub/TestRun-report.md.` }),
+        (e) => setError((e as Error).message)
+      ),
+  }));
+  const saveName = (state.project?.name || "Test").replace(/[^\w .-]/g, "").trim().slice(0, 48) || "Test";
+
   const commandActions: Action[] = [
     { id: "new-chat", label: "New chat", description: "Start a fresh Copilot chat; the project stays open", icon: <MessageSquarePlus className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: startNewChat },
     { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: <RotateCcw className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => api.undo() },
@@ -435,6 +452,48 @@ export default function App() {
       icon: <ScrollText className="h-4 w-4 text-muted-foreground" />,
       end: "Diagnostics",
       onSelect: () => setTimeout(() => setPalette("logging"), 0),
+    },
+    {
+      id: "testrun-save",
+      label: "Save this chat as a test run",
+      description: `The requests of this project's chat, its data files and setup, as test run "${saveName}" to run again later`,
+      icon: <ClipboardList className="h-4 w-4 text-muted-foreground" />,
+      end: "Test runs",
+      onSelect: () =>
+        api.saveTestRun(saveName).then(
+          (r) => setNotice({ text: `Test run saved with ${r.steps} step(s): ${r.path}`, path: r.fullPath }),
+          (e) => setError((e as Error).message)
+        ),
+    },
+    {
+      id: "testruns",
+      label: "Test runs",
+      description: "Run a saved test run again in a new project, with a report compared with the last run",
+      icon: <ClipboardList className="h-4 w-4 text-muted-foreground" />,
+      end: "Test runs",
+      onSelect: () =>
+        api.testRuns().then(
+          (r) => {
+            if (!r.items.length) { setNotice({ text: `No test runs saved yet. Use "Save this chat as a test run" first; they are kept in ${r.dir}.` }); return; }
+            setTestRuns(r.items);
+            setTimeout(() => setPalette("testruns"), 0);
+          },
+          (e) => setError((e as Error).message)
+        ),
+    },
+    {
+      id: "session-report",
+      label: "Session report",
+      description: "What happened since StreamHub started: tasks, failed steps, loops, nudges and slow parts, in one page",
+      icon: <FileText className="h-4 w-4 text-muted-foreground" />,
+      end: "Diagnostics",
+      onSelect: () => {
+        setNotice({ text: "Writing the session report..." });
+        api.sessionReport().then(
+          (r) => setNotice({ text: `Session report saved: ${r.path}`, path: r.fullPath }),
+          (e) => setError((e as Error).message)
+        );
+      },
     },
     {
       id: "diagnostics",
@@ -813,11 +872,11 @@ export default function App() {
         <ModalBackdrop className="pt-24" onClose={() => setPalette(null)}>
           <div className="kit-dialog w-full max-w-xl px-4 pt-0 pb-4">
             <ActionSearchBar
-              actions={palette === "attach" ? fileActions : palette === "logging" ? loggingActions : commandActions}
+              actions={palette === "attach" ? fileActions : palette === "logging" ? loggingActions : palette === "testruns" ? testRunActions : commandActions}
               key={palette}
-              label={palette === "attach" ? "Attach a project file" : palette === "logging" ? "Logging level" : "Commands and files"}
+              label={palette === "attach" ? "Attach a project file" : palette === "logging" ? "Logging level" : palette === "testruns" ? "Test runs" : "Commands and files"}
               onClose={() => setPalette(null)}
-              placeholder={palette === "attach" ? "File name..." : palette === "logging" ? "Info, verbose or trace..." : "Type a command or file name..."}
+              placeholder={palette === "attach" ? "File name..." : palette === "logging" ? "Info, verbose or trace..." : palette === "testruns" ? "Test run name..." : "Type a command or file name..."}
             />
           </div>
         </ModalBackdrop>
