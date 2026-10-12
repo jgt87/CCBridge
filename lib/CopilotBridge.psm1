@@ -547,6 +547,13 @@ function Set-CopilotResponseMode {
     $shown
 }
 
+function Get-TypedLength([AllowEmptyString()][string]$Text) {
+    <# The length the message box should show for $Text, counted like Get-CopilotInputLength: without
+       line breaks and the zero-width characters it leaves out (Lexical adds them as placeholders,
+       and text copied from web pages, such as Microsoft's, often holds them too). #>
+    ([regex]::Replace("$Text", '[\u200b\u200c\r\n]', '')).Length
+}
+
 function Get-CopilotInputLength {
     <# Length of the message box text, ignoring the zero-width placeholder characters Lexical adds. #>
     param([Parameter(Mandatory)]$Bridge)
@@ -763,7 +770,7 @@ function Set-CopilotInput {
         if ((Get-CopilotInputLength $Bridge) -gt 0) { Write-CCBLog info bridge 'Could not clear the message box' @{ chars = (Get-CopilotInputLength $Bridge) }; throw 'could not clear the Copilot message box' }
     }
 
-    $expected = $before + $Text.Replace("`r", '').Replace("`n", '').Length
+    $expected = $before + (Get-TypedLength $Text)   # counted as the box is measured (zero-width characters left out)
     # The page can rebuild the message box just after it appeared (first prompt after connecting);
     # text typed into the old box is then lost. An empty box after typing is retried.
     for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -1991,4 +1998,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Get-CopilotResponseOptions, Get-ResponseModeClassic, Close-CopilotMenu, Test-DamagedTagText, Get-AlnumHead, Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames
+Export-ModuleMember -Function Get-CopilotResponseOptions, Get-ResponseModeClassic, Close-CopilotMenu, Test-DamagedTagText, Get-AlnumHead, Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames, Get-TypedLength

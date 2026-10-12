@@ -49,3 +49,14 @@ Describe 'Send-CopilotPrompt keeps waiting while Copilot is busy' {
         $r.Result | Should Be 'Lost'
     }
 }
+
+Describe 'The length the message box should show (Get-TypedLength)' {
+    It 'leaves out line breaks and the zero-width characters the box measurement leaves out' {
+        # Seen: a prompt with text copied from Microsoft pages (zero-width spaces in it) was refused as
+        # "message box holds 75010 characters, expected 75024".
+        $zw = [string][char]0x200B
+        Get-TypedLength "ab${zw}c`r`nd" | Should Be 4
+        Get-TypedLength ("x" * 10 + ([string][char]0x200C) * 3) | Should Be 10
+        Get-TypedLength '' | Should Be 0
+    }
+}

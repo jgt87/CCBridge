@@ -2995,8 +2995,11 @@ function Invoke-AgentAction {
             # Reads public web pages for Copilot. Sites named in the request are read at once;
             # others need a person's approval (setting webRead), so no project data can leave
             # through an address Copilot made up. Local and intranet addresses are never read.
-            $urls = @(@("$($Action.arg)") + @("$($Action.body)".Split("`n")) | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^(?i)https?://\S+$' } | Select-Object -Unique -First 3)
-            $evt.target = $urls -join ', '
+            # ACTION web source: the page, script or JSON as the site sends it, with the addresses it
+            # refers to (WebFetch -Source); same site rules as a plain read.
+            $srcMode = "$($Action.arg)" -match '^(?i)\s*source\b'
+            $urls = @(@("$($Action.arg)" -split '\s+') + @("$($Action.body)".Split("`n")) | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^(?i)https?://\S+$' } | Select-Object -Unique -First 3)
+            $evt.target = "$(if ($srcMode) { 'source: ' })$($urls -join ', ')"
             if (-not $urls.Count) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed' }); return @{ ok = $false; summary = 'web without an address'; output = 'error: put one full address (https://...) per line in the web block' } }
             # Microsoft 365 files (SharePoint, OneDrive...): the helper program only gets a sign-in
             # page; Copilot opens them itself, with the user's access.
@@ -3019,9 +3022,9 @@ function Invoke-AgentAction {
                 Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $true; status = 'running'; decidedBy = $d.by }
             } else { Add-AgentEvent $State 'action' $evt }
             $per = [Math]::Max(4000, [int]([int]$State.Config.resultCharBudget / ($urls.Count + 1)))
-            $parts = foreach ($u in $urls) { Format-WebResult (Invoke-WebFetch $u -MaxChars $per) }
+            $parts = foreach ($u in $urls) { Format-WebResult (Invoke-WebFetch $u -MaxChars $per -Source:$srcMode) }
             $okCount = @($parts | Where-Object { $_ -notmatch '^error:' }).Count
-            return @{ ok = ($okCount -gt 0); summary = "read $okCount of $($urls.Count) web page(s)"; output = ($parts -join "`n`n") }
+            return @{ ok = ($okCount -gt 0); summary = "read $(if ($srcMode) { 'the source of ' })$okCount of $($urls.Count) web page(s)"; output = ($parts -join "`n`n") }
         }
         'todo' {
             $State.Todos = @(Get-TodoItems $Action.body)
@@ -3231,6 +3234,16 @@ function Invoke-AgentAction {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = 'not run: this command cannot work here' })
             return @{ ok = $false; summary = 'run skipped (command cannot work here)'; output = "not executed: $useless." }
         }
+        $download = Get-WebDownloadCommand $evt.target $State.ProjectRoot
+        if ($download) {
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = "not run: $download" })
+            return @{ ok = $false; summary = 'run skipped (web page read by a command)'; output = "not executed: $download. Read web pages with the web action instead: ACTION web and the address for the page's text, ACTION web source and the address for the page, script or JSON as the site sends it, with the addresses it refers to (the scripts it loads and the data addresses in its code). The same rules apply as for any web read: public addresses only, and sites the user did not name only after the user approves." }
+        }
+        $broken = Get-CmdQuoteBreak $evt.target
+        if ($broken) {
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = "not run: $broken" })
+            return @{ ok = $false; summary = 'run skipped (quotes break in cmd.exe)'; output = "not executed: $broken. Commands run through cmd.exe. Put the code in a script file with a write block and run that file (Work/NAME.ps1 with powershell -NoProfile -ExecutionPolicy Bypass -File, Work/NAME.js with node, Work/NAME.py with python), or use single quotes inside the double-quoted code instead of \""." }
+        }
         $packed = Test-LongPowerShellCommand $evt.target
         if ($packed) {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = "not run: $packed" })
@@ -3243,6 +3256,15 @@ function Invoke-AgentAction {
             Write-CCBLog info agent 'Command refused: deletes or moves outside the project' @{ reason = $outside }
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = "refused: $outside" })
             return @{ ok = $false; summary = 'run refused (outside the project)'; output = "not executed: $outside. Files may only be deleted or moved inside the project folder. Name each file or folder as a plain path inside the project (relative to it), without .., variables, or changing folders first." }
+        }
+        # The project's own working folders (Work/, Scripts/, Logs/) a command names: made before it
+        # runs, since a tool that writes into a missing folder fails (curl: "error on write").
+        foreach ($kind in 'Work', 'Scripts', 'Logs') {
+            $dir = Get-LayoutPath $kind
+            if ($evt.target -match "(?i)(?<![\w.-])$([regex]::Escape($dir))[\\/]" -and $State.ProjectRoot) {
+                $full = Join-Path $State.ProjectRoot $dir
+                if (-not (Test-Path -LiteralPath $full)) { try { $null = New-Item -ItemType Directory -Path $full -ErrorAction Stop } catch { Write-CCBLogError agent "make $dir" $_ } }
+            }
         }
         $needsApproval = -not (Test-AutoRun $State $evt.target)
         $risk = Get-CommandRisk $evt.target

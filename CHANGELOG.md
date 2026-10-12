@@ -6,6 +6,21 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.132] - 2026-10-12
+
+### Added
+- The web action has a source mode (ACTION web source ADDRESS): the page, script or JSON as the site sends it, with the addresses it refers to (the scripts and stylesheets a page loads, data addresses in a script's code), so Copilot can follow a page built by JavaScript to where its data comes from under the same rules as any web read (public addresses only, sites you did not name only after you approve).
+
+### Changed
+- Copilot gets one block on what can run on this computer, with every work task: the tools that are installed, that nothing may be installed (npm packages in package.json excepted, when npm is there), how commands run (no terminal, nothing that keeps running such as a development server, longer code in a script file), how to read the web, which test runners are there, and that its suggestions to you may only use what works here and StreamHub's own buttons: never installing software, a terminal, a server, administrator rights or system settings.
+- A command that reads a web page, script or JSON from the internet itself (curl, wget, Invoke-WebRequest, Invoke-RestMethod, WebClient, Python's urllib or requests, fetch), or a project script it runs that does, is not run: Copilot is pointed to the web action instead, which keeps to the web reading rules. A local development server and file downloads (zip, installers, images, documents) are left to the usual approval.
+- The project's working folders (Work/, Scripts/, Logs/) a command names are made before it runs, so a tool that writes into one no longer fails because it is missing (curl: "client returned ERROR on write").
+
+### Fixed
+- A message holding text with zero-width spaces (common in text copied from Microsoft pages, such as a roadmap export) was refused as "message box holds 75010 characters, expected 75024" and the turn stopped: the check of the typed message counted those characters on one side only.
+- A plan started from the project setup card ("plan first" for a big request) got no section in .streamhub/PLAN.md, so the plan and its approval were not recorded. It gets its section when it starts now.
+- A command with \" inside a quoted argument (powershell -Command "... \"a|b\" ...", node -e, python -c) is no longer run when cmd.exe would end the quoted text there and take a |, &, < or > inside it as its own (seen: a regex with | ran 'fetch' as a command). Copilot is asked for a script file or single quotes instead.
+
 ## [v0.1.131] - 2026-10-12
 
 ### Fixed

@@ -38,7 +38,7 @@ Describe 'New-PromptMessage' {
         $m | Should Match 'OneDrive > CCBridge > budget tracker'
         $m | Should Match 'Request: Fix the build$'
         $m | Should Not Match 'app\.py|hello\.py|dotnet build|CCBridge sends'
-        $m.Length -lt 4500 | Should Be $true     # includes the folder rules, the work method, what the computer has installed, that commands get no terminal and that syntax checks are the helper program's
+        $m.Length -lt 5800 | Should Be $true     # includes the folder rules, the work method and WHAT CAN RUN HERE (tools, installs, commands, web, checks, what to suggest)
     }
 
     It 'gives assistant tasks only the role, the read-only rule, saving and the location' {
@@ -246,7 +246,14 @@ Describe 'Case-specific prompt modules' {
         (Get-PromptModules 'Rename the title' @{ Traits = @('javascript', 'batch') }) -join ',' | Should Match 'rules:javascript.*rules:batch'
         (Get-PromptModules 'Update start.cmd' $none) -join ',' | Should Match 'rules:batch'
         (Get-ProjectTraits @('start.cmd', 'tests/App.Tests.ps1', 'lib/App.psm1')) -join ',' | Should Be 'code,powershell,batch,tests'
-        Get-EnvironmentText | Should Match '^- This computer: Windows PowerShell 5\.1 and Edge'
+        $envText = Get-EnvironmentText
+        $envText | Should Match '^WHAT CAN RUN HERE'
+        $envText | Should Match '- This computer: Windows PowerShell 5\.1 and Edge'
+        $envText | Should Not Match '\{(MACHINE|PACKAGES|TESTS)\}'
+        $envText | Should Match 'ACTION web source'
+        $envText | Should Match 'Never tell the user to install software'
+        $envText | Should Match 'helper program'
+        $envText | Should Not Match '(?i)ccbridge|streamhub'
     }
     It 'adds the question, data, bigger task, script, UI, web service, C#, React and privacy rules only when they apply' {
         $none = @{ Traits = @() }

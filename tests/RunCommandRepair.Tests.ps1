@@ -44,6 +44,66 @@ Describe 'Scripts packed into one powershell -Command line' {
         Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+Describe 'Quotes cmd.exe ends early (\" inside a quoted argument)' {
+    It 'finds a | & < or > that cmd would take as its own' {
+        # Seen: a regex with | inside powershell -Command "...": cmd ran 'fetch\' as a command.
+        $seen = 'powershell -NoProfile -Command "$t = Get-Content -Raw ''Work\app.js''; [regex]::Matches($t, \"fetch\(|axios\") | ForEach-Object { $_.Value }"'
+        Get-CmdQuoteBreak $seen | Should Match 'reaches cmd as a pipe'
+        Get-CmdQuoteBreak 'python -c "print(\"a|b\")"' | Should Match 'as a pipe'
+        Get-CmdQuoteBreak 'node -e "console.log(\"a > b\")"' | Should Match 'as a redirection'
+    }
+    It 'leaves commands whose quotes cmd reads the same way alone' {
+        Get-CmdQuoteBreak 'powershell -NoProfile -Command "Get-ChildItem | Select-Object Name"' | Should BeNullOrEmpty
+        Get-CmdQuoteBreak 'node -e "console.log(\"a\")" && echo ok' | Should BeNullOrEmpty
+        Get-CmdQuoteBreak 'git log --oneline | findstr fix' | Should BeNullOrEmpty
+        Get-CmdQuoteBreak 'python -c "print(\"done\")"' | Should BeNullOrEmpty
+    }
+}
+
+Describe 'Web pages read by a command go to the web action' {
+    It 'finds commands and scripts that read a public page, script or JSON themselves' {
+        Get-WebDownloadCommand 'curl.exe -L --max-time 30 -sS https://items.example.com/ -o Work\items-home.html' | Should Match 'reads https://items\.example\.com/ from the internet'
+        Get-WebDownloadCommand 'powershell -NoProfile -Command "Invoke-WebRequest -UseBasicParsing https://items.example.com/app.js -OutFile Work\app.js"' | Should Match 'items\.example\.com/app\.js'
+        Get-WebDownloadCommand 'powershell -NoProfile -Command "irm https://api.example.com/v1/items"' | Should Match 'api\.example\.com'
+        Get-WebDownloadCommand 'python -c "import urllib.request; print(urllib.request.urlopen(''https://items.example.com/'').read())"' | Should Not BeNullOrEmpty
+        $p = Join-Path $env:TEMP ('ccb-webdl-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'Work') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $p 'Work\get.ps1'), '$r = Invoke-WebRequest -UseBasicParsing "https://items.example.com/data"; $r.Content')
+        Get-WebDownloadCommand 'powershell -NoProfile -ExecutionPolicy Bypass -File Work\get.ps1' $p | Should Match '^the script Work\\get\.ps1 reads https://items\.example\.com/data'
+        Remove-Item $p -Recurse -Force
+    }
+    It 'leaves local servers, binary downloads, package managers and other commands alone' {
+        Get-WebDownloadCommand 'curl -s http://localhost:5173/' | Should BeNullOrEmpty
+        Get-WebDownloadCommand 'curl -sS http://127.0.0.1:8080/api/items' | Should BeNullOrEmpty
+        Get-WebDownloadCommand 'curl -L -o Work\tool.zip https://downloads.example.com/tool-1.2.zip' | Should BeNullOrEmpty
+        Get-WebDownloadCommand 'npm install --no-fund --no-audit' | Should BeNullOrEmpty
+        Get-WebDownloadCommand 'git log --oneline' | Should BeNullOrEmpty
+        Get-WebDownloadCommand 'node --test tests/*.test.js' | Should BeNullOrEmpty
+    }
+    It 'is not run; Copilot is pointed to ACTION web and ACTION web source' {
+        $p = Join-Path $env:TEMP ('ccb-webdl2-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        $config = Get-CCBridgeConfig harness $root
+        $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
+        $r = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'run'; arg = ''; body = 'curl.exe -sS https://items.example.com/ -o Work\home.html' }) 'a1' $null 0 } $s
+        $r.ok | Should Be $false
+        $r.summary | Should Be 'run skipped (web page read by a command)'
+        $r.output | Should Match 'ACTION web source'
+        Remove-Item $p -Recurse -Force
+    }
+}
+
+Describe 'Working folders a command writes into' {
+    It 'are made before the command runs' {
+        $p = Join-Path $env:TEMP ('ccb-workdir-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
+        $config = Get-CCBridgeConfig harness $root
+        $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
+        $s.Config.autoApproveCommands = @('^echo(\s|$)')
+        $r = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'run'; arg = ''; body = 'echo made> Work\out.txt' }) 'a1' $null 0 } $s
+        $r.ok | Should Be $true
+        (Test-Path -LiteralPath (Join-Path $p 'Work\out.txt')) | Should Be $true
+        Remove-Item $p -Recurse -Force
+    }
+}
+
 Describe 'A type name the chat removed in front of ::' {
     It 'is found in PowerShell, and ordinary colons are left alone' {
         Find-RemovedTypeName '$m = :Match($t, "x")' | Should Be '$m = :Match($t, "x")'

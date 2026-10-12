@@ -229,6 +229,59 @@ function Test-LongPowerShellCommand([AllowEmptyString()][string]$Command, [int]$
     "a PowerShell command line of $($body.Length) characters (more than $MaxChars)"
 }
 
+$script:WebDownloadPattern = '(?i)(?<![\w.-])(curl(\.exe)?|wget(\.exe)?|Invoke-WebRequest|iwr|Invoke-RestMethod|irm|Start-BitsTransfer|bitsadmin(\.exe)?)(?![\w.-])|Net\.WebClient|\.Download(String|File|Data)\s*\(|urllib\.request|\brequests\.(get|post)\s*\(|\bhttps?\.get\s*\(|\bfetch\s*\(\s*["''`]https?://|certutil(\.exe)?\s[^|&]*-urlcache'
+$script:LocalUrlPattern = '(?i)^https?://(localhost|127\.\d+\.\d+\.\d+|\[::1\]|[\w.-]+\.localhost|0\.0\.0\.0)(:\d+)?(/|$)'
+$script:BinaryUrlPattern = '(?i)\.(zip|7z|gz|tgz|tar|rar|exe|msi|msix|nupkg|vsix|whl|png|jpe?g|gif|webp|ico|svg|pdf|docx?|xlsx?|pptx?|mp3|mp4|woff2?|ttf|otf)([?#]|$)'
+
+function Get-WebDownloadCommand {
+    <# A command (or a project script it runs, one level) that reads a public web page, script or
+       JSON from the internet itself (curl, wget, Invoke-WebRequest, Invoke-RestMethod, WebClient,
+       urllib, requests, fetch...): that skips the web action's rules (public addresses only, sites
+       the user named or approved, the page as data). Returns the address and why, or $null.
+       Local addresses (a dev server) and binary downloads (zip, installers, images, documents) are
+       left to the normal approval; package managers (npm, pip, winget) do not match. #>
+    param([AllowEmptyString()][string]$Command, [string]$ProjectRoot = '')
+    $texts = @(@{ name = ''; text = "$Command" })
+    if ($ProjectRoot) {
+        foreach ($t in @("$Command" -split '[\s"'']+' | Where-Object { $_ -match '(?i)\.(ps1|py|js|mjs|cjs)$' } | Select-Object -Unique)) {
+            $full = try { Resolve-ProjectPath $ProjectRoot $t } catch { $null }
+            if ($full -and (Test-Path -LiteralPath $full -PathType Leaf) -and (Get-Item -LiteralPath $full).Length -le 500000) { $texts += @{ name = $t; text = [IO.File]::ReadAllText($full) } }
+        }
+    }
+    foreach ($x in $texts) {
+        if ($x.text -notmatch $script:WebDownloadPattern) { continue }
+        $urls = @([regex]::Matches($x.text, '(?i)https?://[^\s"''`<>|)]+') | ForEach-Object { $_.Value.TrimEnd('.', ',', ';') } | Select-Object -Unique)
+        $web = @($urls | Where-Object { $_ -notmatch $script:LocalUrlPattern -and $_ -notmatch $script:BinaryUrlPattern })
+        if (-not $web.Count) { continue }
+        return "$(if ($x.name) { "the script $($x.name) reads" } else { 'it reads' }) $($web[0]) from the internet itself"
+    }
+    $null
+}
+
+function Get-CmdQuoteBreak([AllowEmptyString()][string]$Command) {
+    <# A quoted argument that uses \" for a quote inside it (powershell -Command "... \"x\" ...",
+       node -e, python -c): the program reads \" as an escaped quote, but cmd.exe, which reads the
+       line first, has no such escape and ends the quoted text there. A | & < or > that the program
+       meant inside its text then reaches cmd as a pipe, a command separator or a redirection (seen:
+       a regex with | in it ran 'fetch\' as a command). Returns why, or $null. #>
+    if ("$Command" -notmatch '\\"') { return $null }
+    $cmdQuoted = $false; $argQuoted = $false; $slashes = 0
+    for ($i = 0; $i -lt $Command.Length; $i++) {
+        $c = $Command[$i]
+        if ($c -eq '\') { $slashes++; continue }
+        if ($c -eq '"') {
+            $cmdQuoted = -not $cmdQuoted                            # cmd: every quote toggles
+            if ($slashes % 2 -eq 0) { $argQuoted = -not $argQuoted }  # the program: \" is a literal quote
+        } elseif ($c -eq '^' -and -not $cmdQuoted) { $i++ }
+        elseif ($argQuoted -and -not $cmdQuoted -and '|&<>'.IndexOf($c) -ge 0) {
+            $what = switch ($c) { '|' { 'a pipe' } '&' { 'a command separator' } default { 'a redirection' } }
+            return "cmd.exe ends the quoted text at a \"" (it has no such escape), so the $c inside the quoted code (character $($i + 1)) reaches cmd as $what"
+        }
+        $slashes = 0
+    }
+    $null
+}
+
 $script:BareAssetLine = '(?m)^([ \t]*)((?:\.{1,2}/)?[\w~-][\w.~/-]*\.(?:css|m?js)(?:\?[\w=.&-]*)?)[ \t]*$'
 
 function Repair-StrippedScriptTag([AllowEmptyString()][string]$Text) {
@@ -2415,5 +2468,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes,
+Export-ModuleMember -Function Get-WebDownloadCommand, Get-CmdQuoteBreak, Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction, Get-FileViewText, Get-FolderListing, Get-ReadNotFoundNote

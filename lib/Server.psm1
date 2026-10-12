@@ -664,6 +664,11 @@ function Invoke-ApiRequest($Ctx, $State) {
                 # Plan first: read-only turn that ends with a plan to approve in the app.
                 $task.planFirst = $true; $task.mode = 'plan'; $task.forceKind = 'coding'
                 $task.request = if ($b.request) { [string]$b.request } else { [string]$b.text }
+                # A plan first that starts here (the setup card's plan-first answer) gets its PLAN.md
+                # section now, so the plan, its changes and the approval are recorded there.
+                if (-not $planId -and $State.ProjectRoot) {
+                    try { $planId = New-PlanEntry $State.ProjectRoot $task.request; $task.planId = $planId } catch { Write-CCBLogError server 'PLAN.md' $_ }
+                }
                 $task.text = (Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + [string]$b.text
                 $title = "Plan: $($task.request)"
                 if (@($b.answers).Count) { & $planNote 'Your answers' (Format-PlanAnswers @($b.answers)) 'planning' }

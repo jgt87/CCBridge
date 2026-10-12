@@ -104,19 +104,29 @@ function Test-ToolInstalled([string]$Name) {
 }
 
 function Get-EnvironmentText {
-    <# What this computer can run, so Copilot does not suggest tools that are not there. Looked up
-       once per run of the helper program (the Store's python.exe stub does not count). #>
-    # Looked up again when PATH changed (a tool installed from Settings > This computer).
+    <# What can run on this computer, for what Copilot does and what it suggests to the user
+       (prompts/rules/environment.md, filled in here): the tools that are there (the Store's
+       python.exe stub does not count) and the rules the helper program enforces on commands, web
+       reads and installs, so Copilot does not plan around something that will be refused. Looked up
+       once per run, again when PATH changed (a tool installed from Settings > This computer). #>
     if ($script:EnvText -and $script:EnvPath -eq $env:Path) { return $script:EnvText }
     $script:EnvPath = $env:Path
     $tools = [ordered]@{ python = 'python'; node = 'node'; npm = 'npm'; dotnet = 'dotnet (.NET SDK)'; git = 'git' }
     $have = New-Object System.Collections.Generic.List[string]; $miss = New-Object System.Collections.Generic.List[string]
     foreach ($k in $tools.Keys) {
-        $c = Get-Command $k -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
-        if ($c) { $have.Add($tools[$k]) } else { $miss.Add($tools[$k]) }
+        if (Test-ToolInstalled $k) { $have.Add($tools[$k]) } else { $miss.Add($tools[$k]) }
     }
-    $script:EnvText = "- This computer: Windows PowerShell 5.1 and Edge$(if ($have.Count) { "; also $($have -join ', ')" })." +
-        $(if ($miss.Count) { " Not installed: $($miss -join ', '): do not use or suggest them, and do not install software." } else { '' })
+    $machine = "Windows PowerShell 5.1 and Edge$(if ($have.Count) { "; also $($have -join ', ')" })." +
+        $(if ($miss.Count) { " Not installed: $($miss -join ', ')." } else { '' })
+    $packages = if (Test-ToolInstalled 'npm') { 'Except npm packages in package.json: the helper program offers their install.' } else { 'No npm here: no packages, bundlers or build steps.' }
+    $tests = New-Object System.Collections.Generic.List[string]
+    if (@(Get-Module -ListAvailable -Name Pester -ErrorAction SilentlyContinue).Count) { $tests.Add('Pester (NAME.Tests.ps1)') }
+    if (Test-ToolInstalled 'node') { $tests.Add('node --test (NAME.test.js)') }
+    if (Test-ToolInstalled 'python') { $tests.Add('python -m unittest (test_NAME.py)') }
+    $testText = if ($tests.Count) { "$($tests -join ', ')." } else { 'no test runner here.' }
+    $f = Join-Path (Split-Path -Parent $PSScriptRoot) 'prompts\rules\environment.md'
+    $t = if (Test-Path -LiteralPath $f) { ([IO.File]::ReadAllText($f)).Trim() } else { '- This computer: {MACHINE}' }
+    $script:EnvText = $t.Replace('{MACHINE}', $machine).Replace('{PACKAGES}', $packages).Replace('{TESTS}', $testText)
     $script:EnvText
 }
 

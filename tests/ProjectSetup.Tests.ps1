@@ -374,6 +374,20 @@ Describe 'The setup in the API (Server /api/chat setup, /api/project-setup)' {
             $t.setup | Should BeNullOrEmpty
         } finally { Remove-Item $p -Recurse -Force }
     }
+    It 'records a plan first chosen on the setup card in PLAN.md, and builds it on approval' {
+        $p = New-SetupProject
+        try {
+            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Config.port = 8765
+            Invoke-FakeApi (New-FakeCtx 'POST' '/api/chat' @{ text = 'Build a dashboard of the releases'; planFirst = $true; request = 'Build a dashboard of the releases'; setup = @{ answers = @{ bigtask = 'plan' } } } 'http://localhost:8765') $s
+            $t = $null; $null = $s.Tasks.TryDequeue([ref]$t)
+            $t.planFirst | Should Be $true
+            $t.planId | Should Match '^\d{8}-\d{4}-build-a-dashboard'
+            [IO.File]::ReadAllText((Join-Path $p '.streamhub\PLAN.md')) | Should Match ([regex]::Escape("<!-- plan:$($t.planId) -->"))
+            Invoke-FakeApi (New-FakeCtx 'POST' '/api/chat' @{ text = 'Build this now, following the approved plan below.'; approve = $true; asCoding = $true } 'http://localhost:8765') $s
+            $b = $null; $null = $s.Tasks.TryDequeue([ref]$b)
+            $b.planBuild | Should Be $true
+        } finally { Remove-Item $p -Recurse -Force }
+    }
     It 'gives a served page the live file as it is now, on every load' {
         $p = New-SetupProject
         $out = Join-Path $env:TEMP ('ccb-live-' + [guid]::NewGuid().ToString('N') + '.csv')
