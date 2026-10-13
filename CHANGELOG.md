@@ -6,6 +6,21 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.137] - 2026-10-13
+
+### Added
+- When a Copilot chat fills up, the handoff to the new chat uses fixed headings (objective, requirements, decisions, done, active, blocked, next steps, relevant files), and StreamHub adds what it recorded itself: the request, the files changed so far, open to-do items, the Done when checks and their state, and outlines of the changed files. A handoff without the headings is asked for once more.
+- Going in circles is caught: a file that goes back to a version it had earlier in the task, or rounds that alternate between the same two sets of steps, get a note asking Copilot to decide; the second time the message stops.
+- Search results name the function or section each hit is in, and say how many matches there were in all when they are cut off.
+- A new error found by the file check comes with the code around it straight away, so Copilot can fix it without reading the file first.
+- An AGENTS.md in a subfolder is sent with the work on files in that folder, once per chat.
+- A long edit whose middle lines differ from the file (text the chat page damaged, or lines Copilot remembered differently) is applied by its first and last lines when they fit exactly one place, with a note; otherwise the places are named.
+
+### Changed
+- Source data, downloads, saved answers, data files and documents Copilot reads are marked as content, not instructions, as web pages already were, and so are Microsoft 365 mail, chats and files: a mail or a cell that says "ignore your rules" is not followed.
+- Clearer working rules for Copilot: read a file the request names before answering about it, end with a done summary that says what was not tested or left out, fix a failed step without apologising, change only the part asked in texts and documents, ask at most one question after doing what it can, and check the version a project uses instead of guessing a function exists.
+- A to-do list Copilot writes shows only as its checklist on the card; the result text that repeated its lines is left out (it still shows when the step failed).
+
 ## [v0.1.136] - 2026-10-12
 
 ### Added

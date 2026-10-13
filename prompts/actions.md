@@ -44,9 +44,9 @@ replaces lines START-END with the new lines, no SEARCH needed: only for lines yo
 ACTION done
 SUMMARY
 ```
-ends the task
+ends the task; the summary says in plain sentences what changed, what you did not test or run, and what you left out or could not do
 
 HOW A TASK GOES
 1. Reply with read or grep blocks for what you need to see. That reply needs nothing else.
 2. The next message contains the results. Reply with edit or write blocks for all the changes.
-3. The next message reports what happened. If something failed, fix it; when everything is done, reply with a done block.
+3. The next message reports what happened. If something failed, find why and fix it (no apology needed); when everything is done, reply with a done block.

@@ -298,7 +298,8 @@ export function ActionCard({ item }: { item: ActionItem }) {
               <ConsoleView lines={[]} live={running} title={`> ${item.target}`} />
             ))}
           {ran?.notes && !awaiting && <div className="whitespace-pre-wrap text-muted-foreground text-xs">{ran.notes}</div>}
-          {item.output && !awaiting && item.action !== "run" && (
+          {/* A to-do list that was written shows as its checklist; the result text would only repeat its lines. */}
+          {item.output && !awaiting && item.action !== "run" && !(todo && item.status === "ok") && (
             <ActionOutput fallbackPath={item.target} output={item.output} />
           )}
           {item.action === "run" && !awaiting && (!running || myLive?.state === "question" || myLive?.state === "stuck") && item.target.trim() && (

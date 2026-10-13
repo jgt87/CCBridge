@@ -2,7 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer', 'Handoff', 'LoopGuard') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -2817,6 +2817,7 @@ function Start-NewChatCore($State) {
     $State.ChatKind = $null
     $State.SentParts = New-Object 'System.Collections.Generic.HashSet[string]'
     $State.ChatFiles = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $State.FolderNotesSent = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)   # folder AGENTS.md sent in this chat (Get-FolderNotes)
     $State.FollowUps = 0; $State.LastTurnActed = $null
     $State.NeedNewChat = $false
     $State.Throttle = @{ used = 0; max = $State.Throttle.max }
@@ -2832,6 +2833,33 @@ function Get-PinnedFiles {
         ForEach-Object { $_.Groups[1].Value + $_.Groups[2].Value } | Select-Object -Unique)
     if (-not $paths.Count) { return '' }
     "`n`n# Attached files`n" + ((Invoke-ReadAction $ProjectRoot $paths) -join "`n`n")
+}
+
+function Get-FolderNotes {
+    <# The AGENTS.md of the folders the given files are in (and their parent folders, not the
+       project root: that one is in the project context), deepest last, that were not sent in this
+       chat yet ($Sent, a set of paths; added to). Never from build output, packages, Source/ or the
+       helper program's folders. Text, or ''. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Paths, $Sent, [int]$MaxChars = 3000)
+    $found = New-Object System.Collections.Generic.List[string]
+    foreach ($p in @($Paths | Where-Object { $_ })) {
+        $parts = @("$p".Replace('\', '/').TrimStart('/').Split('/') | Where-Object { $_ })
+        for ($i = 1; $i -lt $parts.Count; $i++) {
+            $dir = ($parts[0..($i - 1)] -join '/')
+            if ($dir -match '(?i)(^|/)(node_modules|dist|build|out|\.git|vendor|Source|\.streamhub|shared|library|shared-library)(/|$)|^styles/kit') { break }
+            $rel = "$dir/AGENTS.md"
+            if (-not $found.Contains($rel) -and -not ($Sent -and $Sent.Contains($rel)) -and (Test-Path -LiteralPath (Join-Path $ProjectRoot $rel.Replace('/', '\')) -PathType Leaf)) { $found.Add($rel) }
+        }
+    }
+    if (-not $found.Count) { return '' }
+    $out = @(foreach ($rel in @($found | Sort-Object { ($_ -split '/').Count }, { $_ })) {
+        if ($Sent) { [void]$Sent.Add($rel) }
+        $t = Get-ProjectNotes (Join-Path $ProjectRoot (Split-Path $rel.Replace('/', '\') -Parent))
+        if (-not $t) { continue }
+        if ($t.Length -gt $MaxChars) { $t = $t.Substring(0, $MaxChars) + "`n(cut: read $rel for the rest)" }
+        "Folder notes ($rel; they apply to the files in $(Split-Path $rel.Replace('/', '\') -Parent | ForEach-Object { $_.Replace('\', '/') })/ and win over the project notes there):`n$t"
+    })
+    $out -join "`n`n"
 }
 
 function Get-ProjectNotes([string]$ProjectRoot) {
@@ -2958,13 +2986,26 @@ function Limit-Text([string]$Text, [int]$Max) {
     $Text.Substring(0, $Max) + "`n(truncated: $($Text.Length - $Max) more characters)"
 }
 
-function Invoke-RolloverIfNeeded($State) {
+function Invoke-RolloverIfNeeded($State, [hashtable]$Turn = @{}) {
+    <# A chat nearly full of messages: Copilot writes a handoff under fixed headings (Handoff.psm1;
+       asked again once when three or more are missing), and the helper program adds the facts it
+       kept itself ($Turn: changed, doneWhen, acceptance) before the task goes on in a new chat. #>
     $t = $State.Throttle
     if (-not $t.max -or $t.used -lt ($t.max - $State.Config.rolloverMargin)) { return }
     Write-CCBLog info agent "Chat rollover" @{ used = $t.used; max = $t.max }
     Add-AgentEvent $State 'status' @{ text = "This Copilot chat is nearly full ($($t.used)/$($t.max) messages). Summarizing and continuing in a new chat." }
-    $r = Send-ToCopilot $State 'Summarize this conversation so it can continue in a fresh chat: the task, decisions made, files created or changed, the current state and the next steps. At most 2500 characters. Do not use action blocks.'
-    $State.Summary = Limit-Text $r.Text 4000
+    $r = Send-ToCopilot $State (Get-HandoffAsk)
+    $text = "$($r.Text)"
+    $missing = @(Get-HandoffMissing $text)
+    if ($missing.Count -ge 3 -and -not $r.Cancelled -and -not $State.Cancel) {
+        Write-CCBLog verbose agent 'Handoff without its headings: asked again' @{ missing = ($missing -join ', ') }
+        $r2 = Send-ToCopilot $State (Get-HandoffRetry $missing)
+        if (-not $r2.Cancelled -and @(Get-HandoffMissing "$($r2.Text)").Count -lt $missing.Count) { $text = "$($r2.Text)" }
+    }
+    $changed = @($Turn.changed | Where-Object { $_ })
+    $outlines = if ($State.ProjectRoot -and $changed.Count) { try { Get-HandoffOutlines $State.ProjectRoot $changed } catch { Write-CCBLogError agent 'handoff outlines' $_; '' } } else { '' }
+    $facts = try { Format-HandoffFacts -Request "$($State.TurnText)" -Mode "$($State.Mode)" -Changed $changed -Todos @($State.Todos) -DoneWhen @($Turn.doneWhen) -Acceptance @($Turn.acceptance) -IssueFix $State.IssueFix -Outlines $outlines } catch { Write-CCBLogError agent 'handoff facts' $_; '' }
+    $State.Summary = (Limit-Text $text 4000) + $(if ($facts) { "`n`n$facts" } else { '' })
     $kind = $State.ChatKind
     Start-NewChat $State
     $State.ChatKind = $kind   # the new chat continues the same kind of task
@@ -3649,6 +3690,26 @@ function Get-FixEvidence {
     $parts -join "`n`n"
 }
 
+function Add-ErrorView($State, $Results, $Findings) {
+    <# The lines around new errors (at most 2 files, 3 places each), widened to whole blocks by the
+       ranged read, as a result block; the ranges count as read in this task (Register-ReadStamp,
+       ReadRanges), so a line-range edit can fix them straight away. #>
+    $specs = @(foreach ($g in @($Findings | Group-Object path | Select-Object -First 2)) {
+        foreach ($l in @($g.Group | ForEach-Object { [int]$_.line } | Sort-Object -Unique | Select-Object -First 3)) { "$($g.Name):$([Math]::Max(1, $l - 3))-$($l + 3)" }
+    })
+    if (-not $specs.Count) { return }
+    $view = (Invoke-ReadAction $State.ProjectRoot $specs -MaxCharsPerFile 4000) -join "`n`n"
+    if (-not "$view".Trim() -or $view -match '\(error: ') { return }
+    if ($null -eq $State.ReadRanges) { $State.ReadRanges = @{} }
+    foreach ($m in [regex]::Matches($view, '(?m)^### (\S+)(?: \(lines (\d+)-(\d+) of \d+)?')) {
+        $key = $m.Groups[1].Value.Replace('\', '/').TrimStart('/').ToLowerInvariant()
+        try { Register-ReadStamp $State $State.ProjectRoot $key } catch { }
+        $range = if ($m.Groups[2].Success) { @{ from = [int]$m.Groups[2].Value; to = [int]$m.Groups[3].Value } } else { @{ from = 1; to = 2000000000 } }
+        $State.ReadRanges[$key] = @(@($State.ReadRanges[$key] | Where-Object { $_ }) + @($range))
+    }
+    $Results.Add(@{ head = '### The code around these errors, as it is now'; output = "Fix the errors in these lines (they count as read, so ACTION edit PATH:START-END works on them):`n`n$view" })
+}
+
 function Get-FixDiagnosis($State, [int]$FromSeq) {
     <# Copilot's "Cause:" lines from a fix attempt's replies (at most 4 lines), or "". #>
     $texts = @(Get-AgentEvents $State $FromSeq | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { "$($_.text)" })
@@ -4026,6 +4087,12 @@ function Invoke-AgentTurn {
         Write-CCBLog info agent "Task kind: $kind" @{ partsAdded = $State.SentParts.Count - $partsBefore; chars = $message.Length }
         $State.LastTurnActed = $null
         $message += Get-PinnedFiles $State.ProjectRoot $Text
+        # The AGENTS.md of the folders of files the request names (the root one is in the project context).
+        if ($kind -ne 'chat' -and $State.ProjectRoot) {
+            if ($null -eq $State.FolderNotesSent) { $State.FolderNotesSent = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase) }
+            $fnText = try { Get-FolderNotes $State.ProjectRoot @(Get-NamedFiles $Text @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object { $_.path })) $State.FolderNotesSent } catch { Write-CCBLogError agent 'folder notes' $_; '' }
+            if ($fnText) { $message += "`n`n$fnText" }
+        }
         # What Copilot writes down for the helper program (TaskNotes): the checks this task must pass,
         # and notes on data files that have none yet (or whose data changed). Asked with this message,
         # read from the replies; no extra message.
@@ -4077,10 +4144,11 @@ function Invoke-AgentTurn {
         # as two rounds in a row change nothing (Test-RoundsLeft).
         $round = 0; $lastProgress = 0; $extended = $false
         $exploreRounds = 0; $missingReads = New-Object System.Collections.Generic.List[string]   # rounds that only looked around, and the files they looked for
+        $loopWatch = New-LoopWatch   # a change undone again, rounds alternating between the same steps (LoopGuard)
         while ($true) {
             $round++
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
-            $rolled = [bool](Invoke-RolloverIfNeeded $State)
+            $rolled = [bool](Invoke-RolloverIfNeeded $State @{ changed = @($checkpoint.Files.Keys); doneWhen = @($doneWhen); acceptance = @($acceptResults) })
             if (-not $State.ChatStarted -and ($round -gt 1 -or $rolled)) {
                 # A rollover started a fresh chat (also before the first send of this turn, when the
                 # previous turn filled the chat): give it the parts again, with the summary.
@@ -4274,6 +4342,36 @@ function Invoke-AgentTurn {
                 $nudge = Get-ExploreNudge $exploreRounds @($missingReads) (-not (Test-OwnCode @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object { $_.path })))
                 if ($nudge) { $results.Add(@{ head = '### Nothing changed yet'; output = $nudge }); Add-AgentEvent $State 'status' @{ text = "Round ${round}: Copilot has only read and searched for $exploreRounds rounds; StreamHub asked it to write the files now." } }
             } else { $exploreRounds = 0 }
+            # Going in circles: a file back to a version it had earlier in this task, or rounds that
+            # alternate between the same two sets of steps. Said once, the second time stops the message.
+            if (-not $stopLoop -and -not $isDone) {
+                $flipped = @(foreach ($p in $roundChanged) {
+                    $st = if ($State.ReadStamps) { $State.ReadStamps["$p".Replace('\', '/').TrimStart('/').ToLowerInvariant()] } else { $null }
+                    if ($st -and $st.read) { $null = Add-LoopFileVersion $loopWatch $p $st.read -Seed }
+                    $fullP = try { Resolve-ProjectPath $State.ProjectRoot $p } catch { $null }
+                    if ($fullP -and (Test-Path -LiteralPath $fullP -PathType Leaf) -and (Add-LoopFileVersion $loopWatch $p (Get-FileFingerprint $fullP))) { $p }
+                })
+                $alternating = Add-LoopRound $loopWatch (Get-RoundKey $actions)
+                if ($flipped.Count -or $alternating) {
+                    $loopWatch.flips++
+                    $what = if ($flipped.Count) { "$($flipped -join ', ') went back to an earlier version" } else { 'the rounds alternate between the same steps' }
+                    Write-CCBLog info agent "Going in circles: $what" @{ round = $round; times = $loopWatch.flips }
+                    if ($loopWatch.flips -ge 2) {
+                        $stopLoop = $true
+                        Add-AgentEvent $State 'error' @{ text = "Copilot is going in circles ($what, for the second time in this task). Stopped this message so it does not loop."; code = 'CIRCLE-LOOP'; hint = 'Say which version is right, or describe the change more precisely, and continue.' }
+                    } else {
+                        $results.Add(@{ head = '### Going in circles'; output = (Get-LoopNote $(if ($flipped.Count) { 'flip' } else { 'alternate' }) $flipped) })
+                        Add-AgentEvent $State 'status' @{ text = "Round ${round}: $what; StreamHub asked Copilot to decide instead of switching back and forth." }
+                    }
+                }
+            }
+            # Files read or changed in a folder with its own AGENTS.md: its notes, once per chat.
+            if ($State.ProjectRoot) {
+                if ($null -eq $State.FolderNotesSent) { $State.FolderNotesSent = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase) }
+                $touched = @($results | ForEach-Object { @($_.readPaths) + @($_.changedPath) } | Where-Object { $_ } | ForEach-Object { "$_" -replace ':\d+-\d+$', '' })
+                $fnText = if ($touched.Count) { try { Get-FolderNotes $State.ProjectRoot $touched $State.FolderNotesSent } catch { Write-CCBLogError agent 'folder notes' $_; '' } } else { '' }
+                if ($fnText) { $results.Add(@{ head = '### Folder notes'; output = $fnText }) }
+            }
             if ($null -ne $State.ChatFiles) { foreach ($f in @($results | ForEach-Object { @($_.readPaths) + @($_.changedPath) } | Where-Object { $_ })) { [void]$State.ChatFiles.Add("$f".Replace('\', '/')) } }
             if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
                 # The project's afterEdit hooks first (a formatter changes the files), so the checks
@@ -4439,6 +4537,10 @@ function Invoke-AgentTurn {
                     # Light: only what breaks a file goes to Copilot; the chat card shows the rest.
                     $toSend = @(if ($enf.sendWarnings) { $keep } else { $keep | Where-Object level -eq 'error' })
                     if ($toSend.Count) { $results.Add(@{ head = '### File check of the files changed in this reply'; output = (Format-CheckResults $toSend) }) }
+                    # A new error comes with the code around it at once (the whole block it is in), read
+                    # for Copilot, so the fix needs no read round first (Add-ErrorView).
+                    $firstErr = @($keep | Where-Object { $_.level -eq 'error' -and $_.path -and [int]$_.line -gt 0 -and -not $errorRounds.ContainsKey($_.key) })
+                    if ($firstErr.Count) { try { Add-ErrorView $State $results $firstErr } catch { Write-CCBLogError agent 'error view' $_ } }
                     # An error still there after Copilot's next change: once per problem, the evidence it
                     # needs (the file now, the bracket map, users) and a diagnosis before another fix.
                     $again = New-Object System.Collections.Generic.List[object]
@@ -5113,4 +5215,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask, Invoke-TestRunReport, Invoke-ExportJob
+Export-ModuleMember -Function Get-FolderNotes, Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask, Invoke-TestRunReport, Invoke-ExportJob

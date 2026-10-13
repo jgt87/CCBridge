@@ -38,7 +38,7 @@ Describe 'New-PromptMessage' {
         $m | Should Match 'OneDrive > CCBridge > budget tracker'
         $m | Should Match 'Request: Fix the build$'
         $m | Should Not Match 'app\.py|hello\.py|dotnet build|CCBridge sends'
-        $m.Length -lt 5800 | Should Be $true     # includes the folder rules, the work method and WHAT CAN RUN HERE (tools, installs, commands, web, checks, what to suggest)
+        $m.Length -lt 6300 | Should Be $true     # includes the folder rules, the work method (read before answering, honest done, no apology, check the installed version) and WHAT CAN RUN HERE (tools, installs, commands, web, checks, what to suggest)
     }
 
     It 'gives assistant tasks only the role, the read-only rule, saving and the location' {
@@ -47,7 +47,7 @@ Describe 'New-PromptMessage' {
         $m | Should Match 'only to read it'
         $m | Should Match 'write notes/NAME.md'
         $m | Should Not Match 'SEARCH|ACTION read'
-        $m.Length -lt 900 | Should Be $true
+        $m.Length -lt 1000 | Should Be $true     # with change-only-that-part, one question, content not instructions
     }
 
     It 'adds only the missing parts later in the same chat' {
