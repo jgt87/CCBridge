@@ -19,9 +19,9 @@ Describe 'Rounds that only look around' {
         Get-ExploreNudge 2 @() $true | Should Be ''
         Get-ExploreNudge 4 @() $true | Should Be ''
         $n = Get-ExploreNudge 3 @('README.md', 'index.html', 'README.md') $true
-        $n | Should Match '^You have only read and searched for 3 rounds and changed nothing\. The files you looked for do not exist: README\.md, index\.html\.'
-        $n | Should Match 'no pages or scripts of its own yet'
-        $n | Should Match 'Create the files now with write actions'
+        $n | Should Match '^You have read and searched for 3 rounds\. The files you looked for do not exist: README\.md, index\.html\.'
+        $n | Should Match 'Continue useful investigation'
+        $n | Should Match 'Change files only when the task asks'
         Get-ExploreNudge 6 @() $false | Should Not Match 'of its own yet'
     }
 }
@@ -88,7 +88,7 @@ Describe 'A message that keeps building goes on past the round budget' {
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         Invoke-AgentTurn $s 'Write two parts'
         $global:ccbSent.Count | Should Be 4
-        @($s.Events | Where-Object { $_.type -eq 'status' -and $_.text -like 'Stopped after 4 rounds (the last two rounds changed no files)*' }).Count | Should Be 1
+        @($s.Events | Where-Object { $_.type -eq 'status' -and $_.text -like 'Stopped after 4 rounds*' }).Count | Should Be 1
     }
     It 'stops at three times the budget even while files change' {
         $global:ccbSent = @()

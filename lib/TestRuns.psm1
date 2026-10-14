@@ -54,6 +54,7 @@ function Read-TestRun([Parameter(Mandatory)][string]$Path) {
         answers = $answers; build = "$($meta['build'])"
         files = @(& $list $meta['files']); source = @(& $list $meta['source'])
         mode = $(if ($meta['mode'] -in 'auto', 'ask') { $meta['mode'] } else { 'auto' })
+        expectations = @(& $list $meta['expect'])
         steps = $steps.ToArray()
     }
 }

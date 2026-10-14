@@ -190,14 +190,21 @@ function Get-PromptModules {
     <# Case-specific parts for work on files, in order. 'actions:run' unless commands are off
        (trait 'nocommands'); 'rules:*' when the request or the project calls for them. #>
     param([AllowEmptyString()][string]$Text, $Context)
-    $traits = @($Context.Traits)
+    # Once a chat has a concrete file scope, specialist rules follow that scope rather than every
+    # language present somewhere in a large repository. Request words still add rules explicitly.
+    # Hashtable property access in Windows PowerShell returns a single null item for a missing
+    # key, so inspect the key explicitly before deciding whether the scoped values are present.
+    $touchedPaths = if ($Context -is [hashtable] -and $Context.ContainsKey('TouchedPaths')) { $Context['TouchedPaths'] } elseif ($Context -and $Context.PSObject.Properties['TouchedPaths']) { $Context.TouchedPaths } else { $null }
+    $touchedTraits = if ($Context -is [hashtable] -and $Context.ContainsKey('TouchedTraits')) { $Context['TouchedTraits'] } elseif ($Context -and $Context.PSObject.Properties['TouchedTraits']) { $Context.TouchedTraits } else { $null }
+    $paths = if (@($touchedPaths | Where-Object { "$_".Trim() }).Count) { @($touchedPaths) } else { @($Context.Paths) }
+    $traits = if (@($touchedTraits | Where-Object { "$_".Trim() }).Count) { @($touchedTraits) } else { @($Context.Traits) }
     $web = ($traits -contains 'web') -or ($Text -match $script:WebPattern)
     $ids = New-Object System.Collections.Generic.List[string]
     if ($traits -notcontains 'nocommands') { $ids.Add('actions:run') }
     $ids.Add('rules:folders')   # where each kind of file goes (Layout.psm1)
     $ids.Add('rules:environment')   # what this computer has installed (Get-EnvironmentText)
     # find and remember: only useful once the project has files.
-    if (@($Context.Paths | Where-Object { $_ }).Count -or $traits -contains 'code') { $ids.Add('actions:project') }
+    if (@($paths | Where-Object { $_ }).Count -or $traits -contains 'code') { $ids.Add('actions:project') }
     if ($web) { $ids.Add('rules:web') }
     # Project setup (ProjectSetup.psm1): the build form the user chose, and live data.
     switch ("$($Context.Build)") { 'single' { $ids.Add('rules:build-single') } 'modular' { $ids.Add('rules:build-modular') } }
@@ -218,7 +225,7 @@ function Get-PromptModules {
     if (($traits -contains 'office') -or ($Text -match $script:OfficePattern)) { $ids.Add('rules:office') }
     if (($Text -match $script:BigTaskPattern) -or $Text.Length -gt 600) { $ids.Add('rules:bigtask') }
     if ($Text -match $script:ScriptPattern) { $ids.Add('rules:scripts') }
-    if ($Text -match $script:PsGuiPattern -or @($Context.Paths | Where-Object { "$_" -match '(?i)\.xaml$' -and "$_" -notmatch '(?i)^styles/kit/' }).Count) { $ids.Add('rules:psgui') }
+    if ($Text -match $script:PsGuiPattern -or @($paths | Where-Object { "$_" -match '(?i)\.xaml$' -and "$_" -notmatch '(?i)^styles/kit/' }).Count) { $ids.Add('rules:psgui') }
     $designReview = $Text -match $script:DesignReviewPattern
     if (($web -and ($Text -match $script:AppPartPattern -or $Text -match $script:BuildPattern)) -or ($Text -match $script:UiPattern) -or $designReview) {
         $ids.Add('rules:ui')
@@ -227,13 +234,13 @@ function Get-PromptModules {
         # Build from the UI kit (setting uiKit; the agent adds the kit to the project when this goes out).
         if (Test-UiKitOn (Split-Path -Parent $PSScriptRoot)) { $ids.Add('rules:uikit') }
     }
-    elseif ($web -and @($Context.Paths) -contains 'styles/kit/tokens.css' -and ($Text -match $script:ChangePattern -or $Text -match $script:FixPattern -or $Text -match $script:BuildPattern) -and (Test-UiKitOn (Split-Path -Parent $PSScriptRoot))) {
+    elseif ($web -and @($paths) -contains 'styles/kit/tokens.css' -and ($Text -match $script:ChangePattern -or $Text -match $script:FixPattern -or $Text -match $script:BuildPattern) -and (Test-UiKitOn (Split-Path -Parent $PSScriptRoot))) {
         # A project with the UI kit: any change to it may add interface, so the kit's rule goes too.
         $ids.Add('rules:uikit')
     }
     # A change to how something looks, in a project with the UI kit (setting on): the kit first (its part,
     # variant, option or token for that element), the person's own look where it goes beyond the kit.
-    if (((Test-LookRequest $Text) -or (Test-LookUnclear $Text)) -and @($Context.Paths) -contains 'styles/kit/tokens.css' -and (Test-UiKitOn (Split-Path -Parent $PSScriptRoot))) {
+    if (((Test-LookRequest $Text) -or (Test-LookUnclear $Text)) -and @($paths) -contains 'styles/kit/tokens.css' -and (Test-UiKitOn (Split-Path -Parent $PSScriptRoot))) {
         if ($ids -notcontains 'rules:uikit') { $ids.Add('rules:uikit') }
         if ($ids -notcontains 'rules:userlook') { $ids.Add('rules:userlook') }
     }
@@ -243,7 +250,7 @@ function Get-PromptModules {
     if (($traits -contains 'prisma') -or ($Text -match $script:PrismaPattern)) { $ids.Add('rules:prisma') }
     if (($traits -contains 'source') -or ($Text -match $script:PrivacyPattern)) { $ids.Add('rules:privacy') }
     # Runbook rules: for requests about runbooks, and for messages that name one of the project's runbooks.
-    $namesRunbook = @($Context.Paths | Where-Object { "$_" -match '(?i)^Runbooks/([^/]+)\.runbook\.md$' -and $Text -match ('(?i)(^|[^\w-])' + [regex]::Escape($Matches[1]) + '($|[^\w-])') }).Count
+    $namesRunbook = @($paths | Where-Object { "$_" -match '(?i)^Runbooks/([^/]+)\.runbook\.md$' -and $Text -match ('(?i)(^|[^\w-])' + [regex]::Escape($Matches[1]) + '($|[^\w-])') }).Count
     if ($Text -match $script:RunbookPattern -or $namesRunbook) { $ids.Add('rules:runbook') }
     # The setup answers (ProjectSetup registry): the kind of app the user chose brings its rules.
     $ans = $Context.Answers
@@ -253,11 +260,22 @@ function Get-PromptModules {
         if ("$($ans['audience'])" -eq 'sharepoint' -and -not $ids.Contains('rules:sharepoint')) { $ids.Add('rules:sharepoint') }
     }
     # Converted data in the project: the query action, so numbers come from every row.
-    if ($Context.Databases -or @($Context.Paths | Where-Object { "$_" -match '^(?i)data/[^/]+\.json$' }).Count) { $ids.Add('actions:sql') }
+    if ($Context.Databases -or @($paths | Where-Object { "$_" -match '^(?i)data/[^/]+\.json$' }).Count) { $ids.Add('actions:sql') }
     # Online information: how to use web sources, and the web action for the exact text of a page.
     if ($Text -match $script:WebLookupPattern -or @(Get-NamedSites $Text).Count) { $ids.Add('rules:websources'); $ids.Add('actions:web') }
     if (@(Get-M365Links $Text).Count) { $ids.Add('rules:m365links') }
     $ids.ToArray()
+}
+
+function Get-TaskIntent {
+    <# Intent is independent of subject. Fixed cues; questions do not authorize changes. #>
+    param([string]$Text, [string]$Mode = '', [string]$Previous = '')
+    if ($Mode -eq 'plan' -or $Text -match '(?i)\b(do not|don.t|without|no|geen|niet)\s+(make\s+)?(changes?|edit\w*|modif\w*|chang\w*|wijzig\w*|aanpass\w*)\b|\b(review|plan|explain|analyse|analyze) only\b') { return 'investigate' }
+    if ($Text -match '(?i)^\s*(continue|go ahead|do it|proceed|ga door)[.!\s]*$' -and $Previous -in 'answer', 'investigate', 'change') { return $Previous }
+    if ($Text -match '(?i)^\s*(how (do|can|should|would)|why|what (does|is|are|would)|where (is|are)|which|explain|hoe|waarom|wat doet)\b' -and $Text -notmatch '(?i)\b(and|then|en)\s+(please\s+)?(fix|implement|apply|change|update|edit|repareer)\b') { return 'answer' }
+    if ($Text -match $script:ChangePattern -or $Text -match $script:FixPattern -or $Text -match '(?i)\b(write|save|export|schrijf|sla op)\b') { return 'change' }
+    if ($Text -match '(?i)\b(review|investigate|inspect|diagnos\w*|analy[sz]e|audit|check|read|find|search|onderzoek|controleer|lees)\b') { return 'investigate' }
+    'answer'
 }
 
 function Get-TaskKind {
@@ -500,4 +518,4 @@ function Get-AutoAgent {
     @{ agent = ''; why = '' }
 }
 
-Export-ModuleMember -Function Test-LeakReport, Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage, Test-BuildRequest, Test-LookUnclear
+Export-ModuleMember -Function Get-TaskIntent, Test-LeakReport, Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage, Test-BuildRequest, Test-LookUnclear

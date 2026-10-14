@@ -54,8 +54,7 @@ function Format-HandoffFacts {
     $o = New-Object System.Collections.Generic.List[string]
     $o.Add('WHAT THE HELPER PROGRAM KEPT (facts it recorded itself; they win over the summary above where they differ):')
     if ("$Request".Trim()) {
-        $q = ("$Request" -replace '\s+', ' ').Trim()
-        if ($q.Length -gt 600) { $q = $q.Substring(0, 600) + ' ...' }
+        $q = $Request
         $o.Add("- The request of this task: $q")
     }
     if ($Mode -eq 'plan') { $o.Add('- Mode: plan only. Do not change files or run commands; plan.') }

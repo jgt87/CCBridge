@@ -51,6 +51,13 @@ Describe 'A test run file' {
         (Get-ProjectSetup $p).answers['audience'] | Should Be 'sharepoint'
         Split-Path -Leaf (New-TestRunProject $projects $run ([datetime]'2026-01-05 09:30')) | Should Be 'Tickets run 20260105-0930-2'
     }
+    It 'reads deterministic outcome expectations' {
+        $f = Join-Path (Get-TestRunsDir $projects) 'expect.testrun.md'
+        [IO.File]::WriteAllText($f, "---`ntitle: Expectations`nexpect: index.html exists, index.html contains hello`n---`n1. Build the page`n")
+        $t = Read-TestRun $f
+        @($t.expectations).Count | Should Be 2
+        $t.expectations[1] | Should Be 'index.html contains hello'
+    }
     It 'keeps each run''s numbers and puts this run next to the last' {
         Add-TestRunHistory $projects 'Tickets' @{ when = '2026-01-05 10:00'; build = 'v0.1.1'; tasks = 2; messages = 14; rounds = 12; nudges = 4; failedSteps = 3; pageProblems = 1; planLoops = 0; typing = 0; noAnswer = 0; errors = 0; minutes = 9 }
         $last = @(Read-TestRunHistory $projects 'Tickets') | Select-Object -Last 1

@@ -6,6 +6,18 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.139] - 2026-10-14
+
+### Added
+- Task records preserve the full request, acceptance state, verification state and remaining work across long turns and chat rollovers.
+- Test runs can declare deterministic `expect` checks such as `index.html exists` or `index.html contains hello`.
+
+### Changed
+- Prompt budgets keep the user request and project instructions intact while shortening optional context around them.
+- Progress tracking counts fresh evidence and test results, and exploratory rounds no longer force edits when the task asks for investigation.
+- Folder instructions are discovered and sent before proposed writes or edits run.
+- Task intent separates answers and investigations from authorized changes, and specialist guidance follows the files touched by the current chat.
+
 ## [v0.1.138] - 2026-10-14
 
 ### Fixed

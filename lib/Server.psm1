@@ -971,7 +971,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $proj = New-TestRunProject $pr $run
             Set-Project $State $proj
             $started = (Get-Date).ToString('s')
-            $info = @{ name = $run.name; title = $run.title; steps = @($run.steps).Count; started = $started; project = $proj; projectsRoot = $pr }
+            $info = @{ name = $run.name; title = $run.title; steps = @($run.steps).Count; started = $started; project = $proj; projectsRoot = $pr; expectations = @($run.expectations) }
             for ($i = 0; $i -lt @($run.steps).Count; $i++) {
                 $null = Submit-AgentTask $State @{ kind = 'chat'; text = [string]$run.steps[$i]; mode = $run.mode; testRun = $info } 'testrun' "Test run $($run.name) $($i + 1)/$(@($run.steps).Count): $([string]$run.steps[$i])"
             }

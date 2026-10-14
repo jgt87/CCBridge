@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = 'Stop'
 $script:ProjectTaskKinds = @('chat', 'agent', 'fetch', 'runbook', 'chain', 'script', 'review', 'packages', 'undo', 'export', 'testrun-report')
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer', 'Handoff', 'LoopGuard') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -828,7 +828,17 @@ function Invoke-TestRunReport {
     $now = Get-SessionReport $entries "StreamHub $build" -Metrics
     $now.when = (Get-Date).ToString('yyyy-MM-dd HH:mm'); $now.project = Split-Path -Leaf "$($tr.project)"
     $before = @(Read-TestRunHistory "$($tr.projectsRoot)" "$($tr.name)") | Select-Object -Last 1
-    $text = "# Test run: $($tr.title)`n`n- Test: $($tr.name) ($($tr.steps) step(s)), project: $($now.project)`n`n## Compared with the last run`n`n" + (Format-TestRunComparison $now $before) + "`n" + ($page -replace '^# Session report', '## Session report' -replace '(?m)^## (Findings|Tasks|Failed steps)', '### $1')
+    $checks = New-Object System.Collections.Generic.List[string]
+    foreach ($expect in @($tr.expectations | Where-Object { "$_".Trim() })) {
+        $m = [regex]::Match("$expect", '^\s*([^ ]+)\s+(exists|contains)\s*(.*)$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if (-not $m.Success) { $checks.Add("- NOT CHECKED: $expect (use 'path exists' or 'path contains text')"); continue }
+        $rel = $m.Groups[1].Value.Replace('/', '\'); $full = Join-Path "$($tr.project)" $rel
+        $ok = Test-Path -LiteralPath $full -PathType Leaf
+        if ($m.Groups[2].Value -ieq 'contains' -and $ok) { $ok = [IO.File]::ReadAllText($full).Contains($m.Groups[3].Value) }
+        $checks.Add("- $(if ($ok) { 'MET' } else { 'NOT MET' }): $expect")
+    }
+    $outcomes = if ($checks.Count) { "`n## Deterministic outcome checks`n`n$($checks -join "`n")`n" } else { '' }
+    $text = "# Test run: $($tr.title)`n`n- Test: $($tr.name) ($($tr.steps) step(s)), project: $($now.project)`n`n## Compared with the last run`n`n" + (Format-TestRunComparison $now $before) + $outcomes + "`n" + ($page -replace '^# Session report', '## Session report' -replace '(?m)^## (Findings|Tasks|Failed steps)', '### $1')
     $enc = New-Object Text.UTF8Encoding($false)
     $rel = '.streamhub/TestRun-report.md'
     try {
@@ -962,7 +972,7 @@ function Test-RoundsLeft([int]$Limit, [int]$Round, [int]$LastProgress) {
     if ($Round -lt $Limit) { return @{ go = $true; extend = $false; idle = $false; hard = $hard; reason = '' } }
     $building = ($Round - $LastProgress) -le 1 -and $LastProgress -gt 0
     if ($Round -lt $hard -and $building) { return @{ go = $true; extend = $true; idle = $false; hard = $hard; reason = '' } }
-    $reason = if ($Round -ge $hard) { "it reached the limit of $hard rounds" } else { "it reached the limit of $Limit rounds and the last rounds changed no files" }
+    $reason = if ($Round -ge $hard) { "it reached the limit of $hard rounds" } else { "it reached the limit of $Limit rounds without new evidence (changed no files) in the last two rounds" }
     @{ go = $false; extend = $false; idle = ($Round -lt $hard); hard = $hard; reason = $reason }
 }
 
@@ -987,7 +997,7 @@ function Get-ExploreNudge([int]$Rounds, [string[]]$Missing, [bool]$NewProject) {
     if ($Rounds -lt 3 -or $Rounds % 3 -ne 0) { return '' }
     $m = @($Missing | Where-Object { $_ } | Select-Object -Unique)
     $gone = if ($m.Count) { " The files you looked for do not exist: $($m -join ', ')." } else { '' }
-    "You have only read and searched for $Rounds rounds and changed nothing.$gone The project context lists every file the project has$(if ($NewProject) { ', and this project has no pages or scripts of its own yet' }): there is nothing more to find. Create the files now with write actions (the main page first), and read only files that are in that list."
+    "You have read and searched for $Rounds rounds.$gone Check whether the next observation will resolve a specific uncertainty. Continue useful investigation, or report the findings when the request is answered. Change files only when the task asks for changes. The project listing may be shortened; use glob or grep to locate files outside the displayed portion."
 }
 
 function Publish-SetupQuestions {
@@ -2198,6 +2208,7 @@ function Test-NeedsActionNudge {
        message. #>
     param($State, [string]$Kind, [string]$Text, [int]$Attempts = 0, [int]$Max = 2)
     if ($Attempts -ge $Max -or $State.Mode -eq 'plan') { return $false }
+    if ($State.ContainsKey('TaskIntent') -and $State.TaskIntent -ne 'change') { return $false }
     if ($Kind -notin 'coding', 'project', 'mixed') { return $false }
     $hasCode = $Text -match '(?m)^\s{0,3}(`{3,}|~{3,})'
     $hasSteps = ([regex]::Matches($Text, '(?m)^\s{0,3}(\d+[.)]|[-*])\s+\S')).Count -ge 2
@@ -2863,7 +2874,7 @@ function Get-FolderNotes {
         if ($Sent) { [void]$Sent.Add($rel) }
         $t = Get-ProjectNotes (Join-Path $ProjectRoot (Split-Path $rel.Replace('/', '\') -Parent))
         if (-not $t) { continue }
-        if ($t.Length -gt $MaxChars) { $t = $t.Substring(0, $MaxChars) + "`n(cut: read $rel for the rest)" }
+        # Instructions are never shortened. The send budget refuses an oversized required block.
         "Folder notes ($rel; they apply to the files in $(Split-Path $rel.Replace('/', '\') -Parent | ForEach-Object { $_.Replace('\', '/') })/ and win over the project notes there):`n$t"
     })
     $out -join "`n`n"
@@ -2894,7 +2905,7 @@ function Get-ProjectContext($State) {
     $files = if ($paths.Count) { "Files:`n" + (Format-ProjectTree $root -MaxChars $budget) } else { 'The folder is empty.' }
     # A project without pages or scripts of its own (only converted data and the kit): said plainly,
     # so Copilot writes instead of looking for files that are not there.
-    if ($paths.Count -and -not (Test-OwnCode $paths)) { $files += "`nThis project has no pages or scripts of its own yet: the list above is complete (data the helper program converted, and the UI kit). Do not read or search for other files; create the pages and scripts with write actions." }
+    if ($paths.Count -and -not (Test-OwnCode $paths)) { $files += "`nNo pages or scripts of the project's own were found in the indexed files. The displayed list may be shortened. Use glob or grep when needed; create files only when the request asks for them." }
     $notes = Get-ProjectNotes $root
     $full = "$location`n$files" + $(if ($notes) { "`n`nProject notes (AGENTS.md):`n$notes" } else { '' })
     # The shared instructions of every project in this folder (shared/AGENTS.md beside the projects).
@@ -3013,6 +3024,12 @@ function Invoke-RolloverIfNeeded($State, [hashtable]$Turn = @{}) {
     $outlines = if ($State.ProjectRoot -and $changed.Count) { try { Get-HandoffOutlines $State.ProjectRoot $changed } catch { Write-CCBLogError agent 'handoff outlines' $_; '' } } else { '' }
     $facts = try { Format-HandoffFacts -Request "$($State.TurnText)" -Mode "$($State.Mode)" -Changed $changed -Todos @($State.Todos) -DoneWhen @($Turn.doneWhen) -Acceptance @($Turn.acceptance) -IssueFix $State.IssueFix -Outlines $outlines } catch { Write-CCBLogError agent 'handoff facts' $_; '' }
     $State.Summary = (Limit-Text $text 4000) + $(if ($facts) { "`n`n$facts" } else { '' })
+    if ($State.TaskRecord) {
+        $State.TaskRecord.summary = $text
+        $State.TaskRecord.changed = $changed; $State.TaskRecord.remaining = @($State.Todos)
+        $State.TaskRecord.acceptance = @($Turn.acceptance)
+        $null = Save-TaskRecord $State.TaskRecordDir $State.TaskRecord
+    }
     $kind = $State.ChatKind
     Start-NewChat $State
     $State.ChatKind = $kind   # the new chat continues the same kind of task
@@ -3059,6 +3076,9 @@ function Invoke-AgentAction {
     $root = $State.ProjectRoot
     $mode = $State.Mode
     $evt = @{ id = $Id; action = $Action.type; target = $Action.arg; status = 'running' }
+    if ($State.TaskIntent -in 'answer', 'investigate' -and $Action.type -in 'write', 'edit', 'remember', 'runbook') {
+        return @{ ok = $false; summary = 'This task asks for an answer or investigation, not changes.'; output = 'Not applied: the current task does not authorize file changes. Continue reading or investigating, then answer with a done block.' }
+    }
 
     switch ($Action.type) {
         'read' {
@@ -4046,8 +4066,14 @@ function Invoke-AgentTurn {
     Write-CCBLog trace agent 'User message' @{ text = $Text }
     Add-AgentEvent $State 'user' @{ text = $Text }
     $State.TurnText = $Text
+    $State.TaskIntent = Get-TaskIntent $Text $State.Mode "$($State.TaskIntent)"
+    $State.PendingGuidance = New-Object 'Collections.Generic.List[string]'
+    $State.TaskGuidance = New-Object 'Collections.Generic.List[string]'
     # Busy is already set: a checkpoint that cannot be made must not leave it set.
     try { $checkpoint = New-Checkpoint $State.ProjectRoot $Text } catch { $State.Busy = $false; throw }
+    $taskRecord = @{ request = $Text; intent = $State.TaskIntent; mode = $State.Mode; changed = @(); remaining = @(); acceptance = @(); verification = $null; summary = ''; status = 'running' }
+    $State.TaskRecord = $taskRecord
+    $State.TaskRecordDir = Get-ProjectStateDir $State.ProjectRoot
     $baseline = $null
     try { Sync-SourceVault $State.ProjectRoot } catch { Add-AgentEvent $State 'error' @{ text = "Could not back up source data: $($_.Exception.Message)" } }
     try {
@@ -4058,6 +4084,10 @@ function Invoke-AgentTurn {
         # As little as the request needs: plain chat goes as it is; other kinds add only the parts
         # (role, actions, rules, project context) this chat has not had yet.
         $ctx = Get-ProjectContext $State
+        if (@($State.ChatFiles).Count) {
+            $ctx.TouchedPaths = @($State.ChatFiles)
+            $ctx.TouchedTraits = @(Get-ProjectTraits $ctx.TouchedPaths)
+        }
         $kind = Get-TurnKind $State $Text $ctx $ForceKind
         # Issue cycle step 1: index before the change (not for plain chat or plan mode).
         if ($kind -ne 'chat' -and $State.Mode -ne 'plan') { $baseline = Get-IssueBaseline $State }
@@ -4074,13 +4104,16 @@ function Invoke-AgentTurn {
         # A report that a page shows markup or script as text: the helper program checks the pages
         # itself first, fixes what has one right answer, and names the lines for Copilot.
         $sendText = $Text
-        if ($kind -ne 'chat' -and (Test-LeakReport $Text)) {
+        if ($State.TaskIntent -eq 'change' -and $kind -ne 'chat' -and (Test-LeakReport $Text)) {
             $rep = try { Get-LeakReport $State } catch { Write-CCBLogError agent 'leak report' $_; '' }
             if ($rep) { $sendText = "$Text`n`n$rep" }
         }
         $message = New-PromptMessage -AppRoot $State.AppRoot -Kind $kind -Text $sendText -Sent $State.SentParts -Context $ctx -Summary $summary
+        foreach ($notes in @((Get-ProjectNotes $State.ProjectRoot), (Get-SharedNotes $State.ProjectRoot))) {
+            if ("$notes".Trim()) { $State.PendingGuidance.Add($notes); $State.TaskGuidance.Add($notes) }
+        }
         # The UI kit rules go out: the kit must be in the project (added once, never overwritten).
-        if ($State.ProjectRoot -and $State.SentParts.Contains('rules:uikit')) {
+        if ($State.TaskIntent -eq 'change' -and $State.ProjectRoot -and $State.SentParts.Contains('rules:uikit')) {
             try {
                 # A catalogue from an older kit revision first, so the rules and the kit files match.
                 $kitNewer = @(Update-UiKitCatalog $State.ProjectRoot $State.AppRoot)
@@ -4098,7 +4131,7 @@ function Invoke-AgentTurn {
         if ($kind -ne 'chat' -and $State.ProjectRoot) {
             if ($null -eq $State.FolderNotesSent) { $State.FolderNotesSent = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase) }
             $fnText = try { Get-FolderNotes $State.ProjectRoot @(Get-NamedFiles $Text @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object { $_.path })) $State.FolderNotesSent } catch { Write-CCBLogError agent 'folder notes' $_; '' }
-            if ($fnText) { $message += "`n`n$fnText" }
+            if ($fnText) { $message += "`n`n$fnText"; $State.PendingGuidance.Add($fnText); $State.TaskGuidance.Add($fnText) }
         }
         # What Copilot writes down for the helper program (TaskNotes): the checks this task must pass,
         # and notes on data files that have none yet (or whose data changed). Asked with this message,
@@ -4150,6 +4183,7 @@ function Invoke-AgentTurn {
         # rounds keep changing files goes on past it, up to three times the budget, and stops as soon
         # as two rounds in a row change nothing (Test-RoundsLeft).
         $round = 0; $lastProgress = 0; $extended = $false
+        $observations = New-Object 'Collections.Generic.HashSet[string]'
         $exploreRounds = 0; $missingReads = New-Object System.Collections.Generic.List[string]   # rounds that only looked around, and the files they looked for
         $loopWatch = New-LoopWatch   # a change undone again, rounds alternating between the same steps (LoopGuard)
         while ($true) {
@@ -4163,10 +4197,32 @@ function Invoke-AgentTurn {
                 $State.Summary = $null
                 if ($prefix) { $message = "$prefix`n`n$message" }
             }
-            $message = Limit-Text $message $State.Config.promptCharBudget
+            $intentText = if ($State.TaskIntent -eq 'change') { 'Task intent: change. Complete the requested changes and verify them; useful investigation and tests are progress too.' } else { "Task intent: $($State.TaskIntent). Read, investigate and answer the request. Do not change project files. An answer or findings can finish the task without edits." }
+            $required = @($intentText) + @($State.PendingGuidance.ToArray())
+            # The user's request is a hard requirement on every turn. Optional context may be
+            # shortened, but the actual task must remain available after a rollover or long loop.
+            $required += @($Text)
+            if ($round -eq 1 -or $rolled) {
+                $required += @($State.TaskGuidance.ToArray())
+                if ($kind -in 'coding', 'project', 'mixed') { $required += @((Get-PromptPart $State.AppRoot 'actions'), (Get-PromptPart $State.AppRoot 'rules'), (Get-PromptPart $State.AppRoot 'rules:environment')) }
+                if ($State.Mode -eq 'plan') { $required += 'Mode: plan only. Do not change files or run commands.' }
+            }
+            $unbudgeted = $message
+            $message = Format-TaskMessage $message $required ([int]$State.Config.promptCharBudget)
+            # An optional module shortened out of this message was not delivered in full.
+            foreach ($partId in @($State.SentParts)) {
+                if ($partId -notmatch '^(rules|actions):') { continue }
+                $partText = Get-PromptPart $State.AppRoot $partId $ctx
+                if ($partText -and $unbudgeted.Contains($partText) -and -not $message.Contains($partText)) { [void]$State.SentParts.Remove($partId) }
+            }
+            $taskRecord.guidance = @($State.TaskGuidance.ToArray())
+            $taskRecord.changed = @($checkpoint.Files.Keys); $taskRecord.remaining = @($State.Todos)
+            $taskRecord.acceptance = @($acceptResults); $taskRecord.verification = $ev
+            $null = Save-TaskRecord $State.TaskRecordDir $taskRecord
 
             Write-CCBLog verbose agent "Round ${round}: sending" @{ chars = $message.Length }
             $r = Send-ToCopilot $State $message -Files @(@($attach) + @($fileAttach)) -OptionalFiles
+            $State.PendingGuidance.Clear()
             if ($attach.Count -or $fileAttach.Count) {
                 foreach ($why in @((Get-Bridge $State).AttachErrors)) { Add-AgentEvent $State 'status' @{ text = "A file was not shown to Copilot: $why" } }
             }
@@ -4280,6 +4336,20 @@ function Invoke-AgentTurn {
             # A change that is meant to fix a reported problem: the file as it was, to roll back to
             # when the change makes it worse.
             $roundSnap = @{}
+            # Discover instructions for the whole proposed mutation batch before any action runs.
+            # Do not replay the stale proposal: Copilot must reconsider it with these instructions.
+            $destinations = @($actions | Where-Object { $_.type -in 'write', 'edit' } | ForEach-Object { "$($_.arg)" -replace ':\d+-\d+$', '' })
+            # Read destination-folder guidance with a temporary sent set. A folder discovered in a
+            # previous round is already known and must not cause the same proposal to be deferred forever.
+            $newNotes = if ($destinations.Count) { Get-FolderNotes $State.ProjectRoot $destinations $null } else { '' }
+            $knownNotes = $newNotes -and @($State.TaskGuidance | Where-Object { "$newNotes" -eq "$_" }).Count
+            if ($newNotes -and -not $knownNotes) {
+                $State.PendingGuidance.Add($newNotes); $State.TaskGuidance.Add($newNotes)
+                $message = "No actions in this reply were executed. Read the newly discovered folder instructions below, reconsider your proposed actions, then send the appropriate actions again.`n`n$newNotes"
+                Add-AgentEvent $State 'status' @{ text = 'New folder instructions found; Copilot must read them before the proposed changes run.' }
+                if ($round -ge [Math]::Min(60, [Math]::Max(1, [int]$State.Config.maxRounds) * 3)) { break }
+                continue
+            }
             foreach ($a in $actions) {
                 if ($a.type -notin 'write', 'edit' -or -not $a.arg) { continue }
                 $rp = "$($a.arg)".Trim().Replace('\', '/')
@@ -4332,7 +4402,7 @@ function Invoke-AgentTurn {
                         Add-AgentEvent $State 'error' @{ text = "The same $($a.type) of $($a.arg) failed $times times in a row with: $(("$($res.output)" -split "`n")[0] -replace '^error:\s*', ''). Stopped this message so it does not loop."; code = 'STEP-LOOP'; hint = 'Ask Copilot to rewrite the whole file with a write block, or make this change by hand; then continue.' }
                     }
                 }
-                $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = $out; readPaths = $res.readPaths; changedPath = $(if ($res.ok -and $res.changed) { $res.path } else { $null }) })
+                $results.Add(@{ head = "### $($k + 1). $($a.type) $($a.arg)".TrimEnd(); output = $out; observation = $res.output; ok = $res.ok; action = $a; readPaths = $res.readPaths; changedPath = $(if ($res.ok -and $res.changed) { $res.path } else { $null }) })
                 if ($stopLoop) { break }
             }
             # File checks of what this round changed (per type: syntax, unclosed brackets, tags and
@@ -4340,14 +4410,16 @@ function Invoke-AgentTurn {
             # the next round, before more edits build on it. Only problems the task added count.
             if ($isDone) { Add-AgentEvent $State 'done' @{ text = $doneText } }
             $roundChanged = @($results | ForEach-Object { $_.changedPath } | Where-Object { $_ } | Select-Object -Unique)
-            if ($roundChanged.Count) { $lastProgress = $round }
+            # Fresh investigation is useful evidence, but it does not turn an exploratory answer
+            # into an unbounded build. Only non-exploratory evidence or a real change extends rounds.
+            if ((-not (Test-ExploreRound $actions $results)) -and (Test-RoundProgress $actions $results.ToArray() $observations)) { $lastProgress = $round }
             # Rounds that only look around (reads, searches, listings): after three of them in a row
             # Copilot is told the file list is complete and asked to write (Get-ExploreNudge).
             if (Test-ExploreRound $actions $results) {
                 $exploreRounds++
                 foreach ($res in $results) { foreach ($mm in [regex]::Matches("$($res.output)", '(?m)^### (\S+)\s*\n\(file not found')) { [void]$missingReads.Add($mm.Groups[1].Value) } }
                 $nudge = Get-ExploreNudge $exploreRounds @($missingReads) (-not (Test-OwnCode @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object { $_.path })))
-                if ($nudge) { $results.Add(@{ head = '### Nothing changed yet'; output = $nudge }); Add-AgentEvent $State 'status' @{ text = "Round ${round}: Copilot has only read and searched for $exploreRounds rounds; StreamHub asked it to write the files now." } }
+                if ($nudge) { $results.Add(@{ head = '### Investigation progress'; output = $nudge }); Add-AgentEvent $State 'status' @{ text = "Round ${round}: checking whether further investigation will resolve a specific uncertainty." } }
             } else { $exploreRounds = 0 }
             # Going in circles: a file back to a version it had earlier in this task, or rounds that
             # alternate between the same two sets of steps. Said once, the second time stops the message.
@@ -4377,7 +4449,7 @@ function Invoke-AgentTurn {
                 if ($null -eq $State.FolderNotesSent) { $State.FolderNotesSent = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase) }
                 $touched = @($results | ForEach-Object { @($_.readPaths) + @($_.changedPath) } | Where-Object { $_ } | ForEach-Object { "$_" -replace ':\d+-\d+$', '' })
                 $fnText = if ($touched.Count) { try { Get-FolderNotes $State.ProjectRoot $touched $State.FolderNotesSent } catch { Write-CCBLogError agent 'folder notes' $_; '' } } else { '' }
-                if ($fnText) { $results.Add(@{ head = '### Folder notes'; output = $fnText }) }
+                if ($fnText) { $results.Add(@{ head = '### Folder notes'; output = $fnText }); $State.PendingGuidance.Add($fnText); $State.TaskGuidance.Add($fnText) }
             }
             if ($null -ne $State.ChatFiles) { foreach ($f in @($results | ForEach-Object { @($_.readPaths) + @($_.changedPath) } | Where-Object { $_ })) { [void]$State.ChatFiles.Add("$f".Replace('\', '/')) } }
             if ($roundChanged.Count -and -not $State.Cancel -and -not $stopLoop) {
@@ -4851,8 +4923,8 @@ function Invoke-AgentTurn {
                 break
             }
             $left = Test-RoundsLeft ([int]$State.Config.maxRounds) $round $lastProgress
-            if ($left.extend -and -not $extended) { $extended = $true; Add-AgentEvent $State 'status' @{ text = "Past $($State.Config.maxRounds) rounds, but the last round still changed files: continuing while files keep changing (up to $($left.hard) rounds)." } }
-            if (-not $left.go) { $endReason = $left.reason; Add-AgentEvent $State 'status' @{ text = $(if ($lastProgress -eq 0) { "Stopped after $round rounds: Copilot read and searched but changed nothing. Send a message to continue, for example: write the files now." } else { "Stopped after $round rounds$(if ($left.idle) { ' (the last two rounds changed no files)' }). Send a message to continue." }) }; break }
+            if ($left.extend -and -not $extended) { $extended = $true; Add-AgentEvent $State 'status' @{ text = "Past $($State.Config.maxRounds) rounds, but the last round still changed files or gathered new evidence: continuing while progress continues (up to $($left.hard) rounds)." } }
+            if (-not $left.go) { $endReason = $left.reason; Add-AgentEvent $State 'status' @{ text = "Stopped after $round rounds: $($left.reason). Send a message to continue." }; break }
 
             $message = "Results:`n`n" + (Format-ActionResults $State $results) + "`n`nContinue. Use done when the task is finished."
         }
@@ -4866,6 +4938,11 @@ function Invoke-AgentTurn {
         Add-AgentEvent $State 'error' @{ text = $_.Exception.Message; record = $_ }
     } finally {
         Write-CCBLog info agent "Turn finished" @{ ms = $turnWatch.ElapsedMilliseconds; chat = "$($State.Throttle.used)/$($State.Throttle.max)"; cancelled = [bool]$State.Cancel }
+        $taskRecord.status = if ($State.Cancel) { 'cancelled' } elseif ($doneFinished) { 'finished' } else { 'stopped' }
+        $taskRecord.changed = @($checkpoint.Files.Keys); $taskRecord.remaining = @($State.Todos)
+        $taskRecord.acceptance = @($acceptResults); $taskRecord.verification = $ev
+        $taskRecord.result = $doneText
+        try { $null = Save-TaskRecord $State.TaskRecordDir $taskRecord } catch { Write-CCBLogError agent 'task record' $_ }
         try {
             $fixed = @(Restore-SourceData $State.ProjectRoot)
             if ($fixed.Count) { Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) read-only file(s)" 'Source/ and protected files are read-only; StreamHub undid changes to them.' -Output ($fixed -join "`n") }
