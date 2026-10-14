@@ -1504,6 +1504,10 @@ function Assert-Writable([string]$ProjectRoot, [string]$Path) {
     if (Test-InSource $ProjectRoot $full) {
         throw "$Path is in Source/, which holds the user's source data and is read-only. Leave it unchanged and write your own working file elsewhere in the project (for example Work/$([IO.Path]::GetFileName($full)))."
     }
+    # A writable-looking alias may lead to Source/, .streamhub/, a protected file or generated
+    # output. Check the destination by the same rules as the name Copilot supplied.
+    $physical = Resolve-ProjectLinkPath $ProjectRoot $full $Path
+    if ($physical -ne $full) { $null = Assert-Writable $ProjectRoot (ConvertTo-RelativePath $ProjectRoot $physical) }
     $full
 }
 

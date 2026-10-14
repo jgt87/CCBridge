@@ -100,6 +100,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File mcp\ccbridge-mcp.ps1
 
 The running web server holds `lib/*.psm1` in memory: restart it after backend changes (the UI files are read fresh from disk).
 
+Project routing: `Submit-AgentTask` captures the project in every project task's payload; `Start-AgentWorker` applies it before preferences, vault sync and execution (including MCP undo), then restores the selected project after cleanup. `ProjectGate` excludes `Set-Project` for the whole task and idle project maintenance, including gaps when Busy is false. Tests: `tests/ProjectRouting.Tests.ps1`. Linked paths: `Resolve-ProjectLinkPath` follows complete junction/symlink chains with confinement and cycle checks; `Assert-Writable` applies protections to the resolved destination too. Project listings skip links, as vault traversal does. Tests: `tests/LinkedPaths.Tests.ps1`.
+
 ## PowerShell 5.1 rules (each of these has bitten this repo)
 
 - Keep `.ps1`/`.psm1` **ASCII-only**; BOM-less files are read as ANSI. Write non-ASCII as `\u` escapes in JS strings or `[char]0x..`.

@@ -1025,6 +1025,9 @@ function Invoke-ApiRequest($Ctx, $State) {
 }
 
 function Set-Project($State, [string]$Path) {
+    if (-not [Threading.Monitor]::TryEnter($State.ProjectGate)) { throw 'Wait for the current task to finish or stop it before switching projects.' }
+    try {
+    if ($State.Busy) { throw 'Wait for the current task to finish or stop it before switching projects.' }
     $State.ProjectRoot = $Path.TrimEnd('\')
     $State.SessionSince = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')   # line-change counts start here
     $State.OpenedAt = $State.SessionSince   # "last change" counts only changes made after this open
@@ -1049,8 +1052,8 @@ function Set-Project($State, [string]$Path) {
     if ($moved.Count) { Add-OwnChangeEvent $State 'move' "$($moved.Count) item(s) to the current folder layout" "Project folders tidied to the current layout: fetch prompts and runbooks in Runbooks/, their data in Runbooks/Exports/, StreamHub's own records (evidence, reviews, plans, earlier data versions) in .streamhub/, folder names with a capital." -Output ($moved -join "`n") }
     foreach ($f in @(if ($re) { $re.files })) {
         # Each file whose links now point at the moved folders: an edit card with its diff.
-        $old = try { (Read-TextFile (Join-Path $re.backup $f.path.Replace('/', ''))).Text } catch { $null }
-        $new = try { (Read-TextFile (Join-Path $State.ProjectRoot $f.path.Replace('/', ''))).Text } catch { $null }
+        $old = try { (Read-TextFile (Join-Path $re.backup $f.path.Replace('/', '\'))).Text } catch { $null }
+        $new = try { (Read-TextFile (Join-Path $State.ProjectRoot $f.path.Replace('/', '\'))).Text } catch { $null }
         Add-OwnChangeEvent $State 'edit' $f.path "$($f.count) link(s) or reference(s) now point at the new folders. The earlier version is kept in $($re.backup)." @{ path = $f.path; exists = $true; old = $old; new = $new }
     }
     # A project that has had no request yet, with files the person put in it: what are they for?
@@ -1073,6 +1076,7 @@ function Set-Project($State, [string]$Path) {
     try { $indexing = Start-IssueIndexer $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue index' $_ }   # step 1 of the issue cycle, in the background (with the import index)
     if (-not $indexing) { try { $null = Update-ImportIndex $State.ProjectRoot } catch { Write-CCBLogError server 'import index' $_ } }   # issues off: the import index alone
     try { [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'), $State.ProjectRoot) } catch { }
+    } finally { [Threading.Monitor]::Exit($State.ProjectGate) }
 }
 
 $script:PreviewTypes = @{ '.html' = 'text/html; charset=utf-8'; '.htm' = 'text/html; charset=utf-8'; '.css' = 'text/css; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.mjs' = 'text/javascript; charset=utf-8'

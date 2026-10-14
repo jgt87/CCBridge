@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.138] - 2026-10-14
+
+### Fixed
+- Project switching waits until active work and its cleanup finish, so a running task cannot redirect writes into another project.
+- Queued tasks retain their original project across project switches and restarts. Tasks whose project is missing fail instead of using the open project.
+- MCP undo requests apply to the requested project and restore the app's selected project afterwards.
+- Complete junction and symbolic-link chains are checked for project confinement and write protections, including aliases into Source/ and .streamhub/. Project listings skip links so cycles cannot break file operations.
+- Migration change cards show the before and after contents of nested files correctly.
+
 ## [v0.1.137] - 2026-10-13
 
 ### Added

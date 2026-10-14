@@ -2,6 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
+$script:ProjectTaskKinds = @('chat', 'agent', 'fetch', 'runbook', 'chain', 'script', 'review', 'packages', 'undo', 'export', 'testrun-report')
 foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer', 'Handoff', 'LoopGuard') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
@@ -12,6 +13,7 @@ function New-AgentState {
         Tasks = New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]'
         Approvals = [hashtable]::Synchronized(@{})
         Mode = 'ask'; ProjectRoot = $null; Busy = $false; Cancel = $false; Stop = $false
+        ProjectGate = New-Object object   # worker/project-open exclusion; never lock the shared state itself
         Progress = ''; Copilot = 'idle'; CopilotMessage = ''
         Throttle = @{ used = 0; max = 0 }; Credits = $null; Todos = @(); ChatStarted = $false; NeedNewChat = $true; Summary = $null
         # This run of the app: event numbers start over with it, so an open tab knows to start over too.
@@ -392,6 +394,11 @@ function Submit-AgentTask {
        what was asked, where it came from (user, mcp, api), status, timing, Copilot messages used,
        result or error. Returns the queue entry. #>
     param($State, [hashtable]$Task, [string]$Source = 'user', [string]$Title = '')
+    # The queue's display entry and the executable task must name the same project, even when
+    # the person opens another project before this task runs. Copy the caller's task as well.
+    $Task = $Task.Clone()
+    if ($Task.kind -in $script:ProjectTaskKinds -and -not $Task.ContainsKey('projectRoot')) { $Task.projectRoot = $State.ProjectRoot }
+    $taskProjectRoot = if ($Task.ContainsKey('projectRoot')) { $Task.projectRoot } else { $State.ProjectRoot }
     $id = 'q-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     if (-not $Title) {
         $Title = switch ($Task.kind) {
@@ -401,9 +408,9 @@ function Submit-AgentTask {
     }
     $Title = ($Title -replace '\s+', ' ').Trim(); if ($Title.Length -gt 160) { $Title = $Title.Substring(0, 157) + '...' }
     $entry = [hashtable]::Synchronized(@{ id = $id; kind = $Task.kind; title = $Title; source = $Source; status = 'queued'; created = (Get-Date).ToString('s')
-        project = $(if ($Task.projectRoot) { Split-Path $Task.projectRoot -Leaf } elseif ($State.ProjectRoot) { Split-Path $State.ProjectRoot -Leaf } else { $null })
+        project = $(if ($taskProjectRoot) { Split-Path $taskProjectRoot -Leaf } else { $null })
         jobId = $Task.jobId; started = $null; finished = $null; messages = 0; summary = $null; error = $null; resultPath = $null
-        projectRoot = $(if ($Task.projectRoot) { $Task.projectRoot } else { $State.ProjectRoot }) })
+        projectRoot = $taskProjectRoot })
     $Task.queueId = $id
     $entry.task = @{}
     foreach ($k in $Task.Keys) { if ($k -ne 'queueId') { $entry.task[$k] = $Task[$k] } }
@@ -464,7 +471,7 @@ function Restore-AgentQueue {
             $task = ConvertTo-PlainHash $s.task
             if (-not $task.kind) { $e.status = 'failed'; $e.error = 'Could not be restored after the restart.'; $e.Remove('task') }
             else {
-                if ($task.kind -eq 'chat' -and -not $task.projectRoot -and $e.projectRoot) { $task.projectRoot = $e.projectRoot }
+                if ($task.kind -in $script:ProjectTaskKinds -and -not $task.ContainsKey('projectRoot') -and $e.projectRoot) { $task.projectRoot = $e.projectRoot }
                 $task.queueId = $e.id
                 if ($task.jobId) {
                     $State.Jobs[$task.jobId] = [hashtable]::Synchronized(@{ id = $task.jobId; kind = $(if ($task.kind -eq 'chat') { 'task' } else { $task.kind }); status = 'queued'; created = $e.created; queuedSeq = $State.Seq; project = $task.projectRoot })
@@ -5011,6 +5018,8 @@ function Start-AgentWorker {
                 $State.Tasks.Enqueue(@{ kind = 'connect' })
             }
             Update-CopilotTheme $State   # idle: a theme just chosen in the app reaches the Copilot tab at once
+            [Threading.Monitor]::Enter($State.ProjectGate)
+            try {
             # A project just opened (Set-Project): data copies follow their JSON. Data files are not
             # converted for an open alone; a live data file the person chose is brought in at once.
             if ($State.OpenSync) {
@@ -5046,10 +5055,16 @@ function Start-AgentWorker {
                 $State.NextLiveCheck = (Get-Date).AddMinutes(1).ToString('o')
                 try { if ((Get-ProjectSetup $State.ProjectRoot).liveSource -and (Sync-LiveData $State)) { $null = Sync-DataImports $State -NoLive } } catch { Write-CCBLogError agent 'live data' $_ }
             }
+            } finally { [Threading.Monitor]::Exit($State.ProjectGate) }
             # Weekly (setting responseOptionsDays): what Copilot's response picker offers, while idle.
             if ($State.Copilot -eq 'ready' -and $script:Bridge -and (Test-ResponseOptionsDue $State)) { Update-ResponseOptions $State $script:Bridge }
             Start-Sleep -Milliseconds 150; continue
         }
+        # Hold this through checks, approvals and cleanup, not just while Busy happens to be true.
+        # Connecting does not use a project and must not prevent startup from opening the last one.
+        $projectLocked = $task.kind -ne 'connect'
+        if ($projectLocked) { [Threading.Monitor]::Enter($State.ProjectGate) }
+        try {
         # Jobs (MCP) track a task from queue to result.
         $job = if ($task.jobId) { $State.Jobs[$task.jobId] } else { $null }
         $entry = if ($task.queueId) { Get-QueueEntry $State $task.queueId } else { $null }
@@ -5065,26 +5080,29 @@ function Start-AgentWorker {
         $saved = @{ Mode = $State.Mode; ProjectRoot = $State.ProjectRoot; NoCommands = $State.NoCommands; ReviewByCaller = $State.ReviewByCaller; ResponseMode = $State.ResponseMode }
         if ($task.responseMode) { $State.ResponseMode = $task.responseMode }
         $State.ReviewByCaller = [bool]$task.reviewByCaller
-        $foreign = $task.source -and $task.source -ne 'user'
         if ($task.mode) { $State.Mode = $task.mode }
-        # A big request in a project that chose to clarify or plan first (setup question bigtask).
-        $State.ScopeAsk = ''
-        if ($State.ProjectRoot -and -not $State.Headless -and (-not $task.source -or $task.source -eq 'user')) { try { Use-BigTaskPreference $State $task } catch { Write-CCBLogError agent 'big task preference' $_ } }
-        if ($task.projectRoot -and $task.kind -in 'fetch', 'runbook', 'chain', 'script', 'review' -and $task.projectRoot -ne $State.ProjectRoot) {
-            if (-not (Test-Path -LiteralPath $task.projectRoot -PathType Container)) { $task.missingProject = $true }
-            else { $State.ProjectRoot = $task.projectRoot }
-        }
         $State.NoCommands = [bool]$task.noCommands
-        # Protected files as the user left them: the version put back after this task's activity.
-        if ($State.ProjectRoot -and $task.kind -notin 'connect', 'newchat') { try { Sync-ProtectedVault $State.ProjectRoot } catch { Write-CCBLogError agent 'protected files' $_ } }
+        $projectReady = $false; $projectChanged = $false
         try {
+            if ($task.kind -in $script:ProjectTaskKinds) {
+                # Older direct MCP tasks can use the current project; an explicit captured null
+                # must never inherit a project that was opened after the request.
+                $taskRoot = if ($task.ContainsKey('projectRoot')) { $task.projectRoot } else { $State.ProjectRoot }
+                if (-not $taskRoot) { throw 'Open or create a project first.' }
+                if (-not (Test-Path -LiteralPath $taskRoot -PathType Container)) { throw "The project folder $taskRoot no longer exists" }
+                if ($taskRoot -ne $State.ProjectRoot) {
+                    $projectChanged = $true
+                    $State.ProjectRoot = $taskRoot; $State.Todos = @(); $State.NeedNewChat = $true
+                }
+            }
+            $projectReady = $true
+            # Apply the task's project before reading its preferences or protected files.
+            $State.ScopeAsk = ''
+            if ($State.ProjectRoot -and -not $State.Headless -and (-not $task.source -or $task.source -eq 'user')) { try { Use-BigTaskPreference $State $task } catch { Write-CCBLogError agent 'big task preference' $_ } }
+            if ($State.ProjectRoot -and $task.kind -notin 'connect', 'newchat') { try { Sync-ProtectedVault $State.ProjectRoot } catch { Write-CCBLogError agent 'protected files' $_ } }
             switch ($task.kind) {
                 'connect' { $null = Get-Bridge $State }
                 'chat'    {
-                    if ($task.projectRoot -and $task.projectRoot -ne $State.ProjectRoot) {
-                        if ($foreign) { Add-AgentEvent $State 'status' @{ text = "Task from $($task.source): working in $($task.projectRoot)." } }
-                        $State.ProjectRoot = $task.projectRoot; $State.Todos = @(); $State.NeedNewChat = $true
-                    }
                     if ($task.newChat) { $State.NeedNewChat = $true }
                     $force = if ($task.forceKind) { "$($task.forceKind)" } elseif ($task.source -eq 'mcp' -or $task.source -eq 'api') { 'work' } else { '' }
                     # "Run the meetings runbook": the runbook job sends the runbook's instructions and
@@ -5196,6 +5214,8 @@ function Start-AgentWorker {
                 Write-CCBLog info agent "Queue $($entry.id) $($entry.status)" @{ messages = $entry.messages }
                 Save-AgentQueue $State
             }
+            try {
+            if ($projectReady) {
             # Retention: old .streamhub/History, evidence and reviews and undo backups of the project go now.
             if ($State.ProjectRoot -and $task.kind -ne 'connect') { try { $null = Invoke-ProjectRetention $State.ProjectRoot $State.Config } catch { Write-CCBLogError agent 'retention' $_ } }
             # Data copies follow their JSON (a runbook, chain or change may have written the JSON).
@@ -5204,13 +5224,16 @@ function Start-AgentWorker {
             if ($State.ProjectRoot -and $task.kind -notin 'connect', 'packages', 'newchat') { Publish-PackagesNeeded $State }
             # The project's afterTask hooks, after work that can change files.
             if ($State.ProjectRoot -and $task.kind -in 'chat', 'fetch', 'runbook', 'chain', 'script', 'agent') { try { $null = Invoke-ProjectHooks $State 'afterTask' } catch { Write-CCBLogError agent 'hooks' $_ } }
+            }
+            } finally {
             $State.CurrentQueueId = $null
             $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller; $State.ResponseMode = $saved.ResponseMode
-            if ($foreign -and $saved.ProjectRoot -and $State.ProjectRoot -ne $saved.ProjectRoot) {
+            if ($projectChanged) {
                 $State.ProjectRoot = $saved.ProjectRoot; $State.NeedNewChat = $true
-                Add-AgentEvent $State 'status' @{ text = "Back to $($saved.ProjectRoot)." }
+            }
             }
         }
+        } finally { if ($projectLocked) { [Threading.Monitor]::Exit($State.ProjectGate) } }
     }
     Reset-Bridge $State
 }

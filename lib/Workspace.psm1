@@ -189,24 +189,41 @@ function Assert-NoOutsideLink {
        target is outside the project. Links that stay inside, and OneDrive's online-only
        placeholders (no link type), are fine. #>
     param([string]$Root, [string]$Full, [string]$Shown)
-    $root = $Root.TrimEnd('\')
-    $p = $Full.TrimEnd('\')
-    while ($p.Length -gt $root.Length) {
-        if (Test-Path -LiteralPath $p) {
-            $item = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
-            if ($item -and $item.LinkType -in 'Junction', 'SymbolicLink') {
-                foreach ($t in @($item.Target)) {
-                    if (-not $t) { continue }
-                    $tf = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($t)) { $t } else { Join-Path (Split-Path -Parent $p) $t })).TrimEnd('\')
-                    if ($tf -ne $root -and -not $tf.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
-                        throw "Path is outside the project: '$Shown' goes through a link to $tf"
-                    }
-                }
-            }
+    $null = Resolve-ProjectLinkPath $Root $Full $Shown
+}
+
+function Resolve-ProjectLinkPath {
+    <# Resolve every link, including links in another link's target and not-yet-created files.
+       Walk from the root so an outer junction cannot hide a second one. OneDrive cloud reparse
+       points have no Junction/SymbolicLink type and are ordinary paths here. #>
+    param([string]$Root, [string]$Full, [string]$Shown = $Full)
+    $root = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    $resolved = [IO.Path]::GetFullPath($Full).TrimEnd('\')
+    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    for ($hop = 0; $hop -lt 64; $hop++) {
+        if ($resolved -ne $root -and -not $resolved.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Path is outside the project: '$Shown' goes through a link to $resolved"
         }
-        $p = Split-Path -Parent $p
-        if (-not $p) { break }
+        if (-not $seen.Add($resolved)) { throw "Path contains a link cycle: '$Shown'" }
+        if ($resolved -eq $root) { return $resolved }
+        $parts = $resolved.Substring($root.Length + 1).Split('\')
+        $p = $root; $linked = $false
+        for ($i = 0; $i -lt $parts.Count; $i++) {
+            $p = Join-Path $p $parts[$i]
+            $item = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+            if (-not $item -or $item.LinkType -notin 'Junction', 'SymbolicLink') { continue }
+            $targets = @($item.Target | Where-Object { $_ })
+            if ($targets.Count -ne 1) { throw "Cannot resolve link in path: '$Shown'" }
+            $target = [string]$targets[0]
+            $resolved = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($target)) { $target } else { Join-Path (Split-Path -Parent $p) $target }))
+            if ($i + 1 -lt $parts.Count) { $resolved = Join-Path $resolved ($parts[($i + 1)..($parts.Count - 1)] -join '\') }
+            $resolved = [IO.Path]::GetFullPath($resolved).TrimEnd('\')
+            $linked = $true
+            break
+        }
+        if (-not $linked) { return $resolved }
     }
+    throw "Too many links in path: '$Shown'"
 }
 
 function ConvertTo-RelativePath([string]$ProjectRoot, [string]$FullPath) {
@@ -243,12 +260,14 @@ function Get-ProjectFiles {
     while ($stack.Count -and $result.Count -lt $MaxFiles) {
         $dir = $stack.Pop()
         foreach ($d in [IO.Directory]::GetDirectories($dir)) {
+            if (Test-LinkPath $d) { continue }
             $name = [IO.Path]::GetFileName($d)
             $rel = ConvertTo-RelativePath $ProjectRoot $d
             if ($script:IgnoredDirs -contains $name -or (Test-Ignored $name $rel $patterns)) { continue }
             $stack.Push($d)
         }
         foreach ($f in [IO.Directory]::GetFiles($dir)) {
+            if (Test-LinkPath $f) { continue }
             $name = [IO.Path]::GetFileName($f)
             $rel = ConvertTo-RelativePath $ProjectRoot $f
             if (Test-Ignored $name $rel $patterns) { continue }
@@ -496,6 +515,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile, Get-FileFingerprint, Get-SharedRoot, Get-SharedPrefix, Initialize-SharedRoot, Get-SharedNotes
