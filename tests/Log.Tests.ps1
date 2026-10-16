@@ -53,6 +53,14 @@ Describe 'CCBridge log' {
         $line | Should Not Match 'contoso'
     }
 
+    It 'masks common credentials and includes a correlation id when set' {
+        Set-CCBLogContext 'q-1234'
+        $safe = Protect-LogText 'Bearer abcdefghijklmnop api_key=super-secret ghp_1234567890123456 password:letmein'
+        $safe | Should Not Match 'abcdefghijklmnop|super-secret|1234567890123456|letmein'
+        $safe | Should Match 'Bearer <secret>|api_key=<secret>|<secret>'
+        Set-CCBLogContext ''
+    }
+
     It 'records errors with a PowerShell stack' {
         try { throw 'boom' } catch { Write-CCBLogError test "$marker failing step" $_ }
         (Get-MarkerLines | Where-Object { $_ -match 'ERROR .*failing step: boom' -and $_ -match '"stack"' }).Count | Should Be 1

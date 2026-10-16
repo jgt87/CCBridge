@@ -13,6 +13,8 @@ function New-HookProject([string]$Json) {
 }
 function New-HookState($p) {
     $s = New-AgentState -Config ([pscustomobject]@{ commandTimeoutSec = 60 }) -AppRoot $root
+    $s.Config | Add-Member -NotePropertyName hookTimeoutSec -NotePropertyValue 30
+    $s.Config | Add-Member -NotePropertyName hookMaxOutputChars -NotePropertyValue 4000
     $s.ProjectRoot = $p; $s.Mode = 'auto'
     $s
 }
@@ -39,6 +41,16 @@ Describe 'Read-Hooks' {
             New-HooksFile $p | Should Be '.streamhub/hooks.json'
             (Read-Hooks $p).hooks.Count | Should Be 0       # the examples do not run
             { New-HooksFile $p } | Should Throw 'already has'
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+    It 'reads generic action moments and action-name patterns' {
+        $p = New-HookProject '{"beforeAction":[{"match":"write,edit","run":"echo before"}],"afterAction":[{"run":"echo after"}]}'
+        try {
+            $h = Read-Hooks $p
+            @($h.hooks).Count | Should Be 2
+            $before = @($h.hooks | Where-Object event -eq 'beforeAction')[0]
+            Test-HookMatch $before 'write' | Should Be $true
+            Test-HookMatch $before 'read' | Should Be $false
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
@@ -79,5 +91,50 @@ Describe 'Hook file names' {
         foreach ($bad in 'src/x$(Set-Content y z).ps1', 'a&b.ps1', 'a;b.ps1', 'a"b.ps1', 'a`b.ps1', 'a|b.ps1', 'a%b%.ps1', 'a(b).ps1') { Get-HookCommand $hook $bad | Should Be '' }
         Get-HookCommand @{ run = 'npm test' } 'a&b.ps1' | Should Be 'npm test'
         Test-HookFileName 'src/app-v2_final.test.ts' | Should Be $true
+    }
+}
+
+Describe 'Generic action hooks' {
+    It 'blocks an action before execution and reports a post-action failure' {
+        $p = New-HookProject '{"beforeAction":[{"match":"read","run":"exit 1"}],"afterAction":[{"match":"read","run":"exit 1"}]}'
+        [IO.File]::WriteAllText((Join-Path $p 'note.txt'), "hello`n")
+        try {
+            $hash = Get-ScriptHash (Join-Path $p '.streamhub\hooks.json')
+            Add-ApprovedScript $p '.streamhub/hooks.json' $hash
+            $s = New-HookState $p
+            $a = [pscustomobject]@{ type = 'read'; arg = 'note.txt'; body = '' }
+            $r = & (Get-Module Agent) { param($st, $act) Invoke-AgentAction $st $act 'a1' $null 0 } $s $a
+            $r.ok | Should Be $false
+            $r.summary | Should Match 'beforeAction'
+            @($s.Events | Where-Object { $_.type -eq 'action' -and $_.target -eq 'exit 1' }).Count | Should Be 1
+
+            $p2 = New-HookProject '{"afterAction":[{"match":"read","run":"exit 1"}]}'
+            [IO.File]::WriteAllText((Join-Path $p2 'note.txt'), "hello`n")
+            Add-ApprovedScript $p2 '.streamhub/hooks.json' (Get-ScriptHash (Join-Path $p2 '.streamhub\hooks.json'))
+            $s2 = New-HookState $p2
+            $r2 = & (Get-Module Agent) { param($st, $act) Invoke-AgentAction $st $act 'a2' $null 0 } $s2 $a
+            $r2.ok | Should Be $true
+            $r2.summary | Should Match 'afterAction hook warning'
+            Remove-Item $p2 -Recurse -Force
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+    It 'matches action categories and bounds hook execution' {
+        $p = New-HookProject '{"beforeAction":[{"match":"file-change","run":"exit 1"}],"afterAction":[{"match":"command","run":"echo hook"}]}'
+        try {
+            $h = Read-Hooks $p
+            $cat = @($h.hooks | Where-Object event -eq 'beforeAction')[0]
+            Test-HookActionMatch $cat 'write' | Should Be $true
+            Test-HookActionMatch $cat 'run' | Should Be $false
+            foreach ($pair in @(@('read','grep'), @('file-change','edit'), @('command','run'), @('network','web'), @('automation','runbook'))) {
+                Test-HookActionMatch ([pscustomobject]@{ match = $pair[0] }) $pair[1] | Should Be $true
+            }
+            $s = New-HookState $p; $s.Headless = $true
+            $s.HooksApproved = Get-ScriptHash (Join-Path $p '.streamhub\hooks.json')
+            $s.Config.hookTimeoutSec = 1
+            @(Invoke-ProjectHooks $s 'afterAction' @() @{ action = 'run' }).Count | Should Be 0
+            @($s.HookTrace).Count | Should Be 1
+            $s.HookTrace[0].status | Should Be 'ok'
+            $s.HookTrace[0].durationMs | Should BeGreaterThan 0
+        } finally { Remove-Item $p -Recurse -Force }
     }
 }

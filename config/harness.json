@@ -8,6 +8,8 @@
   "replyTimeoutSec": 300,
   "agentTimeoutSec": 1800,
   "commandTimeoutSec": 180,
+  "hookTimeoutSec": 30,
+  "hookMaxOutputChars": 4000,
   "rolloverMargin": 2,
   "messagesPerChat": 30,
   "autoApproveCommands": [],

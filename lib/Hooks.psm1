@@ -1,19 +1,22 @@
 # Hooks: the user's own commands at fixed moments of a task, from .streamhub/hooks.json in the
 # project (Copilot cannot write there). afterEdit runs after Copilot writes or edits a matching file
-# ({file} is that file), beforeDone when Copilot says done (a failure goes back to Copilot), afterTask
-# when a task ends. Agent.psm1 runs them with the command rules (no deleting outside the project,
+# ({file} is that file), beforeAction/afterAction run around every agent action, beforeDone when
+# Copilot says done (a failure goes back to Copilot), afterTask when a task ends. Agent.psm1 runs
+# them with the command rules (no deleting outside the project,
 # Microsoft 365 or deleting commands never run) and asks a person once per version of the file.
 
 $ErrorActionPreference = 'Stop'
 foreach ($m in 'Workspace', 'Layout') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
-$script:Events = @('afterEdit', 'beforeDone', 'afterTask')
+$script:Events = @('beforeAction', 'afterAction', 'afterEdit', 'beforeDone', 'afterTask')
 
 function Get-HooksPath([string]$ProjectRoot) { Join-Path $ProjectRoot '.streamhub\hooks.json' }
 
 function Read-Hooks {
     <# The project's hooks: @{ exists; error; hooks = @( @{ event; run; match; name } ) }. A hook
-       needs "run"; "match" (afterEdit) is a file pattern like *.ps1 or src/*.js (default: any file). #>
+       needs "run"; "match" (afterEdit) is a file pattern like *.ps1 or src/*.js; for
+       beforeAction/afterAction it matches the action name (write, edit, run, ...) or a category
+       (read, file-change, command, network, automation). #>
     param([Parameter(Mandatory)][string]$ProjectRoot)
     $f = Get-HooksPath $ProjectRoot
     $out = @{ exists = (Test-Path -LiteralPath $f -PathType Leaf); error = $null; hooks = @() }
@@ -40,6 +43,23 @@ function Test-HookMatch($Hook, [string]$Path) {
     $r = "$Path".Replace('\', '/')
     foreach ($m in @($Hook.match -split '[,;]' | ForEach-Object { $_.Trim().Replace('\', '/') } | Where-Object { $_ })) {
         if ($r -like $m -or ($m -notmatch '/' -and ($r -split '/')[-1] -like $m)) { return $true }
+    }
+    $false
+}
+
+$script:ActionGroups = @{
+    'read' = @('read', 'glob', 'grep', 'find')
+    'file-change' = @('write', 'edit')
+    'command' = @('run')
+    'network' = @('web', 'download')
+    'automation' = @('runbook', 'fetch', 'chain', 'script')
+}
+
+function Test-HookActionMatch($Hook, [string]$Action) {
+    if (-not $Hook.match) { return $true }
+    $name = "$Action".Trim().ToLowerInvariant()
+    foreach ($m in @($Hook.match -split '[,;]' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })) {
+        if ($m -eq $name -or $m -eq '*' -or ($script:ActionGroups.ContainsKey($m) -and $script:ActionGroups[$m] -contains $name)) { return $true }
     }
     $false
 }
@@ -73,11 +93,15 @@ function New-HooksFile {
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $f)
     $text = @'
 {
-  "_help": "Your own commands at fixed moments. afterEdit: after Copilot writes or edits a file that matches 'match' ({file} is that file). beforeDone: when Copilot says done; a failure goes back to Copilot. afterTask: when a task ends. Commands run in the project folder; deleting or Microsoft 365 commands never run. Remove the leading _ from an example to use it.",
+  "_help": "Your own commands at fixed moments. beforeAction/afterAction: around every Copilot action (match can name an action such as write or run, or a category: read, file-change, command, network, automation). afterEdit: after Copilot writes or edits a matching file ({file} is that file). beforeDone: when Copilot says done; a failure goes back to Copilot. afterTask: when a task ends. Commands run in the project folder; deleting or Microsoft 365 commands never run. Remove the leading _ from an example to use it.",
+  "beforeAction": [],
+  "afterAction": [],
   "afterEdit": [],
   "beforeDone": [],
   "afterTask": [],
   "_examples": {
+    "beforeAction": [ { "name": "Action log", "match": "write,edit", "run": "echo Copilot is about to change a file" } ],
+    "afterAction": [ { "name": "Action log", "run": "echo Copilot finished an action" } ],
     "afterEdit": [ { "name": "Check PowerShell", "match": "*.ps1", "run": "powershell -NoProfile -Command \"$e=$null; $null=[Management.Automation.Language.Parser]::ParseFile((Resolve-Path {file}),[ref]$null,[ref]$e); if ($e) { $e; exit 1 }\"" } ],
     "beforeDone": [ { "name": "Project check", "run": "powershell -NoProfile -ExecutionPolicy Bypass -File Scripts/check.ps1" } ],
     "afterTask": [ { "name": "Export", "run": "powershell -NoProfile -ExecutionPolicy Bypass -File Scripts/export.ps1" } ]
@@ -88,4 +112,4 @@ function New-HooksFile {
     '.streamhub/hooks.json'
 }
 
-Export-ModuleMember -Function Get-HooksPath, Read-Hooks, Test-HookMatch, Get-HookCommand, Test-HookFileName, New-HooksFile
+Export-ModuleMember -Function Get-HooksPath, Read-Hooks, Test-HookMatch, Test-HookActionMatch, Get-HookCommand, Test-HookFileName, New-HooksFile

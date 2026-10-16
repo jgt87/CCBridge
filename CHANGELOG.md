@@ -6,6 +6,13 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.140] - 2026-10-16
+
+### Changed
+- Diagnostic logs correlate lines from the same task or turn, redact common credential and token patterns, and avoid writing an unlocked line when the shared log mutex is contended.
+- Project hooks can run before and after each agent action, optionally filtered by action name; a failing pre-action hook blocks the action and a failing post-action hook is returned to Copilot.
+- Hook execution now has configurable time and output bounds, action categories, re-entry protection, non-blocking post-action warnings, and trace details in task evidence.
+
 ## [v0.1.139] - 2026-10-14
 
 ### Added

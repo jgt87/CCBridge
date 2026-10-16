@@ -51,6 +51,7 @@ function New-AgentState {
         AgentChat = $null   # the agent (Researcher) whose plan waits for the person's answer in the current chat
         InChain = $false   # a chain is running: its runbook/fetch steps leave Busy and Stop to it
         SaveHistory = $false   # set by the web app: the chat is kept per project (Save-ChatEvent / Restore-ChatHistory)
+        HookRunning = $false; HookTrace = [Collections.ArrayList]::Synchronized((New-Object Collections.ArrayList))
     })
 }
 
@@ -1181,6 +1182,12 @@ function Save-TaskEvidence {
     if ($Ev.acceptance -and @($Ev.acceptance).Count) {   # @($null) counts 1
         [void]$sb.AppendLine().AppendLine("## Done when (Copilot's checks, answered at the end)").AppendLine()
         foreach ($l in @(Format-AcceptanceReport $Ev.acceptance)) { [void]$sb.AppendLine($l) }
+    }
+    if (@($Ev.hooks).Count) {
+        [void]$sb.AppendLine().AppendLine('## Hooks').AppendLine()
+        foreach ($h in @($Ev.hooks)) {
+            [void]$sb.AppendLine("- $($h.event)$(if ($h.action) { " [$($h.action)]" })$(if ($h.name) { " '$($h.name)'" }): $($h.status), $($h.durationMs) ms$(if ($h.timedOut) { ', timed out' })$(if ($h.outputTruncated) { ', output truncated' })")
+        }
     }
     $vf = if (-not $Ev.verify -and $null -ne $Ev.page -and -not @($Ev.page).Count) { 'no verify command in AGENTS.md; the page check passed' } elseif (-not $Ev.verify) { 'not configured (add a "verify: COMMAND" line to AGENTS.md)' } elseif ($Ev.verify.skipped) { "not run: $($Ev.verify.skipped)" } elseif ($Ev.verify.passed) { "passed (``$($Ev.verify.command)``)" } else { "FAILED (``$($Ev.verify.command)``, exit $($Ev.verify.exit))" }
     [void]$sb.AppendLine("- Verify: $vf")
@@ -2668,9 +2675,14 @@ function New-ReviewMessage {
 }
 
 function Invoke-ProjectHooks {
-    param($State, [string]$HookEvent, [string[]]$Paths = @())
+    param($State, [string]$HookEvent, [string[]]$Paths = @(), $ActionContext = $null)
+    if ($State.HookRunning) {
+        Write-CCBLog verbose agent "Skipping $HookEvent hooks during hook execution" @{ reason = 're-entry' }
+        return @()
+    }
     $prev = Enter-Activity $State 'tests' "Running the project's $HookEvent hooks"
-    try { Invoke-ProjectHooksCore $State $HookEvent $Paths } finally { Exit-Activity $State $prev }
+    $State.HookRunning = $true
+    try { Invoke-ProjectHooksCore $State $HookEvent $Paths $ActionContext } finally { $State.HookRunning = $false; Exit-Activity $State $prev }
 }
 
 function Invoke-ProjectHooksCore {
@@ -2678,7 +2690,7 @@ function Invoke-ProjectHooksCore {
        matches, beforeDone and afterTask once. The hooks file is approved by a person once per version
        (it can run any command); commands that delete outside the project, delete data or use
        Microsoft 365 never run. Each run is a card in the chat. Returns the failures as lines. #>
-    param($State, [string]$HookEvent, [string[]]$Paths = @())
+    param($State, [string]$HookEvent, [string[]]$Paths = @(), $ActionContext = $null)
     $root = $State.ProjectRoot
     if (-not $root -or $State.NoCommands -or $State.Mode -eq 'plan') { return @() }
     if ("$($State.Config.hooks)" -in 'False', 'off') { return @() }   # setting: hooks paused
@@ -2690,6 +2702,10 @@ function Invoke-ProjectHooksCore {
     $runs = New-Object System.Collections.Generic.List[object]
     foreach ($k in $mine) {
         if ($HookEvent -eq 'afterEdit') { foreach ($p in @($Paths | Where-Object { Test-HookMatch $k $_ })) { $runs.Add(@{ hook = $k; path = $p }) } }
+        elseif ($HookEvent -in 'beforeAction', 'afterAction') {
+            $actionName = if ($ActionContext -and $ActionContext.action) { "$($ActionContext.action)" } else { '' }
+            if (Test-HookActionMatch $k $actionName) { $runs.Add(@{ hook = $k; path = ''; action = $actionName }) }
+        }
         else { $runs.Add(@{ hook = $k; path = '' }) }
     }
     if (-not $runs.Count) { return @() }
@@ -2716,7 +2732,7 @@ function Invoke-ProjectHooksCore {
     foreach ($r in $runs) {
         if ($State.Cancel) { break }
         $cmd = Get-HookCommand $r.hook $r.path
-        $label = "$HookEvent hook$(if ($r.hook.name) { " '$($r.hook.name)'" })$(if ($r.path) { " for $($r.path)" })"
+        $label = "$HookEvent hook$(if ($r.hook.name) { " '$($r.hook.name)'" })$(if ($r.path) { " for $($r.path)" })$(if ($r.action) { " for $($r.action)" })"
         $id = 'hook-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
         if (-not $cmd) {
             Add-AgentEvent $State 'action' @{ id = $id; action = 'run'; target = "$($r.hook.run)"; status = 'running'; by = 'streamhub' }
@@ -2732,13 +2748,24 @@ function Invoke-ProjectHooksCore {
             Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'failed'; summary = "$label not run"; output = "Not run: $why. Hooks never delete data or use Microsoft 365." }
             continue
         }
+        $hookTimeout = if ($State.Config.hookTimeoutSec) { [Math]::Max(1, [int]$State.Config.hookTimeoutSec) } else { 30 }
+        $hookMaxChars = if ($State.Config.hookMaxOutputChars) { [Math]::Max(200, [int]$State.Config.hookMaxOutputChars) } else { 4000 }
+        $started = Get-Date
         $watch = New-RunWatch $State $id $label $cmd
-        try { $vr = Invoke-RunAction $root $cmd ([int]$State.Config.commandTimeoutSec) 4000 { $State.Cancel } -OnProgress $watch } finally { Stop-RunWatch $State $id }
+        $vr = $null; $runError = $null
+        try { $vr = Invoke-RunAction $root $cmd $hookTimeout $hookMaxChars { $State.Cancel } -OnProgress $watch } catch { $runError = $_ } finally { Stop-RunWatch $State $id }
+        if ($runError) { $vr = [pscustomobject]@{ timedOut = $false; exitCode = 1; output = "hook runner error: $($runError.Exception.Message)" } }
         $ok = (-not $vr.timedOut) -and $vr.exitCode -eq 0
         $status = if ($vr.timedOut) { 'timed out' } else { "exit code $($vr.exitCode)" }
-        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = "${label}: $status"; output = "$label`n$status`n$($vr.output)"; changed = $true }
+        $durationMs = [int]((Get-Date) - $started).TotalMilliseconds
+        $out = "$($vr.output)"
+        $truncated = $out.Length -ge $hookMaxChars
+        $trace = @{ event = $HookEvent; name = "$($r.hook.name)"; action = "$($r.action)"; command = $cmd; status = $(if ($ok) { 'ok' } else { 'failed' }); exitCode = $vr.exitCode; timedOut = [bool]$vr.timedOut; durationMs = $durationMs; outputTruncated = $truncated; correlation = (Get-CCBLogContext) }
+        if ($null -ne $State.HookTrace) { [void]$State.HookTrace.Add($trace) }
+        Write-CCBLog verbose agent "Hook $label finished" @{ status = $trace.status; exitCode = $trace.exitCode; timedOut = $trace.timedOut; durationMs = $durationMs; outputTruncated = $truncated; correlation = $trace.correlation }
+        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $ok; status = $(if ($ok) { 'ok' } else { 'failed' }); summary = "${label}: $status"; output = (Limit-Text "$label`n$status`n$out" $hookMaxChars); changed = $true; hookEvent = $HookEvent; durationMs = $durationMs; timedOut = [bool]$vr.timedOut; outputTruncated = $truncated }
         if (-not $ok) {
-            $tail = ("$($vr.output)".Split("`n") | Where-Object { $_.Trim() } | Select-Object -Last 12) -join "`n"
+            $tail = ($out.Split("`n") | Where-Object { $_.Trim() } | Select-Object -Last 12) -join "`n"
             $fails.Add("the project's $label failed ($status): $cmd`n$tail")
         }
     }
@@ -3070,7 +3097,7 @@ function Test-AutoRun($State, [string]$Command) {
 
 function Get-PreviewText([string]$s) { if ($null -eq $s) { return $null } Limit-Text $s 200000 }
 
-function Invoke-AgentAction {
+function Invoke-AgentActionCore {
     <# Executes one action. Returns @{ ok; summary; output } where output goes back to Copilot. #>
     param($State, $Action, [string]$Id, $Checkpoint, [int]$Uncertain)
     $root = $State.ProjectRoot
@@ -3664,6 +3691,30 @@ function Invoke-AgentAction {
 
 # --- Issue cycle: index, change, scan the changed files, fix in cycles, scan again -------------
 
+function Invoke-AgentAction {
+    <# Runs generic project hooks around the action executor. beforeAction can block an action;
+       afterAction is reported with the action result so a failed check is visible to Copilot. #>
+    param($State, $Action, [string]$Id, $Checkpoint, [int]$Uncertain)
+    $context = @{ action = "$($Action.type)"; target = "$($Action.arg)"; id = $Id }
+    $before = @()
+    try { $before = @(Invoke-ProjectHooks $State 'beforeAction' @() $context) }
+    catch { Write-CCBLogError agent 'beforeAction hooks' $_ }
+    if ($before.Count) {
+        return @{ ok = $false; summary = 'A beforeAction hook blocked this action.'; output = "Not applied: a beforeAction hook failed.`n$($before -join "`n")"; hookFailures = $before }
+    }
+    $result = Invoke-AgentActionCore $State $Action $Id $Checkpoint $Uncertain
+    $after = @()
+    try { $after = @(Invoke-ProjectHooks $State 'afterAction' @() $context) }
+    catch { Write-CCBLogError agent 'afterAction hooks' $_ }
+    if ($after.Count) {
+        $extra = "afterAction hook failure(s):`n$($after -join "`n")"
+        $result.output = @($result.output, $extra) -join "`n"
+        $result.hookWarnings = $after
+        $result.summary = @($result.summary, 'afterAction hook warning') -join '; '
+    }
+    $result
+}
+
 function Get-IssueSettings($State) {
     <# harness.json "issues": enabled (on/off), autoFix (categories fixed without asking: error,
        secret, health), maxAttempts (fix tasks per file before 'gave up'). #>
@@ -4062,6 +4113,9 @@ function Invoke-AgentTurn {
     $State.Busy = $true; $State.Cancel = $false
     $State.UserLook = Test-LookRequest $Text   # a look the person asks for wins over the kit's (Prompts)
     $turnWatch = [Diagnostics.Stopwatch]::StartNew()
+    $previousLogContext = Get-CCBLogContext
+    $turnLogContext = if ($State.CurrentQueueId) { "$($State.CurrentQueueId)" } else { 't-' + [guid]::NewGuid().ToString('N').Substring(0, 8) }
+    Set-CCBLogContext $turnLogContext
     Write-CCBLog info agent "Turn started" @{ chars = $Text.Length; mode = $State.Mode; headless = [bool]$State.Headless; allowCommands = [bool]$State.AllowCommands; workIq = $State.WorkIq; chatStarted = [bool]$State.ChatStarted }
     Write-CCBLog trace agent 'User message' @{ text = $Text }
     Add-AgentEvent $State 'user' @{ text = $Text }
@@ -4175,7 +4229,8 @@ function Invoke-AgentTurn {
         $pageFinal = $false; $unloadedChecked = $false   # the page state once the fix tries are used up; new files nothing loads (once)
         $doneFinished = $false   # Copilot reported done and the done step's checks ran (else Invoke-FinalChecks)
         $endReason = 'it ended without reporting the task as done'
-        $ev = @{ syntaxLast = $null; page = $null; reviewed = $false; verify = $null; kitEdits = @(); unloaded = @(); pageLeft = $false; unfinished = $null; final = $null }   # for the evidence file
+        if ($null -ne $State.HookTrace) { $State.HookTrace.Clear() }
+        $ev = @{ syntaxLast = $null; page = $null; reviewed = $false; verify = $null; kitEdits = @(); unloaded = @(); pageLeft = $false; unfinished = $null; final = $null; hooks = @() }   # for the evidence file
         $msgStart = [int]$State.MessagesSent
         $lastReply = ''; $doneText = ''   # for the suggested next steps after the turn
         $reviewed = $false   # the consistency review after a big change happens once per message
@@ -4938,6 +4993,7 @@ function Invoke-AgentTurn {
         Add-AgentEvent $State 'error' @{ text = $_.Exception.Message; record = $_ }
     } finally {
         Write-CCBLog info agent "Turn finished" @{ ms = $turnWatch.ElapsedMilliseconds; chat = "$($State.Throttle.used)/$($State.Throttle.max)"; cancelled = [bool]$State.Cancel }
+        Set-CCBLogContext $previousLogContext
         $taskRecord.status = if ($State.Cancel) { 'cancelled' } elseif ($doneFinished) { 'finished' } else { 'stopped' }
         $taskRecord.changed = @($checkpoint.Files.Keys); $taskRecord.remaining = @($State.Todos)
         $taskRecord.acceptance = @($acceptResults); $taskRecord.verification = $ev
@@ -4979,6 +5035,7 @@ function Invoke-AgentTurn {
             try {
                 $chg = @(Get-CheckpointChanges $State.ProjectRoot $checkpoint | Where-Object { $_.added -or $_.removed -or $_.created -or $_.deleted })
                 if ($chg.Count) {
+                    $ev.hooks = if ($null -ne $State.HookTrace) { @($State.HookTrace | ForEach-Object { $_ }) } else { @() }
                     $evPath = Save-TaskEvidence $State $Text $chg $ev $doneText ([int]$State.MessagesSent - $msgStart)
                     Add-AgentEvent $State 'status' @{ text = "Task report saved: $evPath"; path = $evPath }
                 }

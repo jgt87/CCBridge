@@ -162,7 +162,7 @@ The parts a coding harness (an agent that reads, changes and runs a project for 
 | Finding and fixing problems | Keeping the project healthy | Code health > Issues: errors, secrets and overly complex functions per file; problems a change adds go back to Copilot to fix, a few attempts per file |
 | Sub-agents and parallel work | Delegating work to other agents | Copilot's Researcher and Analyst agents for research and data, picked automatically by fixed words (Agent: Auto) or by hand; StreamHub itself runs one task at a time (Copilot has one chat window), queued under Actions > Runs |
 | Task queue and background work | Work that waits or runs unattended | A queue that survives restarts, pauses at Copilot's daily limit and continues after it; schedules, runbooks, chains and scripts in Automation |
-| Hooks | Your own commands at fixed moments | `.streamhub/hooks.json`: after Copilot edits a matching file, before a task counts as done (a failure goes back to Copilot), after a task; approved once per version, paused with a setting |
+| Hooks | Your own commands at fixed moments | `.streamhub/hooks.json`: before or after every Copilot action (optionally matched by action name), after Copilot edits a matching file, before a task counts as done (a failure goes back to Copilot), after a task; approved once per version, paused with a setting |
 | Web access | Reading pages from the internet | The `web` action: public pages only, sites the message names are read at once, other sites need approval |
 | Other programs | Using the harness from another tool | An MCP server (`mcp/ccbridge-mcp.ps1`) and a local HTTP API; tasks from other programs show in the same queue |
 | Records and logs | Seeing what happened | Chat history per project, a task report per task that changed files (`.streamhub/Evidence/`, with the checks Copilot set for the task at its start and answered at the end), Copilot's notes on the project's data (`.streamhub/data-notes.json`, sent with every task), a log with levels, and Export diagnostics |
@@ -336,13 +336,13 @@ Settings live in `config\harness.json` and `config\selectors.json`. Put your own
 
 ### Where and what
 - Log files: **`%LOCALAPPDATA%\CCBridge\logs\ccbridge-yyyyMMdd.log`**, one per day, kept 14 days. The web app, the MCP server, the updater and the diagnostics tool all write to the same file.
-- One line per event: time, process id, level, component, message, optional JSON data:
+- One line per event: time, process id, level, component, message, optional correlation id and JSON data. A `cid` ties all lines from one queued task or user turn together, even when several tasks share the process:
   ```
   2026-10-02 01:33:30.746 [33720] INFO    server   Web app started on http://localhost:8765/ {"ccbridge":"v0.1.0","powershell":"5.1.26100.9444",...}
   2026-10-02 02:04:12.118 [33720] VERBOSE bridge   Reply received {"ms":7412,"frames":38,"chars":1620,"uncertain":0,"result":"Success","chat":"3/30","credits":"41/50",...}
   ```
 - Components: `server` (web app), `mcp`, `agent` (turns, rounds, actions, approvals), `bridge` (message box, sending, replies), `cdp` (Edge connection), `exec` (commands, risk checks), `source` (source-data protection), `update`, `diag`.
-- **Masking**: in every line your Windows user name, profile path, OneDrive path, computer name, email addresses and GUIDs (conversation, message and user IDs) are replaced (`%USERPROFILE%`, `%OneDrive%`, `<email>`, `<id>`), so logs can be shared as they are.
+- **Masking**: in every line your Windows user name, profile path, OneDrive path, computer name, email addresses, GUIDs (conversation, message and user IDs), and common bearer/API-key/password/token values are replaced (`%USERPROFILE%`, `%OneDrive%`, `<email>`, `<id>`, `<secret>`). Logs can still contain other sensitive text when trace is enabled, so inspect them before sharing.
 
 ### Levels
 

@@ -9,9 +9,12 @@ $script:Levels = @{ off = 0; info = 1; verbose = 2; trace = 3 }
 $script:Level = 1
 $script:Dir = Join-Path $env:LOCALAPPDATA 'CCBridge\logs'
 $script:Masks = $null
+$script:Context = ''
 
 function Get-CCBLogDir { $script:Dir }
 function Get-CCBLogLevel { ($script:Levels.GetEnumerator() | Where-Object { $_.Value -eq $script:Level } | Select-Object -First 1).Key }
+function Get-CCBLogContext { $script:Context }
+function Set-CCBLogContext([string]$Context) { $script:Context = if ($Context) { "$Context" } else { '' } }
 
 function Set-CCBLogLevel([string]$Level) {
     $l = if ($Level) { $Level.ToLowerInvariant() } else { 'info' }
@@ -48,6 +51,11 @@ function Protect-LogText([string]$Text) {
     }
     foreach ($m in $script:Masks) { $Text = [regex]::Replace($Text, $m[0], $m[1], 'IgnoreCase') }
     $Text = [regex]::Replace($Text, '[\w.+-]+@[\w-]+(\.[\w-]+)+', '<email>')
+    # Trace can contain prompts, commands and tool arguments. Redact common credentials even when
+    # a caller accidentally includes one; this is deliberately conservative about token shapes.
+    $Text = [regex]::Replace($Text, '(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}', 'Bearer <secret>')
+    $Text = [regex]::Replace($Text, '(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|secret)\s*[:=]\s*["'']?[^\s"'',;]+', '$1=<secret>')
+    $Text = [regex]::Replace($Text, '(?i)\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9._-]{12,}', '<secret>')
     # Conversation, message and user IDs are not needed to diagnose and can identify a person.
     [regex]::Replace($Text, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', '<id>')
 }
@@ -84,6 +92,7 @@ function Write-CCBLog {
     if (-not (Test-CCBLog $Level)) { return }
     try {
         $line = '{0} [{1,5}] {2,-7} {3,-8} {4}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff'), $PID, $Level.ToUpperInvariant(), $Component, $Message
+        if ($script:Context) { $line += " [cid:$($script:Context)]" }
         if ($null -ne $Data) { $line += ' ' + (ConvertTo-Json -InputObject $Data -Depth 6 -Compress) }
         $line = Protect-LogText $line
         $file = Join-Path $script:Dir ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
@@ -96,7 +105,10 @@ function Write-CCBLog {
         $owned = $false
         try {
             try { $owned = $mutex.WaitOne(2000) } catch [Threading.AbandonedMutexException] { $owned = $true }
-            [IO.File]::AppendAllText($file, $line + "`r`n", (New-Object Text.UTF8Encoding($false)))
+            # Never append without the cross-process lock: two writers can otherwise interleave
+            # UTF-8 lines and make a diagnostic log impossible to parse. A rare contended line is
+            # preferable to corrupting the shared file; the caller continues normally.
+            if ($owned) { [IO.File]::AppendAllText($file, $line + "`r`n", (New-Object Text.UTF8Encoding($false))) }
         } finally { if ($owned) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
     } catch { }   # logging must never break CCBridge
 }
@@ -155,4 +167,4 @@ function Get-CCBErrorDetail($ErrorRecord) {
     Protect-LogText $msg
 }
 
-Export-ModuleMember -Function Get-LogHeader, Format-CCBBuild, New-CCBErrorId, Get-CCBErrorHelp, Get-CCBErrorDetail, Initialize-CCBLog, Set-CCBLogLevel, Get-CCBLogLevel, Get-CCBLogDir, Test-CCBLog, Write-CCBLog, Write-CCBLogError, Protect-LogText
+Export-ModuleMember -Function Get-LogHeader, Format-CCBBuild, New-CCBErrorId, Get-CCBErrorHelp, Get-CCBErrorDetail, Initialize-CCBLog, Set-CCBLogLevel, Get-CCBLogLevel, Get-CCBLogContext, Set-CCBLogContext, Get-CCBLogDir, Test-CCBLog, Write-CCBLog, Write-CCBLogError, Protect-LogText
