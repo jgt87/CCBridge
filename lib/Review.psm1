@@ -245,4 +245,58 @@ function New-ReviewFixTasks {
     }
 }
 
-Export-ModuleMember -Function Get-ReviewFiles, New-ReviewBatches, Test-ReviewOutput, Test-ReviewQuote, Format-ReviewReport, Get-SortedFindings, Save-Review, Get-Reviews, New-ReviewFixTasks
+# --- Review in a fresh chat ---------------------------------------------------------------------
+# At the end of a task (setting freshReview): a new Copilot chat sees only the request, the Done when
+# checks and the change, so the one that made the change does not grade it. Its findings count only
+# when the line they quote is in the file (Test-ReviewQuote).
+
+function New-FreshReviewMessage {
+    <# The review message: request, checks and the change per file (Format-LineChange), within
+       $MaxChars; files that do not fit are named. $Contents: Get-ChangeSetContents. #>
+    param([string]$Request, [string[]]$Checks, $Contents, [int]$MaxChars = 40000)
+    $fence = '```'
+    $req = "$Request".Trim()
+    if ($req.Length -gt 3000) { $req = $req.Substring(0, 3000) + ' (cut)' }
+    $head = "You are reviewing a change someone else made to a project. You did not make it, so do not defend it: look for real defects.`n`nThe request they worked on:`n$req"
+    $list = @(@($Checks) | Where-Object { "$_".Trim() })
+    if ($list.Count) { $head += "`n`nTheir checks for when it is done:`n" + (($list | ForEach-Object { "- $_" }) -join "`n") }
+    $tail = "Report only real defects that make the result wrong or break something: a bug, a part of the request that is missing or done differently, references between files that do not match, an error that is not handled, a security problem. Not style or taste, and not what the change leaves out on purpose. You cannot run or change anything here: answer in text only, no action blocks.`nFor each defect write two lines:`nPROBLEM: PATH:LINE - what is wrong and why`n> the line exactly as it is in the new version`nIf there are none, write NO PROBLEMS. Nothing else."
+    $room = $MaxChars - $head.Length - $tail.Length - 200
+    $parts = New-Object System.Collections.Generic.List[string]
+    $left = New-Object System.Collections.Generic.List[string]
+    foreach ($c in @($Contents)) {
+        if (-not $c) { continue }
+        $what = if ($c.created) { 'new file' } elseif ($c.deleted) { 'deleted' } else { 'changed' }
+        $diff = if ($c.deleted) { '(the file was deleted)' } else { Format-LineChange "$($c.old)" "$($c.new)" 150 }
+        $block = "### $($c.path) ($what)`n$fence`n$diff`n$fence"
+        if ($block.Length -le $room) { $parts.Add($block); $room -= $block.Length } else { $left.Add("$($c.path)") }
+    }
+    $body = "The change, per file ('- ' old lines, '+ ' new lines, from the line number given):`n`n" + ($parts -join "`n`n")
+    if ($left.Count) { $body += "`n`nNot shown (too long for one message): $($left -join ', ')." }
+    "$head`n`n$body`n`n$tail"
+}
+
+function Read-FreshReviewFindings([AllowEmptyString()][string]$Text) {
+    <# The PROBLEM lines of the review reply: @(@{ file; line; text; quote }); the '> ' lines below a
+       PROBLEM line are its quote. Nothing for NO PROBLEMS. #>
+    $out = New-Object System.Collections.Generic.List[hashtable]
+    $cur = $null
+    foreach ($l in "$Text".Replace("`r`n", "`n").Split("`n")) {
+        $m = [regex]::Match($l, '^[\s>*_\-]*PROBLEM\s*:\s*\**\s*`?(?<file>[^\s:`]+?)`?\s*:\s*(?<line>\d+)\D*?(?:\s[-:]\s*|\s+)(?<text>.+?)\s*$')
+        if ($m.Success) {
+            $cur = @{ file = $m.Groups['file'].Value.Replace('\', '/'); line = [int]$m.Groups['line'].Value; text = $m.Groups['text'].Value.Trim(); quote = '' }
+            $out.Add($cur); continue
+        }
+        if ($cur -and $l -match '^\s*>\s?(.*)$') { $cur.quote = ("$($cur.quote)`n" + $Matches[1]).TrimStart("`n"); continue }
+        if ($cur -and $l.Trim()) { $cur = $null }
+    }
+    $out.ToArray()
+}
+
+function Get-FreshReviewContinue($Findings) {
+    # The message the Continue button sends for the fresh review's findings.
+    $lines = @(foreach ($f in @($Findings)) { "- $($f.file):$($f.line) - $($f.text)" })
+    "A review of the last change in a fresh chat reported these problems:`n" + ($lines -join "`n") + "`nCheck each one against the code. Fix the real ones; for the others say in one line why they are not a problem."
+}
+
+Export-ModuleMember -Function Get-ReviewFiles, New-ReviewBatches, Test-ReviewOutput, Test-ReviewQuote, Format-ReviewReport, Get-SortedFindings, Save-Review, Get-Reviews, New-ReviewFixTasks, New-FreshReviewMessage, Read-FreshReviewFindings, Get-FreshReviewContinue

@@ -82,4 +82,60 @@ function Find-TestCommand {
     $null
 }
 
-Export-ModuleMember -Function Get-RealCommand, Get-RelatedTests, Find-TestCommand
+# --- Tests before the change ------------------------------------------------------------------
+# The tests run once before a task changes anything (or the last run is taken again when no file
+# changed since), so failures that were already there are not sent to Copilot as its own.
+
+$script:FailLine = '(?i)(^\s*\[-\]|\bFAIL(ED|URE|S)?\b|\bERRORS?\b|^\s*not ok\b|AssertionError|\bExpected\b|' + [char]0x2715 + '|' + [char]0x2717 + '|' + [char]0x00D7 + ')'
+
+function Get-TestFailureLines([AllowEmptyString()][string]$Output) {
+    <# The lines of a test run that tell a failure, made comparable between runs: digits as N
+       (durations, counts, line numbers), whitespace runs as one. Unique, at most 300. #>
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($l in "$Output".Replace("`r`n", "`n").Split("`n")) {
+        if ($l -notmatch $script:FailLine) { continue }
+        $k = (($l -replace '\d+', 'N') -replace '\s+', ' ').Trim()
+        if ($k.Length -gt 300) { $k = $k.Substring(0, 300) }
+        if ($k -and $seen.Add($k)) { $out.Add($k) }
+        if ($out.Count -ge 300) { break }
+    }
+    $out.ToArray()
+}
+
+function Compare-TestFailures([string[]]$Before, [string[]]$Now) {
+    <# @{ new = failure lines that were not there before; old = the ones that were }. #>
+    $had = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($b in @($Before)) { if ($b) { [void]$had.Add($b) } }
+    $new = @(@($Now) | Where-Object { $_ -and -not $had.Contains($_) })
+    $old = @(@($Now) | Where-Object { $_ -and $had.Contains($_) })
+    @{ new = $new; old = $old }
+}
+
+function Get-ProjectStamp([Parameter(Mandatory)][string]$ProjectRoot) {
+    <# A fingerprint of the project's files (path, size, time), to tell whether anything changed
+       since the tests last ran. StreamHub's own folder and build output are left out. #>
+    $sb = New-Object Text.StringBuilder
+    foreach ($f in @(Get-ProjectFiles $ProjectRoot | Where-Object { $_.path -notmatch $script:Skip } | Sort-Object path)) {
+        $t = try { [IO.File]::GetLastWriteTimeUtc((Join-Path $ProjectRoot $f.path.Replace('/', '\'))).Ticks } catch { 0 }
+        [void]$sb.Append("$($f.path)|$($f.size)|$t`n")
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { [Convert]::ToBase64String($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($sb.ToString()))) } finally { $sha.Dispose() }
+}
+
+function Read-TestBaseline([string]$StateDir) {
+    # The last saved run: @{ command; stamp; passed; failures; when }, or $null.
+    $p = Join-Path $StateDir 'test-baseline.json'
+    if (-not (Test-Path -LiteralPath $p)) { return $null }
+    try { $j = [IO.File]::ReadAllText($p) | ConvertFrom-Json } catch { return $null }
+    @{ command = "$($j.command)"; stamp = "$($j.stamp)"; passed = [bool]$j.passed; failures = @($j.failures | Where-Object { $_ }); when = "$($j.when)" }
+}
+
+function Save-TestBaseline([string]$StateDir, [hashtable]$Entry) {
+    # Local state (never the project folder).
+    $p = Join-Path $StateDir 'test-baseline.json'
+    [IO.File]::WriteAllText($p, ($Entry | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+}
+
+Export-ModuleMember -Function Get-RealCommand, Get-RelatedTests, Find-TestCommand, Get-TestFailureLines, Compare-TestFailures, Get-ProjectStamp, Read-TestBaseline, Save-TestBaseline

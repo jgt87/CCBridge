@@ -6,6 +6,18 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.141] - 2026-10-18
+
+### Added
+- Earlier work in new chats: after every work task StreamHub notes what was asked, how it ended, the files changed, the checks not met and what is still open (kept on this computer, never in OneDrive). The last few go with the first message of every new Copilot chat. Setting: Remember earlier work (on). Clearing the chat history clears them too.
+- Tests before the change: before Copilot changes anything, the project's tests (or its `verify:` command) run once, or the last run is reused when no file changed since. Failures that were already there are no longer sent back to Copilot as its own; when there are new ones, the message lists the old and the new failures apart. Setting: Tests before the change (on).
+- Review in a fresh chat: after a task that changed files, a new Copilot chat sees only the request, the Done when checks and the change, and reports defects. Only findings whose quoted line is really in the file are shown, on a card with Continue to fix them. Setting: Review in a fresh chat (off; it costs one extra Copilot message per task).
+- Test runs can turn checks or on/off settings off for one run (`off: quality, contrast`); the report names them and compares the run with the last run that had everything on.
+
+### Changed
+- Done when checks about a file (`PATH exists`, `PATH does not exist`, `PATH contains "TEXT"`, `PATH does not contain "TEXT"`) are checked by StreamHub in the files itself, checked again at the end, and win over Copilot's own answer; Copilot is asked only about the other checks. The task report marks which checks StreamHub made.
+- A test run's `expect:` lines use the same check, which also keeps their paths inside the project.
+
 ## [v0.1.140] - 2026-10-16
 
 ### Changed

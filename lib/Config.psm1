@@ -125,6 +125,9 @@ $script:SettingDefs = @(
     @{ key = 'checks.powershell7'; group = 'Checks and issues'; label = 'Warn about PowerShell 7 features'; help = 'Commands and parameters a PowerShell 5.1 script cannot use (ConvertFrom-Json -AsHashtable, ForEach-Object -Parallel...). Off when your scripts run in PowerShell 7.'; type = 'toggle' }
     @{ key = 'checks.quality'; group = 'Checks and issues'; label = 'Quality notes'; help = 'Debug leftovers, swallowed errors, personal paths, very long files and similar notes. Never block a task: Copilot is told once.'; type = 'toggle' }
     @{ key = 'checks.contrast'; group = 'UI kit'; label = 'Readability and accessibility'; help = 'WCAG checks with the page check: the contrast of the visible text of a changed page against its background, in light and in dark (4.5:1 for normal text, 3:1 for large text and the edges of fields), click targets of at least 24 x 24 px, and images and buttons without a name; plus the UI kit''s colour pairs when tokens.css changes. Failures go to Copilot with what to change.'; type = 'toggle' }
+    @{ key = 'progressLog'; group = 'Checks and issues'; label = 'Remember earlier work'; help = 'After each work task, StreamHub notes what was asked, how it ended, the files changed and what is still open (kept on this computer, not in OneDrive). The last few go with the first message of every new Copilot chat, so a new chat knows what earlier chats did. Clearing the chat history clears them too.'; type = 'toggle' }
+    @{ key = 'testBaseline'; group = 'Checks and issues'; label = 'Tests before the change'; help = 'With the project''s tests or verify: line: before Copilot changes anything, the tests run once (or the last run is used when no file changed since), so tests that were already failing are not sent back to Copilot as its fault. Costs one test run when files changed outside StreamHub.'; type = 'toggle' }
+    @{ key = 'freshReview'; group = 'Checks and issues'; label = 'Review in a fresh chat'; help = 'After a task that changed files: a new Copilot chat sees only the request, the Done when checks and the change, and reports defects. Only findings whose quoted line is in the file are shown, with a Continue button to fix them. Costs one extra Copilot message per task, and the next message continues in that new chat.'; type = 'toggle' }
     @{ key = 'evidence'; group = 'Checks and issues'; label = 'Task report (evidence)'; help = 'After a task that changed files, a short report of what was asked, what changed and which checks passed, in .streamhub/Evidence/ of the project; the chat links to it.'; type = 'select'; options = @('on', 'off') }
     @{ key = 'issues.enabled'; group = 'Checks and issues'; label = 'Issue detection'; help = 'Keep an index of problems in every project file (file checks, secrets, code health) and scan the changed files after each task.'; type = 'select'; options = @('on', 'off') }
     @{ key = 'issues.autoFix'; group = 'Checks and issues'; label = 'Fix automatically'; help = 'Problems a task adds that StreamHub sends back to Copilot to fix, one file at a time: error (broken syntax, missing files, typos), secret (keys and passwords in code), health (functions that are too complex). The rest is only reported.'; type = 'select'; options = @('error', 'error,secret', 'error,secret,health', 'none') }
@@ -286,9 +289,22 @@ function Test-UiKitOn([string]$AppRoot) {
     try { $v = (Get-CCBridgeConfig harness $AppRoot).uiKit; ($null -eq $v) -or [bool]$v } catch { $true }
 }
 
+$script:CheckSwitchNames = @('generated', 'tools', 'powershell7', 'quality', 'contrast')
+$script:CheckSwitchOff = @()
+
+function Get-CheckSwitchNames { $script:CheckSwitchNames }
+
+function Set-CheckSwitchOverride([string[]]$Off) {
+    <# Check switches turned off for one task in this runspace (a test run's 'off:' header, to see
+       whether a check still earns its place); an empty list ends it. Never saved. #>
+    $script:CheckSwitchOff = @(@($Off) | Where-Object { $_ } | ForEach-Object { "$_".Trim().ToLowerInvariant() })
+}
+
 function Test-CheckSwitch([string]$Name, [string]$AppRoot) {
-    <# Setting checks.NAME (generated, tools, powershell7, quality): on unless turned off. Read from
-       disk, kept until the settings files change, so every runspace (and Lint) sees a change. #>
+    <# Setting checks.NAME (generated, tools, powershell7, quality, contrast): on unless turned off.
+       Read from disk, kept until the settings files change, so every runspace (and Lint) sees a
+       change. Set-CheckSwitchOverride turns one off for a task. #>
+    if ($script:CheckSwitchOff -contains "$Name".ToLowerInvariant()) { return $false }
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
     $stamp = ''
     foreach ($f in 'harness.json', 'harness.local.json') { $p = Join-Path $AppRoot "config\$f"; if (Test-Path -LiteralPath $p) { $stamp += "$((Get-Item -LiteralPath $p).LastWriteTimeUtc.Ticks);" } }
@@ -334,4 +350,4 @@ function Get-CCBridgeEnvironment {
     }
 }
 
-Export-ModuleMember -Function Get-ScriptLanguageMode, Test-DataImportOn, Test-UiKitPart, Test-UiKitOn, Test-CheckSwitch, Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings
+Export-ModuleMember -Function Get-ScriptLanguageMode, Test-DataImportOn, Test-UiKitPart, Test-UiKitOn, Test-CheckSwitch, Set-CheckSwitchOverride, Get-CheckSwitchNames, Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings

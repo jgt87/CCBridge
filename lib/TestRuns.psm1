@@ -8,6 +8,9 @@
 #   files: NAME/data.csv, NAME/notes.md      (copied into the new project's root)
 #   source: NAME/export.xlsx                 (copied into the new project's Source/)
 #   mode: auto                               (the mode every step runs in; auto by default)
+#   expect: index.html exists, index.html contains TEXT   (checked in the files after the last step)
+#   off: quality, contrast                   (checks or on/off settings turned off for this run only,
+#                                             compared with the last run that had everything on)
 #   ---
 #   1. The first request
 #      a second line of it
@@ -55,6 +58,7 @@ function Read-TestRun([Parameter(Mandatory)][string]$Path) {
         files = @(& $list $meta['files']); source = @(& $list $meta['source'])
         mode = $(if ($meta['mode'] -in 'auto', 'ask') { $meta['mode'] } else { 'auto' })
         expectations = @(& $list $meta['expect'])
+        off = @(& $list $meta['off'])
         steps = $steps.ToArray()
     }
 }

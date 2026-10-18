@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer', 'Progress') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -802,6 +802,8 @@ function Invoke-ApiRequest($Ctx, $State) {
             $f = Get-ChatHistoryPath $State.ProjectRoot
             if (Test-Path -LiteralPath $f) { [IO.File]::Delete($f) }
             Reset-ChatHistoryCount $f
+            # What earlier tasks did (Progress) goes too: it would tell a new chat the same story.
+            try { Clear-ProgressEntries (Get-ProjectStateDir $State.ProjectRoot) } catch { Write-CCBLogError server 'progress clear' $_ }
             Add-AgentEvent $State 'history-cleared' @{ text = 'Chat history of this project cleared.' }
             Write-CCBLog info server 'Chat history cleared' @{ project = $State.ProjectRoot }
             return Send-Json $Ctx @{ ok = $true }
@@ -971,7 +973,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $proj = New-TestRunProject $pr $run
             Set-Project $State $proj
             $started = (Get-Date).ToString('s')
-            $info = @{ name = $run.name; title = $run.title; steps = @($run.steps).Count; started = $started; project = $proj; projectsRoot = $pr; expectations = @($run.expectations) }
+            $info = @{ name = $run.name; title = $run.title; steps = @($run.steps).Count; started = $started; project = $proj; projectsRoot = $pr; expectations = @($run.expectations); off = @($run.off) }
             for ($i = 0; $i -lt @($run.steps).Count; $i++) {
                 $null = Submit-AgentTask $State @{ kind = 'chat'; text = [string]$run.steps[$i]; mode = $run.mode; testRun = $info } 'testrun' "Test run $($run.name) $($i + 1)/$(@($run.steps).Count): $([string]$run.steps[$i])"
             }

@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = 'Stop'
 $script:ProjectTaskKinds = @('chat', 'agent', 'fetch', 'runbook', 'chain', 'script', 'review', 'packages', 'undo', 'export', 'testrun-report')
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance', 'Progress') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -828,17 +828,21 @@ function Invoke-TestRunReport {
     $page = Get-SessionReport $entries "StreamHub $build"
     $now = Get-SessionReport $entries "StreamHub $build" -Metrics
     $now.when = (Get-Date).ToString('yyyy-MM-dd HH:mm'); $now.project = Split-Path -Leaf "$($tr.project)"
-    $before = @(Read-TestRunHistory "$($tr.projectsRoot)" "$($tr.name)") | Select-Object -Last 1
+    # A run with checks turned off ('off:') is compared with the last run that had them all on.
+    $off = @(@($tr.off) | Where-Object { "$_".Trim() })
+    $now.off = $off
+    $before = @(Read-TestRunHistory "$($tr.projectsRoot)" "$($tr.name)" | Where-Object { -not @($_.off | Where-Object { $_ }).Count }) | Select-Object -Last 1
     $checks = New-Object System.Collections.Generic.List[string]
     foreach ($expect in @($tr.expectations | Where-Object { "$_".Trim() })) {
-        $m = [regex]::Match("$expect", '^\s*([^ ]+)\s+(exists|contains)\s*(.*)$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
-        if (-not $m.Success) { $checks.Add("- NOT CHECKED: $expect (use 'path exists' or 'path contains text')"); continue }
-        $rel = $m.Groups[1].Value.Replace('/', '\'); $full = Join-Path "$($tr.project)" $rel
-        $ok = Test-Path -LiteralPath $full -PathType Leaf
-        if ($m.Groups[2].Value -ieq 'contains' -and $ok) { $ok = [IO.File]::ReadAllText($full).Contains($m.Groups[3].Value) }
-        $checks.Add("- $(if ($ok) { 'MET' } else { 'NOT MET' }): $expect")
+        $res = Test-DoneWhenCheck "$($tr.project)" "$expect" -Literal
+        if (-not $res) { $checks.Add("- NOT CHECKED: $expect (use 'PATH exists', 'PATH does not exist', 'PATH contains TEXT' or 'PATH does not contain TEXT')"); continue }
+        $checks.Add("- $(if ($res.met) { 'MET' } else { 'NOT MET' }): $expect$(if ($res.note) { " ($($res.note))" })")
     }
     $outcomes = if ($checks.Count) { "`n## Deterministic outcome checks`n`n$($checks -join "`n")`n" } else { '' }
+    if ($off.Count) {
+        $known = @(Get-CheckSwitchNames)
+        $outcomes = "`n## Turned off for this run`n`n$($off -join ', ') (compared with the last run that had everything on$(if (-not $before) { '; there is none yet' })). Checks: $($known -join ', '); other names are settings that are on or off.`n" + $outcomes
+    }
     $text = "# Test run: $($tr.title)`n`n- Test: $($tr.name) ($($tr.steps) step(s)), project: $($now.project)`n`n## Compared with the last run`n`n" + (Format-TestRunComparison $now $before) + $outcomes + "`n" + ($page -replace '^# Session report', '## Session report' -replace '(?m)^## (Findings|Tasks|Failed steps)', '### $1')
     $enc = New-Object Text.UTF8Encoding($false)
     $rel = '.streamhub/TestRun-report.md'
@@ -1156,6 +1160,93 @@ function Get-ProjectVerify([string]$ProjectRoot) {
     $null
 }
 
+function Get-TurnTestBaseline($State) {
+    <# The project's check (verify: in AGENTS.md, else all its tests: TestRunner) as it is before a
+       task changes anything: @{ command; stamp; passed; failures; when }, or $null (setting
+       testBaseline off, no tests, commands not allowed, or a command that only runs by hand). The
+       saved run is used again while no project file changed since (Get-ProjectStamp). #>
+    if ("$($State.Config.testBaseline)" -in 'False', 'off') { return $null }
+    if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { return $null }
+    $cmd = Get-ProjectVerify $State.ProjectRoot
+    if (-not $cmd) {
+        if ("$($State.Config.autoTests)" -in 'False', 'off') { return $null }
+        $tc = Find-TestCommand $State.ProjectRoot @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object { $_.path })
+        if (-not $tc) { return $null }
+        $cmd = $tc.command
+    }
+    $risk = Get-CommandRisk $cmd
+    if ((Test-DeleteScope $State.ProjectRoot $cmd) -or $risk.m365 -or $risk.destructive) { return $null }
+    $dir = Get-ProjectStateDir $State.ProjectRoot
+    $saved = Read-TestBaseline $dir
+    if ($saved -and $saved.command -eq $cmd -and $saved.stamp -eq (Get-ProjectStamp $State.ProjectRoot)) { return $saved }
+    Add-AgentEvent $State 'status' @{ text = "Tests before the change: running ``$cmd`` once, so failures that are already there are not counted as Copilot's." }
+    $prev = Enter-Activity $State 'tests' 'Running the tests before the change'
+    try { $vr = Invoke-RunAction $State.ProjectRoot $cmd ([int]$State.Config.commandTimeoutSec) 20000 { $State.Cancel } } finally { Exit-Activity $State $prev }
+    if ($vr.timedOut -or $State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Tests before the change: did not finish in time; failures after the change all count.' }; return $null }
+    $entry = @{ command = $cmd; stamp = (Get-ProjectStamp $State.ProjectRoot); passed = ($vr.exitCode -eq 0); failures = @(Get-TestFailureLines "$($vr.output)"); when = (Get-Date).ToString('s') }
+    Save-TestBaseline $dir $entry
+    if (-not $entry.passed) { Add-AgentEvent $State 'status' @{ text = "Tests before the change: already failing ($(@($entry.failures).Count) failure line(s)). Those are not sent to Copilot as its own." } }
+    $entry
+}
+
+function Get-AcceptanceStep($State, [string[]]$DoneWhen) {
+    <# What to ask at "done" about the Done when lines: StreamHub checks the file lines itself
+       (TaskNotes Test-DoneWhenCheck), Copilot is asked about the rest and to fix file lines not met.
+       @{ text ('' = nothing to ask); asked (the lines Copilot answers); helper (StreamHub's results) }. #>
+    $helper = @(Get-HelperChecks $State.ProjectRoot $DoneWhen)
+    $own = @($helper | ForEach-Object { "$($_.check)" })
+    @{ text = (New-AcceptanceAsk $DoneWhen $helper); asked = @(@($DoneWhen) | Where-Object { $own -notcontains "$_" }); helper = $helper }
+}
+
+function Invoke-FreshReview($State, $Checkpoint, [string[]]$DoneWhen, $Ev) {
+    <# The change reviewed in a new Copilot chat that sees only the request, the Done when lines and
+       the change (Review New-FreshReviewMessage). A finding counts only when the line it quotes is in
+       the file (Test-ReviewQuote); those go to a Continue card. The next message goes on in that chat. #>
+    $contents = @(Get-ChangeSetContents $State.ProjectRoot $Checkpoint)
+    if (-not $contents.Count) { return }
+    $budget = [Math]::Max(8000, [int]([int]$State.Config.promptCharBudget * 0.6))
+    $msg = New-FreshReviewMessage "$($State.TurnText)" @($DoneWhen) $contents $budget
+    Add-AgentEvent $State 'status' @{ text = "Review in a fresh chat: a new Copilot chat reviews the change ($($contents.Count) file(s)), without the chat that made it." }
+    Start-NewChat $State
+    $r = Send-ToCopilot $State $msg
+    if ($r.Cancelled) { return }
+    $found = @(Read-FreshReviewFindings "$($r.Text)")
+    $verified = @(foreach ($f in $found) { $v = Test-ReviewQuote $State.ProjectRoot $f; if ($v.status -eq 'verified') { $v } })
+    $Ev.freshReview = @{ found = $found.Count; verified = $verified.Count }
+    Write-CCBLog info agent 'Fresh review' @{ files = $contents.Count; found = $found.Count; verified = $verified.Count }
+    if (-not $verified.Count) {
+        Add-AgentEvent $State 'status' @{ text = "Review in a fresh chat: no problems found$(if ($found.Count) { " ($($found.Count) reported, but the lines they quote are not in the files, so they are left out)" })." }
+        return
+    }
+    Add-AgentEvent $State 'task-unfinished' @{ text = "A review in a fresh Copilot chat found $($verified.Count) problem(s) in the change (each quotes a line that is in the file$(if ($found.Count -gt $verified.Count) { "; $($found.Count - $verified.Count) more left out because their quote is not" })). Continue to have Copilot check and fix them."; findings = @($verified | ForEach-Object { "$($_.file):$($_.line) - $($_.text)" }); continueText = (Get-FreshReviewContinue $verified) }
+}
+
+function Set-TaskSwitchesOff($State, [string[]]$Names) {
+    <# A test run's 'off:' names, for one task: check switches (Config Get-CheckSwitchNames) through
+       Set-CheckSwitchOverride, other names as on/off settings ($State.Config, only a setting that is
+       a true/false value). Returns what Restore-TaskSwitches puts back; nothing is saved. #>
+    $list = @(@($Names) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim() })
+    $checks = @(Get-CheckSwitchNames)
+    Set-CheckSwitchOverride @($list | Where-Object { $checks -contains $_.ToLowerInvariant() })
+    $restore = @{ config = $State.Config; values = @{} }
+    $cfg = $State.Config
+    if (-not $cfg) { return $restore }
+    foreach ($n in @($list | Where-Object { $checks -notcontains $_.ToLowerInvariant() })) {
+        $key = if ($cfg -is [hashtable]) { @($cfg.Keys | Where-Object { $_ -eq $n })[0] } else { @($cfg.PSObject.Properties | Where-Object { $_.Name -eq $n } | ForEach-Object { $_.Name })[0] }
+        if (-not $key -or $cfg.$key -isnot [bool]) { continue }
+        $restore.values[$key] = $cfg.$key
+        $cfg.$key = $false
+    }
+    if ($list.Count) { Write-CCBLog info agent 'Turned off for this task' @{ names = ($list -join ', ') } }
+    $restore
+}
+
+function Restore-TaskSwitches($Restore) {
+    Set-CheckSwitchOverride @()
+    if (-not $Restore -or -not $Restore.config) { return }
+    foreach ($k in @($Restore.values.Keys)) { $Restore.config.$k = $Restore.values[$k] }
+}
+
 function Save-TaskEvidence {
     <# .streamhub/evidence/task-<stamp>.md in the project: what was asked, what changed, which checks ran and
        their results, Copilot's summary. Returns the relative path. #>
@@ -1179,8 +1270,9 @@ function Save-TaskEvidence {
     if (@($Ev.kitEdits).Count) { [void]$sb.AppendLine("- UI kit files changed directly: $(@($Ev.kitEdits) -join ', ') (the kit is meant to be restyled through tokens.css and the project's own CSS)") }
     if ($Ev.unfinished) { [void]$sb.AppendLine("- Not finished: Copilot $($Ev.unfinished). StreamHub checked the changed files at the end: $(if (@($Ev.final).Count) { "$(@($Ev.final).Count) problem(s): " + (@($Ev.final) -join '; ') } else { 'no problems found' })") }
     [void]$sb.AppendLine("- Copilot consistency review: $(if ($Ev.reviewed) { 'done' } else { 'not needed' })")
+    if ($Ev.freshReview) { [void]$sb.AppendLine("- Review in a fresh chat: $($Ev.freshReview.verified) problem(s) whose quoted line is in the file$(if ([int]$Ev.freshReview.found -gt [int]$Ev.freshReview.verified) { "; $([int]$Ev.freshReview.found - [int]$Ev.freshReview.verified) more reported that quote lines not in the files (left out)" })") }
     if ($Ev.acceptance -and @($Ev.acceptance).Count) {   # @($null) counts 1
-        [void]$sb.AppendLine().AppendLine("## Done when (Copilot's checks, answered at the end)").AppendLine()
+        [void]$sb.AppendLine().AppendLine("## Done when (Copilot's checks, answered at the end; file checks made by StreamHub)").AppendLine()
         foreach ($l in @(Format-AcceptanceReport $Ev.acceptance)) { [void]$sb.AppendLine($l) }
     }
     if (@($Ev.hooks).Count) {
@@ -1189,7 +1281,7 @@ function Save-TaskEvidence {
             [void]$sb.AppendLine("- $($h.event)$(if ($h.action) { " [$($h.action)]" })$(if ($h.name) { " '$($h.name)'" }): $($h.status), $($h.durationMs) ms$(if ($h.timedOut) { ', timed out' })$(if ($h.outputTruncated) { ', output truncated' })")
         }
     }
-    $vf = if (-not $Ev.verify -and $null -ne $Ev.page -and -not @($Ev.page).Count) { 'no verify command in AGENTS.md; the page check passed' } elseif (-not $Ev.verify) { 'not configured (add a "verify: COMMAND" line to AGENTS.md)' } elseif ($Ev.verify.skipped) { "not run: $($Ev.verify.skipped)" } elseif ($Ev.verify.passed) { "passed (``$($Ev.verify.command)``)" } else { "FAILED (``$($Ev.verify.command)``, exit $($Ev.verify.exit))" }
+    $vf = if (-not $Ev.verify -and $null -ne $Ev.page -and -not @($Ev.page).Count) { 'no verify command in AGENTS.md; the page check passed' } elseif (-not $Ev.verify) { 'not configured (add a "verify: COMMAND" line to AGENTS.md)' } elseif ($Ev.verify.skipped) { "not run: $($Ev.verify.skipped)" } elseif ($Ev.verify.passed) { "passed (``$($Ev.verify.command)``)" } elseif ($Ev.verify.preexisting) { "FAILED with the same failures as before this task (``$($Ev.verify.command)``, exit $($Ev.verify.exit))" } else { "FAILED (``$($Ev.verify.command)``, exit $($Ev.verify.exit))" }
     [void]$sb.AppendLine("- Verify: $vf")
     if ($Ev.verify -and $Ev.verify.tail) { [void]$sb.AppendLine().AppendLine('Verify output (end):').AppendLine('```').AppendLine($Ev.verify.tail).AppendLine('```') }
     [void]$sb.AppendLine().AppendLine("Copilot messages: $Messages")
@@ -2938,6 +3030,11 @@ function Get-ProjectContext($State) {
     # The shared instructions of every project in this folder (shared/AGENTS.md beside the projects).
     $sharedNotes = try { Get-SharedNotes $root } catch { '' }
     if ($sharedNotes) { $full += "`n`nShared notes for every project in this folder ($(Get-SharedPrefix $root)/AGENTS.md, read-only here):`n$sharedNotes" }
+    # What earlier tasks did (Progress, setting progressLog): a new chat knows where the work stands.
+    if ("$($State.Config.progressLog)" -notin 'False', 'off') {
+        $pg = try { Format-ProgressContext @(Read-ProgressEntries (Get-ProjectStateDir $root) 5) } catch { Write-CCBLogError agent 'progress' $_; '' }
+        if ($pg) { $full += "`n`n$pg" }
+    }
     # A code map within its budget (setting repoMapChars), for work on the project's code.
     $mapChars = $(if ($null -ne $State.Config.repoMapChars) { [int]$State.Config.repoMapChars } else { 4000 })
     if ($mapChars -gt 0 -and $paths.Count) {
@@ -4128,7 +4225,7 @@ function Invoke-AgentTurn {
     $taskRecord = @{ request = $Text; intent = $State.TaskIntent; mode = $State.Mode; changed = @(); remaining = @(); acceptance = @(); verification = $null; summary = ''; status = 'running' }
     $State.TaskRecord = $taskRecord
     $State.TaskRecordDir = Get-ProjectStateDir $State.ProjectRoot
-    $baseline = $null
+    $baseline = $null; $kind = ''; $testBase = $null
     try { Sync-SourceVault $State.ProjectRoot } catch { Add-AgentEvent $State 'error' @{ text = "Could not back up source data: $($_.Exception.Message)" } }
     try {
         if (Test-OtherSender) { $State.NeedNewChat = $true }
@@ -4150,6 +4247,11 @@ function Invoke-AgentTurn {
             if (Sync-DataImports $State) { $ctx = Get-ProjectContext $State }
             $State.Activity.kind = 'index'; $State.Activity.label = 'Updating the import index'
             try { $null = Update-ImportIndex $State.ProjectRoot } catch { Write-CCBLogError agent 'import index' $_ } finally { $State.Activity.label = '' }
+        }
+        # The tests as they are before this task changes anything (TestRunner), so failures that were
+        # already there are not sent back to Copilot as its own.
+        if ($kind -in 'coding', 'mixed' -and $State.Mode -ne 'plan' -and -not $State.ReviewByCaller) {
+            $testBase = try { Get-TurnTestBaseline $State } catch { Write-CCBLogError agent 'tests before the change' $_; $null }
         }
         # The app shows how a message was sent, with "Send again as a coding task" for plain chat.
         Add-AgentEvent $State 'kind' @{ taskKind = $kind }
@@ -4191,6 +4293,7 @@ function Invoke-AgentTurn {
         # and notes on data files that have none yet (or whose data changed). Asked with this message,
         # read from the replies; no extra message.
         $doneWhen = @(); $acceptAsked = $false; $acceptResults = $null
+        $acceptAskList = @(); $copilotAnswers = @()   # the checks Copilot was asked about, and its answers
         $coverageNudges = 0   # plan coverage check before done (Get-PlanCoverage), at most twice
         $State.LastTurnPlan = $null   # the steps and checks of this turn, for PLAN.md (Write-TurnPlan)
         $askChecks = ($kind -in 'coding', 'mixed', 'project') -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.ReviewByCaller -and (Test-BuildRequest $Text) -and $Text -notmatch '^\s*Continue and make the change now'
@@ -4321,9 +4424,12 @@ function Invoke-AgentTurn {
                 $doneWhen = @(Read-DoneWhen "$($r.Text)")
                 if ($doneWhen.Count) { $notesOnly = $true; Add-AgentEvent $State 'status' @{ text = "Copilot's checks for this task (asked about at the end): " + ($doneWhen -join '; ') } }
             }
-            if ($acceptAsked -and $doneWhen.Count) {
-                $ans = @(Read-AcceptanceAnswers "$($r.Text)" $doneWhen)
-                if (@($ans | Where-Object { $null -ne $_.met }).Count) { $acceptResults = $ans; $ev.acceptance = $ans }
+            if ($acceptAsked -and @($acceptAskList).Count) {
+                $ans = @(Read-AcceptanceAnswers "$($r.Text)" @($acceptAskList))
+                if (@($ans | Where-Object { $null -ne $_.met }).Count) {
+                    $copilotAnswers = $ans
+                    $acceptResults = @(Merge-AcceptanceResults $State.ProjectRoot $doneWhen $ans); $ev.acceptance = $acceptResults
+                }
             }
             if ($notesFor.Count) {
                 $dnLines = @(Read-NoteBlock "$($r.Text)" 'Data notes' 12)
@@ -4754,16 +4860,27 @@ function Invoke-AgentTurn {
                         $prevAct = Enter-Activity $State 'tests' $(if ($isTests) { 'Running the tests' } else { "Running the project's check" })
                         # No card for this run: the app shows the live output under the waiting indicator.
                         $watch = New-RunWatch $State 'verify' $verifyLabel $verifyCmd
-                        try { $vr = Invoke-RunAction $State.ProjectRoot $verifyCmd ([int]$State.Config.commandTimeoutSec) 6000 { $State.Cancel } -OnProgress $watch } finally { Stop-RunWatch $State 'verify'; Exit-Activity $State $prevAct }
+                        try { $vr = Invoke-RunAction $State.ProjectRoot $verifyCmd ([int]$State.Config.commandTimeoutSec) 20000 { $State.Cancel } -OnProgress $watch } finally { Stop-RunWatch $State 'verify'; Exit-Activity $State $prevAct }
                         $passed = ($vr.exitCode -eq 0)
                         $tail = ("$($vr.output)".Split("`n") | Select-Object -Last 25) -join "`n"
                         $ev.verify = @{ command = $verifyCmd; passed = $passed; exit = $vr.exitCode; tail = $tail }
-                        Add-AgentEvent $State 'status' @{ text = "${verifyLabel}: ``$verifyCmd`` $(if ($passed) { 'passed' } elseif ($vr.timedOut) { 'timed out' } else { "failed (exit $($vr.exitCode))" })." }
-                        if (-not $passed -and $verifyNudges -lt $enf.testTries -and -not $State.Cancel) {
+                        # Against the run before the change (Get-TurnTestBaseline): failures that were already
+                        # there are not Copilot's.
+                        $failNow = @(Get-TestFailureLines "$($vr.output)")
+                        $cmp = if (-not $passed -and -not $vr.timedOut -and $testBase -and -not $testBase.passed) { Compare-TestFailures @($testBase.failures) $failNow } else { $null }
+                        if ($cmp -and @($cmp.old).Count -and -not @($cmp.new).Count) { $ev.verify.preexisting = $true }
+                        Add-AgentEvent $State 'status' @{ text = "${verifyLabel}: ``$verifyCmd`` $(if ($passed) { 'passed' } elseif ($vr.timedOut) { 'timed out' } elseif ($ev.verify.preexisting) { "failed (exit $($vr.exitCode)) with the same failures as before this task, so they are not sent to Copilot as its own" } else { "failed (exit $($vr.exitCode))" })." }
+                        if ($testBase -and "$($testBase.command)" -eq $verifyCmd -and -not $vr.timedOut -and -not $State.Cancel) {
+                            try { Save-TestBaseline $State.TaskRecordDir @{ command = $verifyCmd; stamp = (Get-ProjectStamp $State.ProjectRoot); passed = $passed; failures = $failNow; when = (Get-Date).ToString('s') } } catch { Write-CCBLogError agent 'test baseline' $_ }
+                        }
+                        if (-not $passed -and -not $ev.verify.preexisting -and $verifyNudges -lt $enf.testTries -and -not $State.Cancel) {
                             $verifyNudges++
                             $fence = '```'
                             $what = $(if ($isTests) { "The project's tests failed" } else { "The project's check failed" })
                             $message = "$what, so the task is not finished. Command: $verifyCmd (exit $($vr.exitCode)). Output (end):`n$fence`n$tail`n$fence`nFix the cause (in the code, or in the test when the test is wrong about the new behaviour), then send done again."
+                            if ($cmp -and @($cmp.old).Count) {
+                                $message += "`n`nThe helper program ran the same tests before this task. These failures were already there then (leave them unless the request is about them):`n" + ((@($cmp.old) | Select-Object -First 10 | ForEach-Object { "- $_" }) -join "`n") + "`nNew since this task:`n" + ((@($cmp.new) | Select-Object -First 10 | ForEach-Object { "- $_" }) -join "`n")
+                            }
                             continue
                         }
                     }
@@ -4912,7 +5029,7 @@ function Invoke-AgentTurn {
                         Add-AgentEvent $State 'status' @{ text = "Big change: asking Copilot to review $(@($changes).Count) changed file(s) for leftovers, dead code and broken references$(if ($issues.Count) { " ($($issues.Count) problem(s) found by the local checks)" })." }
                         $message = New-ReviewMessage $State $changes $issues
                         if ($attach.Count) { $message += "`n`nAttached: a screenshot of the page as it looks now. Check it against the request too. $(Get-ScreenshotHint $State.LastShotPage)" + $(if ($shotNote) { "`n`n$shotNote" } else { '' }) }
-                        if ($doneWhen.Count -and -not $acceptAsked) { $acceptAsked = $true; $message += "`n`n" + (New-AcceptanceAsk $doneWhen) }
+                        if ($doneWhen.Count -and -not $acceptAsked) { $acceptAsked = $true; $st = Get-AcceptanceStep $State $doneWhen; $acceptAskList = @($st.asked); if ($st.text) { $message += "`n`n" + $st.text } }
                         continue
                     }
                 } elseif ($pagesToRecheck.Count -and $pageRechecks -lt [Math]::Max(1, [int]$enf.errorTries) -and -not $State.Cancel) {
@@ -4941,19 +5058,31 @@ function Invoke-AgentTurn {
                 }
                 if ($attach.Count) {
                     $message = "Attached: a screenshot of the page as it looks now, after your changes. Compare it with what was asked (layout, parts that are missing, overlap or are cut off, colours, text). If something is wrong, fix it, then send done again. If it looks right, send done. $(Get-ScreenshotHint $State.LastShotPage)" + $(if ($shotNote) { "`n`n$shotNote" } else { '' })
-                    if ($doneWhen.Count -and -not $acceptAsked) { $acceptAsked = $true; $message += "`n`n" + (New-AcceptanceAsk $doneWhen) }
+                    if ($doneWhen.Count -and -not $acceptAsked) { $acceptAsked = $true; $st = Get-AcceptanceStep $State $doneWhen; $acceptAskList = @($st.asked); if ($st.text) { $message += "`n`n" + $st.text } }
                     continue
                 }
                 # The checks Copilot set at the start, asked once at the end when no message above carried them.
                 if ($doneWhen.Count -and -not $acceptAsked -and $checkpoint.Files.Count -and -not $State.Cancel) {
                     $acceptAsked = $true
-                    Add-AgentEvent $State 'status' @{ text = "Before finishing: Copilot checks its $($doneWhen.Count) 'Done when' line(s) against the result." }
-                    $message = New-AcceptanceAsk $doneWhen
-                    continue
+                    $st = Get-AcceptanceStep $State $doneWhen
+                    $acceptAskList = @($st.asked)
+                    if ($st.text) {
+                        Add-AgentEvent $State 'status' @{ text = "Before finishing: $(if (@($st.asked).Count) { "Copilot checks $(@($st.asked).Count) 'Done when' line(s) against the result" } else { 'Copilot fixes the Done when lines StreamHub found not met' })$(if (@($st.helper).Count) { "; StreamHub checked $(@($st.helper).Count) itself in the files" })." }
+                        $message = $st.text
+                        continue
+                    }
+                }
+                # The checks StreamHub can make in the files are made again now (a fix after the question
+                # counts); the others keep Copilot's answer.
+                if ($doneWhen.Count -and $acceptAsked) {
+                    $merged = @(Merge-AcceptanceResults $State.ProjectRoot $doneWhen $copilotAnswers)
+                    if (@($merged | Where-Object { $null -ne $_.met }).Count) { $acceptResults = $merged; $ev.acceptance = $merged }
                 }
                 if ($acceptResults) {
                     $notMet = @($acceptResults | Where-Object { $_.met -eq $false })
-                    Add-AgentEvent $State 'status' @{ text = $(if ($notMet.Count) { "Copilot's checks: $($notMet.Count) of $(@($acceptResults).Count) not met: " + (@($notMet | ForEach-Object { $_.check }) -join '; ') } else { "Copilot's checks: all $(@($acceptResults).Count) met." }) }
+                    $byHelper = @($acceptResults | Where-Object { $_.by -eq 'helper' }).Count
+                    $who = if ($byHelper) { "Done when checks ($byHelper checked by StreamHub in the files)" } else { "Copilot's checks" }
+                    Add-AgentEvent $State 'status' @{ text = $(if ($notMet.Count) { "${who}: $($notMet.Count) of $(@($acceptResults).Count) not met: " + (@($notMet | ForEach-Object { $_.check }) -join '; ') } else { "${who}: all $(@($acceptResults).Count) met." }) }
                 }
                 $doneFinished = $true
                 # Copilot says done while the project's to-do list still has open items: the person
@@ -4974,6 +5103,11 @@ function Invoke-AgentTurn {
                             Add-AgentEvent $State 'task-unfinished' @{ text = "Copilot reported the task as done, but $($unmet.Count) of its $(@($acceptResults).Count) own checks are not met. Continue to have Copilot meet them, or explain why one cannot be met here."; findings = @($unmet | ForEach-Object { "$($_.check)$(if ($_.note) { ": $($_.note)" })" }); continueText = (Get-UnmetChecksContinue $unmet) }
                         }
                     }
+                }
+                # A review of the change in a fresh chat (setting freshReview): the chat that made the
+                # change does not grade it.
+                if ("$($State.Config.freshReview)" -in 'True', 'on' -and $checkpoint.Files.Count -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.ReviewByCaller -and -not $State.Headless -and -not $State.Cancel) {
+                    try { Invoke-FreshReview $State $checkpoint @($doneWhen) $ev } catch { Write-CCBLogError agent 'fresh review' $_; Add-AgentEvent $State 'status' @{ text = "The review in a fresh chat did not finish: $($_.Exception.Message)" } }
                 }
                 break
             }
@@ -4999,6 +5133,10 @@ function Invoke-AgentTurn {
         $taskRecord.acceptance = @($acceptResults); $taskRecord.verification = $ev
         $taskRecord.result = $doneText
         try { $null = Save-TaskRecord $State.TaskRecordDir $taskRecord } catch { Write-CCBLogError agent 'task record' $_ }
+        # Project progress across chats (Progress, setting progressLog): every work task, not plain chat.
+        if ("$kind" -and "$kind" -ne 'chat' -and $State.Mode -ne 'plan' -and "$($State.Config.progressLog)" -notin 'False', 'off') {
+            try { Add-ProgressEntry $State.TaskRecordDir (New-ProgressEntry -Request $Text -Status $taskRecord.status -Result "$doneText" -Changed @($checkpoint.Files.Keys) -Acceptance @($acceptResults) -Verify $ev.verify -Todos @($State.Todos) -Kind "$kind") } catch { Write-CCBLogError agent 'progress' $_ }
+        }
         try {
             $fixed = @(Restore-SourceData $State.ProjectRoot)
             if ($fixed.Count) { Add-OwnChangeEvent $State 'restore' "$(@($fixed).Count) read-only file(s)" 'Source/ and protected files are read-only; StreamHub undid changes to them.' -Output ($fixed -join "`n") }
@@ -5216,6 +5354,8 @@ function Start-AgentWorker {
         $State.ReviewByCaller = [bool]$task.reviewByCaller
         if ($task.mode) { $State.Mode = $task.mode }
         $State.NoCommands = [bool]$task.noCommands
+        # A test run's 'off:' header: those checks and settings are off for this task only.
+        $switchRestore = Set-TaskSwitchesOff $State @(if ($task.testRun) { @($task.testRun.off) })
         $projectReady = $false; $projectChanged = $false
         try {
             if ($task.kind -in $script:ProjectTaskKinds) {
@@ -5362,6 +5502,7 @@ function Start-AgentWorker {
             } finally {
             $State.CurrentQueueId = $null
             $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller; $State.ResponseMode = $saved.ResponseMode
+            Restore-TaskSwitches $switchRestore
             if ($projectChanged) {
                 $State.ProjectRoot = $saved.ProjectRoot; $State.NeedNewChat = $true
             }
@@ -5372,4 +5513,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Get-FolderNotes, Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask, Invoke-TestRunReport, Invoke-ExportJob
+Export-ModuleMember -Function Get-TurnTestBaseline, Get-AcceptanceStep, Invoke-FreshReview, Set-TaskSwitchesOff, Restore-TaskSwitches, Get-FolderNotes, Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask, Invoke-TestRunReport, Invoke-ExportJob

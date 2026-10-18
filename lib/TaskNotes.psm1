@@ -4,9 +4,12 @@
 #   - "Data notes:" lines: what the project's converted data means (rows, keys, how files join,
 #     values to watch), asked once per data file and again when its data changed, saved in
 #     .streamhub/data-notes.json and sent with every later task.
-# StreamHub has no model of its own: these only read and store what Copilot wrote.
+# StreamHub has no model of its own: these only read and store what Copilot wrote. A Done when line
+# about a file ('PATH contains TEXT', 'PATH exists' and their negations) is checked by the helper
+# program itself (Test-DoneWhenCheck), so Copilot does not grade its own work there.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 
 function Read-NoteBlock([AllowEmptyString()][string]$Text, [string]$Heading, [int]$Max = 12) {
     <# The list under a heading line ("Done when:", "Data notes:"), outside code blocks: the "- " or
@@ -38,7 +41,7 @@ function Read-NoteBlock([AllowEmptyString()][string]$Text, [string]$Heading, [in
 
 function Get-DoneWhenAsk {
     # The line that goes with a build or change request: the checks, before any file is written.
-    "Before you change files, write a line 'Done when:' and under it 2 to 5 checks taken from this request that someone could confirm on the page or in the files (for example: '- the page shows a chart of ITEMS per GROUP'), each a '- ' line. You will be asked about each one at the end. Then go on with the work in the same reply (action blocks): the list alone does not finish the reply."
+    "Before you change files, write a line 'Done when:' and under it 2 to 5 checks taken from this request that someone could confirm on the page or in the files (for example: '- the page shows a chart of ITEMS per GROUP'), each a '- ' line. Where a check is about a file, write it as 'PATH contains ""TEXT""', 'PATH does not contain ""TEXT""', 'PATH exists' or 'PATH does not exist' (PATH relative to the project, TEXT in quotes exactly as it will be in the file): the helper program checks those itself. You will be asked about each one at the end. Then go on with the work in the same reply (action blocks): the list alone does not finish the reply."
 }
 
 function Read-DoneWhen([AllowEmptyString()][string]$Text) {
@@ -46,10 +49,74 @@ function Read-DoneWhen([AllowEmptyString()][string]$Text) {
     @(Read-NoteBlock $Text 'Done when' 6)
 }
 
-function New-AcceptanceAsk([string[]]$Checks) {
-    # The question at "done": each check as MET or NOT MET, fixing what is not met first.
-    $list = (@($Checks) | ForEach-Object { "- $_" }) -join "`n"
-    "Check each 'Done when' line you wrote at the start against the files and the page as they are now (the screenshot, if one is attached):`n$list`nAnswer each on its own line as 'MET: CHECK' or 'NOT MET: CHECK - why'. If one is not met, fix it now with action blocks and answer again after the fix; then send done."
+function New-AcceptanceAsk([string[]]$Checks, $Helper = @()) {
+    <# The question at "done": each check as MET or NOT MET, fixing what is not met first. $Helper:
+       results of the checks the helper program made itself (Test-DoneWhenCheck); the ones not met
+       are named to be fixed, the met ones are not asked. '' when there is nothing to ask. #>
+    $own = @(@($Helper) | Where-Object { $_ } | ForEach-Object { "$($_.check)" })
+    $ask = @(@($Checks) | Where-Object { "$_".Trim() -and $own -notcontains "$_" })
+    $failed = @(@($Helper) | Where-Object { $_ -and $_.met -eq $false })
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($failed.Count) {
+        $parts.Add("The helper program checked these 'Done when' lines in the files itself, and they are NOT MET:`n" + ((@($failed) | ForEach-Object { "- $($_.check) ($($_.note))" }) -join "`n") + "`nFix them now with action blocks.")
+    }
+    if ($ask.Count) {
+        $list = (@($ask) | ForEach-Object { "- $_" }) -join "`n"
+        $parts.Add("Check each 'Done when' line you wrote at the start against the files and the page as they are now (the screenshot, if one is attached):`n$list`nAnswer each on its own line as 'MET: CHECK' or 'NOT MET: CHECK - why'. If one is not met, fix it now with action blocks and answer again after the fix; then send done.")
+    } elseif ($failed.Count) { $parts.Add('Then send done.') }
+    $parts -join "`n`n"
+}
+
+function Test-DoneWhenCheck {
+    <# A Done when line the helper program can check in the files itself: 'PATH exists', 'PATH does
+       not exist', 'PATH contains "TEXT"', 'PATH does not contain "TEXT"' (TEXT in quotes or backticks;
+       PATH may be too; 'the file PATH' and includes/does not include as well). @{ check; met; note;
+       by = 'helper' }, or $null for any other line. PATH must stay inside the project
+       (Resolve-ProjectPath). -Literal (a test run's 'expect:') takes an unquoted TEXT as the text. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [AllowEmptyString()][string]$Check, [switch]$Literal)
+    $m = [regex]::Match("$Check".Trim(), '^(?i)(?:the\s+file\s+)?[`"'']?(?<path>[\w.\-/\\]*[\w\-]\.[A-Za-z0-9]{1,8}|[\w.\-]+(?:[/\\][\w.\-]+)+)[`"'']?\s+(?<op>exists|does\s+not\s+exist|contains|does\s+not\s+contain|includes|does\s+not\s+include)\b\s*(?<text>.*)$')
+    if (-not $m.Success) { return $null }
+    $op = ($m.Groups['op'].Value -replace '\s+', ' ').ToLowerInvariant()
+    $negate = $op -like 'does not *'
+    $wantText = $op -match 'contain|include'
+    $text = $m.Groups['text'].Value.Trim().TrimEnd('.').Trim()
+    # The text must be quoted (or in backticks): 'README.md contains a usage section' is a judgement
+    # for Copilot, not a text to look for.
+    $quoted = $text.Length -ge 3 -and (($text[0] -eq '`' -and $text[-1] -eq '`') -or ($text[0] -eq '"' -and $text[-1] -eq '"') -or ($text[0] -eq "'" -and $text[-1] -eq "'"))
+    if ($wantText -and -not $quoted -and -not $Literal) { return $null }
+    if ($quoted) { $text = $text.Substring(1, $text.Length - 2) }
+    if (-not $wantText -and $text) { return $null }   # 'PATH exists and ...': more than the helper can tell
+    $text = $text.Replace('&lt;', '<').Replace('&gt;', '>').Replace('&quot;', '"').Replace('&amp;', '&')
+    $path = $m.Groups['path'].Value.Replace('\', '/')
+    $full = try { Resolve-ProjectPath $ProjectRoot $path } catch { $null }
+    if (-not $full) { return @{ check = $Check; met = $false; note = "$path is outside the project"; by = 'helper' } }
+    $exists = Test-Path -LiteralPath $full -PathType Leaf
+    if (-not $wantText) {
+        $met = if ($negate) { -not $exists } else { $exists }
+        return @{ check = $Check; met = $met; note = $(if ($met) { '' } elseif ($negate) { "$path is still there" } else { "$path does not exist" }); by = 'helper' }
+    }
+    if (-not $exists) { return @{ check = $Check; met = [bool]$negate; note = $(if ($negate) { '' } else { "$path does not exist" }); by = 'helper' } }
+    $content = try { [IO.File]::ReadAllText($full) } catch { $null }
+    if ($null -eq $content) { return @{ check = $Check; met = $false; note = "$path could not be read"; by = 'helper' } }
+    $has = $content.Contains($text)
+    $met = if ($negate) { -not $has } else { $has }
+    @{ check = $Check; met = $met; note = $(if ($met) { '' } elseif ($negate) { "$path still contains it" } else { "$path does not contain that text" }); by = 'helper' }
+}
+
+function Get-HelperChecks([string]$ProjectRoot, [string[]]$Checks) {
+    # The results of the Done when lines the helper program can check itself (others left out).
+    @(foreach ($c in @($Checks)) { $r = Test-DoneWhenCheck $ProjectRoot "$c"; if ($r) { $r } })
+}
+
+function Merge-AcceptanceResults([string]$ProjectRoot, [string[]]$Checks, $Answers) {
+    <# Every check in order: the helper program's own result where it can check the line (checked
+       again now, so a fix made after the question counts), else Copilot's answer (or not answered). #>
+    @(foreach ($c in @($Checks)) {
+        $h = Test-DoneWhenCheck $ProjectRoot "$c"
+        if ($h) { $h; continue }
+        $a = @(@($Answers) | Where-Object { $_ -and "$($_.check)" -eq "$c" }) | Select-Object -First 1
+        if ($a) { $a } else { @{ check = $c; met = $null; note = '' } }
+    })
 }
 
 function Read-AcceptanceAnswers([AllowEmptyString()][string]$Text, [string[]]$Checks) {
@@ -85,7 +152,7 @@ function Format-AcceptanceReport($Results) {
     # The task report's lines for the checks.
     @(foreach ($r in @($Results)) {
         $state = if ($null -eq $r.met) { 'not answered' } elseif ($r.met) { 'MET' } else { "NOT MET$(if ($r.note) { " ($($r.note))" })" }
-        "- $($r.check): $state"
+        "- $($r.check): $state$(if ($r.by -eq 'helper') { ' (checked by StreamHub in the files)' })"
     })
 }
 
@@ -318,4 +385,4 @@ function Format-DataNotes([string]$ProjectRoot) {
     "Data notes (what you wrote about this data earlier; read the data again only for what they do not cover):`n" + ((@($have.notes) | ForEach-Object { "- $_" }) -join "`n")
 }
 
-Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision, Get-NotesGoAhead, Get-OpenTodoItems, Get-OpenTodoContinue, Get-PlanFiles, Find-StubCode, Get-PlanCoverage, Format-PlanCoverage, Test-TaskListFile, Get-UnmetChecksContinue
+Export-ModuleMember -Function Read-NoteBlock, Get-DoneWhenAsk, Read-DoneWhen, New-AcceptanceAsk, Test-DoneWhenCheck, Get-HelperChecks, Merge-AcceptanceResults, Read-AcceptanceAnswers, Format-AcceptanceReport, Get-DataNotesPath, Read-DataNotes, Get-DataNotesNeeded, Get-DataNotesAsk, Save-DataNotes, Format-DataNotes, Get-RequestTypeAsk, Read-RequestType, Get-ScopeAsk, Read-ScopeDecision, Get-NotesGoAhead, Get-OpenTodoItems, Get-OpenTodoContinue, Get-PlanFiles, Find-StubCode, Get-PlanCoverage, Format-PlanCoverage, Test-TaskListFile, Get-UnmetChecksContinue
