@@ -27,3 +27,6 @@ temp/
 
 # repowise owner-digest key (local)
 .repowise/events.key
+
+# Claude Code: local settings and tool-generated notes (the project's instructions are AGENTS.md)
+.claude/

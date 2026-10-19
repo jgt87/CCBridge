@@ -2510,13 +2510,13 @@ function Test-DeleteScope {
     $deletes = $false
     # The current folder, followed through cd / Set-Location / Push-Location / Pop-Location: '' is the
     # project folder, '?' a folder that cannot be worked out (a relative target after it goes to a person).
-    $cwd = $Cwd; $stack = New-Object System.Collections.Generic.List[string]
+    $curDir = $Cwd; $stack = New-Object System.Collections.Generic.List[string]
     foreach ($g in $groups) {
         # A shell inside the command (cmd /c "...", powershell -Command "...", bash -c "..."): what it
         # runs is checked as a command of its own, so a quoted string cannot hide a delete.
         $inner = Get-InnerShellCommand $g
         if ($null -ne $inner) {
-            $why = Test-DeleteScope $ProjectRoot $inner $Depth -AllowUnchecked:$AllowUnchecked -ScriptDir $ScriptDir -ScriptDepth $ScriptDepth -Cwd $cwd
+            $why = Test-DeleteScope $ProjectRoot $inner $Depth -AllowUnchecked:$AllowUnchecked -ScriptDir $ScriptDir -ScriptDepth $ScriptDepth -Cwd $curDir
             if ($why) { return $why }
         }
         # A folder change anywhere in the line; one that is not the line's own command (inside a block or
@@ -2525,34 +2525,34 @@ function Test-DeleteScope {
         for ($i = 0; $i -lt $g.Count; $i++) { if (("$($g[$i])" -replace '^[@{(]+', '') -match $script:FolderChange) { $at = $i; break } }
         if ($at -ge 0) {
             $verb = "$($g[$at])" -replace '^[@{(]+', ''
-            if ($verb -match '(?i)^(popd|Pop-Location)$') { $cwd = if ($at -eq 0 -and $stack.Count) { $stack[$stack.Count - 1] } else { '?' }; if ($stack.Count) { $stack.RemoveAt($stack.Count - 1) }; continue }
+            if ($verb -match '(?i)^(popd|Pop-Location)$') { $curDir = if ($at -eq 0 -and $stack.Count) { $stack[$stack.Count - 1] } else { '?' }; if ($stack.Count) { $stack.RemoveAt($stack.Count - 1) }; continue }
             $arg = if ($verb -match '(?i)^cd\.\.') { '..' } elseif ($verb -match '(?i)^cd\\') { '\' } else { @($g | Select-Object -Skip ($at + 1) | Where-Object { $_ -notmatch '^-|^/d$|^[})]+$' }) | Select-Object -First 1 }
             if (-not $arg) { continue }
-            if ($verb -match '(?i)^(pushd|Push-Location)$') { $stack.Add($cwd) }
-            $r = Resolve-CommandPath $ProjectRoot $arg $map $cwd
+            if ($verb -match '(?i)^(pushd|Push-Location)$') { $stack.Add($curDir) }
+            $r = Resolve-CommandPath $ProjectRoot $arg $map $curDir
             $new = if (-not $r -or -not $r.full) { '?' } elseif ($r.full -eq $ProjectRoot.TrimEnd('\')) { '' } else { $r.full }
-            $cwd = if ($at -eq 0 -or ($new -and $new -ne '?' -and -not (Test-InProject $ProjectRoot $new))) { $new } elseif ($new -eq $cwd) { $cwd } else { '?' }
+            $curDir = if ($at -eq 0 -or ($new -and $new -ne '?' -and -not (Test-InProject $ProjectRoot $new))) { $new } elseif ($new -eq $curDir) { $curDir } else { '?' }
             continue
         }
-        if (($g -join ' ') -match $script:CodeChdirPattern) { $cwd = '?' }
+        if (($g -join ' ') -match $script:CodeChdirPattern) { $curDir = '?' }
         $verbs = @($g | Where-Object { ($_ -replace '^@', '') -match $script:DeleteVerbs })
         $isGit = ($g -contains 'git') -and (@($g | Where-Object { $_ -in 'clean', 'rm', 'mv' }).Count -gt 0)
         $isRobo = ($g | Where-Object { $_ -match '(?i)^robocopy(\.exe)?$' }) -and ($g | Where-Object { $_ -match '(?i)^/(mir|purge|mov|move)$' })
         $gtext = $g -join ' '
         $codeDeletes = $gtext -match $script:CodeDeletePattern
-        if (($verbs.Count -or $isGit -or $isRobo -or $codeDeletes) -and $cwd -and $cwd -ne '?' -and -not (Test-InProject $ProjectRoot $cwd)) { return 'it changes to a folder outside the project before deleting or moving files' }
-        if (($verbs.Count -or $isGit -or $isRobo -or $codeDeletes) -and $cwd -eq '?' -and -not $AllowUnchecked) { return 'it deletes or moves files after changing to a folder that cannot be worked out, so the targets cannot be checked' }
+        if (($verbs.Count -or $isGit -or $isRobo -or $codeDeletes) -and $curDir -and $curDir -ne '?' -and -not (Test-InProject $ProjectRoot $curDir)) { return 'it changes to a folder outside the project before deleting or moving files' }
+        if (($verbs.Count -or $isGit -or $isRobo -or $codeDeletes) -and $curDir -eq '?' -and -not $AllowUnchecked) { return 'it deletes or moves files after changing to a folder that cannot be worked out, so the targets cannot be checked' }
         if ($verbs.Count -or $isGit -or $isRobo) {
             $deletes = $true
             foreach ($t in $g) {
                 if ($t -match '^-' -or $t -match $script:CmdSwitch) { continue }
-                $why = Test-ScopedPath $ProjectRoot $t -AllowUnchecked:$AllowUnchecked -Map $map -Cwd $cwd
+                $why = Test-ScopedPath $ProjectRoot $t -AllowUnchecked:$AllowUnchecked -Map $map -Cwd $curDir
                 if ($why) { return "it deletes or moves files and $why" }
             }
         }
         if ($codeDeletes) {
             $deletes = $true
-            $why = Test-CodeDeletePaths $ProjectRoot $gtext $Depth -AllowUnchecked:$AllowUnchecked -Map $map -Cwd $cwd
+            $why = Test-CodeDeletePaths $ProjectRoot $gtext $Depth -AllowUnchecked:$AllowUnchecked -Map $map -Cwd $curDir
             if ($why) { return $why }
         }
     }
