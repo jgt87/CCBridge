@@ -38,7 +38,8 @@ export function ConsoleView({
   return (
     <div className={cn("overflow-hidden rounded-md border border-neutral-700 bg-[#0c0c0c] text-[#cccccc]", className)}>
       {title && (
-        <div className="truncate border-neutral-800 border-b bg-[#1f1f1f] px-3 py-1 font-[Consolas,'Cascadia_Mono','Courier_New',monospace] text-[11px] text-neutral-400">
+        // The whole command, wrapped: a person approves exactly what runs, so nothing is cut off.
+        <div className="whitespace-pre-wrap [overflow-wrap:anywhere] border-neutral-800 border-b bg-[#1f1f1f] px-3 py-1 font-[Consolas,'Cascadia_Mono','Courier_New',monospace] text-[11px] text-neutral-400">
           {title}
         </div>
       )}

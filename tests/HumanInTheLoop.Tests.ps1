@@ -73,4 +73,38 @@ Describe 'Agent refuses risky commands without a person' {
         @($state.Events | Where-Object { $_.type -eq 'human-required' }).Count | Should Be 1
         Remove-Item $proj -Recurse -Force
     }
+
+    # The command line only names a script: what the script does is read too (Executor Get-RunScripts).
+    $newRun = {
+        param([string]$Script, [bool]$Headless)
+        $proj = Join-Path $env:TEMP ('ccb-hitl-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $proj 'Scripts') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $proj 'Scripts\job.ps1'), $Script)
+        $cfg = [pscustomobject]@{ commandTimeoutSec = 30; autoApproveCommands = @('.*') }
+        $state = New-AgentState -Config $cfg -AppRoot $root
+        $state.Headless = $Headless; $state.AllowCommands = $true; $state.Mode = 'auto'; $state.ProjectRoot = $proj
+        $action = [pscustomobject]@{ type = 'run'; arg = ''; body = 'powershell -NoProfile -ExecutionPolicy Bypass -File Scripts/job.ps1'; edits = @() }
+        $res = & (Get-Module Agent) { param($s, $a) Invoke-AgentAction $s $a 'a1' $null 0 } $state $action
+        Remove-Item $proj -Recurse -Force
+        @{ res = $res; state = $state }
+    }
+    It 'refuses a script that sends mail or reaches beyond the project when headless' {
+        $r = & $newRun "Send-MailMessage -To x@y.z -Subject hi -SmtpServer smtp.x`n" $true
+        $r.res.ok | Should Be $false
+        $r.res.output | Should Match 'sends email \(in Scripts/job\.ps1\)'
+        $r = & $newRun "Set-ItemProperty HKCU:\Software\X -Name a -Value 1`n" $true
+        $r.res.ok | Should Be $false
+        $r.res.output | Should Match 'changes the Windows registry \(in Scripts/job\.ps1\).*needs a person'
+    }
+    It 'asks a person (hold to run) with the whole script on the card, also in auto mode' {
+        $global:ccbPersonOnly = $null
+        Mock -ModuleName Agent Wait-Approval { param($State, $Id, $PersonOnly) $global:ccbPersonOnly = $PersonOnly; @{ decision = 'reject'; by = 'user'; note = '' } }
+        $r = & $newRun "`$dist = `$args[0]`nRemove-Item `$dist -Recurse`nStop-Process -Name excel`n" $false
+        $global:ccbPersonOnly | Should Be $true
+        $card = @($r.state.Events | Where-Object { $_.type -eq 'action' -and $_.status -eq 'awaiting' })[0]
+        $card.preview.path | Should Be 'Scripts/job.ps1'
+        $card.preview.new | Should Match 'Stop-Process -Name excel'
+        $card.warning | Should Match 'cannot check where this deletes'
+        $card.warning | Should Match 'stops other programs \(in Scripts/job\.ps1\)'
+    }
 }

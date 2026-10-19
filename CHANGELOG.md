@@ -6,17 +6,31 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
-## [v0.1.141] - 2026-10-18
+## [v0.1.141] - 2026-10-19
 
 ### Added
 - Earlier work in new chats: after every work task StreamHub notes what was asked, how it ended, the files changed, the checks not met and what is still open (kept on this computer, never in OneDrive). The last few go with the first message of every new Copilot chat. Setting: Remember earlier work (on). Clearing the chat history clears them too.
 - Tests before the change: before Copilot changes anything, the project's tests (or its `verify:` command) run once, or the last run is reused when no file changed since. Failures that were already there are no longer sent back to Copilot as its own; when there are new ones, the message lists the old and the new failures apart. Setting: Tests before the change (on).
 - Review in a fresh chat: after a task that changed files, a new Copilot chat sees only the request, the Done when checks and the change, and reports defects. Only findings whose quoted line is really in the file are shown, on a card with Continue to fix them. Setting: Review in a fresh chat (off; it costs one extra Copilot message per task).
 - Test runs can turn checks or on/off settings off for one run (`off: quality, contrast`); the report names them and compares the run with the last run that had everything on.
+- The waiting card says what StreamHub is doing: under the rotating text, the current step and how long it has taken, the task's time, round, actions and changed files, and the last sign of life from Copilot. After three minutes without one, a warning says what StreamHub waits for, with Show Copilot (brings Copilot's tab to the front) and Stop. An activity log lists the last steps with their times.
+- The browser tab's title shows what StreamHub is doing and for how long; a long silence sends one desktop notification while the tab is in the background.
+- Every chat item shows its time in a column on the right (with the day for earlier days), and a finished command or change shows how long it took.
+- Hold to run for scripts that reach beyond the project: writing or copying outside it, code built or downloaded while running (Invoke-Expression, Add-Type, eval), administrator rights, the registry, scheduled tasks, the execution policy, installing software, stopping programs, environment variables, services, network settings, restarts and data sent to a web address. The card names each reason and the script it is in.
+- New waiting lines: art lines while Copilot works on how something looks (a look request, or a reply that writes styles), lines about well-known AI test questions, and lines of their own for converting data, installing packages and downloading.
 
 ### Changed
 - Done when checks about a file (`PATH exists`, `PATH does not exist`, `PATH contains "TEXT"`, `PATH does not contain "TEXT"`) are checked by StreamHub in the files itself, checked again at the end, and win over Copilot's own answer; Copilot is asked only about the other checks. The task report marks which checks StreamHub made.
 - A test run's `expect:` lines use the same check, which also keeps their paths inside the project.
+- Scripts are read the way they run: paths built from the script's own folder (`$PSScriptRoot`, `Join-Path`, `Split-Path`, `%~dp0`, path variables set once) and folder changes (`Set-Location`, `Push-Location`, `cd`) are followed, so a build script that cleans the project's own `dist` is no longer refused. A delete target from a variable, or after a folder change that cannot be worked out, asks the person (Hold to run) instead of being refused; anything outside the project stays refused.
+- The Microsoft 365 and delete checks read every script a command starts, and the scripts those start (three levels), not only the command line.
+- A run card shows the whole command (no longer cut off) and the whole text of every script it starts.
+- The message box is white in light mode.
+- The waiting line no longer runs out of its box with a long file name, and status lines break long names.
+- A waiting line that could be read as ignoring safety rules is gone.
+
+### Fixed
+- After answering the setup questions (or choosing Send to Copilot on a runbook card), the request no longer appears twice in the chat.
 
 ## [v0.1.140] - 2026-10-16
 

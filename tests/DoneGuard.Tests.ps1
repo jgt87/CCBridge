@@ -37,6 +37,15 @@ Describe 'Done next to a failed step' {
         ([IO.File]::ReadAllText((Join-Path $p 'app.js'))).Replace("`r`n", "`n") | Should Be "function a() {`n  return 2;`n}`n"
         @($s.Events | Where-Object { $_.type -eq 'done' }).Count | Should Be 1
     }
+    It 'does not post a message the chat shows already (sent again by a setup or runbook card)' {
+        $global:ccbSent = @()
+        $global:ccbReplies = @('```text' + "`nACTION done`nNothing to change.`n" + '```')
+        $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
+        Add-AgentEvent $s 'user' @{ text = 'Make a dist package' }
+        Invoke-AgentTurn $s 'Make a dist package' -Shown
+        @($s.Events | Where-Object { $_.type -eq 'user' }).Count | Should Be 1
+        $global:ccbSent.Count | Should Be 1
+    }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 Remove-Item -LiteralPath $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue

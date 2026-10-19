@@ -42,6 +42,27 @@ Describe 'Test-DeleteScope: allowed inside the project' {
     }
 }
 
+Describe 'Test-DeleteNeedsPerson: a target from a variable goes to a person, nothing else does' {
+    [IO.File]::WriteAllText((Join-Path $proj 'build-dist.ps1'), "`$dist = `$args[0]`nif (Test-Path `$dist) { Remove-Item `$dist -Recurse -Force }`nCopy-Item index.html `$dist`n")
+    [IO.File]::WriteAllText((Join-Path $proj 'build-bad.ps1'), "`$dist = 'dist'`nRemove-Item `$dist -Recurse -Force`nRemove-Item ..\outside -Recurse -Force`n")
+    It 'asks a person for a script whose only problem is a variable target' {
+        Test-DeleteScope $proj 'powershell -NoProfile -File build-dist.ps1' | Should Match 'uses a variable'
+        Test-DeleteNeedsPerson $proj 'powershell -NoProfile -File build-dist.ps1' | Should Match 'uses a variable'
+    }
+    It 'keeps refusing when anything else is wrong too, and for paths that are plainly outside' {
+        Test-DeleteNeedsPerson $proj 'powershell -NoProfile -File build-bad.ps1' | Should BeNullOrEmpty
+        Test-DeleteScope $proj 'powershell -NoProfile -File build-bad.ps1' -AllowUnchecked | Should Match 'outside the project'
+        Test-DeleteNeedsPerson $proj 'del ..\x.txt' | Should BeNullOrEmpty
+        Test-DeleteNeedsPerson $proj 'powershell -NoProfile -File clean-ok.ps1' | Should BeNullOrEmpty
+    }
+    It 'shows the whole script a command starts on the approval card' {
+        $pv = Get-RunScriptPreview $proj 'powershell -NoProfile -ExecutionPolicy Bypass -File build-dist.ps1'
+        $pv.path | Should Be 'build-dist.ps1'
+        $pv.new | Should Match 'Remove-Item \$dist -Recurse -Force'
+        Get-RunScriptPreview $proj 'npm run build' | Should BeNullOrEmpty
+    }
+}
+
 Describe 'Test-DeleteScope: refused outside the project' {
     $bad = @{
         'del ..\x.txt' = 'outside the project'
@@ -54,7 +75,7 @@ Describe 'Test-DeleteScope: refused outside the project' {
         'rm -rf ~' = 'variable'
         'rm -rf /' = 'outside the project'
         'rd /s /q .' = 'project folder itself'
-        'cd .. && del x.txt' = 'changes folder'
+        'cd .. && del x.txt' = 'changes to a folder outside the project'
         'git -C .. clean -fd' = 'outside the project|another folder'
         'Remove-Item -Recurse link\keep.txt' = 'link'
         'rd /s /q link' = 'link'

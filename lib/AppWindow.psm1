@@ -155,6 +155,22 @@ function Open-LinkInEdgeTab {
     'new-tab'
 }
 
+function Show-CopilotTab {
+    <# Brings the Copilot tab of StreamHub's Edge to the front (the waiting card's Show Copilot), so the
+       person can see what Copilot is doing. Only switches tabs (/json/activate): it never types, clicks
+       or opens anything. $Hosts are Copilot's hosts (selectors.json chatHosts and the chatUrl host).
+       Returns 'shown' or 'not-found'. #>
+    param([int]$CdpPort, [string[]]$Hosts)
+    $pages = @((Invoke-RestMethod "http://127.0.0.1:$CdpPort/json/list" -TimeoutSec 3) | Where-Object { $_.type -eq 'page' })
+    $tab = $pages | Where-Object {
+        $h = try { ([uri]"$($_.url)").Host.ToLowerInvariant() } catch { '' }
+        $h -and @($Hosts | Where-Object { $h -eq $_ -or $h.EndsWith(".$_") }).Count
+    } | Select-Object -First 1
+    if (-not $tab) { return 'not-found' }
+    $null = Invoke-RestMethod "http://127.0.0.1:$CdpPort/json/activate/$($tab.id)" -TimeoutSec 3
+    'shown'
+}
+
 function Start-AppWindow {
     <# Opens the StreamHub app the way the appWindow setting says, in the background. #>
     param([Parameter(Mandatory)][string]$Url, [string]$Mode = 'copilot-tab', [int]$AppPort, [int]$CdpPort, [string]$EdgePath)
@@ -182,4 +198,4 @@ function Start-AppWindow {
     $script:Opener = @{ ps = $ps; handle = $ps.BeginInvoke() }
 }
 
-Export-ModuleMember -Function Test-AppTabInEdge, Test-ExternalLink, Open-LinkInEdgeTab, Test-LocalPageUrl, Select-AppWindows, Get-HalfRects, Get-TopWindows, Get-CopilotEdgePids, Set-WindowsSideBySide, Open-AppInCopilotWindow, Start-AppWindow
+Export-ModuleMember -Function Test-AppTabInEdge, Test-ExternalLink, Open-LinkInEdgeTab, Show-CopilotTab, Test-LocalPageUrl, Select-AppWindows, Get-HalfRects, Get-TopWindows, Get-CopilotEdgePids, Set-WindowsSideBySide, Open-AppInCopilotWindow, Start-AppWindow

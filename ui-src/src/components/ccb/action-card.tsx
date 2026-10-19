@@ -273,7 +273,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
             </div>
           )}
           {item.preview && item.action === "run" ? (
-            // A script a chain or Automation > Scripts runs: its text, not a change.
+            // The script a run starts (Copilot's command, a chain, Automation > Scripts): its whole text, not a change.
             <div className="kit-panel overflow-hidden p-0">
               <div className="border-(--kit-border) border-b px-3 py-1.5 font-mono text-muted-foreground text-xs">{item.preview.path || "script"}</div>
               <div className="max-h-[28rem] overflow-auto">

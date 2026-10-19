@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer', 'Progress') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer', 'Progress', 'WorkStatus') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -133,6 +133,8 @@ function Get-StateSnapshot($State) {
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
         workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
         activity = (Get-ActivityView $State)
+        work = (Get-WorkView $State)   # the waiting card: phase, timers, counts, last steps (WorkStatus)
+        look = [bool]($State.Busy -and $State.VisualTurn)   # a turn about how something looks: the indicator's art lines
         installProblem = [string]$State.InstallProblem   # files missing or different from the release (ccbridge.ps1)
         runLive = $State.RunLive   # the command running now: its last output lines (New-RunWatch)
         runWindows = @(Update-RunWindows $State)   # commands the person opened in a console window
@@ -286,6 +288,14 @@ function Invoke-ApiRequest($Ctx, $State) {
             $b = Read-JsonBody $Ctx
             $r = Open-LinkInEdgeTab ([string]$b.url) ([int]$State.Config.port) ([int]$State.Config.cdpPort) -PreviewPrefix "http://localhost:$([int]$State.Config.port)/preview/$($State.PreviewToken)/"
             return Send-Json $Ctx @{ ok = $true; opened = ($r -eq 'new-tab') }
+        }
+        '^POST /api/copilot/show$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            # The waiting card's Show Copilot: the Copilot tab to the front (only a tab switch).
+            $sel = Get-CCBridgeConfig selectors $State.AppRoot
+            $hosts = @(@($sel.chatHosts) + (([uri]$sel.chatUrl).Host -replace '^www\.', '') | Where-Object { $_ } | ForEach-Object { "$_".ToLowerInvariant() })
+            $r = try { Show-CopilotTab ([int]$State.Config.cdpPort) $hosts } catch { 'not-found' }
+            return Send-Json $Ctx @{ ok = ($r -eq 'shown'); shown = ($r -eq 'shown') }
         }
         '^GET /api/queue$' { return Send-Json $Ctx @{ queue = @(Get-QueueView $State 100); pausedUntil = $State.PausedUntil } }
         '^POST /api/copilot-theme$' {
@@ -659,6 +669,8 @@ function Invoke-ApiRequest($Ctx, $State) {
                 if ($b.setup.answers) { foreach ($p in @($b.setup.answers.PSObject.Properties)) { $answers[$p.Name] = [string]$p.Value } }
                 $task.setup = @{ build = [string]$b.setup.build; liveSource = [string]$b.setup.liveSource; answers = $answers }
             }
+            # An answer to a card under the message (setup, runbook choice): the message is in the chat already.
+            if ($task.setup -or $task.noRunbook) { $task.shown = $true }
             if ($b.clarify) { $task.clarify = $true; $task.request = [string]$b.text }
             elseif ($b.planFirst) {
                 # Plan first: read-only turn that ends with a plan to approve in the app.

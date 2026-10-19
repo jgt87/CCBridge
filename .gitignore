@@ -24,3 +24,6 @@ dist/
 # Local scratch folder (reports copied from other machines)
 temp/
 .streamhub/
+
+# repowise owner-digest key (local)
+.repowise/events.key

@@ -2389,17 +2389,99 @@ function Get-InnerShellCommand([string[]]$Group) {
     $null
 }
 
-function Test-ScopedPath([string]$ProjectRoot, [string]$Token) {
-    <# Why a path written in a deleting command is not safely inside the project, or $null. #>
+$script:PathArg = '(\$\{?[\w:]+\}?|"[^"\r\n]*"|''[^''\r\n]*'')'
+
+function ConvertTo-PathExpressions([AllowEmptyString()][string]$Text) {
+    <# Script text with the usual ways of building a path from the script's own folder written as one
+       double-quoted path, so the checks can read it: Join-Path X 'Y' -> "X\Y", Split-Path [-Parent] X
+       -> "X\..", (Resolve-Path X).Path and [IO.Path]::GetFullPath(X) -> X, and the folder of
+       $MyInvocation.MyCommand.Path -> $PSScriptRoot. #>
+    if (-not $Text) { return $Text }
+    $a = $script:PathArg
+    $unq = { param($s) if ($s -match '^(["''])(.*)\1$') { $Matches[2] } else { $s } }
+    $t = [regex]::Replace($Text, '(?i)Split-Path\s+(-Parent\s+)?(-Path\s+)?\$MyInvocation\.MyCommand\.(Path|Definition)(\s+-Parent)?', '$PSScriptRoot')
+    for ($i = 0; $i -lt 4; $i++) {
+        $before = $t
+        $t = [regex]::Replace($t, "(?i)\(\s*Resolve-Path\s+(-Path\s+|-LiteralPath\s+)?$a\s*\)\.(Path|ProviderPath)", { param($m) '"' + (& $unq $m.Groups[2].Value) + '"' })
+        $t = [regex]::Replace($t, "(?i)\[(System\.)?IO\.Path\]::GetFullPath\(\s*$a\s*\)", { param($m) '"' + (& $unq $m.Groups[2].Value) + '"' })
+        $t = [regex]::Replace($t, "(?i)\(\s*Join-Path\s+(-Path\s+)?$a\s+(-ChildPath\s+)?$a\s*\)", { param($m) '"' + (& $unq $m.Groups[2].Value) + '\' + (& $unq $m.Groups[4].Value) + '"' })
+        $t = [regex]::Replace($t, "(?i)Join-Path\s+(-Path\s+)?$a\s+(-ChildPath\s+)?$a", { param($m) '"' + (& $unq $m.Groups[2].Value) + '\' + (& $unq $m.Groups[4].Value) + '"' })
+        $t = [regex]::Replace($t, "(?i)\(\s*Split-Path\s+(-Parent\s+)?(-Path\s+)?$a(\s+-Parent)?\s*\)", { param($m) '"' + (& $unq $m.Groups[3].Value) + '\.."' })
+        $t = [regex]::Replace($t, "(?i)Split-Path\s+(-Parent\s+)?(-Path\s+)?$a(\s+-Parent)?(?!\s+-(Leaf|LeafBase|Extension|Qualifier|NoQualifier|IsAbsolute|Resolve))", { param($m) '"' + (& $unq $m.Groups[3].Value) + '\.."' })
+        if ($t -eq $before) { break }
+    }
+    $t
+}
+
+function Get-ScriptPathVars([AllowEmptyString()][string]$Text, [string]$ScriptDir) {
+    <# The path variables a script sets once to a path from its own folder ($dist = "$PSScriptRoot\..\dist"),
+       with $PSScriptRoot and %~dp0 for the script's folder; a name set more than once is left out. #>
+    $map = @{ 'PSScriptRoot' = $ScriptDir.TrimEnd('\'); '%~dp0' = $ScriptDir.TrimEnd('\') + '\' }
+    $seen = @{}; $cand = @{}
+    foreach ($m in [regex]::Matches("$Text", '(?im)^\s*\$(?:script:|global:|local:)?(\w+)\s*=\s*(.+?)\s*;?\s*$')) {
+        $n = $m.Groups[1].Value.ToLowerInvariant()
+        $seen[$n] = 1 + [int]$seen[$n]
+        $rhs = $m.Groups[2].Value.Trim()
+        if ($rhs -match '^\(\s*(.+?)\s*\)$') { $rhs = $Matches[1] }
+        if ($rhs -match '^"([^"]*)"$' -or $rhs -match "^'([^']*)'$") { $cand[$n] = $Matches[1] }
+        elseif ($rhs -match '^\$\{?[\w:]+\}?$') { $cand[$n] = $rhs }
+    }
+    for ($i = 0; $i -lt 4; $i++) {
+        foreach ($n in @($cand.Keys)) {
+            if ($seen[$n] -ne 1 -or $n -eq 'psscriptroot') { continue }
+            $v = Expand-KnownPathVars $cand[$n] $map
+            if ($v -notmatch '[$%!`]' -and -not $map.ContainsKey($n)) { $map[$n] = $v }
+        }
+    }
+    $map
+}
+
+function Expand-KnownPathVars([AllowEmptyString()][string]$Text, [hashtable]$Map) {
+    <# A path with the variables of Get-ScriptPathVars written out ($PSScriptRoot, ${dist}, %~dp0). #>
+    if (-not $Text -or -not $Map -or -not $Map.Count) { return $Text }
+    $t = $Text
+    foreach ($k in @($Map.Keys | Sort-Object { $_.Length } -Descending)) {
+        $v = [string]$Map[$k]
+        if ($k -eq '%~dp0') { $t = [regex]::Replace($t, '(?i)%~dp0\\?', { param($m) $v }); continue }
+        $t = [regex]::Replace($t, '(?i)\$(?:script:|global:|local:)?(\{' + [regex]::Escape($k) + '\}|' + [regex]::Escape($k) + ')(?![\w:])', { param($m) $v })
+    }
+    $t
+}
+
+function Resolve-CommandPath([string]$ProjectRoot, [string]$Token, [hashtable]$Map, [string]$Cwd = '') {
+    <# A path as a command or script uses it: @{ text; full; why } with why set when a variable or an
+       unknown current folder ($Cwd '?'; '' is the project folder) keeps it from being worked out;
+       $null for no path at all. #>
     $t = $Token.Trim().Trim('"', "'").TrimEnd(';', ',', ')').TrimStart('(')
-    if (-not $t -or $t -eq '|' -or $t -match '^\d?>|^<' -or $t -match '(?i)^nul$') { return $null }
-    if ($t -match '[$%!`]' -or $t.StartsWith('~')) { return "'$t' uses a variable, so the target cannot be checked" }
-    $root = $ProjectRoot.TrimEnd('\')
+    if (-not $t -or $t -eq '|' -or $t -match '^\d?>|^<' -or $t -match '(?i)^nul$' -or $t -match '(?i)^\$null$') { return $null }
+    $t = Expand-KnownPathVars $t $Map
+    if ($t -match '[$%!`]' -or $t.StartsWith('~')) { return @{ text = $t; full = $null; why = "'$t' uses a variable, so the target cannot be checked" } }
     $p = $t.Replace('/', '\') -replace '[*?]', 'x'
+    if (-not [IO.Path]::IsPathRooted($p) -and $Cwd -eq '?') { return @{ text = $t; full = $null; why = "'$t' is relative to a folder the script changed to, which cannot be checked" } }
+    $base = if ($Cwd) { $Cwd } else { $ProjectRoot }   # '' = the project folder, '?' = unknown (above)
+    $full = try { [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $base.TrimEnd('\') $p })).TrimEnd('\') } catch { $null }
+    @{ text = $t; full = $full; path = $p }
+}
+
+function Test-InProject([string]$ProjectRoot, [string]$Full) {
+    $root = $ProjectRoot.TrimEnd('\')
+    [bool]($Full -and ($Full -eq $root -or $Full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)))
+}
+
+function Test-ScopedPath([string]$ProjectRoot, [string]$Token, [switch]$AllowUnchecked, [hashtable]$Map = @{}, [string]$Cwd = '') {
+    <# Why a path written in a deleting command is not safely inside the project, or $null.
+       A path from the script's own folder ($Map) and the folder it changed to ($Cwd) are worked out.
+       -AllowUnchecked: a path that cannot be worked out is passed (a person approves it, Test-DeleteNeedsPerson). #>
+    $r = Resolve-CommandPath $ProjectRoot $Token $Map $Cwd
+    if (-not $r) { return $null }
+    $t = $r.text
+    if ($r.why) { if ($AllowUnchecked) { return $null }; return $r.why }
+    $root = $ProjectRoot.TrimEnd('\')
     # Windows drops dots and spaces at the end of a name ("Remove-Item ..\x" read as one path becomes
     # "Remove-Item" + "x"), so such a name cannot be checked as written.
-    if ($p -match '(^|\\)(?!\.\.?(\\|$))[^\\]*[. ](\\|$)') { return "'$t' has a name ending in a dot or space, which Windows reads differently" }
-    $full = try { [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $root $p })).TrimEnd('\') } catch { return "'$t' is not a path that can be checked" }
+    if ($r.path -match '(^|\\)(?!\.\.?(\\|$))[^\\]*[. ](\\|$)') { return "'$t' has a name ending in a dot or space, which Windows reads differently" }
+    $full = $r.full
+    if (-not $full) { return "'$t' is not a path that can be checked" }
     if ($full -eq $root) { return "'$t' is the project folder itself" }
     if (-not $full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { return "'$t' is outside the project folder" }
     try { Assert-NoOutsideLink $root $full $t } catch { return "'$t' goes through a link to a folder outside the project" }
@@ -2412,65 +2494,293 @@ function Test-DeleteScope {
        or moves must name its targets as plain paths inside the project (relative or absolute):
        no .., no variables, no changing folders first, no encoded commands. Deleting code inside
        python -c / node -e / -Command text, and in project scripts the command runs, is checked
-       the same way (its quoted paths). #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command, [int]$Depth = 0, [switch]$CodeOnly)
+       the same way (its quoted paths).
+       -AllowUnchecked: targets from a variable or the environment are passed, so only the reasons
+       no approval overrides are left (Test-DeleteNeedsPerson sends those targets to a person). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command, [int]$Depth = 0, [switch]$CodeOnly, [switch]$AllowUnchecked,
+        [string]$ScriptDir = '', [int]$ScriptDepth = 0, [string]$Cwd = '')
     if ($Command -match $script:EncodedCommandPattern) { return 'it contains an encoded command, which cannot be checked' }
+    $text = ConvertTo-PathExpressions $Command
+    # A script's text: paths from its own folder ($PSScriptRoot, %~dp0, path variables it sets once) are worked out.
+    $map = if ($ScriptDir) { Get-ScriptPathVars $text $ScriptDir } else { @{} }
     # The text of a JavaScript or Python script ($CodeOnly) is code, not a command line: "remove" is
     # a DOM method there and "//" a comment, so only the code patterns below count.
-    $groups = @(if ($CodeOnly) { } else { Split-CommandGroups $Command })
+    $groups = @(if ($CodeOnly) { } else { Split-CommandGroups $text })
     $all = @($groups | ForEach-Object { $_ })
     $deletes = $false
+    # The current folder, followed through cd / Set-Location / Push-Location / Pop-Location: '' is the
+    # project folder, '?' a folder that cannot be worked out (a relative target after it goes to a person).
+    $cwd = $Cwd; $stack = New-Object System.Collections.Generic.List[string]
     foreach ($g in $groups) {
         # A shell inside the command (cmd /c "...", powershell -Command "...", bash -c "..."): what it
         # runs is checked as a command of its own, so a quoted string cannot hide a delete.
         $inner = Get-InnerShellCommand $g
         if ($null -ne $inner) {
-            $why = Test-DeleteScope $ProjectRoot $inner $Depth
+            $why = Test-DeleteScope $ProjectRoot $inner $Depth -AllowUnchecked:$AllowUnchecked -ScriptDir $ScriptDir -ScriptDepth $ScriptDepth -Cwd $cwd
             if ($why) { return $why }
         }
+        # A folder change anywhere in the line; one that is not the line's own command (inside a block or
+        # a condition) may or may not run, so the folder after it is unknown unless it leads outside.
+        $at = -1
+        for ($i = 0; $i -lt $g.Count; $i++) { if (("$($g[$i])" -replace '^[@{(]+', '') -match $script:FolderChange) { $at = $i; break } }
+        if ($at -ge 0) {
+            $verb = "$($g[$at])" -replace '^[@{(]+', ''
+            if ($verb -match '(?i)^(popd|Pop-Location)$') { $cwd = if ($at -eq 0 -and $stack.Count) { $stack[$stack.Count - 1] } else { '?' }; if ($stack.Count) { $stack.RemoveAt($stack.Count - 1) }; continue }
+            $arg = if ($verb -match '(?i)^cd\.\.') { '..' } elseif ($verb -match '(?i)^cd\\') { '\' } else { @($g | Select-Object -Skip ($at + 1) | Where-Object { $_ -notmatch '^-|^/d$|^[})]+$' }) | Select-Object -First 1 }
+            if (-not $arg) { continue }
+            if ($verb -match '(?i)^(pushd|Push-Location)$') { $stack.Add($cwd) }
+            $r = Resolve-CommandPath $ProjectRoot $arg $map $cwd
+            $new = if (-not $r -or -not $r.full) { '?' } elseif ($r.full -eq $ProjectRoot.TrimEnd('\')) { '' } else { $r.full }
+            $cwd = if ($at -eq 0 -or ($new -and $new -ne '?' -and -not (Test-InProject $ProjectRoot $new))) { $new } elseif ($new -eq $cwd) { $cwd } else { '?' }
+            continue
+        }
+        if (($g -join ' ') -match $script:CodeChdirPattern) { $cwd = '?' }
         $verbs = @($g | Where-Object { ($_ -replace '^@', '') -match $script:DeleteVerbs })
         $isGit = ($g -contains 'git') -and (@($g | Where-Object { $_ -in 'clean', 'rm', 'mv' }).Count -gt 0)
         $isRobo = ($g | Where-Object { $_ -match '(?i)^robocopy(\.exe)?$' }) -and ($g | Where-Object { $_ -match '(?i)^/(mir|purge|mov|move)$' })
-        if (-not ($verbs.Count -or $isGit -or $isRobo)) { continue }
-        $deletes = $true
-        foreach ($t in $g) {
-            if ($t -match '^-' -or $t -match $script:CmdSwitch) { continue }
-            $why = Test-ScopedPath $ProjectRoot $t
-            if ($why) { return "it deletes or moves files and $why" }
+        $gtext = $g -join ' '
+        $codeDeletes = $gtext -match $script:CodeDeletePattern
+        if (($verbs.Count -or $isGit -or $isRobo -or $codeDeletes) -and $cwd -and $cwd -ne '?' -and -not (Test-InProject $ProjectRoot $cwd)) { return 'it changes to a folder outside the project before deleting or moving files' }
+        if (($verbs.Count -or $isGit -or $isRobo -or $codeDeletes) -and $cwd -eq '?' -and -not $AllowUnchecked) { return 'it deletes or moves files after changing to a folder that cannot be worked out, so the targets cannot be checked' }
+        if ($verbs.Count -or $isGit -or $isRobo) {
+            $deletes = $true
+            foreach ($t in $g) {
+                if ($t -match '^-' -or $t -match $script:CmdSwitch) { continue }
+                $why = Test-ScopedPath $ProjectRoot $t -AllowUnchecked:$AllowUnchecked -Map $map -Cwd $cwd
+                if ($why) { return "it deletes or moves files and $why" }
+            }
+        }
+        if ($codeDeletes) {
+            $deletes = $true
+            $why = Test-CodeDeletePaths $ProjectRoot $gtext $Depth -AllowUnchecked:$AllowUnchecked -Map $map -Cwd $cwd
+            if ($why) { return $why }
         }
     }
-    # Code that deletes: every quoted path in it must be inside, and no paths from variables.
-    if ($Command -match $script:CodeDeletePattern) {
+    # Code (a JavaScript or Python script, or code a command passes on): every quoted path a delete may use.
+    if ($CodeOnly -and $text -match $script:CodeDeletePattern) {
         $deletes = $true
-        if ($Command -match '(?i)os\.environ|getenv|expanduser|process\.env|homedir\(|\$env:|%\w+%|GetFolderPath|\[Environment\]::') { return 'it deletes or moves files using a path from the environment, which cannot be checked' }
-        # Each quoted string on its own (double- and single-quoted separately); a string that wraps
-        # code (contains the other quote or ;) is skipped, as its own strings are checked.
-        $strings = @([regex]::Matches($Command, '"([^"\r\n]*)"') | ForEach-Object { $_.Groups[1].Value }) + @([regex]::Matches($Command, '''([^''\r\n]*)''') | ForEach-Object { $_.Groups[1].Value })
-        foreach ($s in $strings) {
-            if ($s -match '["'';]') { continue }
-            if ($s -notmatch '[\\/]|^\.\.?$' -and -not [IO.Path]::IsPathRooted($s)) { continue }   # only path-like strings
-            if ($s -match '^\w+://') { continue }
-            # A string with spaces may be a command line of its own ("Remove-Item ..\x -Recurse"):
-            # checked as one first, then as the path it may also be.
-            if ($s -match '\s' -and $Depth -lt 2) { $why = Test-DeleteScope $ProjectRoot $s ($Depth + 1); if ($why) { return $why } }
-            $why = Test-ScopedPath $ProjectRoot $s
-            if ($why) { return "it deletes or moves files and $why" }
-        }
+        $why = Test-CodeDeletePaths $ProjectRoot $text $Depth -AllowUnchecked:$AllowUnchecked -Map $map -Cwd $(if ($text -match $script:CodeChdirPattern) { '?' } else { '' })
+        if ($why) { return $why }
     }
-    if ($deletes -and @($all | Where-Object { $_ -match $script:FolderChange -or $_ -match '(?i)^--(work-tree|git-dir)' }).Count) { return 'it changes folder before deleting or moving files, so the targets cannot be checked' }
+    if ($deletes -and @($all | Where-Object { $_ -match '(?i)^--(work-tree|git-dir)' }).Count) { return 'it points git at another folder while deleting or moving files, so the targets cannot be checked' }
     if ($deletes -and ($all -contains 'git') -and ($all -contains '-C')) { return 'it runs git in another folder while deleting or moving files' }
-    # Project scripts the command runs: the same check on their contents (one level deep).
-    if ($Depth -lt 1) {
-        foreach ($t in $all) {
-            $p = $t.Trim('"', "'")
-            if ($p -notmatch $script:ScriptExt) { continue }
-            $full = try { Resolve-ProjectPath $ProjectRoot $p } catch { $null }
-            if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf) -or (Get-Item -LiteralPath $full).Length -gt 500000) { continue }
-            $why = Test-DeleteScope $ProjectRoot ([IO.File]::ReadAllText($full)) ($Depth + 1) -CodeOnly:($p -match '(?i)\.(py|pyw|js|mjs|cjs)$')
-            if ($why) { return "the script $p $why" -replace "the script $([regex]::Escape($p)) it ", "the script $p " }
+    # Project scripts the command runs, and the scripts they start (three levels): the same check on
+    # their text. A script whose name comes from a variable cannot be read, so a person approves it.
+    if ($ScriptDepth -lt 3) {
+        foreach ($s in @(Get-StartedScripts $ProjectRoot $groups $map)) {
+            if ($s.why) { if ($AllowUnchecked) { continue }; return "it starts the script $($s.text), whose name comes from a variable, so what it runs cannot be checked" }
+            if (-not $s.full -or (Get-Item -LiteralPath $s.full).Length -gt 500000) { continue }
+            $why = Test-DeleteScope $ProjectRoot ([IO.File]::ReadAllText($s.full)) 1 -CodeOnly:($s.full -match '(?i)\.(py|pyw|js|mjs|cjs)$') -AllowUnchecked:$AllowUnchecked -ScriptDir (Split-Path -Parent $s.full) -ScriptDepth ($ScriptDepth + 1)
+            if ($why) { return $(if ($why -match '^the script ') { "the script $($s.rel) starts $why" } else { "the script $($s.rel) " + ($why -replace '^it ', '') }) }
         }
     }
     $null
+}
+
+function Test-CodeDeletePaths {
+    <# Code that deletes or moves (Remove-Item in a line, os.remove, fs.rmSync, [IO.File]::Delete...):
+       every quoted path in it must be inside the project, and no path from the environment. #>
+    param([string]$ProjectRoot, [AllowEmptyString()][string]$Code, [int]$Depth, [switch]$AllowUnchecked, [hashtable]$Map = @{}, [string]$Cwd = '')
+    if ($Code -match '(?i)os\.environ|getenv|expanduser|process\.env|homedir\(|\$env:|%\w+%|GetFolderPath|\[Environment\]::' -and -not $AllowUnchecked) {
+        # %~dp0 is the script's own folder (worked out), not the environment.
+        if ((Expand-KnownPathVars $Code $Map) -match '(?i)os\.environ|getenv|expanduser|process\.env|homedir\(|\$env:|%\w+%|GetFolderPath|\[Environment\]::') { return 'it deletes or moves files using a path from the environment, which cannot be checked' }
+    }
+    # Each quoted string on its own (double- and single-quoted separately); a string that wraps
+    # code (contains the other quote or ;) is skipped, as its own strings are checked.
+    $strings = @([regex]::Matches($Code, '"([^"\r\n]*)"') | ForEach-Object { $_.Groups[1].Value }) + @([regex]::Matches($Code, '''([^''\r\n]*)''') | ForEach-Object { $_.Groups[1].Value })
+    foreach ($s in $strings) {
+        if ($s -match '["'';]') { continue }
+        $x = Expand-KnownPathVars $s $Map
+        if ($x -notmatch '[\\/]|^\.\.?$' -and -not [IO.Path]::IsPathRooted($x)) { continue }   # only path-like strings
+        if ($x -match '^\w+://') { continue }
+        # A string with spaces may be a command line of its own ("Remove-Item ..\x -Recurse"):
+        # checked as one first, then as the path it may also be.
+        if ($s -match '\s' -and $Depth -lt 2) { $why = Test-DeleteScope $ProjectRoot $s ($Depth + 1) -AllowUnchecked:$AllowUnchecked -Cwd $Cwd; if ($why) { return $why } }
+        $why = Test-ScopedPath $ProjectRoot $s -AllowUnchecked:$AllowUnchecked -Map $Map -Cwd $Cwd
+        if ($why) { return "it deletes or moves files and $why" }
+    }
+    $null
+}
+
+$script:CodeChdirPattern = '(?i)\bos\.chdir\(|\bprocess\.chdir\(|SetCurrentDirectory\(|\[Environment\]::CurrentDirectory\s*='
+$script:ScriptStarters ='(?i)^(&|\.|call|start|Start-Process|-File|-f|-FilePath|powershell(\.exe)?|pwsh(\.exe)?|python[\d.]*(\.exe)?|py(\.exe)?|node(\.exe)?|cmd(\.exe)?|/c|/k)$'
+
+function Get-StartedScripts {
+    <# The script files a command or script starts (tokens ending .ps1/.cmd/.bat/.py/.js...): @{ text;
+       rel; full } for a project script that exists, @{ text; why } for one whose name comes from a
+       variable (only where it is started: first in its line, or after &, ., call, -File, python...). #>
+    param([string]$ProjectRoot, $Groups, [hashtable]$Map = @{})
+    $out = New-Object System.Collections.Generic.List[object]
+    $seen = @{}
+    foreach ($g in @($Groups)) {
+        for ($i = 0; $i -lt @($g).Count; $i++) {
+            $t = "$(@($g)[$i])"
+            if ($t.Trim('"', "'").TrimEnd(')', ';') -notmatch $script:ScriptExt) { continue }
+            $r = Resolve-CommandPath $ProjectRoot $t $Map ''
+            if (-not $r) { continue }
+            if ($r.why) {
+                $starts = $i -eq 0 -or "$(@($g)[$i - 1])" -match $script:ScriptStarters
+                if ($starts -and $r.text -match '[$%!`]') { $out.Add(@{ text = $r.text; why = $r.why }) }
+                continue
+            }
+            if (-not (Test-InProject $ProjectRoot $r.full) -or -not (Test-Path -LiteralPath $r.full -PathType Leaf)) { continue }
+            if ($seen[$r.full]) { continue }
+            $seen[$r.full] = $true
+            $out.Add(@{ text = $r.text; rel = (ConvertTo-RelativePath $ProjectRoot $r.full); full = $r.full })
+        }
+    }
+    $out.ToArray()
+}
+
+function Get-RunScripts {
+    <# Every project script a run command starts, and the scripts those start (three levels deep), in
+       order: @{ path; full; text }. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command)
+    $found = New-Object System.Collections.Generic.List[object]
+    $seen = @{}
+    $walk = $null
+    $walk = {
+        param([string]$Text, [string]$Dir, [int]$Level, [bool]$Code)
+        if ($Code) { return }   # a Python or JavaScript script: what it starts is not followed here
+        $t = ConvertTo-PathExpressions $Text
+        $map = if ($Dir) { Get-ScriptPathVars $t $Dir } else { @{} }
+        foreach ($s in @(Get-StartedScripts $ProjectRoot @(Split-CommandGroups $t) $map)) {
+            if (-not $s.full -or $seen[$s.full]) { continue }
+            $seen[$s.full] = $true
+            $body = try { [IO.File]::ReadAllText($s.full) } catch { '' }
+            $found.Add(@{ path = $s.rel; full = $s.full; text = $body })
+            if ($Level -lt 3) { & $walk $body (Split-Path -Parent $s.full) ($Level + 1) ($s.full -match '(?i)\.(py|pyw|js|mjs|cjs)$') }
+        }
+    }
+    & $walk $Command '' 0 $false
+    $found.ToArray()
+}
+
+function Get-RunScriptPreview {
+    <# The project scripts a run command starts (powershell -File X.ps1, python X.py, node X.js, a .cmd,
+       and the scripts those start), as an approval card preview with their whole text, so a person
+       sees what they approve; $null when the command runs no project script file. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command)
+    $scripts = @(Get-RunScripts $ProjectRoot $Command)
+    if (-not $scripts.Count) { return $null }
+    $text = $scripts[0].text
+    for ($i = 1; $i -lt $scripts.Count; $i++) { $text += "`n`n# ---- $($scripts[$i].path) (started by the script above) ----`n" + $scripts[$i].text }
+    if ($text.Length -gt 200000) { $text = $text.Substring(0, 200000) + "`n... (the script goes on; open it in Files to read the rest)" }
+    @{ path = $scripts[0].path; exists = $true; old = $null; new = $text }
+}
+
+# What a command or script does beyond the project's files: a person approves it (hold to run).
+$script:OutsideEffectPatterns = @(
+    # Code put together or fetched at run time: what runs cannot be read beforehand.
+    @{ re = '(?i)\bInvoke-Expression\b|(^|[\s|;(&{])iex(\s|\(|$)|\[ScriptBlock\]::Create|\.InvokeScript\(|DownloadString\('; why = 'runs code it puts together or downloads while it runs (Invoke-Expression)' },
+    @{ re = '(?i)\bAdd-Type\b[^\r\n]*-(TypeDefinition|MemberDefinition|Path)\b|\bAdd-Type\s+@[''"]|\bAdd-Type\s+\$'; why = 'compiles and runs C# code (Add-Type)' },
+    @{ re = '(?i)\bStart-Process\b[^\r\n]*-Verb\s+[''"]?RunAs'; why = 'asks for administrator rights' },
+    @{ re = '(?i)\bStart-Process\s+(-FilePath\s+)?\$'; why = 'starts a program whose name comes from a variable' },
+    @{ re = '(?<![\w.])(eval|exec)\(|\bnew Function\('; why = 'runs code it builds while it runs (eval or exec)' },
+    @{ re = '(?i)\bsubprocess\.|\bos\.(system|popen|spawn\w*|exec\w*)\(|\bchild_process\b|\b(execSync|execFileSync|spawnSync)\('; why = 'starts other programs from its code' },
+    # Changes to the computer that outlast the script and the project.
+    @{ re = '(?i)\b(Set-ItemProperty|New-ItemProperty|Remove-ItemProperty|New-Item|Remove-Item|Set-Item|Rename-ItemProperty)\b[^\r\n]*(HK(CU|LM|CR|U|CC):|Registry::)|\breg(\.exe)?\s+(add|delete|import|copy|load|restore)\b|\bwinreg\.(SetValue\w*|CreateKey\w*|DeleteKey\w*|DeleteValue)\(|Microsoft\.Win32\.Registry[^\r\n]*\.(SetValue|CreateSubKey|DeleteSubKey\w*|DeleteValue)\('; why = 'changes the Windows registry' },
+    @{ re = '(?i)\b(Register|Set|Unregister|Enable|Disable)-ScheduledTask\b|\bschtasks(\.exe)?\s+/(create|change|delete|run)\b'; why = 'creates or changes a scheduled task' },
+    @{ re = '(?i)\bSet-ExecutionPolicy\b'; why = 'changes the PowerShell execution policy' },
+    @{ re = '(?i)\b(Install|Update|Uninstall)-(Module|Package|Script|PSResource)\b|\bwinget\s+(install|upgrade|uninstall)\b|\bchoco\s+(install|upgrade|uninstall)\b|\bscoop\s+install\b|\bmsiexec\b|\bnpm\s+(i|install|uninstall)\s+(-g|--global)\b|\b(pip3?|py\s+-m\s+pip|python\d?\s+-m\s+pip)\s+install\b|\bAdd-AppxPackage\b|\bdism(\.exe)?\s'; why = 'installs or removes software on the computer' },
+    @{ re = '(?i)\bStop-Process\b|\bspps\b|\btaskkill\b|(^|[\s;&|])kill\s+(-\d+\s+)?-?\d|\bprocess\.kill\('; why = 'stops other programs' },
+    @{ re = '(?i)SetEnvironmentVariable\([^)]*[''"]?(User|Machine)|EnvironmentVariableTarget\]::(User|Machine)|\bsetx(\.exe)?\s'; why = 'changes environment variables for the user or the computer' },
+    @{ re = '(?i)\b(Set|Start|Stop|Restart|New|Remove|Suspend)-Service\b|\bsc(\.exe)?\s+(config|create|delete|start|stop)\b|\bnet(\.exe)?\s+(start|stop|user|localgroup|share|use)\b'; why = 'changes Windows services, accounts or shares' },
+    @{ re = '(?i)\bnetsh\b|\b(New|Set|Remove|Enable|Disable)-NetFirewall\w*|\bSet-NetIPAddress\b|\bSet-DnsClient\w*|\b(Add|Set|Remove)-MpPreference\b'; why = 'changes network or protection settings of the computer' },
+    @{ re = '(?i)\b(Restart|Stop)-Computer\b|\bshutdown(\.exe)?\s+/'; why = 'restarts or shuts down the computer' },
+    # Data that leaves the computer.
+    @{ re = '(?i)\bInvoke-(RestMethod|WebRequest)\b[^\r\n]*-(Method\s+[''"]?(Post|Put|Patch|Delete)\b|Body\b|InFile\b|Form\b)|\b(irm|iwr)\b[^\r\n]*-(Method\s+[''"]?(Post|Put|Patch)\b|Body\b|InFile\b)|\bcurl(\.exe)?\b[^\r\n]*\s(-d|--data\S*|-F|--form|-T|--upload-file|-X\s*[''"]?(POST|PUT|PATCH))(\s|=)|\.Upload(String|File|Data|Values)(Async)?\(|\brequests\.(post|put|patch)\(|\bhttpx\.(post|put|patch)\(|\baxios\.(post|put|patch)\(|\bfetch\([^)]{0,300}?method\s*:\s*[''"](POST|PUT|PATCH|DELETE)'; why = 'sends data to a web address'; local = $true }
+)
+$script:WriteVerbs = '(?i)^(Set-Content|sc|Add-Content|ac|Out-File|New-Item|ni|mkdir|md|Copy-Item|cpi|copy|cp|xcopy|robocopy|Export-Csv|Export-Clixml|Compress-Archive|Expand-Archive|Tee-Object|tee|Rename-Item|rni|ren|Move-Item|move|mv)$'
+$script:CodeWritePattern = '(?i)\[(System\.)?IO\.(File|Directory)\]::(Write|Append|Copy|Create|Move)\w*\(|\bopen\([^)]*,\s*[''"][wax]|\bfs(Promises)?\.(write|append|copy|mkdir|cp)\w*\(|\bshutil\.(copy\w*|make_archive)\('
+
+function Get-OutsideEffects {
+    <# What a command or script text does beyond the project's files, as reasons for the approval card:
+       writing outside the project (a path outside it, or from the environment, such as $env:TEMP),
+       starting a script outside the project, running code put together while it runs, changes to the
+       computer (registry, scheduled tasks, installs, services, settings) and sending data to a web
+       address (not to this computer). Each needs a person to approve the run (hold to run). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [AllowEmptyString()][string]$Text, [string]$ScriptDir = '')
+    $out = New-Object System.Collections.Generic.List[string]
+    if (-not $Text) { return @() }
+    $add = { param($w) if (-not $out.Contains($w)) { $out.Add($w) } }
+    $t = ConvertTo-PathExpressions $Text
+    $map = if ($ScriptDir) { Get-ScriptPathVars $t $ScriptDir } else { @{} }
+    foreach ($p in $script:OutsideEffectPatterns) {
+        foreach ($m in [regex]::Matches($t, $p.re)) {
+            if ($p.local) {
+                # Sending to this computer (a local test server) is not data leaving it.
+                $line = ($t.Substring(0, $m.Index) -split '\n')[-1] + ($t.Substring($m.Index) -split '\n')[0]
+                $urls = @([regex]::Matches($line, '(?i)https?://[^\s''"`)]+') | ForEach-Object { $_.Value })
+                if ($urls.Count -and -not @($urls | Where-Object { $_ -notmatch '(?i)^https?://(localhost|127\.0\.0\.1|\[::1\])([:/]|$)' }).Count) { continue }
+            }
+            & $add $p.why; break
+        }
+    }
+    $outsideWhy = {
+        param($tok)
+        $r = Resolve-CommandPath $ProjectRoot $tok $map ''
+        if (-not $r) { return $null }
+        if ($r.why) {
+            if ($r.text -match '(?i)\$env:|%(TEMP|TMP|APPDATA|LOCALAPPDATA|USERPROFILE|PUBLIC|ProgramData|ProgramFiles\w*|SystemRoot|windir|HOMEPATH|HOMEDRIVE|OneDrive\w*)%|^~') { return "writes or copies files in a folder from the environment ($($r.text))" }
+            return $null   # a path in a variable: the project's own output most of the time
+        }
+        if ($r.full -and -not (Test-InProject $ProjectRoot $r.full)) { return "writes or copies files outside the project ($($r.text))" }
+        $null
+    }
+    foreach ($g in @(Split-CommandGroups $t)) {
+        $isWrite = @($g | Where-Object { ($_ -replace '^[@{(]+', '') -match $script:WriteVerbs }).Count -gt 0
+        for ($i = 0; $i -lt $g.Count; $i++) {
+            $tok = "$($g[$i])"
+            # Redirection: > PATH, >> PATH, 2> PATH, >PATH.
+            if ($tok -match '^\d?>>?$' -and $i + 1 -lt $g.Count) { $w = & $outsideWhy "$($g[$i + 1])"; if ($w) { & $add $w }; continue }
+            if ($tok -match '^\d?>>?(.+)$') { $w = & $outsideWhy $Matches[1]; if ($w) { & $add $w }; continue }
+            if ($isWrite -and $tok -notmatch '^-' -and $tok -notmatch $script:CmdSwitch -and $tok -notmatch $script:WriteVerbs -and ($tok -match '[\\/:$%~]' -or $tok -match '^\.\.')) {
+                $w = & $outsideWhy $tok; if ($w) { & $add $w }
+            }
+            # A script outside the project that this one starts.
+            if ($tok.Trim('"', "'").TrimEnd(')', ';') -match $script:ScriptExt) {
+                $r = Resolve-CommandPath $ProjectRoot $tok $map ''
+                if ($r -and $r.full -and -not (Test-InProject $ProjectRoot $r.full)) { & $add "starts a script outside the project ($($r.text))" }
+            }
+        }
+    }
+    # Code that writes files: its quoted paths.
+    foreach ($line in @($t -split '\n' | Where-Object { $_ -match $script:CodeWritePattern })) {
+        foreach ($m in [regex]::Matches($line, '"([^"\r\n]*)"|''([^''\r\n]*)''')) {
+            $s = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+            $x = Expand-KnownPathVars $s $map
+            if ($x -match '^\w+://' -or ($x -notmatch '[\\/]' -and -not [IO.Path]::IsPathRooted($x))) { continue }
+            $w = & $outsideWhy $s; if ($w) { & $add $w }
+        }
+    }
+    $out.ToArray()
+}
+
+function Get-RunEffects {
+    <# Get-OutsideEffects for a run command and every project script it starts (Get-RunScripts), each
+       reason with the script it comes from. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command, $Scripts = $null)
+    $list = New-Object System.Collections.Generic.List[string]
+    foreach ($w in @(Get-OutsideEffects $ProjectRoot $Command)) { if (-not $list.Contains($w)) { $list.Add($w) } }
+    if ($null -eq $Scripts) { $Scripts = @(Get-RunScripts $ProjectRoot $Command) }
+    foreach ($s in @($Scripts)) {
+        foreach ($w in @(Get-OutsideEffects $ProjectRoot $s.text (Split-Path -Parent $s.full))) { $x = "$w (in $($s.path))"; if (-not $list.Contains($x)) { $list.Add($x) } }
+    }
+    $list.ToArray()
+}
+
+function Test-DeleteNeedsPerson {
+    <# A command Test-DeleteScope refuses only because something cannot be worked out (a delete or move
+       target from a variable or the environment, a relative target after changing to such a folder, a
+       script whose name comes from a variable): a person may approve it (hold to run). Anything it
+       finds for certain (outside the project, a link out, an encoded command) stays refused, also for
+       a person. Returns the reason to show, or $null. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][AllowEmptyString()][string]$Command)
+    $why = Test-DeleteScope $ProjectRoot $Command
+    if (-not $why) { return $null }
+    if (Test-DeleteScope $ProjectRoot $Command -AllowUnchecked) { return $null }
+    $why
 }
 
 function Get-CommandRisk {
@@ -2648,5 +2958,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Find-AnchorTarget, Get-OutlineEntries, Get-EnclosingName, Test-OutsideContent, Get-WebDownloadCommand, Get-CmdQuoteBreak, Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes, Get-LineHunks, Merge-LineHunks,
+Export-ModuleMember -Function Find-AnchorTarget, Get-OutlineEntries, Get-EnclosingName, Test-OutsideContent, Get-WebDownloadCommand, Get-CmdQuoteBreak, Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Test-DeleteNeedsPerson, Get-RunScriptPreview, Get-RunScripts, Get-OutsideEffects, Get-RunEffects, ConvertTo-PathExpressions, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes, Get-LineHunks, Merge-LineHunks,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction, Get-FileViewText, Get-FolderListing, Get-ReadNotFoundNote

@@ -1,0 +1,64 @@
+import type { WorkStatus } from "@/lib/api";
+import { formatDuration } from "@/lib/row-time";
+
+/** No sign of life for this long: the waiting card warns, and a notification goes out once. */
+export const QUIET_WARN_MS = 3 * 60_000;
+
+const ms = (iso: string | undefined, now: number) => {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? null : Math.max(0, now - t);
+};
+
+export interface WorkView {
+  /** What StreamHub is doing now, with how long: "Waiting for Copilot's reply - 2 min 10 s". */
+  phase: string;
+  /** The task as a whole: "Task 6 min 40 s - round 3 - 4 actions - 2 files changed". */
+  detail: string;
+  /** The last sign of life: "last reply data 5 s ago". */
+  sign: string;
+  /** How long nothing new happened. */
+  quietMs: number;
+  /** Quiet for QUIET_WARN_MS or longer. */
+  quiet: boolean;
+  /** What StreamHub does about it, for the warning. */
+  quietText: string;
+  steps: { at: string; text: string }[];
+}
+
+/** The status lines of the waiting card from the server's work status, at time `now`. */
+export function workView(w: WorkStatus, now: number = Date.now()): WorkView {
+  const phaseFor = ms(w.phaseAt, now);
+  const total = ms(w.startedAt, now);
+  const quietMs = ms(w.lastSignAt, now) ?? 0;
+  const data = ms(w.lastDataAt, now);
+  const parts = [total != null ? `Task ${formatDuration(total)}` : ""];
+  if (w.round > 1) parts.push(`round ${w.round}`);
+  if (w.actions) parts.push(`${w.actions} action${w.actions === 1 ? "" : "s"}`);
+  if (w.changed) parts.push(`${w.changed} file${w.changed === 1 ? "" : "s"} changed`);
+  const sign = data != null && data <= quietMs + 1000 ? `last reply data ${formatDuration(data)} ago` : `last sign of life ${formatDuration(quietMs)} ago`;
+  const quietText = w.waitSec
+    ? `StreamHub keeps waiting while Copilot's page shows it is at work, up to ${formatDuration(w.waitSec * 1000)} in all; with no sign at all it stops after ${formatDuration(w.stallSec * 1000)}.`
+    : "StreamHub is still on this step; it ends by itself when the step finishes or times out.";
+  const steps = (Array.isArray(w.steps) ? w.steps : w.steps ? [w.steps] : []).filter((s) => s?.text);
+  return {
+    phase: phaseFor != null ? `${w.phase} · ${formatDuration(phaseFor)}` : w.phase,
+    detail: parts.filter(Boolean).join(" · "),
+    sign,
+    quietMs,
+    quiet: quietMs >= QUIET_WARN_MS,
+    quietText,
+    steps,
+  };
+}
+
+/** The browser tab's title: what StreamHub is doing and for how long, so it shows from another tab. */
+export function tabTitle(busy: boolean, w: WorkStatus | null | undefined, now: number = Date.now()): string {
+  if (!busy || !w) return "StreamHub";
+  const total = ms(w.startedAt, now);
+  const quiet = (ms(w.lastSignAt, now) ?? 0) >= QUIET_WARN_MS;
+  const phase = w.phase.length > 40 ? `${w.phase.slice(0, 39)}…` : w.phase;
+  // Minutes only: the title changes once a minute, not every second.
+  const mins = total != null ? `${Math.floor(total / 60_000)} min` : "";
+  return `${quiet ? "⚠" : "⏳"} ${phase}${mins ? ` · ${mins}` : ""} – StreamHub`;
+}

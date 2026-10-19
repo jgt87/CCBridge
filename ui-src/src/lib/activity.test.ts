@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isIndexing } from "./activity";
-import { activityTexts } from "./thinking-texts";
+import { activityTexts, FUNNY_ACTIVITY } from "./thinking-texts";
 
 const base = { done: 0, total: 0, current: "", background: false };
 
@@ -19,6 +19,10 @@ describe("activityTexts", () => {
     expect(t[0]).toBe("Running the tests...");
     expect(t.filter((x) => x === "Running the tests...").length).toBeGreaterThan(1);
     expect(t.length).toBeGreaterThan(3);
+  });
+  it("has at least six light lines for every kind the server sets", () => {
+    for (const kind of ["newchat", "page", "syntax", "tests", "index", "wait", "agent", "busy", "convert", "install", "download"])
+      expect(FUNNY_ACTIVITY[kind]?.length ?? 0, kind).toBeGreaterThanOrEqual(6);
   });
   it("shows only the plain line for a kind without light lines", () => {
     expect(activityTexts("Working...", "unknown", 1)).toEqual(["Working..."]);

@@ -9,19 +9,25 @@ import { RunLiveContext, type RunLive, type RunLiveView, type RunWindowState } f
 import { MarkdownView } from "./markdown-view";
 import { followBottom } from "@/lib/stick-to-bottom";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
-import type { Activity, AgentEvent, CheckFinding, Preview, Reference, UndoChange } from "@/lib/api";
+import type { Activity, AgentEvent, CheckFinding, Preview, Reference, UndoChange, WorkStatus } from "@/lib/api";
 import { ChecksCard } from "./checks-card";
 import { SetupChoiceCard, type SetupChoiceItem } from "./project-setup";
 import { UndoCard } from "./undo-card";
 import { stripActionBlocks } from "@/lib/diff";
-import { activityTexts, thinkingTexts } from "@/lib/thinking-texts";
+import { formatDuration, rowTime } from "@/lib/row-time";
+import { workView } from "@/lib/work-status";
+import { activityTexts, thinkingTexts, writesStyles } from "@/lib/thinking-texts";
 import { cn } from "@/lib/utils";
 import { ActionCard, LiveConsole, type ActionItem } from "./action-card";
 import GradientButton from "@/components/kokonutui/gradient-button";
 
 type NoteTone = "info" | "error" | "done" | "undo" | "human";
 
-export type TranscriptItem =
+/** When an item happened (its first event) and, for an action, when its result came in. */
+type Stamp = { time?: string; at?: string; endAt?: string };
+
+export type TranscriptItem = Stamp &
+  (
   | { kind: "user"; seq: number; text: string; taskKind?: string; agent?: string }
   | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[]; agent?: string }
   | { kind: "agentPlan"; seq: number; agent: string }
@@ -37,13 +43,16 @@ export type TranscriptItem =
   | { kind: "clarify"; seq: number; request: string; questions: ClarifyQuestion[]; summary?: string; planId?: string }
   | { kind: "plan"; seq: number; request: string; plan: string; planId?: string; variant?: PlanVariant }
   | { kind: "error"; seq: number; text: string; time: string; errId?: string; code?: string; hint?: string; detail?: string; version?: string }
-  | { kind: "checks"; seq: number; text: string; items: CheckFinding[] };
+  | { kind: "checks"; seq: number; text: string; items: CheckFinding[] }
+  );
 
 // --- Building the transcript from events ------------------------------------------------
 
 interface BuildContext {
   items: TranscriptItem[];
   actions: Map<string, ActionItem>;
+  /** When each action's result came in (its duration in the time column). */
+  ends: Map<string, string>;
 }
 
 /** Event types shown as a one-line note: tone, and the text used when the event has none. */
@@ -106,6 +115,7 @@ function mergeAction(e: AgentEvent, ctx: BuildContext) {
 function mergeActionResult(e: AgentEvent, ctx: BuildContext) {
   const existing = ctx.actions.get(e.id!);
   if (!existing) return;
+  if (e.at) ctx.ends.set(e.id!, e.at);
   Object.assign(existing, {
     status: e.status ?? existing.status,
     summary: e.summary ?? existing.summary,
@@ -187,10 +197,15 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
 
 /** Folds the event stream into transcript items; action + action-result events merge by id. */
 export function buildTranscript(events: AgentEvent[]): TranscriptItem[] {
-  const ctx: BuildContext = { items: [], actions: new Map() };
-  for (const e of events) (HANDLERS[e.type] ?? addNote)(e, ctx);
+  const ctx: BuildContext = { items: [], actions: new Map(), ends: new Map() };
+  for (const e of events) {
+    const from = ctx.items.length;
+    (HANDLERS[e.type] ?? addNote)(e, ctx);
+    // New items carry the time of the event that made them.
+    for (let i = from; i < ctx.items.length; i++) if (!ctx.items[i].at) ctx.items[i] = { ...ctx.items[i], time: ctx.items[i].time ?? e.time, at: e.at };
+  }
   // Re-create action items so React sees the merged state.
-  return ctx.items.map((it) => (it.kind === "action" ? { ...it, item: { ...ctx.actions.get(it.item.id)! } } : it));
+  return ctx.items.map((it) => (it.kind === "action" ? { ...it, item: { ...ctx.actions.get(it.item.id)! }, endAt: ctx.ends.get(it.item.id) } : it));
 }
 
 // --- Rendering ---------------------------------------------------------------------------
@@ -425,11 +440,11 @@ function NoteLine({ tone, text, path, onOpenFile }: { tone: NoteTone; text: stri
       <span className="mt-0.5">{style.icon}</span>
       {/* A note about a saved file (task report, chart): the note itself opens it. */}
       {path && onOpenFile ? (
-        <button className="kit-link whitespace-pre-wrap text-left no-underline hover:underline" onClick={() => onOpenFile(path)} title={`Open ${path}`} type="button">
+        <button className="kit-link min-w-0 whitespace-pre-wrap text-left no-underline [overflow-wrap:anywhere] hover:underline" onClick={() => onOpenFile(path)} title={`Open ${path}`} type="button">
           {text}
         </button>
       ) : (
-        <span className="whitespace-pre-wrap">{text}</span>
+        <span className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>
       )}
     </div>
   );
@@ -494,6 +509,18 @@ function NextSteps({ steps, onUse }: { steps: string[]; onUse?: (text: string) =
   );
 }
 
+/** The time column next to an item: when it happened, and how long a finished action took. */
+function RowTimeLabel({ item }: { item: TranscriptItem }) {
+  const t = rowTime(item.time, item.at, item.kind === "action" ? item.endAt : undefined);
+  if (!t) return <span className="w-16 shrink-0" />;
+  return (
+    <span className="w-16 shrink-0 pt-1 text-right text-[11px] text-muted-foreground tabular-nums leading-tight" title={t.title}>
+      <time dateTime={item.at}>{t.label}</time>
+      {t.took && <span className="block opacity-80">{t.took}</span>}
+    </span>
+  );
+}
+
 function TranscriptRow({
   item,
   onUsePrompt,
@@ -547,25 +574,106 @@ function activityText(a: Activity): string {
   return a.total ? `${a.label} (${a.done} of ${a.total} files)` : `${a.label}...`;
 }
 
-function indicatorTexts(progress: string, stopping: boolean, activity: Activity | null, seed: number): string[] {
+function indicatorTexts(progress: string, stopping: boolean, activity: Activity | null, seed: number, look: boolean): string[] {
   if (stopping) return ["Stopping..."];
   if (activity?.label) return activityTexts(activityText(activity), activity.kind, seed);
-  return thinkingTexts(progress ? "writing" : "waiting", seed);
+  return thinkingTexts(progress ? "writing" : "waiting", seed, look || writesStyles(progress));
 }
 
-function ThinkingIndicator({ progress, stopping, activity }: { progress: string; stopping: boolean; activity: Activity | null }) {
+/** The clock for the waiting card: re-renders every second while it shows. */
+function useNow(stepMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), stepMs);
+    return () => window.clearInterval(t);
+  }, [stepMs]);
+  return now;
+}
+
+/** Under the rotating text: what StreamHub does now and since when, the task so far, the last sign of
+ *  life, a warning with Show Copilot and Stop when nothing happened for minutes, and the last steps. */
+function WorkStatusLines({ work, onStop, onShowCopilot, stopping }: { work: WorkStatus; onStop?: () => void; onShowCopilot?: () => Promise<boolean>; stopping: boolean }) {
+  const now = useNow();
+  const v = workView(work, now);
+  const [shown, setShown] = useState<"" | "shown" | "missing">("");
+  const showCopilot = () => onShowCopilot?.().then((ok) => setShown(ok ? "shown" : "missing"), () => setShown("missing"));
+  return (
+    <div className="mt-1.5 min-w-0 space-y-0.5 [overflow-wrap:anywhere]">
+      <div className="text-foreground/80 text-sm">{v.phase}</div>
+      <div className="text-muted-foreground text-xs tabular-nums">
+        {v.detail}
+        {v.detail ? " · " : ""}
+        {v.sign}
+      </div>
+      {v.quiet && (
+        <div className="kit-notice kit-notice--warn mt-2 text-xs" role="status">
+          <div>
+            Nothing new for {formatDuration(v.quietMs)}. {v.quietText}
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            {onShowCopilot && (
+              <button className="kit-btn kit-btn--sm" onClick={showCopilot} type="button">
+                Show Copilot
+              </button>
+            )}
+            {onStop && (
+              <button className="kit-btn kit-btn--sm kit-btn--ghost" disabled={stopping} onClick={onStop} type="button">
+                Stop
+              </button>
+            )}
+            {shown === "missing" && <span className="text-muted-foreground">Copilot's tab was not found in StreamHub's Edge.</span>}
+          </div>
+        </div>
+      )}
+      {v.steps.length > 0 && (
+        <details className="mt-1.5">
+          <summary className="cursor-pointer text-muted-foreground text-xs hover:text-foreground">Activity log ({v.steps.length})</summary>
+          <ol className="mt-1 space-y-0.5 text-xs">
+            {[...v.steps].reverse().map((s, i) => (
+              <li className="flex gap-2" key={`${s.at}-${i}`}>
+                <time className="shrink-0 text-muted-foreground tabular-nums" dateTime={s.at}>
+                  {s.at.slice(11, 19)}
+                </time>
+                <span className="min-w-0">{s.text}</span>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function ThinkingIndicator({
+  progress,
+  stopping,
+  activity,
+  look,
+  work,
+  onStop,
+  onShowCopilot,
+}: {
+  progress: string;
+  stopping: boolean;
+  activity: Activity | null;
+  look: boolean;
+  work: WorkStatus | null;
+  onStop?: () => void;
+  onShowCopilot?: () => Promise<boolean>;
+}) {
   // StreamHub's own work (indexing, scanning for issues): the same indicator, its own text.
   const own = Boolean(activity?.label);
   // One order of the light lines per wait (the indicator mounts when a message starts waiting).
   const [seed] = useState(() => Date.now());
   return (
-    <div className="kit-panel border-dashed px-3 py-2">
+    <div className="kit-panel min-w-0 overflow-hidden border-dashed px-3 py-2">
       <AITextLoading
         className="font-semibold text-base"
         containerClassName="justify-start p-0"
         interval={1800}
-        texts={indicatorTexts(progress, stopping, activity, seed)}
+        texts={indicatorTexts(progress, stopping, activity, seed, look)}
       />
+      {work && <WorkStatusLines onShowCopilot={onShowCopilot} onStop={onStop} stopping={stopping} work={work} />}
       {own && activity?.current && <div className="mt-1 truncate font-mono text-muted-foreground text-xs">{activity.current}</div>}
       {progress && !own && (
         <pre className="mt-2 max-h-32 overflow-hidden whitespace-pre-wrap font-mono text-muted-foreground text-xs [mask-image:linear-gradient(to_bottom,transparent,black_40%)]">
@@ -594,11 +702,15 @@ export function Transcript({
   items,
   busy,
   activity = null,
+  look = false,
   runLive = null,
   runWindows = [],
   progress,
   empty,
   stopping = false,
+  work = null,
+  onStop,
+  onShowCopilot,
   onUsePrompt,
   onResendAsCoding,
   onSend,
@@ -606,8 +718,16 @@ export function Transcript({
 }: {
   items: TranscriptItem[];
   busy: boolean;
+  /** The running task's status (WorkStatus.psm1), shown under the rotating text. */
+  work?: WorkStatus | null;
+  /** Stops the running task (the quiet warning's Stop). */
+  onStop?: () => void;
+  /** Brings Copilot's tab to the front; true when it was found. */
+  onShowCopilot?: () => Promise<boolean>;
   /** StreamHub's own work besides Copilot (indexing, scanning for issues). */
   activity?: Activity | null;
+  /** The turn is about how something looks: the indicator's art lines. */
+  look?: boolean;
   /** The command running now (live output on its card) and commands running in a console window. */
   runLive?: RunLive | null;
   runWindows?: RunWindowState[];
@@ -693,10 +813,23 @@ export function Transcript({
         </div>
       )}
       {visible.map((it) => (
-        <TranscriptRow item={it} key={rowKey(it)} onOpenFile={onOpenFile} onResendAsCoding={onResendAsCoding} onSend={onSend} onUsePrompt={onUsePrompt} />
+        <div className="flex min-w-0 items-start gap-2" key={rowKey(it)}>
+          <div className="min-w-0 flex-1">
+            <TranscriptRow item={it} onOpenFile={onOpenFile} onResendAsCoding={onResendAsCoding} onSend={onSend} onUsePrompt={onUsePrompt} />
+          </div>
+          <RowTimeLabel item={it} />
+        </div>
       ))}
-      {(busy || activity?.label) && !awaiting && <ThinkingIndicator activity={activity} progress={progress} stopping={stopping} />}
-      {liveWithoutCard && <LiveConsole live={liveWithoutCard} />}
+      {/* The same width as the items above, beside an empty time column. */}
+      {((busy || activity?.label) && !awaiting) || liveWithoutCard ? (
+        <div className="flex min-w-0 items-start gap-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-3">
+            {(busy || activity?.label) && !awaiting && <ThinkingIndicator activity={activity} look={look} onShowCopilot={onShowCopilot} onStop={onStop} progress={progress} stopping={stopping} work={work} />}
+            {liveWithoutCard && <LiveConsole live={liveWithoutCard} />}
+          </div>
+          <span className="w-16 shrink-0" />
+        </div>
+      ) : null}
       <div ref={endRef} />
     </div>
     </RunLiveContext.Provider>

@@ -37,8 +37,9 @@ import { FileViewer, type ViewerChange } from "@/components/ccb/file-viewer";
 import { openExternal, setLinksThroughEdge } from "@/lib/links";
 import { SplitViewHint } from "@/components/ccb/split-view-hint";
 import { ModalBackdrop } from "@/components/ccb/modal-backdrop";
-import { notifyEvents, notifyQueue } from "@/lib/notify";
-import type { ChatOptions, ScheduleItem, TestRunItem } from "@/lib/api";
+import { notify, notifyEvents, notifyQueue } from "@/lib/notify";
+import { tabTitle, workView } from "@/lib/work-status";
+import type { ChatOptions, ScheduleItem, TestRunItem, WorkStatus } from "@/lib/api";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
 import { type AgentEvent, type AppState, api, type ChainItem, type ChangeSetView, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
 import { fetchedAge } from "@/components/ccb/fetch-panel";
@@ -298,6 +299,28 @@ export default function App() {
     setStopping(true);
     api.stop().catch(() => setStopping(false));
   };
+
+  // The browser tab's title says what StreamHub is doing and for how long (seen from another tab),
+  // and a long silence gets one desktop notification per quiet spell (only while the tab is hidden).
+  const workRef = useRef({ busy: false, work: null as WorkStatus | null | undefined });
+  workRef.current = { busy: state.busy, work: state.work };
+  const quietNoticed = useRef("");
+  useEffect(() => {
+    const update = () => {
+      const { busy, work } = workRef.current;
+      document.title = tabTitle(busy, work);
+      if (busy && work && workView(work).quiet && quietNoticed.current !== work.lastSignAt) {
+        quietNoticed.current = work.lastSignAt;
+        notify("StreamHub: nothing new for a while", `${work.phase}. Open StreamHub to see Copilot or stop the task.`);
+      }
+    };
+    update();
+    const t = window.setInterval(update, 15000);
+    return () => window.clearInterval(t);
+  }, []);
+  useEffect(() => {
+    document.title = tabTitle(state.busy, state.work);
+  }, [state.busy, state.work]);
   // The side panel shows the open project only: its queue and schedules (items without a project,
   // such as a new chat, belong to every project).
   const projectKey = (state.project?.path ?? "").replace(/\\+$/, "").toLowerCase();
@@ -734,10 +757,14 @@ export default function App() {
               >
               <Transcript
                 activity={state.activity ?? null}
+                look={Boolean(state.look)}
                 runLive={state.runLive ?? null}
                 runWindows={Array.isArray(state.runWindows) ? state.runWindows : state.runWindows ? [state.runWindows] : []}
                 busy={state.busy}
                 stopping={stopping}
+                work={state.work ?? null}
+                onStop={stop}
+                onShowCopilot={() => api.showCopilot().then((r) => r.shown)}
                 empty={
                   <div className="flex h-full flex-col items-center justify-center gap-6 px-6 py-16 text-center">
                     {state.copilot === "connecting" ? (

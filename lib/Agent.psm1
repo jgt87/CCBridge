@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = 'Stop'
 $script:ProjectTaskKinds = @('chat', 'agent', 'fetch', 'runbook', 'chain', 'script', 'review', 'packages', 'undo', 'export', 'testrun-report')
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance', 'Progress') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'WorkStatus', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance', 'Progress') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -99,6 +99,8 @@ function Add-AgentEvent {
             })
         }
         [void]$State.Events.Add($Data)
+        # The waiting card's activity log and counts (WorkStatus); never in the way of the event itself.
+        try { Update-WorkFromEvent $State $Type $Data } catch { }
         # A restored event was logged when it happened.
         if (-not $Data.restored) { switch ($Type) {
             'error'          { Write-CCBLog info agent "ERROR $($Data.errId) [$($Data.code)] $($Data.text)" @{ hint = $Data.hint; detail = $Data.detail } }
@@ -333,12 +335,15 @@ function Send-ToCopilot {
             Add-AgentEvent $State 'status' @{ text = "Work IQ could not be switched $($State.WorkIq): the toggle is not configured or not on the page (run test-tools\capture.cmd on a Microsoft 365 Copilot licence). Copilot uses its current setting." }
         }
     }
-    $progress = { param($t) $State.Progress = $t }.GetNewClosure()
+    $who = if ($Agent) { $Agent } elseif ($State.AgentChat) { [string]$State.AgentChat } else { 'Copilot' }
+    # The waiting card: reply data and the page's own signs of work count as signs of life (WorkStatus).
+    $progress = { param($t) $State.Progress = $t; Set-WorkSign $State -Data; if ($State.Work -and $State.Work.phase -like 'Waiting for*reply*') { Set-WorkPhase $State "$who is writing the reply" -Step } }.GetNewClosure()
     $cancel = { [bool]$State.Cancel }.GetNewClosure()
     # An agent's progress lines ("Searching for release details") show in the waiting indicator.
-    $who = if ($Agent) { $Agent } elseif ($State.AgentChat) { [string]$State.AgentChat } else { 'Copilot' }
     # $null clears the line again (the wait for the send lock is over).
-    $status = { param($t) if (-not $t) { $State.Activity.label = ''; return }; $State.Activity.kind = $(if ($who -eq 'Copilot') { 'busy' } else { 'agent' }); $State.Activity.label = "${who}: $t" }.GetNewClosure()
+    $status = { param($t) if (-not $t) { $State.Activity.label = ''; return }; Set-WorkSign $State; Add-WorkStep $State "${who}: $t"; $State.Activity.kind = $(if ($who -eq 'Copilot') { 'busy' } else { 'agent' }); $State.Activity.label = "${who}: $t" }.GetNewClosure()
+    Set-WorkPhase $State "Waiting for ${who}'s reply" -Step
+    Add-WorkStep $State "Sent a message to ${who} ($($Message.Length) characters)"
     try {
         $stall = if ($State.Config.PSObject.Properties['stallSec']) { [int]$State.Config.stallSec } else { 90 }
         $timeout = [int]$State.Config.replyTimeoutSec
@@ -347,6 +352,7 @@ function Send-ToCopilot {
             $timeout = if ([int]$State.Config.agentTimeoutSec -gt 0) { [int]$State.Config.agentTimeoutSec } else { 1800 }
             $stall = [Math]::Max($stall, 300)
         }
+        Set-WorkWait $State $(if ([int]$State.Config.agentTimeoutSec -gt 0) { [int]$State.Config.agentTimeoutSec } else { 1800 }) $stall
         $r = $null
         try {
             $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -MaxTimeoutSec $(if ([int]$State.Config.agentTimeoutSec -gt 0) { [int]$State.Config.agentTimeoutSec } else { 1800 }) -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $status
@@ -369,7 +375,7 @@ function Send-ToCopilot {
         }
         Reset-Bridge $State   # the next send reconnects
         throw
-    } finally { $State.Progress = ''; if ("$($State.Activity.label)" -like "${who}: *") { $State.Activity.label = ''; $State.Activity.kind = '' } }
+    } finally { $State.Progress = ''; if ("$($State.Activity.label)" -like "${who}: *") { $State.Activity.label = ''; $State.Activity.kind = '' }; Set-WorkPhase $State "Working on ${who}'s reply"; Set-WorkWait $State 0 0 }
     if ($r.Throttling -and $r.Throttling.maxNumUserMessagesInConversation) {
         $State.Throttle = @{ used = [int]$r.Throttling.numUserMessagesInConversation; max = [int]$r.Throttling.maxNumUserMessagesInConversation }
     } elseif (-not $r.Cancelled) {
@@ -1029,7 +1035,7 @@ function Publish-SetupQuestions {
     }
     if (@($q.statedTurn.Keys).Count) { foreach ($k in $q.statedTurn.Keys) { $State.TurnAnswers[$k] = $q.statedTurn[$k] } }
     if (-not @($q.questions).Count) { return $false }
-    Add-AgentEvent $State 'user' @{ text = $Task.text }
+    if (-not $Task.shown) { Add-AgentEvent $State 'user' @{ text = $Task.text } }
     Add-AgentEvent $State 'setup-choice' @{ request = $Task.text; choices = @($q.questions); live = [bool]$q.live; suggest = "$($q.suggest)"; clarify = [bool]$Task.clarify }
     Write-CCBLog info agent 'Setup questions asked' @{ ids = (@($q.questions | ForEach-Object { $_.id }) -join ','); live = [bool]$q.live }
     $true
@@ -1113,7 +1119,7 @@ function Invoke-ClarifyStep {
        questions it plans right away. #>
     param($State, $Task)
     $request = "$($Task.request)"
-    Add-AgentEvent $State 'user' @{ text = $request }
+    if (-not $Task.shown) { Add-AgentEvent $State 'user' @{ text = $request } }
     Add-AgentEvent $State 'kind' @{ taskKind = 'clarify' }
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; return }
     $State.Busy = $true
@@ -1608,7 +1614,7 @@ function Sync-DataImports {
     # What is happening while a data file is converted (a large Excel file takes a while): a line in
     # the chat per file and the waiting indicator saying which file; the change cards follow.
     $st = $State
-    $progress = { param($rel, $n, $of) $name = Split-Path $rel -Leaf; Add-AgentEvent $st 'status' @{ text = "Converting $name for Copilot, so it can read the data (StreamHub writes it to data/)." }; $st.Activity.kind = 'busy'; $st.Activity.label = "Converting $name for Copilot" }.GetNewClosure()
+    $progress = { param($rel, $n, $of) $name = Split-Path $rel -Leaf; Add-AgentEvent $st 'status' @{ text = "Converting $name for Copilot, so it can read the data (StreamHub writes it to data/)." }; $st.Activity.kind = 'convert'; $st.Activity.label = "Converting $name for Copilot" }.GetNewClosure()
     $prevActivity = Enter-Activity $State "$($State.Activity.kind)" "$($State.Activity.label)"
     try {
         $r = Update-DataImports $State.ProjectRoot -JsCopy (Test-DataCopiesOn $State.AppRoot) -AppRoot $State.AppRoot -OnProgress $progress
@@ -1682,6 +1688,7 @@ function Enter-Activity($State, [string]$Kind, [string]$Label) {
        Returns what was there before, for Exit-Activity. #>
     $prev = @{ kind = "$($State.Activity.kind)"; label = "$($State.Activity.label)" }
     $State.Activity.kind = $Kind; $State.Activity.label = $Label
+    Set-WorkPhase $State $Label -Step   # the waiting card's status line and activity log
     $prev
 }
 
@@ -1850,7 +1857,7 @@ function Invoke-PackagesJob {
             $cmd = Get-NpmInstallCommand $it.folder
             $id = 'npm-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
             Add-AgentEvent $State 'action' @{ id = $id; action = 'run'; target = $cmd; status = 'running'; by = 'streamhub' }
-            $State.Activity.kind = 'busy'; $State.Activity.label = "Installing packages$(if ($it.folder) { " in $($it.folder)" })"
+            $State.Activity.kind = 'install'; $State.Activity.label = "Installing packages$(if ($it.folder) { " in $($it.folder)" })"
             $lockRel = ($(if ($it.folder) { "$($it.folder)/" } else { '' }) + 'package-lock.json')
             $lockFull = Join-Path $root $lockRel.Replace('/', '\')
             $lockBefore = if (Test-Path -LiteralPath $lockFull) { [IO.File]::ReadAllText($lockFull) } else { $null }
@@ -2004,7 +2011,7 @@ function Invoke-ChainDownload {
     $null = New-Item -ItemType Directory -Force -Path $tmp
     try {
         $null = Get-Bridge $State   # StreamHub's Edge is running (and signed in)
-        $State.Activity.kind = 'busy'; $State.Activity.label = "Downloading $(Split-Path $t.rel -Leaf)"
+        $State.Activity.kind = 'download'; $State.Activity.label = "Downloading $(Split-Path $t.rel -Leaf)"
         $r = Invoke-EdgeDownload -Port $State.Config.cdpPort -Url (Add-DownloadParam $Step.target) -Folder $tmp -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
         if (-not $r.error) { $r.error = Test-DownloadContent $r.path $t.rel }
         if ($r.error) {
@@ -3636,8 +3643,11 @@ function Invoke-AgentActionCore {
             return @{ ok = $false; summary = 'run skipped (script in one command line)'; output = "not executed: $packed. Write the code as a script file instead with a write block (plain ASCII, for Windows PowerShell 5.1): Work/NAME.ps1 for a one-off job, Scripts/NAME.ps1 if it is worth keeping to run again. Then run it with: powershell -NoProfile -ExecutionPolicy Bypass -File Work/NAME.ps1 (or the Scripts/ path)" }
         }
         # Hard boundary: deleting or moving files only inside the project. Not even a person can
-        # approve past it.
+        # approve past it. Only a target that comes from a variable (a build script's $dist) and
+        # nothing else goes to a person: hold to run, never without one.
         $outside = Test-DeleteScope $State.ProjectRoot $evt.target
+        $unchecked = if ($outside) { Test-DeleteNeedsPerson $State.ProjectRoot $evt.target } else { $null }
+        if ($unchecked -and -not $State.Headless) { $outside = $null }
         if ($outside) {
             Write-CCBLog info agent 'Command refused: deletes or moves outside the project' @{ reason = $outside }
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = "refused: $outside" })
@@ -3653,7 +3663,16 @@ function Invoke-AgentActionCore {
             }
         }
         $needsApproval = -not (Test-AutoRun $State $evt.target)
+        # The project scripts the command starts (and the scripts those start): the Microsoft 365 and
+        # delete risk reads their text too, since the command line only names them.
+        $runScripts = @(try { Get-RunScripts $State.ProjectRoot $evt.target } catch { Write-CCBLogError agent 'run scripts' $_ })
         $risk = Get-CommandRisk $evt.target
+        foreach ($s in $runScripts) {
+            $sr = Get-CommandRisk $s.text
+            if ($sr.m365) { $risk.m365 = $true }
+            if ($sr.destructive) { $risk.destructive = $true }
+            foreach ($w in @($sr.reasons)) { $x = "$w (in $($s.path))"; if (@($risk.reasons) -notcontains $x) { $risk.reasons = @($risk.reasons) + $x } }
+        }
         if ($risk.m365 -or $risk.destructive) {
             $why = $risk.reasons -join ', '
             if ($State.Headless) {
@@ -3664,6 +3683,28 @@ function Invoke-AgentActionCore {
             $needsApproval = $true
             $riskWarning = "Human in the loop: this command $why. Only approve it if you want exactly this to happen."
             $personOnly = $true
+        }
+        # A project script the command starts: its whole text on the card, so the person reads what
+        # they approve (the command line alone shows only its name).
+        if (-not $preview) { $preview = try { Get-RunScriptPreview $State.ProjectRoot $evt.target } catch { Write-CCBLogError agent 'script preview' $_; $null } }
+        if ($unchecked) {
+            $needsApproval = $true; $personOnly = $true
+            $note = "StreamHub cannot check where this deletes or moves files: $unchecked. Read the script below and only approve it if every target stays inside the project."
+            $riskWarning = if ($riskWarning) { "$riskWarning $note" } else { "Human in the loop: $note" }
+        }
+        # What it does beyond the project's files (writes outside, code built while it runs, changes to
+        # the computer, data sent out): a person approves it, never without one.
+        $effects = @(try { Get-RunEffects $State.ProjectRoot $evt.target $runScripts } catch { Write-CCBLogError agent 'run effects' $_ })
+        if ($effects.Count) {
+            $list = $effects -join '; '
+            if ($State.Headless) {
+                Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; error = "refused: this command $list; that needs a person to approve it" })
+                Add-AgentEvent $State 'human-required' @{ text = "Copilot wanted to run a command that $list. StreamHub does not run such commands without a person approving them. Command: $($evt.target)" }
+                return @{ ok = $false; summary = 'run refused (needs a person)'; output = "not executed: this command $list. That reaches beyond the project, so it needs a person. Do not try a workaround; keep the work inside the project, or tell the user what to run themselves and why." }
+            }
+            $needsApproval = $true; $personOnly = $true
+            $note = "This goes beyond the project: it $list. Read the script below and only approve it if you want exactly this to happen."
+            $riskWarning = if ($riskWarning) { "$riskWarning $note" } else { "Human in the loop: $note" }
         }
     }
 
@@ -4205,17 +4246,19 @@ function Find-TextInFiles($Texts, [string]$Sample) {
 }
 
 function Invoke-AgentTurn {
-    param($State, [string]$Text, [string]$ForceKind = '')
+    # -Shown: the message is in the chat already (sent again by a card's answer), so it is not posted twice.
+    param($State, [string]$Text, [string]$ForceKind = '', [switch]$Shown)
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; $State.Busy = $false; return }
     $State.Busy = $true; $State.Cancel = $false
     $State.UserLook = Test-LookRequest $Text   # a look the person asks for wins over the kit's (Prompts)
+    $State.VisualTurn = [bool]($State.UserLook -or (Test-LookUnclear $Text))   # only for the waiting indicator's light lines
     $turnWatch = [Diagnostics.Stopwatch]::StartNew()
     $previousLogContext = Get-CCBLogContext
     $turnLogContext = if ($State.CurrentQueueId) { "$($State.CurrentQueueId)" } else { 't-' + [guid]::NewGuid().ToString('N').Substring(0, 8) }
     Set-CCBLogContext $turnLogContext
     Write-CCBLog info agent "Turn started" @{ chars = $Text.Length; mode = $State.Mode; headless = [bool]$State.Headless; allowCommands = [bool]$State.AllowCommands; workIq = $State.WorkIq; chatStarted = [bool]$State.ChatStarted }
     Write-CCBLog trace agent 'User message' @{ text = $Text }
-    Add-AgentEvent $State 'user' @{ text = $Text }
+    if (-not $Shown) { Add-AgentEvent $State 'user' @{ text = $Text } }
     $State.TurnText = $Text
     $State.TaskIntent = Get-TaskIntent $Text $State.Mode "$($State.TaskIntent)"
     $State.PendingGuidance = New-Object 'Collections.Generic.List[string]'
@@ -4346,6 +4389,7 @@ function Invoke-AgentTurn {
         $loopWatch = New-LoopWatch   # a change undone again, rounds alternating between the same steps (LoopGuard)
         while ($true) {
             $round++
+            Set-WorkRound $State $round
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped.' }; break }
             $rolled = [bool](Invoke-RolloverIfNeeded $State @{ changed = @($checkpoint.Files.Keys); doneWhen = @($doneWhen); acceptance = @($acceptResults) })
             if (-not $State.ChatStarted -and ($round -gt 1 -or $rolled)) {
@@ -5246,6 +5290,7 @@ function Reset-AfterWorkerStop {
        Returns the queue entries marked failed. #>
     param($State, [string]$Reason)
     $failed = @()
+    Stop-WorkStatus $State
     foreach ($e in @($State.Queue | Where-Object { $_ -and $_.status -in 'running', 'awaiting' })) {
         $e.status = 'failed'; $e.finished = (Get-Date).ToString('s')
         $e.error = "StreamHub's task worker stopped while this task was running ($Reason). Files it changed so far can be undone; send it again to finish it."
@@ -5347,6 +5392,8 @@ function Start-AgentWorker {
         if ($job) { $job.status = 'running'; $job.startSeq = $State.Seq; $job.started = (Get-Date).ToString('s') }
         $fromSeq = [int]$State.Seq; $msgsBefore = [int]$State.MessagesSent
         if ($entry) { $entry.status = 'running'; $entry.started = (Get-Date).ToString('s'); $State.CurrentQueueId = $entry.id; Save-AgentQueue $State }
+        # The waiting card's status: phase, timers, counts and steps of this task (WorkStatus).
+        if (-not $task.background -and $task.kind -ne 'connect') { Start-WorkStatus $State "$($task.kind)" "Started: $(if ($task.title) { "$($task.title)" } else { "$($task.kind) task" })" }
         # A task from another program can bring its own mode, project and command rule; the app's
         # own settings come back afterwards.
         $saved = @{ Mode = $State.Mode; ProjectRoot = $State.ProjectRoot; NoCommands = $State.NoCommands; ReviewByCaller = $State.ReviewByCaller; ResponseMode = $State.ResponseMode }
@@ -5405,7 +5452,7 @@ function Start-AgentWorker {
                         $State.IssueFix = $task.issueFix; $State.IssueFixHandled = $false; $State.IssueFixFromSeq = $fromSeq
                         if ($task.freshChat) { $State.NeedNewChat = $true }
                         $State.ScopeUpgrade = ''
-                        try { Invoke-AgentTurn $State $task.text $force }
+                        try { Invoke-AgentTurn $State $task.text $force -Shown:([bool]$task.shown) }
                         finally {
                             $State.ScopeAsk = ''
                             $State.TurnAnswers = @{}
@@ -5417,7 +5464,7 @@ function Start-AgentWorker {
                         if ($State.ScopeUpgrade) {
                             # Copilot judged it a big request: the same request again as Clarify first or Plan first.
                             $State.ScopeUpgrade = ''
-                            $next = @{ kind = 'chat'; text = "$($task.text)"; bigByCopilot = $true }
+                            $next = @{ kind = 'chat'; text = "$($task.text)"; bigByCopilot = $true; shown = $true }
                             if ($task.projectRoot) { $next.projectRoot = $task.projectRoot }
                             $null = Submit-AgentTask $State $next 'user'
                         }
@@ -5501,6 +5548,8 @@ function Start-AgentWorker {
             }
             } finally {
             $State.CurrentQueueId = $null
+            $State.VisualTurn = $false
+            Stop-WorkStatus $State
             $State.Mode = $saved.Mode; $State.NoCommands = $saved.NoCommands; $State.ReviewByCaller = $saved.ReviewByCaller; $State.ResponseMode = $saved.ResponseMode
             Restore-TaskSwitches $switchRestore
             if ($projectChanged) {

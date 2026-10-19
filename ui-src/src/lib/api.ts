@@ -184,6 +184,8 @@ export interface AgentEvent {
     /** A new project already holds files of the person's: what are they for (by type)? */
     | "files-intake";
   time: string;
+  /** When it happened, as an ISO stamp (the time column next to each chat item). */
+  at?: string;
   text?: string;
   uncertain?: number;
   references?: Reference[];
@@ -279,6 +281,10 @@ export interface AppState {
   commit?: string;
   /** What StreamHub itself is busy with (indexing, scanning for issues); shown like "waiting for Copilot". */
   activity?: Activity | null;
+  /** The running turn is about how something looks (the waiting indicator's art lines). */
+  look?: boolean;
+  /** The running task's status for the waiting card (null when nothing runs). */
+  work?: WorkStatus | null;
   /** The command running now: its last output lines (shown like a console on its run card). */
   runLive?: RunLive | null;
   /** Set when the app folder is not the release as shipped (files missing or different): what is wrong. */
@@ -297,9 +303,29 @@ export interface AppState {
   issueStamp?: string;
 }
 
+/** What the running task is doing (WorkStatus.psm1): times are local ISO stamps from this computer. */
+export interface WorkStatus {
+  kind: string;
+  startedAt: string;
+  /** What StreamHub is doing now, and since when. */
+  phase: string;
+  phaseAt: string;
+  /** The last sign of life: any step, reply data, or Copilot's page showing it is at work. */
+  lastSignAt: string;
+  /** The last reply data from Copilot ('' when none yet). */
+  lastDataAt: string;
+  round: number;
+  actions: number;
+  changed: number;
+  /** While waiting for Copilot: how long StreamHub waits in all, and without any sign (0 otherwise). */
+  waitSec: number;
+  stallSec: number;
+  steps: { at: string; text: string }[] | { at: string; text: string };
+}
+
 export interface Activity {
   label: string;
-  /** What kind of work: newchat, page, syntax, tests, index, wait, agent, busy (empty from older servers). */
+  /** What kind of work: newchat, page, syntax, tests, index, wait, agent, busy, convert, install, download (empty from older servers). */
   kind?: string;
   done: number;
   total: number;
@@ -730,6 +756,8 @@ export const api = {
   changeFile: (changeSet: string, path: string) =>
     call<ChangeFileDiff>("GET", `/api/changeset/file?id=${encodeURIComponent(changeSet)}&path=${encodeURIComponent(path)}`),
   chat: (text: string, opts: ChatOptions = {}) => call<{ ok: boolean }>("POST", "/api/chat", { text, ...opts }),
+  /** The Copilot tab of StreamHub's Edge to the front (the waiting card's Show Copilot). */
+  showCopilot: () => call<{ ok: boolean; shown: boolean }>("POST", "/api/copilot/show"),
   openLink: (url: string) => call<{ ok: boolean; opened: boolean }>("POST", "/api/open-link", { url }),
   setResponseMode: (value: string) => call<{ ok: boolean }>("POST", "/api/response-mode", { value }),
   /** The app's theme, so the Copilot tab can show the same (setting copilotTheme). */
