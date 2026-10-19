@@ -2,6 +2,7 @@ import { ClipboardCheck, FileText, MessageCircleQuestion } from "lucide-react";
 import { useState } from "react";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import type { ChatOptions } from "@/lib/api";
+import { buildPlanMessage, changePlanMessage, clarifyMessage, type PlanVariant } from "@/lib/plan-messages";
 import { cn } from "@/lib/utils";
 
 // Every button a person must act on is as visible as the run approval: a tall primary button
@@ -56,6 +57,46 @@ function PlanLink({ onOpenFile }: { onOpenFile?: (path: string) => void }) {
   );
 }
 
+/** One of Copilot's questions: its options as buttons, and a field for any answer. */
+function QuestionField({
+  question: q,
+  index: i,
+  answer,
+  disabled,
+  onAnswer,
+}: {
+  question: ClarifyQuestion;
+  index: number;
+  answer: string;
+  disabled: boolean;
+  onAnswer: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="text-sm">{q.question}</div>
+      {q.options.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {q.options.map((o) => (
+            <button
+              className={cn(
+                "rounded-md border px-1.5 py-0.5 text-xs",
+                answer === o ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border) text-muted-foreground"
+              )}
+              disabled={disabled}
+              key={o}
+              onClick={() => onAnswer(o)}
+              type="button"
+            >
+              {o}
+            </button>
+          ))}
+        </div>
+      )}
+      <input aria-label={`Answer to question ${i + 1}`} className={field} disabled={disabled} onChange={(e) => onAnswer(e.target.value)} placeholder="Your answer" value={answer} />
+    </div>
+  );
+}
+
 export function ClarifyCard({
   request,
   questions,
@@ -77,13 +118,8 @@ export function ClarifyCard({
 
   const submit = (withAnswers: boolean) => {
     setSent(true);
-    const lines = questions.map((q, i) => `${i + 1}. ${q.question}\n   Answer: ${answers[i].trim() || "(no preference)"}`).join("\n");
-    onSend(withAnswers ? `${request}\n\nMy answers to your questions:\n${lines}` : request, {
-      planFirst: true,
-      request,
-      planId,
-      ...(withAnswers ? { answers: questions.map((q, i) => ({ question: q.question, answer: answers[i].trim() })) } : { skipped: true }),
-    });
+    const { text, opts } = clarifyMessage({ request, questions, answers, planId, withAnswers });
+    onSend(text, opts);
   };
 
   return (
@@ -94,28 +130,7 @@ export function ClarifyCard({
       {summary && <p className="mb-2 text-muted-foreground text-xs">Understood: {summary}</p>}
       <div className="space-y-3">
         {questions.map((q, i) => (
-          <div className="space-y-1" key={i}>
-            <div className="text-sm">{q.question}</div>
-            {q.options.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {q.options.map((o) => (
-                  <button
-                    className={cn(
-                      "rounded-md border px-1.5 py-0.5 text-xs",
-                      answers[i] === o ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border) text-muted-foreground"
-                    )}
-                    disabled={sent}
-                    key={o}
-                    onClick={() => set(i, o)}
-                    type="button"
-                  >
-                    {o}
-                  </button>
-                ))}
-              </div>
-            )}
-            <input aria-label={`Answer to question ${i + 1}`} className={field} disabled={sent} onChange={(e) => set(i, e.target.value)} placeholder="Your answer" value={answers[i]} />
-          </div>
+          <QuestionField answer={answers[i]} disabled={sent} index={i} key={i} onAnswer={(v) => set(i, v)} question={q} />
         ))}
       </div>
       <div className="mt-3 flex flex-wrap justify-end gap-1">
@@ -131,7 +146,7 @@ export function ClarifyCard({
 
 /** What the plan card holds: a plan-first plan, a proposal Copilot made, or a reply that stopped
     before the change (it said what it would still do). */
-export type PlanVariant = "plan" | "proposal" | "unfinished";
+export type { PlanVariant };
 
 const PLAN_TEXT: Record<PlanVariant, { title: string; build: string }> = {
   plan: { title: "Plan to approve", build: "Approve and build" },
@@ -161,15 +176,11 @@ export function PlanCard({
 
   const build = () => {
     setSent("build");
-    const text =
-      variant === "unfinished"
-        ? `Continue and make the change now: read what you still need, then change the files with action blocks in this task. Do not stop before the change is made.\n\nRequest: ${request}\n\nWhat you said you would do:\n${plan}`
-        : `Build this now, following the approved plan below. Change files with action blocks.\n\nRequest: ${request}\n\nApproved plan:\n${plan}`;
-    onSend(text, { asCoding: true, planId, approve: true });
+    onSend(buildPlanMessage(variant, request, plan), { asCoding: true, planId, approve: true });
   };
   const change = () => {
     setSent("change");
-    onSend(`Change the plan: ${feedback.trim()}\n\nRequest: ${request}\n\nCurrent plan:\n${plan}`, { planFirst: true, request, planId, feedback: feedback.trim() });
+    onSend(changePlanMessage(feedback, request, plan), { planFirst: true, request, planId, feedback: feedback.trim() });
   };
 
   return (

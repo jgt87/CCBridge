@@ -6,6 +6,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.142] - 2026-10-19
+
+### Fixed
+- The page check now also reports HTML markup or code shown as text inside a paragraph, link or other short-named element (`p`, `a`, `i`, `s`, `em`, `b`, `u`...). Before, those were skipped by mistake, so only markup inside elements such as a `div` was found.
+
+### Changed
+- Internal clean-up with no change in behaviour, to make the code easier to read and change:
+  - The app's main screen is split into smaller parts: hooks for polling, the side drawer, the tab title, the project lists and stored choices; the command menu and the header in their own files; the event and message logic as tested functions.
+  - The schedule form, side panel, settings panel and plan cards are split into smaller components, with their logic in tested functions.
+  - The UI kit's charts (`kit-charts.js`): data-shape reading, bar placement and tooltips, and the bar list are split into named helpers. Projects get the new file through the usual kit update; charts draw exactly as before.
+  - The page check (`page-content-check.js`): every check is its own named function.
+- New tests pin the behaviour of the page check, the chart data shapes, the schedule form, the settings sections, the plan messages and the app's event handling.
+
 ## [v0.1.141] - 2026-10-19
 
 ### Added

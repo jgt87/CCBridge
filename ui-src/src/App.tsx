@@ -1,56 +1,27 @@
-import {
-  AlertTriangle,
-  AtSign,
-  ClipboardList,
-  FileCode2,
-  FileArchive,
-  FileText,
-  FolderOpen,
-  Menu as MenuIcon,
-  ScrollText,
-  MessageSquarePlus,
-  PanelLeftOpen,
-  PencilRuler,
-  RotateCcw,
-  Settings,
-  ShieldCheck,
-  X,
-  Zap,
-} from "lucide-react";
-import { findAppEntry } from "@/lib/app-entry";
-import { responseChoices } from "@/lib/response-modes";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ActionSearchBar, { type Action } from "@/components/kokonutui/action-search-bar";
-import AI_Prompt, { type PromptMode } from "@/components/kokonutui/ai-prompt";
-import CommandButton from "@/components/kokonutui/command-button";
-import Loader from "@/components/kokonutui/loader";
-import { LimitationsNote } from "@/components/ccb/limitations-note";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import AI_Prompt from "@/components/kokonutui/ai-prompt";
 import { ErrorBoundary } from "@/components/ccb/error-boundary";
-import { CopilotStatus } from "@/components/ccb/copilot-status";
 import { SettingsPanel } from "@/components/ccb/settings-panel";
-import { prefetchSettings } from "@/lib/settings-cache";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { SidePanel } from "@/components/ccb/side-panel";
 import type { ScheduleTarget } from "@/components/ccb/schedule-form";
 import { SchedulesModal } from "@/components/ccb/schedules-modal";
 import { FileViewer, type ViewerChange } from "@/components/ccb/file-viewer";
-import { openExternal, setLinksThroughEdge } from "@/lib/links";
 import { SplitViewHint } from "@/components/ccb/split-view-hint";
-import { ModalBackdrop } from "@/components/ccb/modal-backdrop";
-import { notify, notifyEvents, notifyQueue } from "@/lib/notify";
-import { tabTitle, workView } from "@/lib/work-status";
-import type { ChatOptions, ScheduleItem, TestRunItem, WorkStatus } from "@/lib/api";
+import { type AgentChoice, AppHeader, ChatEmpty, ErrorBar, InstallProblem, NoticeBar, PromptHeaderLeft, PromptHeaderRight, VersionLine } from "@/components/ccb/app-chrome";
+import { MODES, type Notice, useCommandPalette } from "@/components/ccb/command-palette";
 import { buildTranscript, Transcript } from "@/components/ccb/transcript";
-import { type AgentEvent, type AppState, api, type ChainItem, type ChangeSetView, type FetchItem, type FileInfo, type Mode, type RunbookItem, type RunbookTemplate } from "@/lib/api";
-import { fetchedAge } from "@/components/ccb/fetch-panel";
-
-type AgentChoice = "auto" | "copilot" | "researcher" | "analyst";
-
-const MODES: PromptMode[] = [
-  { id: "ask", label: "Ask before changes", description: "Approve every file change and command", icon: <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" /> },
-  { id: "auto", label: "Auto-accept edits", description: "Apply file changes directly; still ask for commands", icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" /> },
-  { id: "plan", label: "Plan only", description: "Read and discuss; no changes, no commands", icon: <PencilRuler className="h-3.5 w-3.5 text-muted-foreground" /> },
-];
+import { useProjectLists } from "@/hooks/use-project-lists";
+import { useServerPoll } from "@/hooks/use-server-poll";
+import { useSideDrawer } from "@/hooks/use-side-drawer";
+import { useStoredChoice } from "@/hooks/use-stored-choice";
+import { useWorkTitle } from "@/hooks/use-work-title";
+import { changeFileNote } from "@/lib/change-note";
+import { changeSets, chatView, endsNewChat, inProject, keptView, projectKey, projectView, promptHistory as promptHistoryOf, touchesFiles, touchesReview } from "@/lib/event-views";
+import { prefetchSettings } from "@/lib/settings-cache";
+import { setLinksThroughEdge } from "@/lib/links";
+import type { ChatOptions, ScheduleItem } from "@/lib/api";
+import { type AgentEvent, type AppState, api, type Mode } from "@/lib/api";
 
 const EMPTY_STATE: AppState = {
   project: null, mode: "ask", busy: false, progress: "", copilot: "idle", copilotMessage: "",
@@ -58,77 +29,47 @@ const EMPTY_STATE: AppState = {
   workIq: "leave", workIqActual: null, workIqAvailable: false, logLevel: "info", version: "",
 };
 
-/** The changelog on GitHub, always the current one on main (newer entries than this build included). */
-const changelogUrl = () => "https://github.com/jgt87/CCBridge/blob/main/CHANGELOG.md";
+// Remembered in this browser: Clarify first, and who answers the next message (Auto, the default,
+// lets StreamHub pick by fixed words: Researcher, Analyst or Copilot itself).
+const parseClarify = (raw: string | null) => raw === "1";
+const showClarify = (on: boolean) => (on ? "1" : "0");
+const parseAgent = (raw: string | null): AgentChoice => (raw === "researcher" || raw === "analyst" || raw === "copilot" ? raw : "auto");
+const showAgent = (v: AgentChoice) => v;
+
+/** What goes with a message: the agent, and Clarify first (an agent itself is never clarified first). */
+function sendOptions(agent: AgentChoice, clarify: boolean): ChatOptions {
+  if (agent === "copilot") return { clarify };
+  if (agent === "auto") return { agent, clarify };
+  return { agent };
+}
+
+const IMAGE = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
 
 export default function App() {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [files, setFiles] = useState<FileInfo[]>([]);
-  const [fetchItems, setFetchItems] = useState<FetchItem[]>([]);
-  const [runbooks, setRunbooks] = useState<RunbookItem[]>([]);
-  const [chains, setChains] = useState<ChainItem[]>([]);
-  const [scripts, setScripts] = useState<string[]>([]);
-  const [runbookTemplates, setRunbookTemplates] = useState<RunbookTemplate[]>([]);
   const [draft, setDraft] = useState("");
   // Schedules modal: closed (null), the list ({ target: null }) or a form for a target.
   const [scheduling, setScheduling] = useState<{ target: ScheduleTarget | null; editing?: ScheduleItem } | null>(null);
   const [reviewTick, setReviewTick] = useState(0);
-  // Clarify first: remembered in this browser.
-  const [clarifyFirst, setClarifyFirst] = useState(() => {
-    try {
-      return localStorage.getItem("ccb.clarify") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const toggleClarify = () =>
-    setClarifyFirst((on) => {
-      try {
-        localStorage.setItem("ccb.clarify", on ? "0" : "1");
-      } catch {
-        /* storage blocked: only this session */
-      }
-      return !on;
-    });
-  const queueSeen = useRef(new Map<string, string>());
-  const pauseSeen = useRef<string | null | undefined>(undefined);
-  const [palette, setPalette] = useState<null | "commands" | "attach" | "logging" | "testruns">(null);
-  const [testRuns, setTestRuns] = useState<TestRunItem[]>([]);
+  const [clarifyFirst, setClarifyFirst] = useStoredChoice("ccb.clarify", parseClarify, showClarify);
+  const [agent, setAgent] = useStoredChoice("ccb.agent", parseAgent, showAgent);
   const [viewer, setViewer] = useState<{ path: string; text: string; change?: ViewerChange; note?: string } | null>(null);
   const [queuedNote, setQueuedNote] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState<{ text: string; path?: string } | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [focusKey, setFocusKey] = useState(0);
   const [newChatPending, setNewChatPending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const lastSeq = useRef(0);
-  const instance = useRef<string | undefined>(undefined);
+  const { wide, drawerOpen, setDrawerOpen, sideVisible } = useSideDrawer();
+  const lists = useProjectLists(state.project?.path, state.busy);
+  const { files, fetchItems, runbooks, chains, scripts, refreshFiles } = lists;
+  const fail = useCallback((e: unknown) => setError((e as Error).message), []);
 
-  // Side panel: always beside the chat when the window is wide enough. On a narrow window it is
-  // hidden and a button (shown only then) opens it over the chat; a click beside it or Esc closes it.
-  const [wide, setWide] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   // External links open through StreamHub's Edge when the app is a tab there (lib/links.ts).
   useEffect(() => setLinksThroughEdge(Boolean(state.appInEdge)), [state.appInEdge]);
-  useEffect(() => {
-    if (!drawerOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDrawerOpen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawerOpen]);
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const onChange = () => {
-      setWide(mq.matches);
-      setDrawerOpen(false);
-    };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-  const sideVisible = wide || drawerOpen;
 
   // Settings opens complete: what it shows is loaded once in the background, a little after start.
   useEffect(() => {
@@ -136,161 +77,41 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, []);
 
-  // The file tree: a refresh after a change shows a bar in the Files tab (at least 600 ms, so it is
-  // seen); the background refresh while StreamHub works is silent ({ quiet: true }).
-  const [filesRefreshing, setFilesRefreshing] = useState(false);
-  const refreshFiles = useCallback((opts?: { quiet?: boolean }) => {
-    const shown = !opts?.quiet;
-    const started = Date.now();
-    if (shown) setFilesRefreshing(true);
-    api.files().then(
-      (r) => setFiles(r.files),
-      () => {}
-    ).finally(() => {
-      if (shown) window.setTimeout(() => setFilesRefreshing(false), Math.max(0, 600 - (Date.now() - started)));
-    });
-    // The lists of runbooks, fetches and chains change with files Copilot or the person writes:
-    // after such a change (not quiet) and on focus, never with the timer while StreamHub works.
-    if (opts?.quiet) return;
-    api.fetchList().then(setFetchItems, () => {});
-    api.runbooks().then((r) => {
-      setRunbooks(r.runbooks);
-      setRunbookTemplates(r.templates);
-    }, () => {});
-    api.chains().then((r) => {
-      setChains(r.chains);
-      setScripts(r.scripts);
-    }, () => {});
-  }, []);
+  useServerPoll({
+    onState: (s) => {
+      setState(s);
+      if (!s.busy) setStopping(false);
+    },
+    onRestart: () => setEvents([]),
+    onEvents: (evs) => {
+      setEvents((prev) => [...prev, ...evs]);
+      if (touchesFiles(evs)) refreshFiles();
+      if (touchesReview(evs)) setReviewTick((t) => t + 1);
+      if (endsNewChat(evs)) setNewChatPending(false);
+    },
+    onError: setError,
+  });
+  useWorkTitle(state.busy, state.work);
 
-  // Poll the server: new events plus a state snapshot.
-  useEffect(() => {
-    let stop = false;
-    let timer = 0;
-    const tick = async () => {
-      try {
-        const r = await api.poll(lastSeq.current);
-        // StreamHub was restarted while this tab stayed open (the token survives a restart): its
-        // event numbers start over, so the transcript starts over and the next poll reads from 0.
-        if (r.state.instance && r.state.instance !== instance.current) {
-          const restarted = instance.current !== undefined;
-          instance.current = r.state.instance;
-          if (restarted) {
-            lastSeq.current = 0;
-            setEvents([]);
-            setState(r.state);
-            if (!stop) timer = window.setTimeout(tick, 0);
-            return;
-          }
-        }
-        setState(r.state);
-        if (!r.state.busy) setStopping(false);
-        // Desktop notifications for queue changes (the first poll only records the current state).
-        const q = r.state.queue ?? [];
-        if (pauseSeen.current === undefined) {
-          queueSeen.current = new Map(q.map((x) => [x.id, x.status]));
-          pauseSeen.current = r.state.pausedUntil ?? null;
-        } else {
-          queueSeen.current = notifyQueue(queueSeen.current, q, pauseSeen.current, r.state.pausedUntil);
-          pauseSeen.current = r.state.pausedUntil ?? null;
-        }
-        if (r.events.length) {
-          lastSeq.current = r.events[r.events.length - 1].seq;
-          setEvents((prev) => [...prev, ...r.events]);
-          notifyEvents(r.events);
-          // New and changed files show in the tree right away: after each action that changed files,
-          // and at the end of every step (its change set).
-          if (r.events.some((e) => e.type === "project" || e.type === "undo" || e.type === "fetch" || e.type === "runbook" || e.type === "chain" || e.type === "review" || e.type === "checkpoint" || (e.type === "action-result" && e.changed))) refreshFiles();
-          if (r.events.some((e) => e.type === "review" || e.type === "project" || (e.type === "action-result" && e.changed))) setReviewTick((t) => t + 1);
-          if (r.events.some((e) => e.type === "newchat" || e.type === "error")) setNewChatPending(false);
-        }
-        setError("");
-      } catch (e) {
-        setError(`Lost contact with StreamHub: ${(e as Error).message}. Is the PowerShell window still open?`);
-      }
-      if (!stop) timer = window.setTimeout(tick, 400);
-    };
-    tick();
-    return () => {
-      stop = true;
-      clearTimeout(timer);
-    };
-  }, [refreshFiles]);
-
-  useEffect(() => {
-    if (state.project) refreshFiles();
-  }, [state.project?.path, refreshFiles]);
-
-  // While StreamHub works, the tree also refreshes every few seconds (a command may write files
-  // before its result comes back); coming back to the window picks up files changed elsewhere.
-  useEffect(() => {
-    if (!state.project || !state.busy) return;
-    const t = window.setInterval(() => refreshFiles({ quiet: true }), 4000);
-    return () => window.clearInterval(t);
-  }, [state.project?.path, state.busy, refreshFiles]);
-  useEffect(() => {
-    const onFocus = () => state.project && refreshFiles();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [state.project?.path, refreshFiles]);
-
-  // Ctrl/Cmd+K opens the command palette.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPalette((p) => (p ? null : "commands"));
-      }
-      if (e.key === "Escape") setDrawerOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  const projectEvents = useMemo(() => {
-    // Only show the transcript since the last project switch.
-    let idx = -1;
-    events.forEach((e, i) => {
-      if (e.type === "project") idx = i;
-    });
-    return idx >= 0 ? events.slice(idx) : events;
-  }, [events]);
-
+  const projectEvents = useMemo(() => projectView(events), [events]);
   // After "Clear chat history" (Settings > Privacy) nothing earlier is shown or recalled; the Changes
   // tab keeps its change sets (their backups still exist).
-  const keptEvents = useMemo(() => {
-    let idx = -1;
-    projectEvents.forEach((e, i) => {
-      if (e.type === "history-cleared") idx = i;
-    });
-    return idx >= 0 ? projectEvents.slice(idx + 1) : projectEvents;
-  }, [projectEvents]);
-
-  // The chat view starts at the last explicit "New chat"; the History tab keeps the whole project session.
-  const chatEvents = useMemo(() => {
-    let idx = -1;
-    keptEvents.forEach((e, i) => {
-      if (e.type === "newchat") idx = i;
-    });
-    return idx >= 0 ? keptEvents.slice(idx) : keptEvents;
-  }, [keptEvents]);
+  const keptEvents = useMemo(() => keptView(projectEvents), [projectEvents]);
+  const chatEvents = useMemo(() => chatView(keptEvents), [keptEvents]);
   const transcript = useMemo(() => buildTranscript(chatEvents), [chatEvents]);
-  // The user's own messages in this project, oldest first, consecutive repeats once (Arrow Up history).
-  const promptHistory = useMemo(() => {
-    const out: string[] = [];
-    for (const e of keptEvents) {
-      const t = e.type === "user" ? (e.text ?? "").trim() : "";
-      if (t && out[out.length - 1] !== t) out.push(t);
-    }
-    return out;
-  }, [keptEvents]);
+  const promptHistory = useMemo(() => promptHistoryOf(keptEvents), [keptEvents]);
+  const changes = useMemo(() => changeSets(projectEvents), [projectEvents]);
+  // The side panel shows the open project only: its queue and schedules.
+  const key = projectKey(state.project?.path);
+  const queueHere = useMemo(() => inProject(state.queue, key), [state.queue, key]);
+  const schedulesHere = useMemo(() => inProject(state.schedules, key), [state.schedules, key]);
 
   const startNewChat = () => {
     setNewChatPending(true);
     if (state.busy) setStopping(true);
     api.newChat().catch((e) => {
       setNewChatPending(false);
-      setError((e as Error).message);
+      fail(e);
     });
     window.setTimeout(() => setNewChatPending(false), 30000);
   };
@@ -300,77 +121,9 @@ export default function App() {
     api.stop().catch(() => setStopping(false));
   };
 
-  // The browser tab's title says what StreamHub is doing and for how long (seen from another tab),
-  // and a long silence gets one desktop notification per quiet spell (only while the tab is hidden).
-  const workRef = useRef({ busy: false, work: null as WorkStatus | null | undefined });
-  workRef.current = { busy: state.busy, work: state.work };
-  const quietNoticed = useRef("");
-  useEffect(() => {
-    const update = () => {
-      const { busy, work } = workRef.current;
-      document.title = tabTitle(busy, work);
-      if (busy && work && workView(work).quiet && quietNoticed.current !== work.lastSignAt) {
-        quietNoticed.current = work.lastSignAt;
-        notify("StreamHub: nothing new for a while", `${work.phase}. Open StreamHub to see Copilot or stop the task.`);
-      }
-    };
-    update();
-    const t = window.setInterval(update, 15000);
-    return () => window.clearInterval(t);
-  }, []);
-  useEffect(() => {
-    document.title = tabTitle(state.busy, state.work);
-  }, [state.busy, state.work]);
-  // The side panel shows the open project only: its queue and schedules (items without a project,
-  // such as a new chat, belong to every project).
-  const projectKey = (state.project?.path ?? "").replace(/\\+$/, "").toLowerCase();
-  const queueHere = useMemo(
-    () => (state.queue ?? []).filter((q) => !q.projectRoot || q.projectRoot.replace(/\\+$/, "").toLowerCase() === projectKey),
-    [state.queue, projectKey]
-  );
-  const schedulesHere = useMemo(
-    () => (state.schedules ?? []).filter((s) => !s.projectRoot || s.projectRoot.replace(/\\+$/, "").toLowerCase() === projectKey),
-    [state.schedules, projectKey]
-  );
-
-  // The change sets that can still be undone: an undo takes the newest one off the list.
-  const changes = useMemo(() => {
-    const list: ChangeSetView[] = [];
-    for (const e of projectEvents) {
-      if (e.type === "checkpoint") {
-        const counts = Array.isArray(e.counts) ? e.counts : e.counts ? [e.counts] : [];
-        list.push({ seq: e.seq, time: e.time, files: Array.isArray(e.files) ? e.files : e.files ? [e.files as unknown as string] : [], title: e.title || undefined, counts, changeSet: e.changeSet || undefined });
-      }
-      else if (e.type === "undo" && (e.files ?? []).length) list.pop();
-    }
-    return list;
-  }, [projectEvents]);
-
-  // Who answers the next message (the agent picker next to Response); kept per browser. Auto (the
-  // default) lets StreamHub pick by fixed words: Researcher, Analyst or Copilot itself.
-  const [agent, setAgentState] = useState<AgentChoice>(() => {
-    try {
-      const v = localStorage.getItem("ccb.agent");
-      return v === "researcher" || v === "analyst" || v === "copilot" ? v : "auto";
-    } catch {
-      return "auto";
-    }
-  });
-  const setAgent = (v: AgentChoice) => {
-    setAgentState(v);
-    try {
-      localStorage.setItem("ccb.agent", v);
-    } catch {
-      /* storage blocked */
-    }
-  };
-
   const send = async (text: string) => {
     try {
-      await api.chat(
-        text,
-        agent === "copilot" ? { clarify: clarifyFirst } : agent === "auto" ? { agent, clarify: clarifyFirst } : { agent },
-      );
+      await api.chat(text, sendOptions(agent, clarifyFirst));
       setDraft("");
       // Sent while busy = queued: say when it runs (only while StreamHub stays open).
       if (state.busy) {
@@ -378,7 +131,7 @@ export default function App() {
         window.setTimeout(() => setQueuedNote(false), 8000);
       }
     } catch (e) {
-      setError((e as Error).message);
+      fail(e);
     }
   };
 
@@ -386,10 +139,10 @@ export default function App() {
     setDrawerOpen(false);
     try {
       // Images are shown from the project's read-only preview address, not read as text.
-      if (/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(path)) setViewer({ path, text: "" });
+      if (IMAGE.test(path)) setViewer({ path, text: "" });
       else setViewer(await api.file(path));
     } catch (e) {
-      setError((e as Error).message);
+      fail(e);
     }
   };
 
@@ -399,12 +152,9 @@ export default function App() {
     try {
       const d = await api.changeFile(changeSet, path);
       if (d.binary) return openFile(path); // no line view for binary files
-      const note = `${d.exists ? (d.deleted ? "Deleted later" : "Changes made by this change set") : "Created by this change set"}${
-        d.after === "later" ? "; the file was changed again later, which is not shown here." : d.deleted ? "." : "; compared with the file as it is now."
-      }`;
-      setViewer({ path, text: d.new, change: { note, preview: { path, exists: d.exists, old: d.old ?? "", new: d.new } } });
+      setViewer({ path, text: d.new, change: { note: changeFileNote(d), preview: { path, exists: d.exists, old: d.old ?? "", new: d.new } } });
     } catch (e) {
-      setError((e as Error).message);
+      fail(e);
     }
   };
 
@@ -413,225 +163,47 @@ export default function App() {
     setFocusKey((k) => k + 1);
   };
 
-  const fetchedByPath = new Map(fetchItems.map((it) => [it.output, it]));
-  const fileActions: Action[] = files.map((f) => ({
-    id: `file:${f.path}`,
-    label: f.path.split("/").pop() ?? f.path,
-    // Fetched data shows how old it is, so stale data is easy to spot before attaching.
-    description: fetchedByPath.has(f.path) ? `${f.path} - fetched ${fetchedAge(fetchedByPath.get(f.path)!.fetchedAt)}` : f.path,
-    icon: <FileCode2 className="h-4 w-4 text-muted-foreground" />,
-    end: palette === "attach" ? "Attach" : "Open",
-    onSelect: () => {
-      if (palette === "attach") attachPath(f.path);
-      else openFile(f.path);
-    },
-  }));
+  const palette = useCommandPalette({
+    state,
+    files,
+    fetchItems,
+    attachPath,
+    openFile,
+    startNewChat,
+    openSettings: () => setShowSettings(true),
+    openPicker: () => setShowPicker(true),
+    setLogLevel: (level) => setState((s) => ({ ...s, logLevel: level })),
+    notice: setNotice,
+    fail: setError,
+  });
 
-  const LOG_LEVELS = [
-    { id: "info", label: "Info", description: "The normal log: what StreamHub did, without details" },
-    { id: "verbose", label: "Verbose", description: "Every step in detail, for finding a problem" },
-    { id: "trace", label: "Trace", description: "Also the prompt and reply text, which can hold Microsoft 365 data: for a short test only" },
-  ] as const;
-  const loggingActions: Action[] = LOG_LEVELS.map((l) => ({
-    id: `log:${l.id}`,
-    label: l.label,
-    description: l.description,
-    icon: <ScrollText className="h-4 w-4 text-muted-foreground" />,
-    end: (state.logLevel || "info") === l.id ? "Active" : "Logging",
-    onSelect: () =>
-      // The level the server reports back is the one in force.
-      api.setLogging(l.id).then((r) => {
-        const now = r.level ?? l.id;
-        setState((s) => ({ ...s, logLevel: now }));
-        setNotice({ text: now === l.id ? `Logging set to ${now}.` : `Logging asked for ${l.id}, but StreamHub is at ${now}.` });
-      }),
-  }));
-
-  // Test runs: the saved ones to start (a fresh project, every step, then the report).
-  const testRunActions: Action[] = testRuns.map((t) => ({
-    id: `testrun:${t.name}`,
-    label: t.title,
-    description: `${t.steps} step(s)${t.lastRun ? `, last run ${t.lastRun}` : ", not run yet"}: runs them in a new project, then writes a report compared with the last run`,
-    icon: <ClipboardList className="h-4 w-4 text-muted-foreground" />,
-    end: "Test run",
-    onSelect: () =>
-      api.runTestRun(t.name).then(
-        (r) => setNotice({ text: `Test run started in a new project (${r.steps} step(s)). The report comes at the end, in .streamhub/TestRun-report.md.` }),
-        (e) => setError((e as Error).message)
-      ),
-  }));
-  const appEntry = useMemo(() => findAppEntry(files.map((f) => f.path)), [files]);
-  const saveName = (state.project?.name || "Test").replace(/[^\w .-]/g, "").trim().slice(0, 48) || "Test";
-
-  const commandActions: Action[] = [
-    { id: "new-chat", label: "New chat", description: "Start a fresh Copilot chat; the project stays open", icon: <MessageSquarePlus className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: startNewChat },
-    { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: <RotateCcw className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => api.undo() },
-    { id: "settings", label: "Settings", icon: <Settings className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setShowSettings(true), 0) },
-    { id: "project", label: "Switch project", description: "Open or create a OneDrive project folder", icon: <FolderOpen className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setShowPicker(true) },
-    { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: <AtSign className="h-4 w-4 text-muted-foreground" />, end: "Command", onSelect: () => setTimeout(() => setPalette("attach"), 0) },
-    {
-      // Opens a second list with the levels to choose from (loggingActions).
-      id: "logging",
-      label: `Logging: ${state.logLevel || "info"}`,
-      description: "Choose how much the diagnostic log records; stays on after restarts",
-      icon: <ScrollText className="h-4 w-4 text-muted-foreground" />,
-      end: "Diagnostics",
-      onSelect: () => setTimeout(() => setPalette("logging"), 0),
-    },
-    ...(appEntry
-      ? [
-          {
-            id: "export-pdf",
-            label: "Export page as PDF",
-            description: `${appEntry} as a PDF in Runbooks/Exports (the UI kit's print styles; a script for schedules comes with the first one)`,
-            icon: <FileText className="h-4 w-4 text-muted-foreground" />,
-            end: "Export",
-            onSelect: () => api.exportPage(appEntry, "pdf").then(() => setNotice({ text: `Exporting ${appEntry} as a PDF...` }), (e) => setError((e as Error).message)),
-          },
-          {
-            id: "export-pptx",
-            label: "Export charts to PowerPoint",
-            description: `Every chart and the key figures of ${appEntry}, one slide each, in Runbooks/Exports`,
-            icon: <FileText className="h-4 w-4 text-muted-foreground" />,
-            end: "Export",
-            onSelect: () => api.exportPage(appEntry, "pptx").then(() => setNotice({ text: `Exporting the charts of ${appEntry} to PowerPoint...` }), (e) => setError((e as Error).message)),
-          },
-        ]
-      : []),
-    {
-      id: "testrun-save",
-      label: "Save this chat as a test run",
-      description: `The requests of this project's chat, its data files and setup, as test run "${saveName}" to run again later`,
-      icon: <ClipboardList className="h-4 w-4 text-muted-foreground" />,
-      end: "Test runs",
-      onSelect: () =>
-        api.saveTestRun(saveName).then(
-          (r) => setNotice({ text: `Test run saved with ${r.steps} step(s): ${r.path}`, path: r.fullPath }),
-          (e) => setError((e as Error).message)
-        ),
-    },
-    {
-      id: "testruns",
-      label: "Test runs",
-      description: "Run a saved test run again in a new project, with a report compared with the last run",
-      icon: <ClipboardList className="h-4 w-4 text-muted-foreground" />,
-      end: "Test runs",
-      onSelect: () =>
-        api.testRuns().then(
-          (r) => {
-            if (!r.items.length) { setNotice({ text: `No test runs saved yet. Use "Save this chat as a test run" first; they are kept in ${r.dir}.` }); return; }
-            setTestRuns(r.items);
-            setTimeout(() => setPalette("testruns"), 0);
-          },
-          (e) => setError((e as Error).message)
-        ),
-    },
-    {
-      id: "session-report",
-      label: "Session report",
-      description: "What happened since StreamHub started: tasks, failed steps, loops, nudges and slow parts, in one page",
-      icon: <FileText className="h-4 w-4 text-muted-foreground" />,
-      end: "Diagnostics",
-      onSelect: () => {
-        setNotice({ text: "Writing the session report..." });
-        api.sessionReport().then(
-          (r) => setNotice({ text: `Session report saved: ${r.path}`, path: r.fullPath }),
-          (e) => setError((e as Error).message)
-        );
-      },
-    },
-    {
-      id: "diagnostics",
-      label: "Export diagnostics",
-      description: "Zip logs and an environment summary to your desktop",
-      icon: <FileArchive className="h-4 w-4 text-muted-foreground" />,
-      end: "Diagnostics",
-      onSelect: () => {
-        setNotice({ text: "Collecting diagnostics..." });
-        api.diagnostics().then(
-          (r) => setNotice({ text: `Diagnostics saved: ${r.path}`, path: r.fullPath }),
-          (e) => setError((e as Error).message)
-        );
-      },
-    },
-    ...MODES.map((m) => ({ id: `mode:${m.id}`, label: `Mode: ${m.label}`, description: m.description, icon: m.icon, end: state.mode === m.id ? "Active" : "Mode", onSelect: () => api.setMode(m.id as Mode) })),
-    ...fileActions,
-  ];
+  // Side panel callbacks: report a failure in the error bar; those that write files refresh the tree.
+  const orFail = <A extends unknown[]>(f: (...a: A) => Promise<unknown>) => (...a: A) => f(...a).catch(fail);
+  const thenRefresh = <A extends unknown[]>(f: (...a: A) => Promise<unknown>) => async (...a: A) => {
+    await f(...a);
+    refreshFiles();
+  };
+  const scheduleFor = (s: { target: ScheduleTarget | null; editing?: ScheduleItem }) => {
+    setScheduling(s);
+    setDrawerOpen(false);
+  };
 
   const pickerOpen = !state.project || showPicker;
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="flex h-14 shrink-0 items-center gap-3 border-(--kit-border) border-b px-4">
-        {state.project && !pickerOpen && !sideVisible && (
-          <button
-            aria-label="Open side panel"
-            className="kit-btn kit-btn--ghost kit-btn--icon -ml-1.5 h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={() => setDrawerOpen(true)}
-            title="Open side panel (the window is too narrow to show it beside the chat)"
-            type="button"
-          >
-            <PanelLeftOpen className="h-4 w-4" />
-          </button>
-        )}
-        <div className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background text-xs">SH</span>
-          <span>StreamHub <span className="ml-0.5 font-normal text-muted-foreground">by JGT</span></span>
-        </div>
-        {state.project && (
-          <button
-            className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-muted-foreground text-sm hover:bg-(--kit-surface-2) hover:text-foreground"
-            onClick={() => setShowPicker(true)}
-            title={`${state.project.name}\n${state.project.path}\nClick to open or create another project`}
-            type="button"
-          >
-            <FolderOpen className="h-4 w-4" />
-            <span className="truncate">Switch project</span>
-          </button>
-        )}
-        <div className="flex-1" />
-        <CopilotStatus copilot={state.copilot} message={state.copilotMessage} />
-        <button
-          aria-label="Settings"
-          className="kit-btn kit-btn--ghost kit-btn--icon h-8 w-8 text-muted-foreground hover:text-foreground"
-          onClick={() => setShowSettings(true)}
-          title="Settings"
-          type="button"
-        >
-          <Settings className="h-4 w-4" />
-        </button>
-        <CommandButton className="h-8" icon={MenuIcon} onClick={() => setPalette("commands")} title="Commands and files (Ctrl+K)">
-          Menu
-        </CommandButton>
-      </header>
+      <AppHeader
+        onMenu={() => palette.open("commands")}
+        onOpenDrawer={() => setDrawerOpen(true)}
+        onSettings={() => setShowSettings(true)}
+        onSwitchProject={() => setShowPicker(true)}
+        showDrawerButton={Boolean(state.project) && !pickerOpen && !sideVisible}
+        state={state}
+      />
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-
-      {notice && (
-        <div className="flex items-center justify-between gap-3 bg-(--kit-surface-2) px-4 py-2 text-sm">
-          <span className="truncate">{notice.text}</span>
-          <span className="flex shrink-0 items-center gap-3">
-            {notice.path && (
-              <button className="kit-link" onClick={() => api.showDiagnostics(notice.path!)} type="button">
-                Show in folder
-              </button>
-            )}
-            <button aria-label="Dismiss" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" title="Dismiss" onClick={() => setNotice(null)} type="button">
-              <X className="h-4 w-4" />
-            </button>
-          </span>
-        </div>
-      )}
-
-      {error && (
-        <div className="kit-notice kit-notice--error items-center justify-between rounded-none border-x-0 border-t-0 px-4 py-2 text-(--kit-error) text-sm" role="alert">
-          {error}
-          <button aria-label="Dismiss the error" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm text-(--kit-error)" title="Dismiss" onClick={() => setError("")} type="button">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
+      {notice && <NoticeBar notice={notice} onDismiss={() => setNotice(null)} />}
+      {error && <ErrorBar error={error} onDismiss={() => setError("")} />}
 
       {pickerOpen ? (
         <main className="flex-1 overflow-y-auto">
@@ -666,89 +238,41 @@ export default function App() {
                 onAttach={attachPath}
                 onOpenChangeFile={openChangeFile}
                 onOpenFile={openFile}
-                onRunFetch={(name) => api.runFetch(name).catch((e) => setError((e as Error).message))}
-                onSaveFetch={async (name, prompt, web) => {
-                  await api.saveFetch(name, prompt, web);
-                  refreshFiles();
-                }}
+                onRunFetch={orFail(api.runFetch)}
+                onSaveFetch={thenRefresh(api.saveFetch)}
                 onUndo={() => api.undo()}
-                onUndoTo={(id) => api.undo(id).catch((e) => setError((e as Error).message))}
-                onEditSchedule={(s) => {
-                  setScheduling({ target: null, editing: s });
-                  setDrawerOpen(false);
-                }}
+                onUndoTo={orFail(api.undo)}
+                onEditSchedule={(s) => scheduleFor({ target: null, editing: s })}
                 onUploaded={refreshFiles}
-                onCreateRunbook={async (template, name) => {
-                  await api.createRunbook(template, name);
-                  refreshFiles();
-                }}
-                onRunRunbook={(name) => api.runRunbook(name).catch((e) => setError((e as Error).message))}
+                onCreateRunbook={thenRefresh(api.createRunbook)}
+                onRunRunbook={orFail(api.runRunbook)}
                 chains={chains}
                 scripts={scripts}
-                onCreateChain={async (name) => {
-                  await api.createChain(name);
-                  refreshFiles();
-                }}
-                onRunChain={(name) => api.runChain(name).catch((e) => setError((e as Error).message))}
-                onRunScript={(path) => api.runScript(path).catch((e) => setError((e as Error).message))}
-                onChainSteps={async (name, op, opts) => {
-                  await api.chainSteps(name, op, opts);
-                  refreshFiles();
-                }}
+                onCreateChain={thenRefresh(api.createChain)}
+                onRunChain={orFail(api.runChain)}
+                onRunScript={orFail(api.runScript)}
+                onChainSteps={thenRefresh(api.chainSteps)}
                 project={state.project}
                 queue={queueHere}
                 schedules={schedulesHere}
                 reviewTick={reviewTick}
-                filesRefreshing={filesRefreshing}
+                filesRefreshing={lists.filesRefreshing}
                 previewBase={state.previewBase}
                 issueStamp={state.issueStamp ?? ""}
                 activity={state.activity ?? null}
                 pausedUntil={state.pausedUntil}
-                onSchedule={(target) => {
-                  setScheduling({ target });
-                  setDrawerOpen(false);
-                }}
-                runbookTemplates={runbookTemplates}
+                onSchedule={(target) => scheduleFor({ target })}
+                runbookTemplates={lists.runbookTemplates}
                 runbooks={runbooks}
                 todos={state.todos}
               />
             </div>
-            {state.version && (
-              <div
-                className="flex shrink-0 items-center justify-center gap-2 px-1 pt-2 text-muted-foreground text-xs"
-                title="Installed StreamHub release and the commit it was built from; with automatic updates on, a new release installs when a new instance of the app starts (or run update.cmd)"
-              >
-                <span>StreamHub {state.release || state.version}</span>
-                {state.commit && (
-                  <>
-                    <span aria-hidden className="h-3 w-px bg-(--kit-border-strong)" />
-                    <a
-                      className="font-mono underline-offset-2 hover:text-foreground hover:underline"
-                      href={changelogUrl()}
-                      onClick={openExternal}
-                      rel="noopener noreferrer"
-                      target="_blank"
-                      title="What changed: the changelog on GitHub (this build's commit shown)"
-                    >
-                      {state.commit}
-                    </a>
-                  </>
-                )}
-              </div>
-            )}
+            <VersionLine state={state} />
           </aside>
 
           {/* Chat column */}
           <main className="flex min-w-0 flex-1 flex-col">
-            {state.installProblem && (
-              <div className="flex items-start gap-2 border-(--kit-border) border-b bg-(--kit-surface-2) px-4 py-2 text-xs" role="alert">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  {state.installProblem} Close StreamHub and run <span className="font-mono">update.cmd</span> in its folder to install the files again
-                  (or run <span className="font-mono">install.ps1</span> from a fresh download). Things may not work as expected until then.
-                </span>
-              </div>
-            )}
+            {state.installProblem && <InstallProblem problem={state.installProblem} />}
             <div className="min-h-0 flex-1 overflow-y-auto">
               <ErrorBoundary
                 area="chat view"
@@ -765,28 +289,10 @@ export default function App() {
                 work={state.work ?? null}
                 onStop={stop}
                 onShowCopilot={() => api.showCopilot().then((r) => r.shown)}
-                empty={
-                  <div className="flex h-full flex-col items-center justify-center gap-6 px-6 py-16 text-center">
-                    {state.copilot === "connecting" ? (
-                      <Loader size="sm" subtitle={state.copilotMessage || "Opening Copilot in Edge"} title="Connecting to Copilot" />
-                    ) : (
-                      <>
-                        <ClipboardList className="h-10 w-10 text-muted-foreground/50" />
-                        <div className="max-w-md space-y-1">
-                          <p className="font-medium">What should we build in {state.project?.name}?</p>
-                          <p className="text-muted-foreground text-sm">
-                            Describe the change. Copilot reads the project, proposes edits and commands, and StreamHub applies them after your approval.
-                            Type <span className="font-mono">@</span> or use the @ button to attach files.
-                          </p>
-                        </div>
-                        {state.copilot === "ready" && <LimitationsNote />}
-                      </>
-                    )}
-                  </div>
-                }
+                empty={<ChatEmpty state={state} />}
                 items={transcript}
-                onResendAsCoding={(text) => api.chat(text, { asCoding: true }).catch((e) => setError((e as Error).message))}
-                onSend={(text: string, opts: ChatOptions) => api.chat(text, opts).catch((e) => setError((e as Error).message))}
+                onResendAsCoding={(text) => api.chat(text, { asCoding: true }).catch(fail)}
+                onSend={(text: string, opts: ChatOptions) => api.chat(text, opts).catch(fail)}
                 onOpenFile={openFile}
                 onUsePrompt={(text) => {
                   setDraft(text);
@@ -820,89 +326,14 @@ export default function App() {
                   disabled={!state.project}
                   focusKey={focusKey}
                   history={promptHistory}
-                  headerLeft={
-                    <>
-                      <select
-                        aria-label="Who answers"
-                        className="kit-btn kit-btn--sm shrink-0"
-                        onChange={(e) => setAgent(e.target.value as AgentChoice)}
-                        title="Who answers the next message: Copilot (with StreamHub's instructions), or one of Copilot's agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat. Auto: StreamHub picks by fixed words - Analyst when you ask for analysis, a chart or a trend of a data file (csv, xlsx, json) you attach or name; Researcher when you ask to research, investigate, compare competitors or the market, or for sources; Copilot itself for everything else, including all work on code."
-                        value={agent}
-                      >
-                        <option value="auto">Agent: Auto</option>
-                        <option value="copilot">Agent: none (Copilot)</option>
-                        <option value="researcher">Agent: Researcher</option>
-                        <option value="analyst">Agent: Analyst</option>
-                      </select>
-                      <select
-                        className="kit-btn kit-btn--sm shrink-0"
-                        onChange={(e) => api.setResponseMode(e.target.value).catch((err) => setError((err as Error).message))}
-                        title={`Copilot's response mode: Auto, Quick response, Think deeper, or any other option Copilot's own picker offers here (read when StreamHub connects, such as Advanced reasoning or a model)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
-                        value={state.responseMode ?? "leave"}
-                      >
-                        {responseChoices(state.responseOptions, state.responseMode).map((c) => (
-                          <option key={c.value} title={c.hint} value={c.value}>
-                            {c.label}
-                          </option>
-                        ))}
-                      </select>
-                      {queuedNote && (
-                        <span className="truncate font-medium" title="Waiting tasks run while StreamHub is open; if you close it, they continue at the next start.">
-                          Queued: runs after the current task, while StreamHub stays open.
-                        </span>
-                      )}
-                    </>
-                  }
-                  headerRight={
-                    <span className="flex items-center gap-2">
-                      {state.workIqAvailable && (
-                        <button
-                          aria-pressed={state.workIq === "on"}
-                          className={
-                            state.workIq === "on"
-                              ? "kit-btn kit-btn--primary kit-btn--sm h-7 min-h-0 px-2 font-medium"
-                              : "kit-btn kit-btn--sm h-7 min-h-0 px-2"
-                          }
-                          onClick={() => api.setWorkIq(state.workIq === "on" ? "off" : "on")}
-                          title="Work IQ lets Copilot use your Microsoft 365 data: Outlook, Teams, calendar, OneDrive and SharePoint"
-                          type="button"
-                        >
-                          Work IQ {state.workIq === "on" ? "on" : state.workIq === "off" ? "off" : "(as set in Copilot)"}
-                        </button>
-                      )}
-                      {state.credits && state.credits.remaining <= 10 && (
-                        <span
-                          className={state.credits.remaining === 0 ? "text-(--kit-error)" : "text-muted-foreground"}
-                          title={`Copilot daily credits; they reset at ${new Date(state.credits.resetAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
-                        >
-                          {state.credits.remaining === 0
-                            ? `Out of Copilot credits until ${new Date(state.credits.resetAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                            : `${state.credits.remaining} credits left`}
-                        </span>
-                      )}
-                      {state.throttle.max > 0 && (
-                        <span className="text-muted-foreground" title="Messages used in this Copilot chat; StreamHub starts a new chat with a summary before the limit">
-                          {state.throttle.used}/{state.throttle.max}
-                        </span>
-                      )}
-                      <button
-                        className="kit-btn kit-btn--sm h-7 min-h-0 px-2"
-                        disabled={newChatPending}
-                        onClick={startNewChat}
-                        title="Start a new Copilot conversation (the project stays open)"
-                        type="button"
-                      >
-                        <MessageSquarePlus className="h-3.5 w-3.5" />
-                        {newChatPending ? "Starting..." : "New chat"}
-                      </button>
-                    </span>
-                  }
+                  headerLeft={<PromptHeaderLeft agent={agent} fail={setError} onAgent={setAgent} queuedNote={queuedNote} state={state} />}
+                  headerRight={<PromptHeaderRight newChatPending={newChatPending} onNewChat={startNewChat} state={state} />}
                   mode={state.mode}
                   modes={MODES}
-                  onAttach={() => setPalette("attach")}
+                  onAttach={() => palette.open("attach")}
                   onSchedule={(text) => setScheduling({ target: { kind: "chat", text } })}
                   clarify={clarifyFirst}
-                  onToggleClarify={toggleClarify}
+                  onToggleClarify={() => setClarifyFirst(!clarifyFirst)}
                   onModeChange={(m) => api.setMode(m as Mode)}
                   onStop={stop}
                   onSubmit={send}
@@ -917,23 +348,11 @@ export default function App() {
       )}
 
       {/* Command palette */}
-      {palette && (
-        <ModalBackdrop className="pt-24" onClose={() => setPalette(null)}>
-          <div className="kit-dialog w-full max-w-xl px-4 pt-0 pb-4">
-            <ActionSearchBar
-              actions={palette === "attach" ? fileActions : palette === "logging" ? loggingActions : palette === "testruns" ? testRunActions : commandActions}
-              key={palette}
-              label={palette === "attach" ? "Attach a project file" : palette === "logging" ? "Logging level" : palette === "testruns" ? "Test runs" : "Commands and files"}
-              onClose={() => setPalette(null)}
-              placeholder={palette === "attach" ? "File name..." : palette === "logging" ? "Info, verbose or trace..." : palette === "testruns" ? "Test run name..." : "Type a command or file name..."}
-            />
-          </div>
-        </ModalBackdrop>
-      )}
+      {palette.element}
 
-      {/* File viewer */}
       {/* Once, on first use in Edge: how to put StreamHub and Copilot side by side. */}
       {state.copilot === "ready" && <SplitViewHint appWindow={state.appWindow} shownBefore={Boolean(state.hints?.splitView)} />}
+      {/* File viewer */}
       {viewer && <FileViewer file={viewer} onClose={() => setViewer(null)} onOpenFile={openFile} previewBase={state.previewBase} />}
     </div>
   );

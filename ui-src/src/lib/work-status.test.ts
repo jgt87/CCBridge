@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkStatus } from "@/lib/api";
-import { tabTitle, workView } from "./work-status";
+import { isNewQuietSpell, tabTitle, workView } from "./work-status";
 
 const base = new Date(2026, 9, 19, 12, 0, 0).getTime();
 const iso = (secondsAfter: number) => {
@@ -50,5 +50,16 @@ describe("tabTitle", () => {
     expect(tabTitle(true, work(), base + 400_000)).toBe("⏳ Waiting for Copilot's reply · 6 min – StreamHub");
     expect(tabTitle(true, work({ lastSignAt: iso(0) }), base + 400_000)).toMatch(/^⚠ /);
     expect(tabTitle(false, work(), base)).toBe("StreamHub");
+  });
+});
+
+describe("isNewQuietSpell", () => {
+  it("notifies once per quiet spell, only while busy", () => {
+    const quiet = work({ lastSignAt: iso(0) });
+    expect(isNewQuietSpell(true, quiet, "", base + 400_000)).toBe(true);
+    expect(isNewQuietSpell(true, quiet, quiet.lastSignAt, base + 400_000)).toBe(false);
+    expect(isNewQuietSpell(false, quiet, "", base + 400_000)).toBe(false);
+    expect(isNewQuietSpell(true, null, "", base + 400_000)).toBe(false);
+    expect(isNewQuietSpell(true, work(), "", base + 400_000)).toBe(false);
   });
 });

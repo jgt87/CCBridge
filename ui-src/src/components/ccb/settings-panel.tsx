@@ -2,6 +2,7 @@ import { AppWindow, Bot, Cpu, Lock, LogIn, Monitor, Moon, Palette, RotateCcw, Sh
 import { getThemeChoice, setThemeChoice, type ThemeChoice } from "@/lib/theme";
 import { type CardView, getCardView, setCardView } from "@/lib/card-view";
 import { readStored, writeStored } from "@/lib/stored";
+import { currentSection, FIRST_SECTION, settingGroups, settingSections } from "@/lib/settings-sections";
 import { ModalBackdrop } from "./modal-backdrop";
 import { SsoSection } from "./sso-section";
 import { ToolsSection } from "./tools-section";
@@ -261,6 +262,7 @@ function ResponseOptionsRow() {
       return r.read;
     });
   useEffect(() => {
+    // Not read yet or not reachable: the row says "never" and Read now tries again.
     load().catch(() => {});
   }, []);
   const refresh = async () => {
@@ -414,6 +416,73 @@ function ResetAllControl({ anyCustom, onReset }: { anyCustom: boolean; onReset: 
 
 /** The settings themselves: a list of sections on the left (this browser, this computer,
     sign-in, then the app's groups) and the chosen section on the right. */
+/** The section list on the left (a row of tabs on a narrow window). */
+function SectionNav({ sections, current, onChoose }: { sections: string[]; current: string; onChoose: (name: string) => void }) {
+  return (
+    <nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-(--kit-border) border-b p-2 sm:w-52 sm:flex-col sm:overflow-x-visible sm:overflow-y-auto sm:border-r sm:border-b-0 sm:p-3">
+      {sections.map((name) => (
+        <button
+          aria-current={name === current ? "page" : undefined}
+          className={cn(
+            "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-left text-sm hover:bg-(--kit-surface-2)",
+            name === current ? "bg-(--kit-surface-2) font-medium text-foreground" : "text-muted-foreground",
+          )}
+          key={name}
+          onClick={() => onChoose(name)}
+          type="button"
+        >
+          <span className="inline-flex items-center gap-2">
+            <SectionIcon name={name} />
+            {name}
+          </span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/** The sections that are not app settings groups: what goes in each. */
+function FixedSection({ name, theme, onTheme }: { name: string; theme: ThemeChoice; onTheme: (t: ThemeChoice) => void }) {
+  if (name === "This browser")
+    return (
+      <SettingsGroup first title="This browser">
+        <SettingLine
+          control={<Segmented label="Theme" onChange={onTheme} options={THEMES} value={theme} />}
+          help="System follows Windows (also when it switches). Default: System."
+          title="Theme"
+        />
+        <CardViewSetting />
+        <NotificationSetting />
+      </SettingsGroup>
+    );
+  if (name === "This computer")
+    return (
+      <SettingsGroup first title="This computer">
+        <ToolsSection />
+      </SettingsGroup>
+    );
+  if (name === "Sign-in")
+    return (
+      <SettingsGroup first title="Sign-in">
+        <SsoSection />
+      </SettingsGroup>
+    );
+  return null;
+}
+
+/** Rows some groups have after their settings. */
+function GroupExtras({ group }: { group: string }) {
+  if (group === "Privacy and retention")
+    return (
+      <>
+        <ClearHistoryRow />
+        <ClearEdgeCacheRow />
+      </>
+    );
+  if (group === "Copilot") return <ResponseOptionsRow />;
+  return null;
+}
+
 function SettingsBody({
   settings,
   resetNote,
@@ -421,19 +490,10 @@ function SettingsBody({
   onTheme,
   onSaved,
 }: { settings: Setting[]; resetNote: string; theme: ThemeChoice; onTheme: (t: ThemeChoice) => void; onSaved: (list: Setting[]) => void }) {
-  const groups = useMemo(() => {
-    const m = new Map<string, Setting[]>();
-    for (const s of settings) if (s.group !== "Sign-in") m.set(s.group, [...(m.get(s.group) ?? []), s]);
-    return [...m.entries()];
-  }, [settings]);
-  // App first, then this browser, this computer and sign-in, then the other groups.
-  const sections = useMemo(() => {
-    const names = groups.map(([g]) => g);
-    const first = names.filter((g) => g === FIRST_SECTION);
-    return [...first, ...FIXED_SECTIONS, ...names.filter((g) => g !== FIRST_SECTION)];
-  }, [groups]);
+  const groups = useMemo(() => settingGroups(settings), [settings]);
+  const sections = useMemo(() => settingSections(groups.map(([g]) => g)), [groups]);
   const [chosen, setChosen] = useState<string>(() => readStored(SECTION_KEY) ?? FIRST_SECTION);
-  const current = sections.includes(chosen) ? chosen : sections[0];
+  const current = currentSection(sections, chosen);
   const choose = (name: string) => {
     setChosen(name);
     writeStored(SECTION_KEY, name);
@@ -441,56 +501,16 @@ function SettingsBody({
   const list = groups.find(([g]) => g === current)?.[1] ?? [];
   return (
     <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-      <nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-(--kit-border) border-b p-2 sm:w-52 sm:flex-col sm:overflow-x-visible sm:overflow-y-auto sm:border-r sm:border-b-0 sm:p-3">
-        {sections.map((name) => (
-          <button
-            aria-current={name === current ? "page" : undefined}
-            className={cn(
-              "shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-left text-sm hover:bg-(--kit-surface-2)",
-              name === current ? "bg-(--kit-surface-2) font-medium text-foreground" : "text-muted-foreground",
-            )}
-            key={name}
-            onClick={() => choose(name)}
-            type="button"
-          >
-            <span className="inline-flex items-center gap-2">
-              <SectionIcon name={name} />
-              {name}
-            </span>
-          </button>
-        ))}
-      </nav>
+      <SectionNav current={current} onChoose={choose} sections={sections} />
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 [scrollbar-gutter:stable]">
         {resetNote && <div className="pt-2 text-muted-foreground text-sm">{resetNote}</div>}
-        {current === "This browser" && (
-          <SettingsGroup first title="This browser">
-            <SettingLine
-              control={<Segmented label="Theme" onChange={onTheme} options={THEMES} value={theme} />}
-              help="System follows Windows (also when it switches). Default: System."
-              title="Theme"
-            />
-            <CardViewSetting />
-            <NotificationSetting />
-          </SettingsGroup>
-        )}
-        {current === "This computer" && (
-          <SettingsGroup first title="This computer">
-            <ToolsSection />
-          </SettingsGroup>
-        )}
-        {current === "Sign-in" && (
-          <SettingsGroup first title="Sign-in">
-            <SsoSection />
-          </SettingsGroup>
-        )}
+        <FixedSection name={current} onTheme={onTheme} theme={theme} />
         {list.length > 0 && (
           <SettingsGroup first title={current}>
             {list.map((s) => (
               <SettingRow key={s.key} onSaved={onSaved} s={s} />
             ))}
-            {current === "Privacy and retention" && <ClearHistoryRow />}
-            {current === "Privacy and retention" && <ClearEdgeCacheRow />}
-            {current === "Copilot" && <ResponseOptionsRow />}
+            <GroupExtras group={current} />
           </SettingsGroup>
         )}
       </div>
@@ -498,8 +518,6 @@ function SettingsBody({
   );
 }
 
-/** The group shown at the top of the list, and the first time Settings opens. */
-const FIRST_SECTION = "App";
 /** A Lucide icon per settings section (a plain one for groups added later). */
 const SECTION_ICONS: Record<string, typeof Monitor> = {
   App: AppWindow,
@@ -519,8 +537,6 @@ function SectionIcon({ name }: { name: string }) {
   return <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />;
 }
 
-/** Sections that are not app settings groups, right after it. */
-const FIXED_SECTIONS = ["This browser", "This computer", "Sign-in"];
 /** The section shown last time (this browser). */
 const SECTION_KEY = "ccb.settingsSection";
 

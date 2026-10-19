@@ -7,7 +7,7 @@ import GradientButton from "@/components/kokonutui/gradient-button";
 import { api } from "@/lib/api";
 import { ChangePill } from "./change-pill";
 import SmoothTab from "@/components/kokonutui/smooth-tab";
-import type { ChainItem, ChangeSetView, FetchItem, FetchWeb, FileInfo, IssueReport, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
+import type { ChainItem, ChangeCount, ChangeSetView, FetchItem, FetchWeb, FileInfo, IssueReport, RunbookItem, RunbookTemplate, TodoItem } from "@/lib/api";
 
 import { RunbooksPanel, runbookRows } from "./runbooks-panel";
 import { ScriptsPanel } from "./scripts-panel";
@@ -446,7 +446,7 @@ function TasksPanel({
       )}
       </div>
       </PanelSection>
-      <PanelSection badge={active ? <SectionCount n={active} /> : null} id="tasks.queue" title="Runs">
+      <PanelSection badge={countBadge(active)} id="tasks.queue" title="Runs">
         <QueuePanel onOpen={onOpenFile} onShowChange={onShowChange} pausedUntil={pausedUntil} queue={queue} />
       </PanelSection>
     </div>
@@ -488,6 +488,11 @@ function RestoreControl({
   );
 }
 
+/** A section's count, or no badge for none. */
+function countBadge(n: number) {
+  return n ? <SectionCount n={n} /> : null;
+}
+
 /** One change set in History: its time, title and files with their line counts. */
 function ChangeSetCard({
   change: c,
@@ -514,6 +519,9 @@ function ChangeSetCard({
   const counts = new Map((c.counts ?? []).map((x) => [x.path, x]));
   // Restore on an older change set; a confirmation that is open stays until it is answered.
   const restore = newer > 0 && Boolean(c.changeSet) && (Boolean(onUndoTo) || confirming);
+  // With a change set id the file opens on the lines this change set changed.
+  const changeSet = c.changeSet;
+  const openChange = changeSet && onOpenChangeFile ? (f: string) => onOpenChangeFile(changeSet, f) : undefined;
   return (
     <div
       className={cn("rounded-lg border p-2 transition-colors", lit ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border)")}
@@ -541,16 +549,20 @@ function ChangeSetCard({
           {c.title}
         </div>
       )}
-      {c.files.map((f) => {
-        const n = counts.get(f);
-        return (
-          <button className="kit-link flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs no-underline hover:underline" key={f} onClick={() => (c.changeSet && onOpenChangeFile ? onOpenChangeFile(c.changeSet, f) : onOpenFile(f))} title={c.changeSet && onOpenChangeFile ? `${f}: the lines this change set added and removed` : f} type="button">
-            <span className="min-w-0 flex-1 truncate">{f}</span>
-            {n && (n.deleted ? <span className="shrink-0 font-sans text-muted-foreground">deleted</span> : <ChangePill added={n.added} removed={n.removed} />)}
-          </button>
-        );
-      })}
+      {c.files.map((f) => (
+        <ChangeSetFile count={counts.get(f)} key={f} onOpen={openChange ? () => openChange(f) : () => onOpenFile(f)} path={f} showsChange={Boolean(openChange)} />
+      ))}
     </div>
+  );
+}
+
+/** One file of a change set: opens the lines it changed (or the file), with its line counts or "deleted". */
+function ChangeSetFile({ path, count, showsChange, onOpen }: { path: string; count?: ChangeCount; showsChange: boolean; onOpen: () => void }) {
+  return (
+    <button className="kit-link flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs no-underline hover:underline" onClick={onOpen} title={showsChange ? `${path}: the lines this change set added and removed` : path} type="button">
+      <span className="min-w-0 flex-1 truncate">{path}</span>
+      {count && (count.deleted ? <span className="shrink-0 font-sans text-muted-foreground">deleted</span> : <ChangePill added={count.added} removed={count.removed} />)}
+    </button>
   );
 }
 
@@ -681,7 +693,7 @@ function AutomationPanel({
 > & { scripts: string[]; chains: ChainItem[] }) {
   return (
     <div>
-      <PanelSection badge={schedules.length ? <SectionCount n={schedules.length} /> : null} id="automation.scheduled" title="Scheduled">
+      <PanelSection badge={countBadge(schedules.length)} id="automation.scheduled" title="Scheduled">
         <div className="space-y-2">
           <button
             className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-(--kit-border) px-2 py-1.5 text-xs hover:bg-(--kit-surface-2)"
@@ -693,7 +705,7 @@ function AutomationPanel({
           <SchedulesList onEdit={onEditSchedule} schedules={schedules} />
         </div>
       </PanelSection>
-      <PanelSection badge={runbooks.length + fetchItems.length ? <SectionCount n={runbooks.length + fetchItems.length} /> : null} id="automation.runbooks" title="Runbooks">
+      <PanelSection badge={countBadge(runbooks.length + fetchItems.length)} id="automation.runbooks" title="Runbooks">
         <RunbooksPanel
           busy={busy}
           onAttach={onAttach}
@@ -708,7 +720,7 @@ function AutomationPanel({
         />
       </PanelSection>
       {onRunScript && (
-        <PanelSection badge={scripts.length ? <SectionCount n={scripts.length} /> : null} id="automation.scripts" title="Scripts">
+        <PanelSection badge={countBadge(scripts.length)} id="automation.scripts" title="Scripts">
           <ScriptsPanel busy={busy} onOpen={onOpenFile} onRun={onRunScript} onSchedule={(path) => onSchedule({ kind: "script", name: path })} scripts={scripts} />
         </PanelSection>
       )}
@@ -716,7 +728,7 @@ function AutomationPanel({
         <HooksPanel onOpen={onOpenFile} refreshKey={files} />
       </PanelSection>
       {onCreateChain && onRunChain && (
-        <PanelSection badge={chains.length ? <SectionCount n={chains.length} /> : null} id="automation.chains" title="Chains">
+        <PanelSection badge={countBadge(chains.length)} id="automation.chains" title="Chains">
           <ChainsPanel
             busy={busy}
             chains={chains}

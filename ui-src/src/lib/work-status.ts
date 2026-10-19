@@ -62,3 +62,10 @@ export function tabTitle(busy: boolean, w: WorkStatus | null | undefined, now: n
   const mins = total != null ? `${Math.floor(total / 60_000)} min` : "";
   return `${quiet ? "⚠" : "⏳"} ${phase}${mins ? ` · ${mins}` : ""} – StreamHub`;
 }
+
+/** A quiet spell worth one desktop notification: busy, quiet long enough, and not this spell again
+ *  (`noticed` is the last sign of life already notified about). */
+export function isNewQuietSpell(busy: boolean, w: WorkStatus | null | undefined, noticed: string, now: number = Date.now()): w is WorkStatus {
+  if (!busy || !w) return false;
+  return workView(w, now).quiet && noticed !== w.lastSignAt;
+}

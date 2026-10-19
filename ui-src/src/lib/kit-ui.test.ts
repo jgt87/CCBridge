@@ -265,6 +265,37 @@ describe("kit-charts.js data shapes", () => {
     w.KitCharts.ring(document.getElementById("b")!, { labels: ["X", "Y"], values: [1, 2] });
     expect(document.querySelector("#b svg")).not.toBeNull();
   });
+  it("reads values, a series without labels and a data list as a bar chart, and labels with a series as a ring", () => {
+    document.body.innerHTML = '<div class="kit-chart" id="a"></div><div class="kit-chart" id="b"></div><div class="kit-chart" id="c"></div><div class="kit-chart" id="d"></div>';
+    load(chartsJs);
+    const table = (id: string) => document.querySelector(`#${id} .kit-chart__table`)!.textContent;
+    w.KitCharts.bar(document.getElementById("a")!, { values: [4, 5], name: "V" });
+    expect(document.querySelectorAll("#a .kit-chart__bar").length).toBe(2);
+    expect(table("a")).toContain("V");
+    w.KitCharts.bar(document.getElementById("b")!, { series: [{ name: "S", values: [1, 2, 3] }] });
+    expect(table("b")).toMatch(/1.*2.*3/);
+    w.KitCharts.bar(document.getElementById("c")!, { data: [{ name: "North", count: 2 }, { key: "South", total: 3 }] });
+    expect(table("c")).toContain("North");
+    expect(table("c")).toContain("South");
+    w.KitCharts.ring(document.getElementById("d")!, { labels: ["X", "Y"], series: [{ values: [1, 3] }] });
+    expect(table("d")).toContain("75%");
+  });
+  it("lists every part of a stacked bar in its tooltip, and a bar list's Show all shows the rest", () => {
+    document.body.innerHTML = '<div class="kit-chart" id="s"></div><div class="kit-chart" id="l"></div>';
+    load(chartsJs);
+    const s = document.getElementById("s")!;
+    w.KitCharts.bar(s, { labels: ["Mon"], series: [{ name: "Bikes", values: [3] }, { name: "Scooters", values: [1] }], stacked: "percent" });
+    const bar = s.querySelector(".kit-chart__bar") as unknown as SVGGraphicsElement & { getBBox: () => DOMRect };
+    bar.getBBox = () => ({ x: 0, y: 0, width: 10, height: 10 }) as DOMRect;
+    bar.dispatchEvent(new Event("mouseenter"));
+    expect(s.querySelector(".kit-chart__tip")!.textContent).toBe("Mon · 4Bikes: 3 (75%)Scooters: 1 (25%)");
+    const l = document.getElementById("l")!;
+    w.KitCharts.barlist(l, { items: [{ label: "A", value: 3 }, { label: "B", value: 2 }, { label: "C", value: 1 }], limit: 2 });
+    expect(l.querySelectorAll(".kit-barlist__row").length).toBe(2);
+    (l.querySelector(".kit-barlist__more") as HTMLButtonElement).click();
+    expect(l.querySelectorAll(".kit-barlist__row").length).toBe(3);
+    expect(l.querySelector(".kit-barlist__more")!.textContent).toBe("Show the top 2");
+  });
   it("says which shape it expected when the data cannot be read, and keeps the empty state for no data", () => {
     document.body.innerHTML = '<div class="kit-chart" id="x"></div><div class="kit-chart" id="n"></div>';
     load(chartsJs);

@@ -47,10 +47,13 @@
     return fallback;
   }
   function percent(v, total) { return total ? Math.round((v / total) * 1000) / 10 + "%" : "-"; }
+  function blank(v) { return v === null || v === undefined || v === ""; }
+  // A value as a number, or null when it is none (empty, missing, text): a gap, "-" in the table.
+  function num(v) { var n = Number(v); return blank(v) || !isFinite(n) ? null : n; }
   function fmt(v, opts) {
     if (opts && typeof opts.format === "function") return opts.format(v);
-    var n = Number(v), unit = (opts && opts.unit) || "";
-    if (v === null || v === undefined || v === "" || !isFinite(n)) return "-";
+    var n = num(v), unit = (opts && opts.unit) || "";
+    if (n === null) return "-";
     if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" + unit;
     if (Math.abs(n) >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k" + unit;
     return n.toLocaleString(document.documentElement.lang || undefined, { maximumFractionDigits: 2 }) + unit;
@@ -130,6 +133,21 @@
     d.textContent = data.empty || "Nothing to show";
     host.appendChild(d);
   }
+  // Hover and keyboard focus show the same thing.
+  function hoverable(el, show, hide) {
+    el.addEventListener("mouseenter", show); el.addEventListener("focus", show);
+    el.addEventListener("mouseleave", hide); el.addEventListener("blur", hide);
+  }
+  // First draw only (not a redraw, not with reduced motion): bars grow from the axis, lines draw in.
+  function growIn(host, el, horizontal, origin) {
+    if (reduce || host.__kitDrawn) return;
+    el.style.animation = (horizontal ? "kit-grow-x" : "kit-grow-y") + " 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
+    if (origin) el.style.transformOrigin = origin;
+  }
+  function drawIn(host, p, ms) {
+    if (reduce || host.__kitDrawn || typeof p.getTotalLength !== "function") return;
+    var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw " + ms + "ms cubic-bezier(0.22, 1, 0.36, 1) forwards";
+  }
   function tooltip(host) {
     var tip = document.createElement("div");
     tip.className = "kit-chart__tip";
@@ -156,11 +174,12 @@
   // Target or reference lines (data.targets: [{ value, label }]): dashed across the plot at the value,
   // with its label at the end; horizontal bars get them upright.
   function targetMax(data) { return Math.max.apply(null, [0].concat((data.targets || []).map(function (t) { return Number(t && t.value) || 0; }))); }
+  function onScale(v, lo, hi) { return !isNaN(v) && v >= lo && v <= hi; }
   function targets(svg, s, pad, scale, data, horizontal) {
     var lo = scale.min || 0;
     (data.targets || []).forEach(function (t) {
       var v = Number(t && t.value);
-      if (!t || isNaN(v) || v < lo || v > scale.max) return;
+      if (!t || !onScale(v, lo, scale.max)) return;
       var g = svgEl("g", { class: "kit-chart__targets" }, svg), txt;
       if (horizontal) {
         var x = pad.l + (s.w - pad.l - pad.r) * ((v - lo) / (scale.max - lo));
@@ -189,7 +208,7 @@
   }
   function series(data) {
     return (data.series || []).map(function (sr, i) {
-      return { name: sr.name || "", values: (sr.values || []).map(function (v) { var n = Number(v); return v === null || v === undefined || v === "" || !isFinite(n) ? null : n; }), i: i, line: sr.type === "line", right: sr.type === "line" && sr.axis === "right" };
+      return { name: sr.name || "", values: (sr.values || []).map(num), i: i, line: sr.type === "line", right: sr.type === "line" && sr.axis === "right" };
     });
   }
 
@@ -226,41 +245,50 @@
     var lstep = horizontal ? 1 : labelStep(labels, plotW);
     var inner = band * 0.72, bw = stacked ? Math.max(1, inner) : Math.max(2, inner / Math.max(1, sr.length) - 2);
     var room = horizontal ? plotW : plotH;
+    // Where a bar goes: on top of the ones below it (stacked), or next to the others in its group.
+    var place = function (start, si, len, from) {
+      if (stacked) return horizontal ? { x: pad.l + from, y: start, width: len, height: bw } : { x: start, y: pad.t + plotH - from - len, width: bw, height: len };
+      return horizontal ? { x: pad.l, y: start + si * (bw + 2), width: Math.max(0, len), height: bw } : { x: start + si * (bw + 2), y: pad.t + plotH - len, width: bw, height: Math.max(0, len) };
+    };
+    // The tooltip: a stacked bar lists every part of its label, a grouped bar its own value; line
+    // series follow.
+    var partLine = function (y, li) { return "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li], data)) + (pct ? " (" + percent(y.values[li], total(li)) + ")" : ""); };
+    var tipText = function (lab, li, x, v) {
+      var text = stacked
+        ? "<strong>" + esc(lab) + "</strong> &middot; " + esc(fmt(total(li), data)) + sr.map(function (y) { return (y.values[li] || 0) > 0 ? partLine(y, li) : ""; }).join("")
+        : "<strong>" + esc(lab) + "</strong><br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(v, data));
+      return text + ln.map(function (y) { return "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li] || 0, data)); }).join("");
+    };
+    // A bar's value: a percent bar's is its share of the label's total.
+    var valueAt = function (x, li) {
+      var v = x.values[li] || 0, tot = total(li);
+      if (!pct) return v;
+      return tot ? (Math.max(0, v) / tot) * 100 : 0;
+    };
+    var barHover = function (rect, li, text) {
+      var show = function () {
+        bars.forEach(function (b) { b.el.classList.toggle("is-faded", stacked ? b.li !== li : b.el !== rect); });
+        var box = rect.getBBox();
+        tip.show(text, box.x + box.width / 2, horizontal ? box.y : Math.min(box.y, pad.t + plotH - room * (total(li) / scale.max)));
+      };
+      var hide = function () { bars.forEach(function (b) { b.el.classList.remove("is-faded"); }); tip.hide(); };
+      hoverable(rect, show, hide);
+    };
     labels.forEach(function (lab, li) {
       var start = (horizontal ? pad.t : pad.l) + li * band + (band - inner) / 2;
       var acc = 0, top = -1;
       if (stacked) sr.forEach(function (x, si) { if ((x.values[li] || 0) > 0) top = si; });
       sr.forEach(function (x, si) {
-        var v = x.values[li] || 0, tot = total(li);
-        if (pct) v = tot ? (Math.max(0, v) / tot) * 100 : 0;
+        var v = valueAt(x, li);
         var len = room * (Math.max(0, v) / scale.max), from = room * (acc / scale.max);
         if (stacked && v <= 0) return;
-        var a;
-        if (stacked) {
-          if (horizontal) a = { x: pad.l + from, y: start, width: len, height: bw };
-          else a = { x: start, y: pad.t + plotH - from - len, width: bw, height: len };
-          acc += Math.max(0, v);
-        } else if (horizontal) a = { x: pad.l, y: start + si * (bw + 2), width: Math.max(0, len), height: bw };
-        else a = { x: start + si * (bw + 2), y: pad.t + plotH - len, width: bw, height: Math.max(0, len) };
+        var a = place(start, si, len, from);
+        if (stacked) acc += Math.max(0, v);
         var r = stacked && si !== top ? 0 : Math.min(bw / 4, 4);
         var rect = svgEl("path", { d: barPath(a, r, horizontal), fill: color(x.i), class: "kit-chart__bar" }, svg);
         if (isOff(data.selected, lab) || isOff(data.selectedSeries, x.name)) rect.classList.add("is-off");
-        if (!reduce && !host.__kitDrawn) rect.style.animation = (horizontal ? "kit-grow-x" : "kit-grow-y") + " 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
-        if (!reduce && !host.__kitDrawn) rect.style.transformOrigin = horizontal ? (pad.l + "px 0") : ("0 " + (pad.t + plotH) + "px");
-        var text = stacked
-          ? "<strong>" + esc(lab) + "</strong> &middot; " + esc(fmt(total(li), data)) + sr.map(function (y) { return (y.values[li] || 0) > 0 ? "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li], data)) + (pct ? " (" + percent(y.values[li], total(li)) + ")" : "") : ""; }).join("")
-          : "<strong>" + esc(lab) + "</strong><br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(v, data));
-        text += ln.map(function (y) { return "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li] || 0, data)); }).join("");
-        var show = function () {
-          bars.forEach(function (b) { b.el.classList.toggle("is-faded", stacked ? b.li !== li : b.el !== rect); });
-          var box = rect.getBBox();
-          tip.show(text, box.x + box.width / 2, horizontal ? box.y : Math.min(box.y, pad.t + plotH - room * (total(li) / scale.max)));
-        };
-        rect.addEventListener("mouseenter", show);
-        rect.addEventListener("focus", show);
-        var hide = function () { bars.forEach(function (b) { b.el.classList.remove("is-faded"); }); tip.hide(); };
-        rect.addEventListener("mouseleave", hide);
-        rect.addEventListener("blur", hide);
+        growIn(host, rect, horizontal, horizontal ? (pad.l + "px 0") : ("0 " + (pad.t + plotH) + "px"));
+        barHover(rect, li, tipText(lab, li, x, v));
         pickable(host, data, rect, { chart: "bar", part: "bar", value: lab, index: li, series: x.name, seriesIndex: x.i }, lab + (x.name ? ", " + x.name : "") + ": " + fmt(v, data));
         bars.push({ el: rect, s: x.i, li: li });
       });
@@ -281,7 +309,7 @@
       var d = labels.map(function (l, i) { return (i ? "L" : "M") + px(i).toFixed(1) + " " + py(x.values[i] || 0).toFixed(1); }).join(" ");
       var p = svgEl("path", { d: d, fill: "none", stroke: color(x.i), "stroke-width": 2.25, "stroke-linejoin": "round", "stroke-linecap": "round", class: "kit-chart__path" }, svg);
       if (isOff(data.selectedSeries, x.name)) p.classList.add("is-off");
-      if (!reduce && !host.__kitDrawn && p.getTotalLength) { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
+      drawIn(host, p, 700);
       marks.push({ el: p, s: x.i });
       if (labels.length <= 60) labels.forEach(function (l, i) { marks.push({ el: svgEl("circle", { cx: px(i), cy: py(x.values[i] || 0), r: 3, fill: color(x.i), class: "kit-chart__dot" }, svg), s: x.i }); });
     });
@@ -331,7 +359,7 @@
         if (fill) svgEl("path", { d: fill, fill: "url(#" + gid + ")", class: "kit-chart__area" }, svg);
       }
       var p = svgEl("path", { d: d, fill: "none", stroke: color(si), "stroke-width": 2.25, "stroke-linejoin": "round", "stroke-linecap": "round", class: "kit-chart__path" }, svg);
-      if (!reduce && !host.__kitDrawn && typeof p.getTotalLength === "function") { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
+      drawIn(host, p, 700);
       paths.push(p);
     });
     var lstep = labelStep(labels, plotW);
@@ -400,8 +428,7 @@
         tip.show("<strong>" + esc(it.label) + "</strong><br>" + esc(fmt(it.value, data)) + " (" + share(it.value) + ")", cx, cy - R / 3);
       };
       var hide = function () { arcs.forEach(function (x) { if (x) x.classList.remove("is-faded"); }); tip.hide(); };
-      p.addEventListener("mouseenter", show); p.addEventListener("focus", show);
-      p.addEventListener("mouseleave", hide); p.addEventListener("blur", hide);
+      hoverable(p, show, hide);
       pickable(host, data, p, { chart: "ring", part: "arc", value: it.label, index: i }, it.label + ": " + fmt(it.value, data) + " (" + share(it.value) + ")");
       arcs.push(p);
       a0 = a1;
@@ -440,7 +467,7 @@
     var f = v / max;
     if (f > 0) {
       var p = svgEl("path", { d: "M" + arc(0) + " A" + R + " " + R + " 0 0 1 " + arc(f), fill: "none", stroke: tone(data.color, color(0)), "stroke-width": w, "stroke-linecap": "round" }, svg);
-      if (!reduce && !host.__kitDrawn && typeof p.getTotalLength === "function") { var L = p.getTotalLength(); p.style.strokeDasharray = L; p.style.strokeDashoffset = L; p.style.animation = "kit-draw 800ms cubic-bezier(0.22, 1, 0.36, 1) forwards"; }
+      drawIn(host, p, 800);
     }
     svgEl("text", { x: cx, y: cy - 22, "text-anchor": "middle", class: "kit-chart__center" }, svg).textContent = fmt(v, data);
     if (data.label) svgEl("text", { x: cx, y: cy - 2, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = data.label;
@@ -496,41 +523,55 @@
     var items = (data.items || []).map(function (it) { return { label: String(it.label), value: Number(it.value) || 0, color: tone(it.color, all) }; });
     if (!items.length) { empty(host, data); return; }
     var limit = Number(data.limit) || 0, open = !!host.__kitOpen, sel = picked(data.selected);
-    var shown = items.map(function (it, i) { return { it: it, i: i }; });
-    if (limit && !open && items.length > limit) shown = shown.filter(function (x) { return x.i < limit || (sel && sel.indexOf(x.it.label) >= 0); });
+    var shown = barlistShown(items, open ? 0 : limit, sel);
     var first = data.base === "first" ? Math.max(0, items[0].value) : 0;
     var whole = Number(data.total) || first || items.reduce(function (a, it) { return a + Math.max(0, it.value); }, 0);
-    // A bar next to a percentage fills exactly that share of its track ("share": 18.8% is 18.8% of the
-    // track); "scale": "max" scales the bars to the largest row instead (the page then should not show
-    // a percentage as the bar's meaning).
-    var max = data.share && data.scale !== "max" ? (whole || 1) : (first || Math.max.apply(null, [0].concat(shown.map(function (x) { return x.it.value; }))) || 1);
-    var text = function (v) { return fmt(v, data) + (data.share ? " \u00b7 " + percent(v, whole) : ""); };
+    var max = barlistMax(data, whole, first, shown);
     var list = document.createElement("div");
     list.className = data.share ? "kit-barlist kit-barlist--share" : "kit-barlist";
     if (!data.selectable) list.setAttribute("role", "list");
     list.setAttribute("aria-label", data.title || host.getAttribute("aria-label") || "Bar list");
-    shown.forEach(function (x) {
-      var it = x.it, row = document.createElement(data.selectable ? "button" : "div");
-      if (data.selectable) row.type = "button"; else row.setAttribute("role", "listitem");
-      row.className = "kit-barlist__row" + (sel ? (sel.indexOf(it.label) >= 0 ? " is-on" : " is-off") : "");
-      row.title = it.label + ": " + text(it.value);
-      row.innerHTML = '<span class="kit-barlist__label">' + esc(it.label) + '</span><span class="kit-barlist__track"><span class="kit-barlist__fill" style="width:' +
-        Math.min(100, 100 * Math.max(0, it.value) / max).toFixed(1) + "%;background:" + it.color + '"></span></span><span class="kit-barlist__value">' +
-        (data.share ? "<b>" + esc(fmt(it.value, data)) + "</b> \u00b7 " + percent(it.value, whole) : esc(fmt(it.value, data))) + "</span>";
-      if (!reduce && !host.__kitDrawn) row.querySelector(".kit-barlist__fill").style.animation = "kit-grow-x 520ms cubic-bezier(0.22, 1, 0.36, 1) both";
-      pickable(host, data, row, { chart: "barlist", part: "row", value: it.label, index: x.i }, it.label + ": " + text(it.value));
-      list.appendChild(row);
-    });
+    shown.forEach(function (x) { list.appendChild(barlistRow(host, data, x, { sel: sel, max: max, whole: whole })); });
     host.appendChild(list);
-    if (limit && items.length > limit) {
-      var more = document.createElement("button");
-      more.type = "button";
-      more.className = "kit-btn kit-btn--ghost kit-btn--sm kit-barlist__more";
-      more.setAttribute("aria-expanded", open ? "true" : "false");
-      more.textContent = open ? "Show the top " + limit : "Show all " + items.length;
-      more.addEventListener("click", function () { host.__kitOpen = !open; barlist(host, data); var b = host.querySelector(".kit-barlist__more"); if (b) b.focus(); });
-      host.appendChild(more);
-    }
+    if (limit && items.length > limit) host.appendChild(barlistMore(host, data, items.length, limit, open));
+  }
+  // The rows to show: the first `limit` (0 = all) and every picked one.
+  function barlistShown(items, limit, sel) {
+    var shown = items.map(function (it, i) { return { it: it, i: i }; });
+    if (!limit || items.length <= limit) return shown;
+    return shown.filter(function (x) { return x.i < limit || (sel && sel.indexOf(x.it.label) >= 0); });
+  }
+  // A bar next to a percentage fills exactly that share of its track ("share": 18.8% is 18.8% of the
+  // track); "scale": "max" scales the bars to the largest row instead (the page then should not show
+  // a percentage as the bar's meaning).
+  function barlistMax(data, whole, first, shown) {
+    if (data.share && data.scale !== "max") return whole || 1;
+    return first || Math.max.apply(null, [0].concat(shown.map(function (x) { return x.it.value; }))) || 1;
+  }
+  // One row: label, bar and value (with its share); a button when the list is selectable.
+  function barlistRow(host, data, x, m) {
+    var it = x.it, row = document.createElement(data.selectable ? "button" : "div");
+    if (data.selectable) row.type = "button"; else row.setAttribute("role", "listitem");
+    var share = data.share ? percent(it.value, m.whole) : "";
+    var said = it.label + ": " + fmt(it.value, data) + (share ? " \u00b7 " + share : "");
+    row.className = "kit-barlist__row" + (m.sel ? (m.sel.indexOf(it.label) >= 0 ? " is-on" : " is-off") : "");
+    row.title = said;
+    row.innerHTML = '<span class="kit-barlist__label">' + esc(it.label) + '</span><span class="kit-barlist__track"><span class="kit-barlist__fill" style="width:' +
+      Math.min(100, 100 * Math.max(0, it.value) / m.max).toFixed(1) + "%;background:" + it.color + '"></span></span><span class="kit-barlist__value">' +
+      (share ? "<b>" + esc(fmt(it.value, data)) + "</b> \u00b7 " + share : esc(fmt(it.value, data))) + "</span>";
+    growIn(host, row.querySelector(".kit-barlist__fill"), true);
+    pickable(host, data, row, { chart: "barlist", part: "row", value: it.label, index: x.i }, said);
+    return row;
+  }
+  // Show all / Show the top N: draws the list again, with focus back on the button.
+  function barlistMore(host, data, count, limit, open) {
+    var more = document.createElement("button");
+    more.type = "button";
+    more.className = "kit-btn kit-btn--ghost kit-btn--sm kit-barlist__more";
+    more.setAttribute("aria-expanded", open ? "true" : "false");
+    more.textContent = open ? "Show the top " + limit : "Show all " + count;
+    more.addEventListener("click", function () { host.__kitOpen = !open; barlist(host, data); var b = host.querySelector(".kit-barlist__more"); if (b) b.focus(); });
+    return more;
   }
 
   // Scatter (is A related to B): data.series [{ name, points: [{ x, y, r, label }] }] with x and y
@@ -568,7 +609,7 @@
         if (isOff(data.selectedSeries, x.name) || isOff(data.selected, p.label || name)) c.classList.add("is-off");
         var show = function () { dots.forEach(function (d) { d.el.classList.toggle("is-faded", d.el !== c); }); tip.show("<strong>" + esc(x.name || p.label || "Point") + "</strong><br>" + esc(name), px(p.x), py(p.y) - p.r); };
         var hide = function () { dots.forEach(function (d) { d.el.classList.remove("is-faded"); }); tip.hide(); };
-        c.addEventListener("mouseenter", show); c.addEventListener("focus", show); c.addEventListener("mouseleave", hide); c.addEventListener("blur", hide);
+        hoverable(c, show, hide);
         pickable(host, data, c, { chart: "scatter", part: "point", value: p.label || name, index: pi, series: x.name, seriesIndex: x.i }, (x.name ? x.name + ", " : "") + name);
         dots.push({ el: c, s: x.i });
       });
@@ -600,6 +641,8 @@
       return Object.assign({}, it, { label: String(pick(it, ["label", "name", "key", "category", "x"]) !== undefined ? pick(it, ["label", "name", "key", "category", "x"]) : i + 1), value: Number(pick(it, ["value", "count", "total", "y", "amount"])) || 0 });
     });
   }
+  function readsItems(kind) { return kind === "ring" || kind === "barlist"; }
+  function readsSeries(kind) { return kind === "bar" || kind === "line" || kind === "area"; }
   function shapeData(kind, data) {
     if (Array.isArray(data)) {
       if (kind === "sparkline") return { values: data.map(function (v) { return typeof v === "object" && v ? pick(v, ["value", "count", "total", "y"]) : v; }) };
@@ -608,18 +651,32 @@
     }
     if (!data || typeof data !== "object") return {};
     var out = Object.assign({}, data);
-    var items = Array.isArray(out.items) ? out.items : Array.isArray(out.data) ? out.data : null;
-    if ((kind === "ring" || kind === "barlist") && !Array.isArray(out.items)) {
-      if (items) out.items = asItems(items);
-      else if (Array.isArray(out.labels) && Array.isArray(out.series) && out.series[0]) out.items = out.labels.map(function (l, i) { return { label: String(l), value: Number((out.series[0].values || [])[i]) || 0 }; });
-      else if (Array.isArray(out.labels) && Array.isArray(out.values)) out.items = out.labels.map(function (l, i) { return { label: String(l), value: Number(out.values[i]) || 0 }; });
-    } else if (kind === "ring" || kind === "barlist") out.items = asItems(out.items);
-    if ((kind === "bar" || kind === "line" || kind === "area") && !Array.isArray(out.series)) {
-      if (Array.isArray(out.values)) out.series = [{ name: out.name || "", values: out.values }];
-      else if (items) { var it = asItems(items); out.labels = it.map(function (x) { return x.label; }); out.series = [{ name: out.name || "", values: it.map(function (x) { return x.value; }) }]; delete out.items; }
+    var list = Array.isArray(out.items) ? out.items : Array.isArray(out.data) ? out.data : null;
+    if (readsItems(kind)) {
+      var items = itemsOf(out, list);
+      if (items !== undefined) out.items = items;
     }
-    if ((kind === "bar" || kind === "line" || kind === "area") && Array.isArray(out.series) && !Array.isArray(out.labels) && out.series[0] && out.series[0].values) out.labels = out.series[0].values.map(function (v, i) { return String(i + 1); });
+    if (readsSeries(kind)) seriesOf(out, list);
     return out;
+  }
+  // A ring's or bar list's items: from items or data, else from labels with the first series or
+  // with values; nothing that fits leaves out.items as it was.
+  function itemsOf(out, list) {
+    if (list) return asItems(list);
+    if (!Array.isArray(out.labels)) return out.items;
+    if (Array.isArray(out.series) && out.series[0]) return out.labels.map(function (l, i) { return { label: String(l), value: Number((out.series[0].values || [])[i]) || 0 }; });
+    if (Array.isArray(out.values)) return out.labels.map(function (l, i) { return { label: String(l), value: Number(out.values[i]) || 0 }; });
+    return out.items;
+  }
+  // A bar or line chart's series: from values, else from items or data (which become the labels);
+  // a series without labels gets 1, 2, 3...
+  function seriesOf(out, list) {
+    if (!Array.isArray(out.series)) {
+      if (Array.isArray(out.values)) out.series = [{ name: out.name || "", values: out.values }];
+      else if (list) { var it = asItems(list); out.labels = it.map(function (x) { return x.label; }); out.series = [{ name: out.name || "", values: it.map(function (x) { return x.value; }) }]; delete out.items; }
+    }
+    var first = Array.isArray(out.series) && out.series[0];
+    if (first && first.values && !Array.isArray(out.labels)) out.labels = first.values.map(function (v, i) { return String(i + 1); });
   }
   // Data that has something in it but not what this chart reads: the expected shape, or "".
   function shapeProblem(kind, raw, data) {
