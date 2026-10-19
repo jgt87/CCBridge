@@ -10,6 +10,7 @@ Nothing yet.
 
 ### Fixed
 - The page check now also reports HTML markup or code shown as text inside a paragraph, link or other short-named element (`p`, `a`, `i`, `s`, `em`, `b`, `u`...). Before, those were skipped by mistake, so only markup inside elements such as a `div` was found.
+- A one-file page is no longer rewritten at every check when a UI kit file in the catalogue has Windows line endings (CRLF, for example after an editor or a git checkout saved it that way): the kit block is compared and written with the same line endings as the page.
 
 ### Changed
 - Internal clean-up with no change in behaviour, to make the code easier to read and change:

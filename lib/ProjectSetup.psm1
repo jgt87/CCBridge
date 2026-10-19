@@ -254,7 +254,10 @@ function Get-KitBlockTexts {
         $usage = Get-KitTextUsage (@($page) + @($js))
         $css = $(if ($tokens) { [IO.File]::ReadAllText($tokens).Trim() + "`n" } else { '' }) + (Select-KitCss ([IO.File]::ReadAllText($kitCss)) $usage -NoPrint:(-not (Test-UiKitPart 'print' $AppRoot))).Trim() + "`n" + (Get-KitSettingsCss $AppRoot $usage)
     }
-    $jsText = (@($js) -join "`n;`n").Replace('</script', '<\/script')
+    # LF line endings, as Read-TextFile gives the page: a kit file saved with CRLF (a git checkout, an
+    # editor) would otherwise make every fill differ from the page and rewrite it each time.
+    $jsText = (@($js) -join "`n;`n").Replace('</script', '<\/script').Replace("`r`n", "`n")
+    $css = $css.Replace("`r`n", "`n")
     @{ css = $(if ($css) { "`n$css`n" } else { '' }); js = $(if ($jsText) { "`n$jsText`n" } else { '' }); parts = $parts.ToArray(); kit = $hasCat }
 }
 

@@ -251,6 +251,10 @@ Describe 'Filling one-file pages (Update-OneFilePages)' {
             $t | Should Match '"sun"'                              # the icon the switch turns to
             $t | Should Match 'window\.salesData = '
             @(Update-OneFilePages $p $root -NoCheckpoint).files | Should BeNullOrEmpty   # nothing new
+            # A kit file saved with CRLF line endings (a git checkout, an editor) is still nothing new.
+            $charts = Join-Path (Get-UiKitCatalogPath $p) 'kit-charts.js'
+            [IO.File]::WriteAllText($charts, [IO.File]::ReadAllText($charts).Replace("`r`n", "`n").Replace("`n", "`r`n"))
+            @(Update-OneFilePages $p $root -NoCheckpoint).files | Should BeNullOrEmpty
             (Invoke-ReadAction $p @('index.html')) -join "`n" | Should Match 'not shown here, never edit these lines'
             (Invoke-ReadAction $p @('index.html')) -join "`n" | Should Not Match 'function barlist'
             Invoke-GrepAction $p 'barlist' 'index.html' | Should Match '^index\.html:\d+: KitCharts\.barlist'
