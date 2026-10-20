@@ -24,6 +24,7 @@ Nothing yet.
 - Internal clean-up with no change in behaviour: the chat transcript, action cards, the app's main screen, the chains, runbooks, review, queue, project picker, schedule, side and fetch panels, the tab and message box components, and the UI kit's `kit.js`, `kit-charts.js` and `kit-data.js` are split into named parts, with their logic in tested functions.
 
 ### Fixed
+- Windows PowerShell 5.1 started from PowerShell 7 (for example `start.cmd` from a PowerShell 7 terminal) lacks `Get-FileHash`: the install check at every start, the updater and the release build now compute SHA-256 with .NET. A repository test keeps such commands out.
 - A `.psd1` file Copilot changed was always reported as "not a valid data file" on Windows builds whose PowerShell 5.1 lacks `Import-PowerShellDataFile`. It is now read with PowerShell's own parser.
 - A page with template syntax in a link (`<%= ... %>`) or a Markdown link in angle brackets (`[x](<my notes.md>)`) made the round's file check fail, and could make an edit fail.
 - Reading a folder whose name starts with a dot (`.github/workflows`) said it had no files.

@@ -56,3 +56,22 @@ Describe 'User and machine independence' {
         @($hits) -join "`n" | Should BeNullOrEmpty
     }
 }
+
+Describe 'Commands Windows PowerShell 5.1 may not have' {
+    It 'uses no command of the 5.1 Utility script module in the app, tools and launchers' {
+        # Windows PowerShell 5.1 started from PowerShell 7 loads 7's modules, which lack these (the
+        # release build and the install check at every start stopped on Get-FileHash). Use .NET:
+        # Update Get-FileHashShared, or the parser for a .psd1 (Executor Test-ProjectConsistency).
+        $names = 'Get-FileHash', 'Import-PowerShellDataFile', 'New-TemporaryFile', 'Format-Hex', 'ConvertFrom-SddlString'
+        $files = @(Get-ChildItem (Join-Path $root 'lib'), (Join-Path $root 'tools'), (Join-Path $root 'mcp') -Recurse -File -Include *.ps1, *.psm1) + @(Get-ChildItem $root -File -Filter *.ps1)
+        $hits = foreach ($f in $files) {
+            $n = 0
+            foreach ($line in [IO.File]::ReadAllLines($f.FullName)) {
+                $n++
+                $code = ($line -split '#', 2)[0]
+                foreach ($c in $names) { if ($code -match "(?i)(^|[\s(;|])$c\b") { "$($f.FullName.Substring($root.Length + 1)):${n}: $c" } }
+            }
+        }
+        @($hits) -join "`n" | Should BeNullOrEmpty
+    }
+}

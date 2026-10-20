@@ -48,7 +48,8 @@ function Get-UpdateTouchedFiles {
 }
 
 function Get-FileHashShared([string]$Path) {
-    <# SHA-256 of a file read with full sharing (works while another program has it open for reading); $null when unreadable. #>
+    <# SHA-256 of a file read with full sharing (works while another program has it open for reading); $null when unreadable.
+       .NET directly, not the hash cmdlet: Windows PowerShell 5.1 started from PowerShell 7 loads 7's modules, which lack it. #>
     try {
         $fs = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite, Delete')
         try { $sha = [Security.Cryptography.SHA256]::Create(); [BitConverter]::ToString($sha.ComputeHash($fs)) } finally { $fs.Close() }
@@ -144,7 +145,7 @@ function New-InstallManifest {
     foreach ($f in @(Get-ChildItem -LiteralPath $base -Recurse -File -Force | Sort-Object FullName)) {
         $rel = $f.FullName.Substring($base.Length + 1).Replace('\', '/')
         if ($rel -match $script:ManifestSkip) { continue }
-        $files[$rel] = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash
+        $files[$rel] = "$(Get-FileHashShared $f.FullName)".Replace('-', '')
     }
     $json = ConvertTo-Json -InputObject ([ordered]@{ version = $Version; files = $files }) -Depth 4
     [IO.File]::WriteAllText((Join-Path $base 'manifest.json'), $json, (New-Object Text.UTF8Encoding($false)))
@@ -163,7 +164,7 @@ function Test-InstallIntegrity {
     foreach ($p in @($m.files.PSObject.Properties)) {
         $full = Join-Path $AppRoot ($p.Name.Replace('/', '\'))
         if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { $missing.Add($p.Name); continue }
-        if ((Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash -ne "$($p.Value)") { $changed.Add($p.Name) }
+        if ("$(Get-FileHashShared $full)".Replace('-', '') -ne "$($p.Value)") { $changed.Add($p.Name) }
     }
     @{ version = "$($m.version)"; missing = $missing.ToArray(); changed = $changed.ToArray() }
 }

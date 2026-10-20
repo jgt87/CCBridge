@@ -14,7 +14,7 @@ Describe 'Install-OptionalTool' {
     New-Item -ItemType Directory -Force -Path (Join-Path $src $name) | Out-Null
     [IO.File]::WriteAllText((Join-Path $src "$name\node.cmd"), "@echo v22.0.0`r`n")
     Compress-Archive -Path (Join-Path $src $name) -DestinationPath (Join-Path $src "$name.zip")
-    $hash = (Get-FileHash (Join-Path $src "$name.zip") -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes((Join-Path $src "$name.zip")))).Replace('-', '').ToLowerInvariant()
 
     It 'installs Node.js from the official zip after checking its checksum, and refuses a wrong one' {
         $env:LOCALAPPDATA = $fake

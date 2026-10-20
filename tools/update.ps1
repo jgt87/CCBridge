@@ -147,7 +147,8 @@ try {
         # The new release's updater does the install when it differs from this one, so a fix to the
         # updater itself applies with this update (not one later).
         $newUpdater = Join-Path $src.FullName 'tools\update.ps1'
-        $handOver = (Test-Path -LiteralPath $newUpdater) -and ((Get-FileHash -LiteralPath $newUpdater).Hash -ne (Get-FileHash -LiteralPath $MyInvocation.MyCommand.Path).Hash)
+        Import-Module (Join-Path $here 'lib\Update.psm1') -Force   # Get-FileHashShared
+        $handOver = (Test-Path -LiteralPath $newUpdater) -and ((Get-FileHashShared $newUpdater) -ne (Get-FileHashShared $MyInvocation.MyCommand.Path))
         if ($handOver) {
             Write-CCBLog info update "handing over to the updater of $latest"
             $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $newUpdater, '-AppRoot', $root, '-FromFolder', $src.FullName, '-Version', $latest)
