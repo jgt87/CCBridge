@@ -73,6 +73,12 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-grid--charts { grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
 .kit-grid__wide { grid-column: 1 / -1; }
 .kit-grid > * { min-width: 0; }
+/* Content stays inside its box: a long word, number or link breaks instead of running past the edge
+   of its cell, panel or card, grid cells may shrink below their content, and pictures are never
+   wider than what holds them (their height follows). */
+.kit-figures > *, .kit-bento > * { min-width: 0; }
+.kit-panel, .kit-figure, .kit-notice, .kit-board__card, .kit-bento__item, .kit-list__body, .kit-dialog, .kit-drawer, .kit-table td, .kit-table th { overflow-wrap: break-word; }
+.kit-page :where(img, video) { max-width: 100%; height: auto; }
 /* Blocks one after the other, outside a kit-stack, grid, row or toolbar (which space their parts
    themselves): the kit's gap between them, so a panel never touches the next one. */
 *:not(.kit-stack):not(.kit-grid):not(.kit-row):not(.kit-toolbar):not(.kit-figures):not(.kit-bento) > :where(.kit-panel, .kit-grid, .kit-table-wrap, .kit-notice, .kit-figures, .kit-chart, .kit-bento) + :where(.kit-panel, .kit-grid, .kit-table-wrap, .kit-notice, .kit-figures, .kit-bento) { margin-top: var(--kit-space-4); }

@@ -500,3 +500,108 @@ describe("page check: kit classes without a rule", () => {
     Element.prototype.getClientRects = rects;
   });
 });
+
+describe("kit.js menus, boards, calendars, pagers and filled cells", () => {
+  type Parts = Window & { KitUI: { calendar: (el: HTMLElement, o: unknown) => void; fillTable: (t: string, rows: unknown[], c?: unknown, o?: unknown) => number } };
+  const ui = () => (w as unknown as Parts).KitUI;
+  const press = (el: Element, key: string, more: KeyboardEventInit = {}) => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...more }));
+  it("moves through a menu with the arrow keys (wrapping round), Home and End, and closes it with Escape", async () => {
+    document.body.innerHTML = '<div class="kit-menu"><button data-kit-menu aria-expanded="false" type="button">Actions</button><div class="kit-menu__list" hidden>' +
+      '<button class="kit-menu__item" type="button">Edit</button><button class="kit-menu__item" type="button" disabled>Off</button><button class="kit-menu__item" type="button" data-value="del">Delete</button></div></div>';
+    load(kitJs);
+    await tick();
+    const btn = document.querySelector("[data-kit-menu]") as HTMLButtonElement;
+    const items = Array.from(document.querySelectorAll(".kit-menu__item")) as HTMLButtonElement[];
+    btn.click();
+    expect(document.activeElement).toBe(items[0]);
+    press(items[0], "ArrowUp");
+    expect(document.activeElement).toBe(items[2]);   // round to the last item; a disabled one is skipped
+    press(items[2], "ArrowDown");
+    expect(document.activeElement).toBe(items[0]);
+    press(items[0], "End");
+    expect(document.activeElement).toBe(items[2]);
+    press(items[2], "Escape");
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(btn);
+    let picked = "";
+    document.querySelector(".kit-menu")!.addEventListener("kit:menu", (e) => { picked = (e as CustomEvent).detail.value; });
+    btn.click();
+    items[2].click();
+    expect(picked).toBe("del");
+  });
+  it("moves a board card with Alt and the arrow keys, and only then", async () => {
+    document.body.innerHTML = '<div class="kit-board"><ul data-kit-board="todo"><li data-id="1">One</li><li data-id="2">Two</li></ul><ul data-kit-board="done"></ul></div>';
+    load(kitJs);
+    await tick();
+    const moves: string[] = [];
+    document.addEventListener("kit:move", (e) => { const d = (e as CustomEvent).detail; moves.push(d.id + ":" + d.from + ">" + d.to + "@" + d.index); });
+    const one = document.querySelector('[data-id="1"]') as HTMLElement;
+    press(one, "ArrowUp", { altKey: true });     // already at the top: nothing
+    press(one, "ArrowRight");                    // no Alt: nothing
+    press(one, "ArrowDown", { altKey: true });
+    press(one, "ArrowRight", { altKey: true });
+    press(one, "ArrowRight", { altKey: true });  // no list further right: nothing
+    expect(moves).toEqual(["1:todo>todo@1", "1:todo>done@0"]);
+    expect(one.parentElement!.getAttribute("data-kit-board")).toBe("done");
+  });
+  it("draws a calendar day with three events, +N for the rest, and its count in its name", async () => {
+    document.body.innerHTML = '<div data-kit-calendar data-month="2026-02"></div>';
+    load(kitJs);
+    await tick();
+    const cal = document.querySelector("[data-kit-calendar]") as HTMLElement;
+    const events = [1, 2, 3, 4, 5].map((n) => ({ date: "2026-02-10", title: "E" + n, tone: n === 1 ? "ok" : n === 2 ? "loud" : undefined }));
+    ui().calendar(cal, { month: "2026-02", events });
+    const day = cal.querySelector('[data-date="2026-02-10"]') as HTMLElement;
+    expect(Array.from(day.querySelectorAll(".kit-calendar__event")).map((e) => e.className + "|" + e.textContent)).toEqual([
+      "kit-calendar__event kit-calendar__event--ok|E1", "kit-calendar__event|E2", "kit-calendar__event|E3", "kit-calendar__event|+2"]);
+    expect(day.getAttribute("aria-label")).toMatch(/, 5 items$/);
+    expect(cal.querySelectorAll(".kit-calendar__dow").length).toBe(7);
+    let month = "";
+    cal.addEventListener("kit:month", (e) => { month = (e as CustomEvent).detail.month; });
+    (cal.querySelector('[data-step="1"]') as HTMLButtonElement).click();
+    expect(month).toBe("2026-03");
+  });
+  it("pages a table with external rows by data-kit-total and data-kit-page", async () => {
+    document.body.innerHTML = '<table class="kit-table" id="x" data-kit-sort data-kit-pages="10" data-kit-rows="external" data-kit-total="35"><thead><tr><th>Name</th></tr></thead><tbody><tr><td>a</td></tr></tbody></table>';
+    load(kitJs);
+    await tick();
+    const t = document.getElementById("x") as HTMLTableElement;
+    const info = () => document.querySelector(".kit-pager__info")!.textContent;
+    expect(info()).toBe("Page 1 of 4, 35 rows");
+    const pages: string[] = [];
+    t.addEventListener("kit:page", (e) => { const d = (e as CustomEvent).detail; pages.push(d.page + ":" + d.start + "-" + d.end); });
+    (document.querySelectorAll(".kit-pager button")[1] as HTMLButtonElement).click();
+    expect(pages).toEqual(["2:10-20"]);
+    t.setAttribute("data-kit-page", "4");
+    await tick();
+    expect(info()).toBe("Page 4 of 4, 35 rows");
+    expect((document.querySelectorAll(".kit-pager button")[1] as HTMLButtonElement).disabled).toBe(true);
+  });
+  it("fills cells from columns given in code: a format function, missing values and a date's sort value", async () => {
+    document.body.innerHTML = '<table id="g"><tbody></tbody></table>';
+    load(kitJs);
+    await tick();
+    const n = ui().fillTable("#g", [{ a: 5, d: "2026-01-02" }, { a: null, d: "" }], [{ key: "a", format: (v: unknown) => "<" + v + ">" }, { key: "a", missing: "?" }, { key: "d", format: "date" }]);
+    expect(n).toBe(2);
+    const rows = Array.from((document.getElementById("g") as HTMLTableElement).tBodies[0].rows).filter((r) => !r.hasAttribute("data-kit-empty"));
+    expect(rows.map((r) => Array.from(r.cells).map((c) => c.className + "|" + c.textContent + "|" + (c.getAttribute("data-sort") ?? "none")))).toEqual([
+      ["|<5>|none", "kit-num|5|5", "|2 Jan 2026|2026-01-02"],   // a format function of its own: not a number column
+      ["|<null>|none", "|?|none", "|-|"]]);
+  });
+});
+
+describe("kit-charts.js bar charts with a line series", () => {
+  it("draws a line series over the bars, on its own axis at the right, named so in the legend", () => {
+    const host = document.createElement("div");
+    document.body.innerHTML = "";
+    document.body.appendChild(host);
+    if (!w.KitCharts) load(chartsJs);
+    w.KitCharts.bar(host, { labels: ["Mon", "Tue", "Wed"], series: [{ name: "Rides", values: [3, 5, 4] }, { name: "Total", type: "line", axis: "right", values: [3, 8, 12] }] });
+    expect(host.querySelectorAll(".kit-chart__bar").length).toBe(3);
+    expect(host.querySelectorAll(".kit-chart__path").length).toBe(1);
+    expect(host.querySelectorAll(".kit-chart__dot").length).toBe(3);
+    expect(host.textContent).toContain("Total (right axis)");
+    const right = Array.from(host.querySelectorAll("text.kit-chart__label")).filter((t) => (t as SVGTextElement).style.fill);
+    expect(right.length).toBeGreaterThan(1);   // the right axis's values, in the line's colour
+  });
+});

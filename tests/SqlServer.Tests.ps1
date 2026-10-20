@@ -35,6 +35,14 @@ Describe 'Which database queries run' {
         Test-DbQuery "SELECT 1 EXEC('drop table x')" | Should Match 'EXEC'
         (Invoke-DbQuery ([pscustomobject]@{ server = 's'; database = 'd' }) 'UPDATE x SET y = 1' -Run { throw 'must not run' }).error | Should Match 'only SELECT'
     }
+    It 'reads comments, strings and quoted names in one pass, so none of them hides a second statement' {
+        # A quote inside a bracketed name, and -- or /* inside a string, as SQL Server reads them.
+        Test-DbQuery "SELECT [a'] FROM t; EXEC xp_cmdshell 'dir' --'" | Should Match 'one statement|EXEC'
+        Test-DbQuery "SELECT '--', 1`n; EXEC xp_cmdshell 'dir'" | Should Match 'one statement|EXEC'
+        Test-DbQuery "SELECT '/*' ; EXEC xp_cmdshell 'dir' -- */" | Should Match 'one statement|EXEC'
+        Test-DbQuery "SELECT [x;y], 'a;b' FROM t -- ; drop`n/* ; drop */" | Should BeNullOrEmpty
+        Test-DbQuery 'SELECT "insert" FROM t' | Should BeNullOrEmpty
+    }
     It 'saves a result as CSV in Source/Database and keeps the query for a refresh' {
         $res = Invoke-DbQuery ([pscustomobject]@{ server = 's'; database = 'd' }) 'SELECT Region, Amount FROM dbo.Sales' -Run { param($cs, $sql, $max) [pscustomobject]@{ ok = $true; columns = @('Region', 'Amount'); rows = @(, @('North, east', 1250.5)) + @(, @($null, 3)); count = 2; truncated = $false } }
         $res.ok | Should Be $true
@@ -53,6 +61,9 @@ Describe 'Which database queries run' {
         $t | Should Match 'ApplicationIntent'
         $t | Should Match 'Rollback'
         $t | Should Match 'openrowset'
+        # The same one-pass reading of comments, strings and quoted names as Test-DbQuery.
+        $t | Should Match 'comments, strings and quoted names in one pass'
+        $t | Should Match ([regex]::Escape('|\[[^\]]*\]|"[^"]*"'))
     }
 }
 

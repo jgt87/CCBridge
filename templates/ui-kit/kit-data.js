@@ -67,29 +67,38 @@
     return best;
   }
 
+  // One character inside quotes: "" is a quote, a lone " ends the quoted part. Returns the next index.
+  function quotedStep(text, i, st) {
+    if (text[i] !== '"') { st.field += text[i]; return i + 1; }
+    if (text[i + 1] === '"') { st.field += '"'; return i + 2; }
+    st.quoted = false;
+    return i + 1;
+  }
+
+  // A line that held a delimiter or a quote counts, even with empty fields; a blank line does not.
+  function lineHasContent(st) { return st.any || st.row.length > 1 || st.row[0] !== ""; }
+
+  function endLine(st, rows) {
+    st.row.push(st.field);
+    if (lineHasContent(st)) rows.push(st.row);
+    st.row = []; st.field = ""; st.any = false;
+  }
+
   function splitCsv(text, delimiter) {
     // Rows of fields: quoted fields, "" inside quotes, line breaks inside quotes; blank lines skipped.
-    var rows = [], row = [], field = "", i = 0, quoted = false, n = text.length, any = false;
+    var rows = [], st = { row: [], field: "", quoted: false, any: false }, i = 0, n = text.length;
     while (i < n) {
       var ch = text[i];
-      if (quoted) {
-        if (ch === '"') {
-          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
-          quoted = false; i++; continue;
-        }
-        field += ch; i++; continue;
-      }
-      if (ch === '"' && field === "") { quoted = true; any = true; i++; continue; }
-      if (ch === delimiter) { row.push(field); field = ""; any = true; i++; continue; }
-      if (ch === "\r" || ch === "\n") {
+      if (st.quoted) { i = quotedStep(text, i, st); continue; }
+      if (ch === '"' && st.field === "") { st.quoted = true; st.any = true; }
+      else if (ch === delimiter) { st.row.push(st.field); st.field = ""; st.any = true; }
+      else if (ch === "\r" || ch === "\n") {
         if (ch === "\r" && text[i + 1] === "\n") i++;
-        row.push(field);
-        if (any || row.length > 1 || row[0] !== "") rows.push(row);
-        row = []; field = ""; any = false; i++; continue;
-      }
-      field += ch; any = true; i++;
+        endLine(st, rows);
+      } else { st.field += ch; st.any = true; }
+      i++;
     }
-    if (field !== "" || row.length || any) { row.push(field); rows.push(row); }
+    if (st.field !== "" || st.row.length || st.any) { st.row.push(st.field); rows.push(st.row); }
     return rows;
   }
 
@@ -110,39 +119,49 @@
   var ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
   var DMY = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{4})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
 
+  // What the values seen so far still allow: a number with either decimal mark, a boolean, an ISO date
+  // or a day/month date (with whether a day or a month went past 12, and whether only dots separate).
+  function newGuess() { return { dot: true, comma: true, bool: true, iso: true, dmy: true, dayFirst: false, monthFirst: false, dots: true }; }
+
+  function anyTypeLeft(g) { return g.dot || g.comma || g.bool || g.iso || g.dmy; }
+
+  function guessDmy(g, v) {
+    var m = DMY.exec(v);
+    if (!m) { g.dmy = false; return; }
+    if (+m[1] > 12) g.dayFirst = true;
+    if (+m[3] > 12) g.monthFirst = true;
+    if (m[2] !== ".") g.dots = false;
+  }
+
+  function guessValue(g, v) {
+    if (g.dot && !DOT.test(v)) g.dot = false;
+    if (g.comma && !COMMA.test(v)) g.comma = false;
+    if (/^[-+]?0\d/.test(v)) { g.dot = false; g.comma = false; }   // a leading zero is a code: text
+    if (g.bool && !/^(true|false)$/i.test(v)) g.bool = false;
+    if (g.iso && !ISO.test(v)) g.iso = false;
+    if (g.dmy) guessDmy(g, v);
+  }
+
+  // Day first when a day went past 12, or nothing did and only dots separate (31.12.2024 style);
+  // month first when a month went past 12; null when both did, or neither and slashes leave it open.
+  function dmyOrder(g) {
+    if (g.dayFirst && g.monthFirst) return null;
+    if (g.dayFirst || (!g.monthFirst && g.dots)) return "dmy";
+    return g.monthFirst ? "mdy" : null;
+  }
+
   function columnType(values, delimiter) {
     var vals = values.filter(function (v) { return !MISSING.test(v); });
     if (!vals.length) return { type: "text" };
-    var dot = true, comma = true, bool = true, iso = true, dmy = true, dayFirst = false, monthFirst = false, dots = true;
-    for (var i = 0; i < vals.length; i++) {
-      var v = vals[i];
-      if (dot && !DOT.test(v)) dot = false;
-      if (comma && !COMMA.test(v)) comma = false;
-      if (/^[-+]?0\d/.test(v)) { dot = false; comma = false; }
-      if (bool && !/^(true|false)$/i.test(v)) bool = false;
-      if (iso && !ISO.test(v)) iso = false;
-      if (dmy) {
-        var m = DMY.exec(v);
-        if (!m) dmy = false;
-        else {
-          if (+m[1] > 12) dayFirst = true;
-          if (+m[3] > 12) monthFirst = true;
-          if (m[2] !== ".") dots = false;
-        }
-      }
-      if (!(dot || comma || bool || iso || dmy)) break;
-    }
-    if (dot && comma) { if (delimiter === ";") dot = false; else comma = false; }
-    if (dot) return { type: "number", decimal: "." };
-    if (comma) return { type: "number", decimal: "," };
-    if (bool) return { type: "boolean" };
-    if (iso) return { type: "date", order: "iso" };
-    if (dmy) {
-      if (dayFirst && monthFirst) return { type: "text" };
-      if (dayFirst || (!monthFirst && dots)) return { type: "date", order: "dmy" };
-      if (monthFirst) return { type: "date", order: "mdy" };
-    }
-    return { type: "text" };
+    var g = newGuess();
+    for (var i = 0; i < vals.length && anyTypeLeft(g); i++) guessValue(g, vals[i]);
+    if (g.dot && g.comma) { if (delimiter === ";") g.dot = false; else g.comma = false; }
+    if (g.dot) return { type: "number", decimal: "." };
+    if (g.comma) return { type: "number", decimal: "," };
+    if (g.bool) return { type: "boolean" };
+    if (g.iso) return { type: "date", order: "iso" };
+    var order = g.dmy ? dmyOrder(g) : null;
+    return order ? { type: "date", order: order } : { type: "text" };
   }
 
   function pad(n, w) { n = String(n); while (n.length < (w || 2)) n = "0" + n; return n; }
@@ -300,11 +319,13 @@
     });
     var xfs = elements(stylesXml, "cellXfs")[0];
     if (xfs) elements(xfs.inner, "xf").forEach(function (xf, i) {
-      var id = +xf.attrs.numFmtId;
-      if ((id >= 14 && id <= 22) || (id >= 45 && id <= 47) || custom[xf.attrs.numFmtId]) set[i] = true;
+      if (isBuiltInDateFormat(+xf.attrs.numFmtId) || custom[xf.attrs.numFmtId]) set[i] = true;
     });
     return set;
   }
+
+  // Excel's built-in date and time formats: 14-22 and 45-47.
+  function isBuiltInDateFormat(id) { return (id >= 14 && id <= 22) || (id >= 45 && id <= 47); }
 
   function serialToText(num, date1904) {
     var ms = Math.round((num + (date1904 ? 1462 : 0) - 25569) * 86400000);
@@ -313,6 +334,47 @@
     if (num === Math.floor(num)) return day;
     if (num < 1) return time;
     return day + "T" + time;
+  }
+
+  // A cell's text by its type: shared string, inline string, boolean, error (empty) or the value itself.
+  function cellText(c, t, shared) {
+    var vm = /<(?:[\w-]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?v>/.exec(c.inner), v = vm ? unescapeXml(vm[1]) : "";
+    if (t === "s") return shared[+v] || "";
+    if (t === "inlineStr") return textRuns(c.inner, "t");
+    if (t === "b") return v === "1" ? "TRUE" : "FALSE";
+    if (t === "e") return "";
+    return v;
+  }
+
+  // A number in a cell whose style is a date format: a date serial.
+  function isDateSerial(c, t, val, dates) {
+    var numeric = t === "" || t === "n";
+    return val !== "" && numeric && !!c.attrs.s && !!dates[+c.attrs.s] && !isNaN(+val);
+  }
+
+  function rowValues(row, book) {
+    var cells = [], max = -1;
+    elements(row.inner, "c").forEach(function (c) {
+      var t = c.attrs.t || "", val = cellText(c, t, book.shared);
+      if (isDateSerial(c, t, val, book.dates)) val = serialToText(+val, book.date1904);
+      if (val === "") return;
+      var i = c.attrs.r ? colIndex(c.attrs.r) : max + 1;
+      cells[i] = val;
+      if (i > max) max = i;
+    });
+    if (max < 0) return null;
+    var r = [];
+    for (var k = 0; k <= max; k++) r.push(cells[k] == null ? "" : cells[k]);
+    return r;
+  }
+
+  function sheetRows(xml, book) {
+    var rows = [];
+    elements(xml, "row").forEach(function (row) {
+      var r = rowValues(row, book);
+      if (r) rows.push(r);
+    });
+    return rows;
   }
 
   function readXlsx(buffer) {
@@ -328,31 +390,10 @@
         var target = map[s.attrs["r:id"] || s.attrs.id];
         return target ? zip.text(target.part).then(function (x) { return { name: s.attrs.name, xml: x }; }) : null;
       })).then(function (list) {
-        var out = [];
+        var book = { shared: shared, dates: dates, date1904: date1904 }, out = [];
         list.forEach(function (sh) {
           if (!sh || !sh.xml) return;
-          var rows = [];
-          elements(sh.xml, "row").forEach(function (row) {
-            var cells = [], max = -1;
-            elements(row.inner, "c").forEach(function (c) {
-              var t = c.attrs.t || "", vm = /<(?:[\w-]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?v>/.exec(c.inner), v = vm ? unescapeXml(vm[1]) : "";
-              var val;
-              if (t === "s") val = shared[+v] || "";
-              else if (t === "inlineStr") val = textRuns(c.inner, "t");
-              else if (t === "b") val = v === "1" ? "TRUE" : "FALSE";
-              else if (t === "e") val = "";
-              else val = v;
-              if (val !== "" && (t === "" || t === "n") && c.attrs.s && dates[+c.attrs.s] && !isNaN(+val)) val = serialToText(+val, date1904);
-              if (val === "") return;
-              var i = c.attrs.r ? colIndex(c.attrs.r) : max + 1;
-              cells[i] = val;
-              if (i > max) max = i;
-            });
-            if (max < 0) return;
-            var r = [];
-            for (var k = 0; k <= max; k++) r.push(cells[k] == null ? "" : cells[k]);
-            rows.push(r);
-          });
+          var rows = sheetRows(sh.xml, book);
           if (rows.length) out.push(toTable(rows, ",", sh.name));
         });
         return { kind: "table", sheets: out, rows: out.length ? out[0].rows : [] };
@@ -362,36 +403,48 @@
 
   /* ---- Word ------------------------------------------------------------------------------ */
 
+  // Heading levels by style id: "heading N" styles, and "title" as level 1.
+  function headingLevels(stylesXml) {
+    var levels = {};
+    if (stylesXml) elements(stylesXml, "style").forEach(function (s) {
+      var nm = /<(?:[\w-]+:)?name\b[^>]*?val="([^"]*)"/.exec(s.inner), name = nm ? nm[1].toLowerCase() : "";
+      var m = /^heading (\d)$/.exec(name);
+      if (m) levels[s.attrs.styleId] = +m[1];
+      else if (name === "title") levels[s.attrs.styleId] = 1;
+    });
+    return levels;
+  }
+
+  // Tab stops in the paragraph properties and field codes or deleted text are not text.
+  function paraText(x) { return textRuns(x.replace(/<(?:[\w-]+:)?(pPr|instrText|delText)\b[\s\S]*?<\/(?:[\w-]+:)?\1>/g, ""), "t"); }
+
+  function docTable(x) {
+    var rows = elements(x, "tr").map(function (tr) {
+      return elements(tr.inner, "tc").map(function (tc) { return elements(tc.inner, "p").map(function (pp) { return paraText(pp.inner); }).join("\n").trim(); });
+    });
+    return { type: "table", rows: rows };
+  }
+
+  // A paragraph as a heading or a paragraph block, or null when it has no text.
+  function docParagraph(x, levels) {
+    var text = paraText(x).trim();
+    if (!text) return null;
+    var sm = /<(?:[\w-]+:)?pStyle\b[^>]*?val="([^"]*)"/.exec(x), style = sm ? sm[1] : "";
+    var level = levels[style] || (/^Heading(\d)$/i.exec(style) || [])[1];
+    if (level) return { type: "heading", level: +level, text: text };
+    return { type: "paragraph", text: text, list: /<(?:[\w-]+:)?numPr\b/.test(x) };
+  }
+
   function readDocx(buffer) {
     var zip = readZip(buffer);
     return Promise.all([zip.text("word/document.xml"), zip.text("word/styles.xml")]).then(function (p) {
       if (!p[0]) throw new Error("No word/document.xml: not a Word document");
-      var levels = {};
-      if (p[1]) elements(p[1], "style").forEach(function (s) {
-        var nm = /<(?:[\w-]+:)?name\b[^>]*?val="([^"]*)"/.exec(s.inner), name = nm ? nm[1].toLowerCase() : "";
-        var m = /^heading (\d)$/.exec(name);
-        if (m) levels[s.attrs.styleId] = +m[1];
-        else if (name === "title") levels[s.attrs.styleId] = 1;
-      });
+      var levels = headingLevels(p[1]);
       var body = (/<(?:[\w-]+:)?body\b[^>]*>([\s\S]*)<\/(?:[\w-]+:)?body>/.exec(p[0]) || [, p[0]])[1];
       var blocks = [], re = /<(?:[\w-]+:)?tbl\b[\s\S]*?<\/(?:[\w-]+:)?tbl>|<(?:[\w-]+:)?p\b[^>]*\/>|<(?:[\w-]+:)?p\b[^>]*>[\s\S]*?<\/(?:[\w-]+:)?p>/g, m;
-      // Tab stops in the paragraph properties and field codes or deleted text are not text.
-      function paraText(x) { return textRuns(x.replace(/<(?:[\w-]+:)?(pPr|instrText|delText)\b[\s\S]*?<\/(?:[\w-]+:)?\1>/g, ""), "t"); }
       while ((m = re.exec(body))) {
-        var x = m[0];
-        if (/^<(?:[\w-]+:)?tbl\b/.test(x)) {
-          var rows = elements(x, "tr").map(function (tr) {
-            return elements(tr.inner, "tc").map(function (tc) { return elements(tc.inner, "p").map(function (pp) { return paraText(pp.inner); }).join("\n").trim(); });
-          });
-          blocks.push({ type: "table", rows: rows });
-          continue;
-        }
-        var text = paraText(x).trim();
-        if (!text) continue;
-        var sm = /<(?:[\w-]+:)?pStyle\b[^>]*?val="([^"]*)"/.exec(x), style = sm ? sm[1] : "";
-        var level = levels[style] || (/^Heading(\d)$/i.exec(style) || [])[1];
-        if (level) blocks.push({ type: "heading", level: +level, text: text });
-        else blocks.push({ type: "paragraph", text: text, list: /<(?:[\w-]+:)?numPr\b/.test(x) });
+        var block = /^<(?:[\w-]+:)?tbl\b/.test(m[0]) ? docTable(m[0]) : docParagraph(m[0], levels);
+        if (block) blocks.push(block);
       }
       var plain = blocks.map(function (b) { return b.type === "table" ? b.rows.map(function (r) { return r.join("\t"); }).join("\n") : b.text; }).join("\n\n");
       return { kind: "document", blocks: blocks, text: plain };
@@ -400,14 +453,19 @@
 
   /* ---- PowerPoint ------------------------------------------------------------------------ */
 
+  // Slide number, date, footer and the notes page's slide picture are not slide text.
+  var NOT_TEXT_PLACEHOLDERS = ["sldNum", "dt", "ftr", "sldImg"];
+
+  function isTitlePlaceholder(type) { return type === "title" || type === "ctrTitle"; }
+
   function shapeLines(xml) {
     var lines = [], title = "";
     elements(xml, "sp").forEach(function (sp) {
       var ph = /<(?:[\w-]+:)?ph\b[^>]*?type="([^"]*)"/.exec(sp.inner), type = ph ? ph[1] : "";
-      if (type === "sldNum" || type === "dt" || type === "ftr" || type === "sldImg") return;
+      if (NOT_TEXT_PLACEHOLDERS.indexOf(type) >= 0) return;
       var paras = elements(sp.inner, "p").map(function (pp) { return textRuns(pp.inner, "t").trim(); }).filter(Boolean);
       if (!paras.length) return;
-      if ((type === "title" || type === "ctrTitle") && !title) title = paras.join(" ");
+      if (isTitlePlaceholder(type) && !title) title = paras.join(" ");
       else lines.push.apply(lines, paras);
     });
     return { title: title, lines: lines };

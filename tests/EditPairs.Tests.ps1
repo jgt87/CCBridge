@@ -160,6 +160,11 @@ Describe 'Moving code to another file (Test-MoveOrder)' {
         $out = Invoke-EditAction $proj 'index.html' @(@{ search = "<style>`n$css`n</style>"; replace = '' }) $null
         $out | Should Match '^edited index\.html'
     }
+    It 'does not take a template expression in a link for a file (characters a path cannot hold)' {
+        [IO.File]::WriteAllText((Join-Path $proj 'index.html'), $page)
+        $out = Invoke-EditAction $proj 'index.html' @(@{ search = "<style>`n$css`n</style>"; replace = '<link rel="stylesheet" href="<%= theme %>">' }) $null
+        $out | Should Match '^edited index\.html'
+    }
     Remove-Item $proj -Recurse -Force
 }
 Describe 'Long blocks: SEARCH shortened with ..., and half blocks' {

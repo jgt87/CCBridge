@@ -56,10 +56,10 @@
 <section id="buttons">
   <h2 class="kit-h2">Buttons</h2>
   <div class="kit-row">
-    <button class="kit-btn kit-btn--primary" type="button">Save</button>
+    <button class="kit-btn kit-btn--primary" type="button"><span data-kit-icon="save" aria-hidden="true"></span>Save</button>
     <button class="kit-btn" type="button">Cancel</button>
     <button class="kit-btn kit-btn--ghost" type="button">More</button>
-    <button class="kit-btn kit-btn--danger" type="button">Delete</button>
+    <button class="kit-btn kit-btn--danger" type="button"><span data-kit-icon="trash-2" aria-hidden="true"></span>Delete</button>
     <button class="kit-btn kit-btn--sm" type="button">Small</button>
     <!-- While an action runs: aria-busy="true" on the button (a spinner takes the place of its text, no
          clicks); a form that saves gets <fieldset disabled> around its fields. -->
@@ -133,7 +133,7 @@
     <label class="kit-check"><input type="checkbox" checked> Send me a copy</label>
     <div class="kit-form__actions">
       <button class="kit-btn" type="reset">Reset</button>
-      <button class="kit-btn kit-btn--primary" type="submit">Save</button>
+      <button class="kit-btn kit-btn--primary" type="submit"><span data-kit-icon="save" aria-hidden="true"></span>Save</button>
     </div>
   </form>
 </section>
@@ -226,7 +226,7 @@
   <h2 class="kit-h2">Page with side navigation and a panel</h2>
   <div class="kit-split">
     <div class="kit-panel">
-      <div class="kit-panel__head"><h3 class="kit-panel__title">Overview</h3><button class="kit-btn kit-btn--sm" type="button">Export</button></div>
+      <div class="kit-panel__head"><h3 class="kit-panel__title">Overview</h3><button class="kit-btn kit-btn--sm" type="button"><span data-kit-icon="download" aria-hidden="true"></span>Export</button></div>
       <!-- kit-figures: key numbers as compact label + value, not big hero numbers; a share as a bar
            under it: kit-progress kit-figure__bar, with --ok, --warn or --error for what it means -->
       <div class="kit-figures">
@@ -274,10 +274,10 @@
 <section id="notices">
   <h2 class="kit-h2">Notices</h2>
   <div class="kit-stack">
-    <div class="kit-notice"><div><p class="kit-notice__title">Note</p>The data was updated an hour ago.</div></div>
-    <div class="kit-notice kit-notice--ok"><div>All items were saved.</div></div>
-    <div class="kit-notice kit-notice--warn"><div>Three items have no owner.</div></div>
-    <div class="kit-notice kit-notice--error"><div><p class="kit-notice__title">Could not load the data</p>Check the file and try again.</div></div>
+    <div class="kit-notice"><span data-kit-icon="info" aria-hidden="true"></span><div><p class="kit-notice__title">Note</p>The data was updated an hour ago.</div></div>
+    <div class="kit-notice kit-notice--ok"><span data-kit-icon="circle-check" aria-hidden="true"></span><div>All items were saved.</div></div>
+    <div class="kit-notice kit-notice--warn"><span data-kit-icon="triangle-alert" aria-hidden="true"></span><div>Three items have no owner.</div></div>
+    <div class="kit-notice kit-notice--error"><span data-kit-icon="circle-x" aria-hidden="true"></span><div><p class="kit-notice__title">Could not load the data</p>Check the file and try again.</div></div>
   </div>
 </section>
 
@@ -285,9 +285,10 @@
 <section id="empty">
   <h2 class="kit-h2">Empty state</h2>
   <div class="kit-panel kit-empty">
+    <span data-kit-icon="inbox" aria-hidden="true"></span>
     <p class="kit-empty__title">No items yet</p>
     <p>Add the first item to see it here.</p>
-    <button class="kit-btn kit-btn--primary" type="button">New item</button>
+    <button class="kit-btn kit-btn--primary" type="button"><span data-kit-icon="plus" aria-hidden="true"></span>New item</button>
   </div>
 </section>
 
@@ -304,7 +305,7 @@
     <p class="kit-muted">This cannot be undone.</p>
     <div class="kit-dialog__actions">
       <button class="kit-btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
-      <button class="kit-btn kit-btn--danger" type="button" onclick="this.closest('dialog').close()">Delete</button>
+      <button class="kit-btn kit-btn--danger" type="button" onclick="this.closest('dialog').close()"><span data-kit-icon="trash-2" aria-hidden="true"></span>Delete</button>
     </div>
   </dialog>
 </section>
@@ -313,7 +314,7 @@
 <section id="boxes">
   <h2 class="kit-h2">Confirm, alert and popover</h2>
   <div class="kit-row">
-    <button class="kit-btn kit-btn--danger" type="button" id="ex-confirm">Delete 3 items</button>
+    <button class="kit-btn kit-btn--danger" type="button" id="ex-confirm"><span data-kit-icon="trash-2" aria-hidden="true"></span>Delete 3 items</button>
     <button class="kit-btn" type="button" id="ex-alert">Show a message</button>
     <span class="kit-small kit-muted" id="ex-box-result" aria-live="polite"></span>
     <span class="kit-toolbar__spacer"></span>
@@ -415,7 +416,7 @@ GROUP BY station;</pre>
   <div class="kit-row">
     <button class="kit-btn kit-btn--hold" data-kit-hold="1500" type="button">Hold to delete</button>
     <!-- command button: a kit-btn with its shortcut in a kit-kbd -->
-    <button class="kit-btn" type="button">Search <kbd class="kit-kbd">Ctrl+K</kbd></button>
+    <button class="kit-btn" type="button"><span data-kit-icon="search" aria-hidden="true"></span>Search <kbd class="kit-kbd">Ctrl+K</kbd></button>
   </div>
 </section>
 
@@ -473,9 +474,9 @@ GROUP BY station;</pre>
   <div class="kit-composer">
     <textarea aria-label="Message" placeholder="Write a message"></textarea>
     <div class="kit-composer__actions">
-      <button class="kit-btn kit-btn--ghost kit-btn--sm" type="button">Attach</button>
+      <button class="kit-btn kit-btn--ghost kit-btn--sm" type="button"><span data-kit-icon="paperclip" aria-hidden="true"></span>Attach</button>
       <span class="kit-toolbar__spacer"></span>
-      <button class="kit-btn kit-btn--primary kit-btn--sm" type="button">Send</button>
+      <button class="kit-btn kit-btn--primary kit-btn--sm" type="button"><span data-kit-icon="send" aria-hidden="true"></span>Send</button>
     </div>
   </div>
 </section>
@@ -624,7 +625,7 @@ GROUP BY station;</pre>
           </select>
         </div>
         <span class="kit-toolbar__spacer"></span>
-        <button class="kit-btn" type="button" id="kit-dash-reset">Reset filters</button>
+        <button class="kit-btn" type="button" id="kit-dash-reset"><span data-kit-icon="rotate-ccw" aria-hidden="true"></span>Reset filters</button>
       </div>
       <p class="kit-help">Click a bar, a ring part or a row to filter every chart; click it again, or its chip, to remove the filter.</p>
       <div class="kit-chips" id="kit-dash-chips"></div>
@@ -694,10 +695,10 @@ GROUP BY station;</pre>
       <table class="kit-table kit-table--sticky-first" id="kit-stations" data-kit-sort>
         <thead><tr><th>Station</th><th class="kit-num">Rentals</th><th class="kit-num">Share</th><th data-kit-nosort>Details</th></tr></thead>
         <tbody>
-          <tr><td>Central</td><td class="kit-num">5,210</td><td class="kit-num">41.7%</td><td><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-kit-open="kit-station-panel">Details</button></td></tr>
-          <tr><td>Harbour</td><td class="kit-num">3,105</td><td class="kit-num">24.9%</td><td><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-kit-open="kit-station-panel">Details</button></td></tr>
-          <tr><td>Park</td><td class="kit-num">2,640</td><td class="kit-num">21.2%</td><td><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-kit-open="kit-station-panel">Details</button></td></tr>
-          <tr><td>Station</td><td class="kit-num">1,525</td><td class="kit-num">12.2%</td><td><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-kit-open="kit-station-panel">Details</button></td></tr>
+          <tr><td>Central</td><td class="kit-num">5,210</td><td class="kit-num">41.7%</td><td><button class="kit-btn kit-btn--sm kit-btn--ghost kit-btn--icon" type="button" data-kit-open="kit-station-panel" aria-label="Details for Central"><span data-kit-icon="eye" aria-hidden="true"></span></button></td></tr>
+          <tr><td>Harbour</td><td class="kit-num">3,105</td><td class="kit-num">24.9%</td><td><button class="kit-btn kit-btn--sm kit-btn--ghost kit-btn--icon" type="button" data-kit-open="kit-station-panel" aria-label="Details for Harbour"><span data-kit-icon="eye" aria-hidden="true"></span></button></td></tr>
+          <tr><td>Park</td><td class="kit-num">2,640</td><td class="kit-num">21.2%</td><td><button class="kit-btn kit-btn--sm kit-btn--ghost kit-btn--icon" type="button" data-kit-open="kit-station-panel" aria-label="Details for Park"><span data-kit-icon="eye" aria-hidden="true"></span></button></td></tr>
+          <tr><td>Station</td><td class="kit-num">1,525</td><td class="kit-num">12.2%</td><td><button class="kit-btn kit-btn--sm kit-btn--ghost kit-btn--icon" type="button" data-kit-open="kit-station-panel" aria-label="Details for Station"><span data-kit-icon="eye" aria-hidden="true"></span></button></td></tr>
           <tr data-kit-empty hidden><td colspan="4"><div class="kit-empty"><p class="kit-empty__title">No stations match</p>Clear the search to see all stations.</div></td></tr>
         </tbody>
         <tfoot class="kit-table__total"><tr><td>Total</td><td class="kit-num">12,480</td><td class="kit-num">100%</td><td></td></tr></tfoot>
@@ -767,10 +768,10 @@ GROUP BY station;</pre>
       <button class="kit-btn" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false">Actions</button>
       <div class="kit-menu__list" role="menu" hidden>
         <div class="kit-menu__head">Ann Smith<span class="kit-small kit-muted">ann@example.org</span></div>
-        <button class="kit-menu__item" role="menuitem" type="button" data-value="edit">Edit</button>
-        <button class="kit-menu__item" role="menuitem" type="button" data-value="copy">Make a copy</button>
+        <button class="kit-menu__item" role="menuitem" type="button" data-value="edit"><span data-kit-icon="pencil" aria-hidden="true"></span>Edit</button>
+        <button class="kit-menu__item" role="menuitem" type="button" data-value="copy"><span data-kit-icon="copy" aria-hidden="true"></span>Make a copy</button>
         <hr class="kit-menu__sep">
-        <button class="kit-menu__item kit-menu__item--danger" role="menuitem" type="button" data-value="delete">Delete</button>
+        <button class="kit-menu__item kit-menu__item--danger" role="menuitem" type="button" data-value="delete"><span data-kit-icon="trash-2" aria-hidden="true"></span>Delete</button>
       </div>
     </div>
   </div>
@@ -824,7 +825,7 @@ GROUP BY station;</pre>
 <section id="print">
   <h2 class="kit-h2">Printing</h2>
   <p class="kit-print-only">Printed from the examples page.</p>
-  <div class="kit-toolbar"><button class="kit-btn" type="button" data-kit-print>Print this page</button></div>
+  <div class="kit-toolbar"><button class="kit-btn" type="button" data-kit-print><span data-kit-icon="printer" aria-hidden="true"></span>Print this page</button></div>
 </section>
 <!-- /kit-part:print -->
 

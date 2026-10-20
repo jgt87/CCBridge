@@ -307,6 +307,8 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/response-mode$' {
+            # Saved in harness.local.json like any setting: the StreamHub page only.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             $b = Read-JsonBody $Ctx
             $v = [string]$b.value
             # pick:PATH = an entry read from Copilot's picker (Advanced reasoning, GPT > a model).
@@ -725,6 +727,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ ok = $true; path = $rel }
         }
         '^POST /api/workiq$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             $b = Read-JsonBody $Ctx
             if (@('on', 'off', 'leave') -notcontains $b.value) { throw "Work IQ must be on, off or leave" }
             $State.WorkIq = [string]$b.value; $State.WorkIqWarned = $false
@@ -993,10 +996,13 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ ok = $true; project = $proj; steps = @($run.steps).Count }
         }
         '^POST /api/project/show$' {
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             if ($State.ProjectRoot -and (Test-Path -LiteralPath $State.ProjectRoot)) { Start-Process explorer.exe "`"$($State.ProjectRoot)`"" }
             return Send-Json $Ctx @{ ok = $true }
         }
         '^POST /api/diagnostics/show$' {
+            # Opens Explorer on a path the caller names: the StreamHub page only.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             $b = Read-JsonBody $Ctx
             if ($b.path -and (Test-Path -LiteralPath $b.path)) { Start-Process explorer.exe "/select,`"$($b.path)`"" }
             return Send-Json $Ctx @{ ok = $true }

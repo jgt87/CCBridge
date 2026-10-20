@@ -49,7 +49,7 @@ describe("page check: what the page shows", () => {
       '<div data-kit-chart="ring" data-kit-shape-error>Expected a list of items</div>' +
       "<table><caption>Empty list</caption><thead><tr><th>Name</th></tr></thead><tbody></tbody></table>" +
       "<table><caption>People</caption><thead><tr><th>Name</th><th>Share</th><th>Joined</th><th>Bar</th></tr></thead><tbody>" +
-      '<tr><td>Ann</td><td>40%</td><td>2026-07-16</td><td><div data-w="200" data-h="10" style="padding: 0; background: #eee"><div data-w="100" data-h="10" style="background: red"></div></div></td></tr>' +
+      '<tr><td>Ann</td><td>40%</td><td>2026-07-16</td><td data-w="240"><div data-w="200" data-h="10" style="padding: 0; background: #eee"><div data-w="100" data-h="10" style="background: red"></div></div></td></tr>' +
       "<tr><td>Bob</td><td>10%</td><td>16 Jul 26</td><td></td></tr>" +
       "<tr><td>Cy</td><td>20%</td><td>2026-07-18</td><td></td></tr>" +
       "</tbody></table>" +
@@ -130,9 +130,77 @@ describe("page check: what the page shows", () => {
     // A code sample stays a code sample.
     expect(await leaks("<pre>&lt;div&gt;sample&lt;/div&gt;</pre>")).toEqual([]);
   });
+  it("reports kit icons that draw nothing because the icon script is not loaded", async () => {
+    document.head.innerHTML = "";
+    const icons = async () => (await run()).filter((f) => f.kind === "icons").map((f) => f.text ?? "");
+    document.body.innerHTML = '<button class="kit-btn"><span data-kit-icon="plus" aria-hidden="true"></span>New</button><span data-kit-icon="download"></span><span data-kit-icon="plus"></span>';
+    expect(await icons()).toEqual([expect.stringMatching(/^shows 3 kit icons \(plus, download\) as empty space: .*kit-icons\.js/)]);
+    // Loaded: the script draws them (an unknown name is reported elsewhere).
+    (window as unknown as Record<string, unknown>).KitIcons = {};
+    try {
+      expect(await icons()).toEqual([]);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).KitIcons;
+    }
+    // Drawn already (an svg inside): nothing to report.
+    document.body.innerHTML = '<span data-kit-icon="plus"><svg></svg></span>';
+    expect(await icons()).toEqual([]);
+  });
+  it("reports parts that stick out of their table cell, panel or card, not floating or clipped ones", async () => {
+    document.head.innerHTML = "";
+    const escapes = async (html: string) => {
+      document.body.innerHTML = html;
+      return (await run()).filter((f) => f.kind === "escape").map((f) => f.text ?? "");
+    };
+    // jsdom has no layout: boxes start at 0,0 and are data-w x data-h (100 x 50).
+    expect(await escapes('<table><tr><td data-w="80"><span class="badge" data-w="140">Overdue by 12 days</span></td></tr></table>')).toEqual([
+      expect.stringMatching(/^has 1 part sticking out of their box: <span\.badge> 'Overdue by 12 days' runs 60 px past the right edge of its table cell: /),
+    ]);
+    expect(await escapes('<div class="kit-panel" data-w="200" data-h="100"><img alt="Map" data-w="320" data-h="90"></div>')).toEqual([
+      expect.stringContaining("runs 120 px past the right edge of its <div.kit-panel>"),
+    ]);
+    // A menu that floats, a box that scrolls, and a part that fits: nothing.
+    expect(await escapes('<div class="kit-panel" data-w="200"><div style="position:absolute" data-w="400">Menu</div><span data-w="150">Fits</span></div>')).toEqual([]);
+    expect(await escapes('<div class="kit-panel" data-w="200" style="overflow-x:auto"><table data-w="600"><tr><td data-w="600">Wide</td></tr></table></div>')).toEqual([]);
+    // Said once, by the innermost box: a card in a grid cell with a picture too wide for the card.
+    expect(await escapes('<div class="kit-grid"><div data-w="300"><div class="card" data-w="200"><img alt="x" data-w="260"></div></div></div>')).toEqual([
+      expect.stringContaining("past the right edge of its <div.card>"),
+    ]);
+  });
   it("reports nothing on a clean page", async () => {
     document.head.innerHTML = "";
     document.body.innerHTML = "<h1>Hello</h1><p>A plain page with 1,250 visitors on 16 Jul 2026.</p>";
     expect(await run()).toEqual([]);
+  });
+});
+
+describe("page checks on odd pages (code review)", () => {
+  it("runs on a document without a body (an SVG or XML file) instead of throwing", async () => {
+    const b = document.body;
+    document.documentElement.removeChild(b);
+    try {
+      expect(await run()).toEqual([]);
+    } finally {
+      document.documentElement.appendChild(b);
+    }
+  });
+  it("compares sizes in a row, not a tip button in a heading or a button beside one that wraps", () => {
+    const contrast = fs.readFileSync(path.join(repo, "lib/contrast-check.js"), "utf8");
+    const real = window.getComputedStyle;
+    const ctx = HTMLCanvasElement.prototype.getContext;
+    // jsdom: no canvas and no computed opacity; heights from data-h.
+    (HTMLCanvasElement.prototype as unknown as Record<string, unknown>).getContext = () => ({ clearRect() {}, fillRect() {}, getImageData: () => ({ data: [255, 255, 255, 255] }) });
+    (window as unknown as Record<string, unknown>).getComputedStyle = (el: Element) => new Proxy(real(el), { get: (t, k) => (k === "opacity" ? "1" : (t as unknown as Record<string | symbol, unknown>)[k]) });
+    try {
+      document.head.innerHTML = "";
+      document.body.innerHTML = `<div class="kit-panel__head" style="display:flex"><h3>Rentals <button class="kit-tip" data-h="16" aria-label="How">?</button></h3><button class="kit-btn" data-h="36">Export</button></div>
+        <div class="kit-toolbar" style="display:flex"><button class="kit-btn" data-h="36">Short</button><button class="kit-btn" data-h="80">A very long label that wraps</button></div>
+        <div style="display:flex"><button class="kit-btn kit-btn--sm" data-h="30">Small</button><input class="kit-input" aria-label="Search" data-h="36"></div>`;
+      const out = JSON.parse(new Function("return (" + contrast + ")")() as string) as { kind: string; where: string; scope: string }[];
+      expect(out.filter((f) => f.kind === "size").map((f) => f.where + ":" + f.scope)).toEqual(["button.kit-btn.kit-btn--sm:row"]);
+    } finally {
+      (window as unknown as Record<string, unknown>).getComputedStyle = real;
+      HTMLCanvasElement.prototype.getContext = ctx;
+    }
   });
 });

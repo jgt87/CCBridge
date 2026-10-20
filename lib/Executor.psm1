@@ -689,11 +689,20 @@ function Get-PagesLoading([string]$ProjectRoot, [string]$Rel) {
     $pages.ToArray()
 }
 
+function Get-SafeFullPath([AllowEmptyString()][string]$Path) {
+    <# [IO.Path]::GetFullPath, or $null for text that is not a path (a template expression such as
+       <%= x %> in an href holds characters a path may not: GetFullPath throws on them). #>
+    if (-not $Path) { return $null }
+    try { [IO.Path]::GetFullPath($Path) } catch { $null }
+}
+
 function Resolve-RelRef([string]$ProjectRoot, [string]$BaseDir, [string]$Ref) {
-    # A reference written in a file in $BaseDir (project-relative), as a project-relative path.
+    # A reference written in a file in $BaseDir (project-relative), as a project-relative path;
+    # $null when it points outside the project or is not a path at all.
     $root = if ($ProjectRoot) { $ProjectRoot } else { 'C:\p' }
     $dir = if ($Ref.StartsWith('/') -or -not $BaseDir) { $root } else { Join-Path $root ("$BaseDir".Replace('/', '\')) }
-    $full = [IO.Path]::GetFullPath((Join-Path $dir ($Ref.TrimStart('/').Replace('/', '\'))))
+    $full = Get-SafeFullPath (Join-Path $dir ($Ref.TrimStart('/').Replace('/', '\')))
+    if (-not $full) { return $null }
     $rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\')
     if (-not $full.StartsWith("$rootFull\", [StringComparison]::OrdinalIgnoreCase)) { return $null }
     $full.Substring($rootFull.Length + 1).Replace('\', '/')
@@ -747,7 +756,9 @@ function Find-FileUrlBlocks {
     $ext = [IO.Path]::GetExtension($Rel).ToLowerInvariant()
     if ($ext -notin '.html', '.htm', '.js', '.mjs') { return }
     $line = { param($i) ([regex]::Matches($Text.Substring(0, $i), "`n")).Count + 1 }
-    $isLocal = { param($u) $u -and $u -notmatch '(?i)^([a-z][a-z0-9+.-]*:|//)' -and $u -notmatch '\$\{' }
+    # Not a web address, not built from a variable, and a path at all (template syntax such as
+    # <%= x %> holds characters a file name may not).
+    $isLocal = { param($u) $u -and $u -notmatch '(?i)^([a-z][a-z0-9+.-]*:|//)' -and $u -notmatch '\$\{' -and $u -notmatch '[<>|"*?]' }
     $blocked = 'is blocked when the page is opened from disk (file://).'
     $fileDir = (Split-Path -Parent $Rel).Replace('\', '/')
     $pages = $null
@@ -801,8 +812,18 @@ function Test-ProjectConsistency {
             elseif ([regex]::IsMatch($text, '(?m)^\t+\S') -and [regex]::IsMatch($text, '(?m)^ +\S')) { "${rel}: some lines are indented with tabs and others with spaces (Python may stop with a TabError)" }
         }
         if ($ext -eq '.psd1') {
-            try { $null = Import-PowerShellDataFile -LiteralPath $full -ErrorAction Stop }
-            catch { "${rel}: not a valid data file ($(("$($_.Exception.Message)" -replace '\s+', ' ').Trim()))" }
+            # As Import-PowerShellDataFile reads it (the hashtable's values must be plain data), through the
+            # parser: that cmdlet is missing from some Windows PowerShell 5.1 builds.
+            $tok = $null; $perr = $null
+            $ast = [Management.Automation.Language.Parser]::ParseInput($text, [ref]$tok, [ref]$perr)
+            if (-not @($perr).Count) {
+                $hash = $ast.Find({ param($a) $a -is [Management.Automation.Language.HashtableAst] }, $false)
+                if (-not $hash) { "${rel}: not a valid data file (it holds no @{ ... } hashtable)" }
+                else {
+                    try { $null = $hash.SafeGetValue() }
+                    catch { "${rel}: not a valid data file ($(("$($_.Exception.Message)" -replace '\s+', ' ').Trim()))" }
+                }
+            }
         }
         if ($ext -in '.ps1', '.psm1', '.psd1') {
             $tok = $null; $errs = $null
@@ -832,8 +853,9 @@ function Test-ProjectConsistency {
                 if (-not $ref -or $ref -match '^(?i)([a-z][a-z0-9+.-]*:|//|#|\$|\{)' -or $ref.Contains('${')) { continue }
                 # Imports without ./ or / are packages or path aliases (react, @/lib/api): not files here.
                 if ($r.kind -eq 'import' -and $ref -notmatch '^\.{1,2}/|^/') { continue }
-                $target = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $full) ($ref.TrimStart('/').Replace('/', '\'))))
-                if ($ref.StartsWith('/')) { $target = [IO.Path]::GetFullPath((Join-Path $ProjectRoot ($ref.TrimStart('/').Replace('/', '\')))) }
+                $base = if ($ref.StartsWith('/')) { $ProjectRoot } else { Split-Path -Parent $full }
+                $target = Get-SafeFullPath (Join-Path $base ($ref.TrimStart('/').Replace('/', '\')))
+                if (-not $target) { continue }   # not a path (template syntax such as <%= x %>)
                 if (-not $target.StartsWith([IO.Path]::GetFullPath($ProjectRoot), [StringComparison]::OrdinalIgnoreCase)) { continue }
                 if (Test-Path -LiteralPath $target -PathType Leaf) { continue }
                 if ($r.kind -eq 'import' -and (Resolve-ModuleImport $target)) { continue }
@@ -1134,7 +1156,10 @@ function Split-ReadPath([string]$Spec) {
 
 function Get-FolderListing([string]$ProjectRoot, [string]$Rel) {
     <# A read of a folder ('.' or a folder path): its files with their sizes (at most 200). #>
-    $prefix = "$Rel".Replace('\', '/').Trim('/', '.'); if ($prefix) { $prefix += '/' }
+    # Only a leading ./ or / and trailing slashes go: a dot in the name (.github) is part of it.
+    $prefix = "$Rel".Replace('\', '/') -replace '^(\./|/)+', '' -replace '/+$', ''
+    if ($prefix -eq '.') { $prefix = '' }
+    if ($prefix) { $prefix += '/' }
     $files = @(Get-ProjectFiles $ProjectRoot | Where-Object { -not $prefix -or $_.path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })
     if (-not $files.Count) { return "(a folder with no files$(if (-not $prefix) { ': the project has no files yet. Create them with write actions' }))" }
     $shown = @($files | Select-Object -First 200 | ForEach-Object { "$($_.path) ($($_.size) bytes)" })
@@ -1566,13 +1591,15 @@ function Test-MoveOrder {
     $have = New-Object 'System.Collections.Generic.HashSet[string]'
     $names = @()
     foreach ($ref in $added) {
-        $target = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $FullPath) ($ref.TrimStart('/').Replace('/', '\'))))
-        if ($ref.StartsWith('/')) { $target = [IO.Path]::GetFullPath((Join-Path $ProjectRoot ($ref.TrimStart('/').Replace('/', '\')))) }
+        $base = if ($ref.StartsWith('/')) { $ProjectRoot } else { Split-Path -Parent $FullPath }
+        $target = Get-SafeFullPath (Join-Path $base ($ref.TrimStart('/').Replace('/', '\')))
+        if (-not $target) { continue }   # not a path (template syntax such as <%= x %>): no file to hold the code
         $names += $ref
         if (Test-Path -LiteralPath $target -PathType Leaf) {
             foreach ($l in (Read-TextFile $target).Text.Replace("`r`n", "`n").Split("`n")) { [void]$have.Add($l.Trim()) }
         }
     }
+    if (-not $names.Count) { return $null }
     $found = @($removed | Where-Object { $have.Contains($_) }).Count
     if ($found -ge [Math]::Ceiling($removed.Count * 0.8)) { return $null }
     $list = $names -join ', '
@@ -2380,6 +2407,7 @@ function Get-InnerShellCommand([string[]]$Group) {
         $sw = $Group[$i]
         $hit = if ($isCmd) { $sw -match '(?i)^/[ck]$' } else { $sw -match '(?i)^-(c|co|com|comm|comma|comman|command)$' }
         if (-not $hit) { continue }
+        if ($i + 1 -ge $Group.Count) { return '' }   # the switch is the last token (a reversed range would hand the switch itself back)
         $rest = @($Group[($i + 1)..($Group.Count - 1)] | Where-Object { $null -ne $_ })
         if (-not $rest.Count) { return '' }
         $text = $rest -join ' '

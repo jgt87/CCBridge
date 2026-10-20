@@ -21,6 +21,23 @@ import GradientButton from "@/components/kokonutui/gradient-button";
 import HoldButton from "@/components/kokonutui/hold-button";
 import { Input } from "@/components/ui/input";
 import { api, type ChangeBlock, type Preview } from "@/lib/api";
+import {
+  approveLabel,
+  asBlocks,
+  blockPlace,
+  canOpenInWindow,
+  decidedVia,
+  doneSummary,
+  hasDetails,
+  needsTerminal,
+  offersAllow,
+  shortError,
+  showsOutput,
+  shownStatus,
+  statusClass,
+  statusLabel,
+  verbFor,
+} from "@/lib/action-card-view";
 import { cn } from "@/lib/utils";
 import { countChanges, diffLines } from "@/lib/diff";
 import { ChangePill } from "./change-pill";
@@ -30,7 +47,7 @@ import { TodoView } from "./todo-view";
 import { isTodoChange, todoChange } from "@/lib/todo-list";
 import { CodeView } from "./code-block";
 import { languageForPath } from "@/lib/highlight";
-import { formatElapsed, liveLines, parseRunOutput, useRunLive, waitText, type RunLive } from "@/lib/run-live";
+import { formatElapsed, liveLines, parseRunOutput, useRunLive, waitText, type RunLive, type RunWindowState } from "@/lib/run-live";
 import { ConsoleView } from "./console-view";
 
 export interface ActionItem {
@@ -121,44 +138,235 @@ const ICONS: Record<string, React.ReactNode> = {
   restore: <RotateCcw className="h-4 w-4 text-muted-foreground" />,
 };
 
-const VERBS: Record<string, string> = {
-  runbook: "Run runbook",
-  screenshot: "Screenshot",
-  read: "Read",
-  glob: "List",
-  grep: "Search",
-  write: "Write",
-  edit: "Edit",
-  run: "Run",
-  todo: "Plan",
-  move: "Move",
-  restore: "Restore",
-};
-
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    running: "text-muted-foreground",
-    awaiting: "font-medium text-foreground",
-    ok: "text-muted-foreground",
-    "already applied": "text-muted-foreground",
-    failed: "text-(--kit-error)",
-    rejected: "text-muted-foreground",
-    skipped: "text-muted-foreground",
-    interrupted: "text-muted-foreground",
-    ambiguous: "text-muted-foreground",
-  };
-  const label: Record<string, string> = {
-    interrupted: "interrupted (StreamHub restarted)",
-    ambiguous: "needs a more exact SEARCH",
-    running: "running",
-    awaiting: "needs approval",
-    ok: "done",
-    "already applied": "already applied (verified)",
-    failed: "failed",
-    rejected: "rejected",
-    skipped: "skipped (plan mode)",
-  };
-  return <span className={cn("text-xs", map[status])}>{label[status] ?? status}</span>;
+  return <span className={cn("text-xs", statusClass(status))}>{statusLabel(status)}</span>;
+}
+
+type TodoState = ReturnType<typeof todoChange>;
+
+/** The header line: icon, verb, target, change count, who made or decided it, status. */
+function CardHeader({
+  item,
+  todo,
+  counts,
+  sent,
+  details,
+  expanded,
+  onToggle,
+}: {
+  item: ActionItem;
+  todo: TodoState | null;
+  counts: ReturnType<typeof countChanges> | null;
+  sent: boolean;
+  details: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const via = decidedVia(item.decidedBy);
+  return (
+    <button className="flex w-full items-center gap-2 px-3 py-2 text-left" disabled={!details} onClick={onToggle} type="button">
+      {ICONS[item.action] ?? <Play className="h-4 w-4" />}
+      <span className="font-medium">{verbFor(item.action)}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground text-xs">{item.target}</span>
+      {todo ? (
+        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="Items done in this list">
+          {todo.done}/{todo.total} done
+        </span>
+      ) : (
+        counts && <ChangePill added={counts.add} removed={counts.del} />
+      )}
+      {item.by === "streamhub" && (
+        <span className="text-[11px] text-muted-foreground" title="StreamHub made this change itself, not Copilot">
+          by StreamHub
+        </span>
+      )}
+      {via && (
+        <span className="text-[11px] text-muted-foreground" title="This action was approved or rejected by another program, not in this window">
+          via {via}
+        </span>
+      )}
+      <StatusBadge status={shownStatus(item.status, sent)} />
+      {details && <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />}
+    </button>
+  );
+}
+
+/** A failed step: possible reasons, its code and what happens next. */
+function FailureReasons({ item }: { item: ActionItem }) {
+  if (!item.reasons || item.reasons.length === 0) return null;
+  return (
+    <div className="kit-notice flex-col space-y-1 p-2 text-xs">
+      <div className="flex items-center gap-2">
+        <span className="font-medium">Possible reasons</span>
+        {item.code && <span className="kit-badge rounded-(--kit-radius-sm) font-mono font-normal">{item.code}</span>}
+      </div>
+      <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+        {item.reasons.map((r) => (
+          <li key={r}>{r}</li>
+        ))}
+      </ul>
+      {item.next && (
+        <div className="text-muted-foreground">
+          <span className="font-medium text-foreground">What happens next: </span>
+          {item.next}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The preview: a run's script text, a to-do checklist, or the change as lines. */
+function PreviewBody({ item, todo }: { item: ActionItem; todo: TodoState | null }) {
+  const preview = item.preview;
+  if (!preview) return null;
+  if (item.action === "run") {
+    // The script a run starts (Copilot's command, a chain, Automation > Scripts): its whole text, not a change.
+    return (
+      <div className="kit-panel overflow-hidden p-0">
+        <div className="border-(--kit-border) border-b px-3 py-1.5 font-mono text-muted-foreground text-xs">{preview.path || "script"}</div>
+        <div className="max-h-[28rem] overflow-auto">
+          <CodeView language={languageForPath(preview.path)} text={preview.new ?? ""} />
+        </div>
+      </div>
+    );
+  }
+  return todo ? <TodoView preview={preview} todo={todo} /> : <DiffView preview={preview} />;
+}
+
+/** A run's console: live output, a run in its own window, the finished output, or an empty console. */
+function RunConsole({
+  item,
+  myLive,
+  myWindow,
+  ran,
+  running,
+  awaiting,
+}: {
+  item: ActionItem;
+  myLive: RunLive | null;
+  myWindow?: RunWindowState;
+  ran: ReturnType<typeof parseRunOutput> | null;
+  running: boolean;
+  awaiting: boolean;
+}) {
+  if (myLive) return <LiveConsole live={myLive} />;
+  if (item.window && running) {
+    return (
+      <ConsoleView
+        footer={`running in its own console window${myWindow ? ` for ${formatElapsed(myWindow.elapsed)}` : ""}`}
+        lines={["Answer its questions in that window. Its output stays there; StreamHub notes the exit code here."]}
+        title={`> ${item.target}`}
+      />
+    );
+  }
+  if (ran && !awaiting) return <ConsoleView footer={ran.status || undefined} lines={ran.lines} title={`> ${item.target}`} />;
+  return <ConsoleView lines={[]} live={running} title={`> ${item.target}`} />;
+}
+
+/** web: what to allow from now on with this approval ("" = only these pages). */
+function AllowSelect({ options, allow, setAllow }: { options: string[]; allow: string; setAllow: (v: string) => void }) {
+  return (
+    <label className="flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-muted-foreground">Approve for</span>
+      <select aria-label="What to allow with this approval" className="kit-select h-8 min-h-8 text-xs" onChange={(e) => setAllow(e.target.value)} value={allow}>
+        <option value="">only these pages</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            everything under {o}, from now on
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** A tick box per block of a change: an unticked block is left out when approving. */
+function BlockPicker({ blocks, skip, setSkip }: { blocks: ChangeBlock[]; skip: number[]; setSkip: React.Dispatch<React.SetStateAction<number[]>> }) {
+  return (
+    <fieldset className="kit-fieldset space-y-1 text-xs">
+      <legend className="kit-legend">
+        Changes in this step ({blocks.length - skip.length} of {blocks.length} kept): untick one to leave it out
+      </legend>
+      {blocks.map((b) => (
+        <label className="flex min-w-0 items-center gap-2" key={b.index}>
+          <input
+            checked={!skip.includes(b.index)}
+            className="kit-check"
+            onChange={(e) => setSkip((s) => (e.target.checked ? s.filter((x) => x !== b.index) : [...s, b.index]))}
+            type="checkbox"
+          />
+          <span className="shrink-0 text-muted-foreground">{blockPlace(b)}</span>
+          <span className="min-w-0 truncate font-mono" title={b.first}>
+            {b.first}
+          </span>
+        </label>
+      ))}
+      {skip.length === blocks.length && <div className="text-muted-foreground">Nothing is kept: reject the step instead, with a note for Copilot.</div>}
+    </fieldset>
+  );
+}
+
+/** Approve (hold to run for a command) or reject with an optional note. */
+function DecisionBar({
+  item,
+  note,
+  setNote,
+  decide,
+}: {
+  item: ActionItem;
+  note: string;
+  setNote: (v: string) => void;
+  decide: (decision: "approve" | "reject") => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {item.action === "run" ? (
+        <HoldButton
+          className="h-10 min-w-44"
+          holdDuration={1200}
+          holdingLabel="Keep holding..."
+          icon={<TerminalSquare className="h-4 w-4" />}
+          label="Hold to run"
+          onHoldComplete={() => decide("approve")}
+          variant="grey"
+        />
+      ) : (
+        <GradientButton className="h-10" label={approveLabel(item)} onClick={() => decide("approve")} variant="neutral" />
+      )}
+      {/* The note goes with Reject only, so it reads as the other choice. */}
+      <span className="text-muted-foreground text-xs">or</span>
+      <Input
+        aria-label="Note for Copilot, sent when rejecting"
+        className="h-10 min-w-48 flex-1 text-xs"
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Optional note for Copilot (sent when rejecting)"
+        value={note}
+      />
+      <button
+        className="flex h-10 items-center gap-1 rounded-lg px-3 text-muted-foreground text-xs hover:bg-(--kit-surface-2) hover:text-foreground"
+        onClick={() => decide("reject")}
+        type="button"
+      >
+        <X className="h-3.5 w-3.5" /> Reject
+      </button>
+    </div>
+  );
+}
+
+/** The change counts and the to-do checklist of a step's preview (not for a run's script). */
+function usePreviewSummary(item: ActionItem) {
+  const counts = useMemo(() => {
+    if (!item.preview || item.action === "run") return null;
+    const lines = diffLines(item.preview.old ?? "", item.preview.new ?? "");
+    return lines ? countChanges(lines) : null;
+  }, [item.preview]);
+  // A to-do list (TODO.md, or a file of "- [ ]" items): shown as a checklist, not as lines.
+  const todo = useMemo(() => {
+    const p = item.preview;
+    if (!p || item.action === "run" || !isTodoChange(p.path ?? "", p.new ?? "")) return null;
+    return todoChange(p.old ?? "", p.new ?? "");
+  }, [item.preview, item.action]);
+  return { counts, todo };
 }
 
 export function ActionCard({ item }: { item: ActionItem }) {
@@ -179,9 +387,11 @@ export function ActionCard({ item }: { item: ActionItem }) {
   const myLive = item.action === "run" && running && live?.id === item.id ? live : null;
   const myWindow = item.window && running ? windows.find((w) => w.id === item.id) : undefined;
   // Open by default; with auto-collapse a finished step folds up (the reader can still open or close any card).
-  const expanded = awaiting || (open ?? (Boolean(myLive) || cardOpen(sent && item.status === "awaiting" ? "running" : item.status, view)));
+  const expanded = awaiting || (open ?? (Boolean(myLive) || cardOpen(shownStatus(item.status, sent), view)));
   const ran = item.action === "run" && item.output ? parseRunOutput(item.output) : null;
-  const needsTerminal = /interactive terminal|needs a terminal|RUN-INTERACTIVE/i.test(`${item.output ?? ""} ${item.code ?? ""}`);
+  const { counts, todo } = usePreviewSummary(item);
+  const details = hasDetails(item);
+  const summary = doneSummary(item);
 
   const decide = async (decision: "approve" | "reject") => {
     setSent(true);
@@ -192,19 +402,6 @@ export function ActionCard({ item }: { item: ActionItem }) {
     }
   };
 
-  const hasDetails = Boolean(item.preview || item.output || item.error || item.reasons?.length || item.action === "run");
-  const counts = useMemo(() => {
-    if (!item.preview || item.action === "run") return null;
-    const lines = diffLines(item.preview.old ?? "", item.preview.new ?? "");
-    return lines ? countChanges(lines) : null;
-  }, [item.preview]);
-  // A to-do list (TODO.md, or a file of "- [ ]" items): shown as a checklist, not as lines.
-  const todo = useMemo(() => {
-    const p = item.preview;
-    if (!p || item.action === "run" || !isTodoChange(p.path ?? "", p.new ?? "")) return null;
-    return todoChange(p.old ?? "", p.new ?? "");
-  }, [item.preview, item.action]);
-
   return (
     <div
       className={cn(
@@ -212,37 +409,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
         awaiting ? "border-(--kit-border-strong) shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:shadow-[0_0_0_3px_rgba(255,255,255,0.05)]" : "border-(--kit-border)"
       )}
     >
-      <button
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
-        disabled={!hasDetails}
-        onClick={() => setOpen(!expanded)}
-        type="button"
-      >
-        {ICONS[item.action] ?? <Play className="h-4 w-4" />}
-        <span className="font-medium">{VERBS[item.action] ?? item.action}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground text-xs">{item.target}</span>
-        {todo ? (
-          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="Items done in this list">
-            {todo.done}/{todo.total} done
-          </span>
-        ) : (
-          counts && <ChangePill added={counts.add} removed={counts.del} />
-        )}
-        {item.by === "streamhub" && (
-          <span className="text-[11px] text-muted-foreground" title="StreamHub made this change itself, not Copilot">
-            by StreamHub
-          </span>
-        )}
-        {item.decidedBy && item.decidedBy !== "user" && (
-          <span className="text-[11px] text-muted-foreground" title="This action was approved or rejected by another program, not in this window">
-            via {item.decidedBy === "mcp" ? "MCP" : "API"}
-          </span>
-        )}
-        <StatusBadge status={sent && item.status === "awaiting" ? "running" : item.status} />
-        {hasDetails && (
-          <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />
-        )}
-      </button>
+      <CardHeader counts={counts} details={details} expanded={expanded} item={item} onToggle={() => setOpen(!expanded)} sent={sent} todo={todo} />
 
       {expanded && (
         <div className="space-y-3 border-(--kit-border) border-t px-3 pt-3 pb-3">
@@ -253,172 +420,26 @@ export function ActionCard({ item }: { item: ActionItem }) {
             </div>
           )}
           {item.error && <div className="kit-error-text">{shortError(item.error)}</div>}
-          {item.reasons && item.reasons.length > 0 && (
-            <div className="kit-notice flex-col space-y-1 p-2 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="font-medium">Possible reasons</span>
-                {item.code && <span className="kit-badge rounded-(--kit-radius-sm) font-mono font-normal">{item.code}</span>}
-              </div>
-              <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
-                {item.reasons.map((r) => (
-                  <li key={r}>{r}</li>
-                ))}
-              </ul>
-              {item.next && (
-                <div className="text-muted-foreground">
-                  <span className="font-medium text-foreground">What happens next: </span>
-                  {item.next}
-                </div>
-              )}
-            </div>
-          )}
-          {item.preview && item.action === "run" ? (
-            // The script a run starts (Copilot's command, a chain, Automation > Scripts): its whole text, not a change.
-            <div className="kit-panel overflow-hidden p-0">
-              <div className="border-(--kit-border) border-b px-3 py-1.5 font-mono text-muted-foreground text-xs">{item.preview.path || "script"}</div>
-              <div className="max-h-[28rem] overflow-auto">
-                <CodeView language={languageForPath(item.preview.path)} text={item.preview.new ?? ""} />
-              </div>
-            </div>
-          ) : (
-            item.preview && (todo ? <TodoView preview={item.preview} todo={todo} /> : <DiffView preview={item.preview} />)
-          )}
-          {item.action === "run" &&
-            (myLive ? (
-              <LiveConsole live={myLive} />
-            ) : item.window && running ? (
-              <ConsoleView
-                footer={`running in its own console window${myWindow ? ` for ${formatElapsed(myWindow.elapsed)}` : ""}`}
-                lines={["Answer its questions in that window. Its output stays there; StreamHub notes the exit code here."]}
-                title={`> ${item.target}`}
-              />
-            ) : ran && !awaiting ? (
-              <ConsoleView footer={ran.status || undefined} lines={ran.lines} title={`> ${item.target}`} />
-            ) : (
-              <ConsoleView lines={[]} live={running} title={`> ${item.target}`} />
-            ))}
+          <FailureReasons item={item} />
+          <PreviewBody item={item} todo={todo} />
+          {item.action === "run" && <RunConsole awaiting={awaiting} item={item} myLive={myLive} myWindow={myWindow} ran={ran} running={running} />}
           {ran?.notes && !awaiting && <div className="whitespace-pre-wrap text-muted-foreground text-xs">{ran.notes}</div>}
           {/* A to-do list that was written shows as its checklist; the result text would only repeat its lines. */}
-          {item.output && !awaiting && item.action !== "run" && !(todo && item.status === "ok") && (
-            <ActionOutput fallbackPath={item.target} output={item.output} />
-          )}
-          {item.action === "run" && !awaiting && (!running || myLive?.state === "question" || myLive?.state === "stuck") && item.target.trim() && (
-            <OpenInWindow command={item.target} strong={needsTerminal || myLive?.state === "question"} />
+          {showsOutput(item, awaiting, Boolean(todo)) && <ActionOutput fallbackPath={item.target} output={item.output ?? ""} />}
+          {canOpenInWindow(item, awaiting, running, myLive?.state) && (
+            <OpenInWindow command={item.target} strong={needsTerminal(item) || myLive?.state === "question"} />
           )}
 
-          {awaiting && item.action === "web" && (item.allowOptions?.length ?? 0) > 0 && (
-            <label className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Approve for</span>
-              <select aria-label="What to allow with this approval" className="kit-select h-8 min-h-8 text-xs" onChange={(e) => setAllow(e.target.value)} value={allow}>
-                <option value="">only these pages</option>
-                {item.allowOptions!.map((o) => (
-                  <option key={o} value={o}>
-                    everything under {o}, from now on
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {awaiting && blocks.length > 1 && (
-            <fieldset className="kit-fieldset space-y-1 text-xs">
-              <legend className="kit-legend">
-                Changes in this step ({blocks.length - skip.length} of {blocks.length} kept): untick one to leave it out
-              </legend>
-              {blocks.map((b) => (
-                <label className="flex min-w-0 items-center gap-2" key={b.index}>
-                  <input
-                    checked={!skip.includes(b.index)}
-                    className="kit-check"
-                    onChange={(e) => setSkip((s) => (e.target.checked ? s.filter((x) => x !== b.index) : [...s, b.index]))}
-                    type="checkbox"
-                  />
-                  <span className="shrink-0 text-muted-foreground">
-                    {b.oldCount ? `line ${b.oldStart}${b.oldCount > 1 ? `-${b.oldStart + b.oldCount - 1}` : ""}` : `after line ${b.oldStart - 1}`}
-                    {` (+${b.newCount} -${b.oldCount})`}
-                  </span>
-                  <span className="min-w-0 truncate font-mono" title={b.first}>
-                    {b.first}
-                  </span>
-                </label>
-              ))}
-              {skip.length === blocks.length && <div className="text-muted-foreground">Nothing is kept: reject the step instead, with a note for Copilot.</div>}
-            </fieldset>
-          )}
-          {awaiting && (
-            <div className="flex flex-wrap items-center gap-2">
-              {item.action === "run" ? (
-                <HoldButton
-                  className="h-10 min-w-44"
-                  holdDuration={1200}
-                  holdingLabel="Keep holding..."
-                  icon={<TerminalSquare className="h-4 w-4" />}
-                  label="Hold to run"
-                  onHoldComplete={() => decide("approve")}
-                  variant="grey"
-                />
-              ) : (
-                <GradientButton
-                  className="h-10"
-                  label={approveLabel(item)}
-                  onClick={() => decide("approve")}
-                  variant="neutral"
-                />
-              )}
-              {/* The note goes with Reject only, so it reads as the other choice. */}
-              <span className="text-muted-foreground text-xs">or</span>
-              <Input aria-label="Note for Copilot, sent when rejecting"
-                className="h-10 min-w-48 flex-1 text-xs"
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Optional note for Copilot (sent when rejecting)"
-                value={note}
-              />
-              <button
-                className="flex h-10 items-center gap-1 rounded-lg px-3 text-muted-foreground text-xs hover:bg-(--kit-surface-2) hover:text-foreground"
-                onClick={() => decide("reject")}
-                type="button"
-              >
-                <X className="h-3.5 w-3.5" /> Reject
-              </button>
-            </div>
-          )}
-          {(item.status === "ok" || item.status === "already applied") && item.summary && item.summary !== item.output && (
+          {offersAllow(item, awaiting) && <AllowSelect allow={allow} options={item.allowOptions ?? []} setAllow={setAllow} />}
+          {awaiting && blocks.length > 1 && <BlockPicker blocks={blocks} setSkip={setSkip} skip={skip} />}
+          {awaiting && <DecisionBar decide={decide} item={item} note={note} setNote={setNote} />}
+          {summary && (
             <div className="flex items-center gap-1 text-muted-foreground text-xs">
-              <Check className="h-3.5 w-3.5" /> {item.summary}
+              <Check className="h-3.5 w-3.5" /> {summary}
             </div>
           )}
         </div>
       )}
     </div>
   );
-}
-
-/** The blocks of a change from the preview (one object or a list, as PowerShell sends them). */
-function asBlocks(h: Preview["hunks"]): ChangeBlock[] {
-  if (!h) return [];
-  return (Array.isArray(h) ? h : [h]).filter((b) => b && typeof b.index === "number");
-}
-
-/** The approve button's words, by the kind of step (a web read is not a file). */
-function approveLabel(item: ActionItem): string {
-  switch (item.action) {
-    case "web":
-      return "Read";
-    case "sql":
-      return "Run query";
-    case "remember":
-      return "Save note";
-    case "runbook":
-      return "Run runbook";
-    case "write":
-    case "edit":
-      return item.preview?.exists ? "Apply change" : "Create file";
-    default:
-      return "Approve";
-  }
-}
-
-/** The card's red line: the reason only. Code and current lines stay in the output below it. */
-function shortError(text: string): string {
-  const first = text.split(/\n|\s(?:Current lines|The closest place|What differs:)/)[0].trim();
-  return first.length > 320 ? `${first.slice(0, 317)}...` : first;
 }

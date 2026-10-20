@@ -131,6 +131,7 @@ function Test-ReviewQuote {
     $lines = @((Read-TextFile $full).Text.Replace("`r`n", "`n").Split("`n") | ForEach-Object { $_.Trim() })
     $hits = New-Object System.Collections.Generic.List[int]
     for ($i = 0; $i -le $lines.Count - $q.Count; $i++) {
+        if (-not $lines[$i]) { continue }   # a match starts on the first quoted line, not on a blank one above it
         $ok = $true; $j = 0; $k = $i
         while ($j -lt $q.Count -and $k -lt $lines.Count) {
             if (-not $lines[$k]) { $k++; continue }   # blank lines in the file may be left out of the quote

@@ -1,8 +1,9 @@
 # Design rules and checks written for StreamHub (prompts/rules/design.md, designreview.md; Guardrails
-# Find-UiSlop focus and motion; the page-side target size and names in lib/contrast-check.js).
+# Find-UiSlop focus and motion; the page-side size comparison and names in lib/contrast-check.js).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
 Import-Module (Join-Path $root 'lib\Guardrails.psm1') -Force
+Import-Module (Join-Path $root 'lib\CheckPolicy.psm1') -Force
 
 Describe 'Design rules for Copilot' {
     It 'go with interface work, and the review rule with a design review request' {
@@ -37,11 +38,15 @@ Describe 'Focus and motion checks' {
 }
 
 Describe 'The page-side checks' {
-    It 'cover click target size with the WCAG spacing exception, and names' {
+    It 'compare control sizes (side by side and of one kind) instead of a minimum, and cover names' {
         $js = [IO.File]::ReadAllText((Join-Path $root 'lib\contrast-check.js'))
-        $js | Should Match 'note\("target"'
-        $js | Should Match 'crowded'
+        $js | Should Not Match 'note\("target"'
+        $js | Should Match 'sizeNote\(a, most, "row"\)'
+        $js | Should Match 'sizeNote\(odd, main, "page"\)'
         $js | Should Match 'note\("name"'
+        [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\design.md')) | Should Not Match '24 x 24|44 x 44'
+        [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\design.md')) | Should Match 'share one height'
+        Get-CheckLevel 'index.html sizes: <button.kit-btn> is 30 px tall beside <input> at 36 px; controls side by side share one height' 'script' | Should Be 'warning'
     }
 }
 

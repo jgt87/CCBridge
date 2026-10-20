@@ -680,7 +680,8 @@ function Test-LocalReferences([string]$Text, [string]$Path, [string]$ProjectRoot
        paths (PowerShell), relative imports (Python), relative links (Markdown). #>
     if (-not $ProjectRoot) { return }
     $dir = Split-Path -Parent (Join-Path $ProjectRoot ($Path.Replace('/', '\')))
-    $exists = { param($rel) $p = [IO.Path]::GetFullPath((Join-Path $dir ($rel.Replace('/', '\')))); Test-Path -LiteralPath $p }
+    # Text that is not a path (characters a path may not hold) counts as not found, never as an error.
+    $exists = { param($rel) try { $p = [IO.Path]::GetFullPath((Join-Path $dir ($rel.Replace('/', '\')))); Test-Path -LiteralPath $p } catch { $false } }
     switch -Regex ($Path) {
         '(?i)\.ps[md]?1$' {
             foreach ($m in [regex]::Matches($Text, '(?im)^\s*\.\s+["'']?(?:\$PSScriptRoot[\\/])?((?:\.{1,2}[\\/])?[\w .\\/-]+\.ps1)["'']?')) {
@@ -704,8 +705,11 @@ function Test-LocalReferences([string]$Text, [string]$Path, [string]$ProjectRoot
         }
         '(?i)\.(md|markdown)$' {
             $m2 = Hide $Text '(?ms)^\s{0,3}(`{3,}|~{3,}).*?^\s{0,3}\1|`[^`\n]*`'   # not inside code
-            foreach ($m in [regex]::Matches($m2, '\[[^\]]*\]\(([^)\s#?]+)')) {
-                $target = [uri]::UnescapeDataString($m.Groups[1].Value)
+            # A target in angle brackets, [x](<my notes.md>), may hold spaces (CommonMark).
+            foreach ($m in [regex]::Matches($m2, '\[[^\]]*\]\((?:<([^>\n]+)>|([^)\s#?]+))')) {
+                $target = if ($m.Groups[1].Success) { $m.Groups[1].Value -replace '[#?].*$', '' } else { $m.Groups[2].Value }
+                if (-not $target) { continue }
+                $target = [uri]::UnescapeDataString($target)
                 if ($target -match '^(?i)([a-z][a-z0-9+.-]*:|//|/)') { continue }
                 if (-not (& $exists $target)) { "line $(LineAt $Text $m.Index): links to $target, which does not exist" }
             }

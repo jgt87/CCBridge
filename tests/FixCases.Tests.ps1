@@ -23,6 +23,36 @@ Describe 'A fix case file' {
     }
 }
 
+Describe 'Fix cases from a task (Copilot mocked)' {
+    It 'keeps the change of a file in a subfolder: the backup is found by its path' {
+        $p = Join-Path $env:TEMP ('ccb-fc-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'js') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $p 'js\app.js'), "function a() {`n  return 0;`n}`n")
+        $config = Get-CCBridgeConfig harness $root
+        $config.pageCheck = 'off'
+        Mock -ModuleName Agent Start-NewChat { }
+        Mock -ModuleName Agent Send-ToCopilot {
+            param($State, [string]$Message)
+            $global:ccbFcSent += , $Message
+            [pscustomobject]@{ Result = 'Success'; Text = $global:ccbFcReplies[$global:ccbFcSent.Count - 1]; Agent = ''; IsPlan = $false; Uncertain = 0; References = @(); ProposedActions = @(); ActionClaims = @() }
+        }
+        $fence = '````'
+        $global:ccbFcSent = @()
+        $global:ccbFcReplies = @(
+            "${fence}text`nACTION write js/app.js`nfunction a() {`n  return 1;`n$fence",
+            "${fence}text`nACTION write js/app.js`nfunction a() {`n  return 2;`n$fence",
+            ("${fence}text`nACTION write js/app.js`nfunction a() {`n  return 1;`n}`n$fence`n" + '```text' + "`nACTION done`nFixed.`n" + '```')
+        )
+        $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
+        Invoke-AgentTurn $s 'Make a return 1 in js/app.js'
+        $case = @(Get-ChildItem (Join-Path $p '.streamhub\FixCases') -Filter 'case-*.md')
+        $case.Count | Should Be 1
+        $t = [IO.File]::ReadAllText($case[0].FullName)
+        $t | Should Not Match 'the change is no longer kept'
+        $t | Should Match '(?s)```diff.*return'
+        Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'Fix cases from the issue cycle' {
     $mk = {
         $p = Join-Path $env:TEMP ('ccb-fc-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null

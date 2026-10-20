@@ -71,9 +71,13 @@ function Get-SharePointPageFindings([AllowEmptyString()][string]$Text) {
     foreach ($m in [regex]::Matches($t, '(?is)<(img|source|video|audio|track|input|image|use)\b[^>]*\b(src|srcset|poster|href|xlink:href)\s*=\s*["'']?([^"''\s>]+)')) {
         if ($m.Groups[3].Value -match $remote) { & $add 'img' $m.Index "shows an image or media file from a file or address ($($m.Groups[3].Value)): SharePoint HTML pages only show images as data: addresses (base64 in the page) or inline SVG and canvas; video and audio are not supported. Embed the image as a data: address or draw it as SVG." }
     }
-    foreach ($m in [regex]::Matches($t, '(?is)(@import\b[^;]*|url\(\s*["'']?)(?!data:|blob:|#)([^"''\s\)]+)')) {
-        if ($m.Value -match '(?i)^url\(\s*["'']?(data:|blob:|#)') { continue }
-        & $add 'cssurl' $m.Index "a stylesheet loads a file or address ($($m.Groups[2].Value)) with @import or url(): SharePoint HTML pages block it (fonts and images only as data: addresses). Embed it as a data: address, use a system font stack, or leave it out."
+    # Only in styles (style blocks and style attributes): url( in a page's own script, such as new URL(...), is not a stylesheet.
+    $styles = @([regex]::Matches($t, '(?is)<style\b[^>]*>(.*?)</style\s*>') | ForEach-Object { @{ index = $_.Groups[1].Index; text = $_.Groups[1].Value } }) +
+        @([regex]::Matches($t, '(?is)\bstyle\s*=\s*(?:"([^"]*)"|''([^'']*)'')') | ForEach-Object { $g = if ($_.Groups[1].Success) { $_.Groups[1] } else { $_.Groups[2] }; @{ index = $g.Index; text = $g.Value } })
+    foreach ($st in $styles) {
+        foreach ($m in [regex]::Matches($st.text, '(?is)(@import\s+(?:url\(\s*)?["'']?|url\(\s*["'']?)(?!data:|blob:|#)([^"''\s\)]+)')) {
+            & $add 'cssurl' ($st.index + $m.Index) "a stylesheet loads a file or address ($($m.Groups[2].Value)) with @import or url(): SharePoint HTML pages block it (fonts and images only as data: addresses). Embed it as a data: address, use a system font stack, or leave it out."
+        }
     }
     foreach ($m in [regex]::Matches($t, '(?is)<(iframe|frame|object|embed|portal)\b')) { & $add 'frame' $m.Index "uses <$($m.Groups[1].Value.ToLowerInvariant())>: SharePoint HTML pages block frames, objects and embeds (Power BI, Forms, video players do not load). Link to it instead; the link opens in a new tab." }
     foreach ($m in [regex]::Matches($t, '(?is)<form\b[^>]*\baction\s*=')) { & $add 'form' $m.Index "a form posts to an address: SharePoint HTML pages cannot submit forms or write anything back. Handle the input in the page's own script (nothing is saved), or leave the form out." }

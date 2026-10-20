@@ -9,6 +9,10 @@
 # in .streamhub/db-queries.json, and Scripts/Refresh-Database.ps1 runs the saved queries again on its
 # own (for a schedule or chain). ASCII only (Windows PowerShell 5.1).
 
+# The parts of a query that hold text, not statements: a block or line comment, a 'string' (with ''
+# inside), a [bracketed name], a "quoted name". Each becomes a blank, '' or x in that order.
+$script:SqlTokens = '(?s)/\*.*?\*/|--[^\n]*|''(?:[^'']|'''')*''|\[[^\]]*\]|"[^"]*"'
+$script:SqlTokenOut = { param($m) $v = $m.Value; if ($v[0] -eq '/' -or $v[0] -eq '-') { ' ' } elseif ($v[0] -eq "'") { "''" } else { 'x' } }
 $script:Blocked = '(?i)\b(insert|update|delete|merge|drop|alter|create|truncate|grant|revoke|deny|exec|execute|sp_\w+|xp_\w+|openrowset|opendatasource|openquery|bulk|backup|restore|shutdown|dbcc|waitfor|kill|use|declare|set)\b|\binto\b'
 
 function Get-DbConfigPath([string]$ProjectRoot) { Join-Path $ProjectRoot '.streamhub\databases.json' }
@@ -54,9 +58,10 @@ function Get-DbConnectionString($Connection, [int]$TimeoutSec = 15) {
 function Test-DbQuery([AllowEmptyString()][string]$Sql) {
     <# Why a database query is refused ($null when it may run): one SELECT or WITH statement, and no
        word that writes, changes the database or runs code, outside quoted text. #>
-    $t = [regex]::Replace("$Sql", '(?s)/\*.*?\*/|--[^\n]*', ' ')
-    $bare = [regex]::Replace($t, "'(?:[^']|'')*'", "''")
-    $bare = [regex]::Replace($bare, '\[[^\]]*\]|"[^"]*"', 'x')   # quoted names
+    # One pass, left to right: a comment, a string or a quoted name is taken whole where it starts
+    # (as SQL Server reads it), so a quote inside a [name], or -- or /* inside a string, can never
+    # hide a second statement from the checks below.
+    $bare = [regex]::Replace("$Sql", $script:SqlTokens, $script:SqlTokenOut)
     $s = $bare.Trim().TrimEnd(';').Trim()
     if (-not $s) { return 'the query is empty' }
     if ($s -notmatch '^(?i)(select|with)\b') { return 'only SELECT (or WITH ... SELECT) queries run against a database' }
@@ -159,7 +164,7 @@ function Write-DbRefreshScript {
 foreach (`$q in `$queries) {
     `$c = `$conns[`$q.connection]
     if (-not `$c) { Write-Warning "No connection `$(`$q.connection) for `$(`$q.name)"; continue }
-    `$bare = [regex]::Replace([regex]::Replace(`$q.sql, '(?s)/\*.*?\*/|--[^\n]*', ' '), "'(?:[^']|'')*'", "''")
+    `$bare = [regex]::Replace(`$q.sql, '$($script:SqlTokens.Replace("'", "''"))', { param(`$m) `$v = `$m.Value; if (`$v[0] -eq '/' -or `$v[0] -eq '-') { ' ' } elseif (`$v[0] -eq "'") { "''" } else { 'x' } })   # comments, strings and quoted names in one pass
     if (`$bare.Trim() -notmatch '^(?i)(select|with)\b' -or `$bare.Trim().TrimEnd(';') -match ';' -or `$bare -match `$blocked) { Write-Warning "`$(`$q.name) is not a single reading query: skipped"; continue }
     `$b = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
     `$b['Data Source'] = `$c.server; `$b['Initial Catalog'] = `$c.database; `$b['Integrated Security'] = `$true; `$b['ApplicationIntent'] = 'ReadOnly'

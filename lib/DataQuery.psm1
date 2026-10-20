@@ -33,11 +33,16 @@ function Get-QueryTables([Parameter(Mandatory)][string]$ProjectRoot) {
 }
 
 function Test-ReadOnlyQuery([AllowEmptyString()][string]$Sql) {
-    # Why a query is refused ($null when it may run): one SELECT or WITH statement.
-    $t = [regex]::Replace("$Sql", '(?s)/\*.*?\*/|--[^\n]*', ' ').Trim().TrimEnd(';').Trim()
+    # Why a query is refused ($null when it may run): one SELECT or WITH ... SELECT statement. Comments,
+    # strings and quoted names are taken whole in one pass, so none of them hides a second statement
+    # or makes a ; in text count as one.
+    $t = [regex]::Replace("$Sql", '(?s)/\*.*?\*/|--[^\n]*|''(?:[^'']|'''')*''|"[^"]*"|\[[^\]]*\]|`[^`]*`', { param($m) $v = $m.Value; if ($v[0] -eq '/' -or $v[0] -eq '-') { ' ' } elseif ($v[0] -eq "'") { "''" } else { 'x' } }).Trim().TrimEnd(';').Trim()
     if (-not $t) { return 'the query is empty' }
     if ($t -notmatch '^(?i)(select|with)\b') { return 'only SELECT (or WITH ... SELECT) queries run here: the data files are read-only' }
     if ($t -match ';\s*\S') { return 'one statement at a time' }
+    # SQLite also runs WITH ... INSERT / UPDATE / DELETE: a reading query has none of those.
+    $w = [regex]::Match($t, '(?i)\b(insert|replace)\s+into\b|\bdelete\s+from\b|\bupdate\s+\S+\s+set\b')
+    if ($w.Success) { return "the query holds '$($w.Value)': only reading queries run here, the data files are read-only" }
     $null
 }
 

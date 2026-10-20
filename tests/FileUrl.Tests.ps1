@@ -47,6 +47,16 @@ Describe 'Find-FileUrlBlocks' {
         $f[0] | Should Match 'write config\.data\.js containing window\.configData'
         Remove-Item $p -Recurse -Force
     }
+    It 'skips a reference that is not a path (template syntax) instead of failing the whole check' {
+        $p = New-PageProject
+        Add-PageFile $p 'index.html' "<html><body><img src=""<%= item.img %>""><img src=""missing.png""><script src=""app.js""></script></body></html>"
+        Add-PageFile $p 'app.js' "fetch('<%= url %>'); fetch('../<%= x %>/a.json');"
+        $f = @(Test-ProjectConsistency $p @('index.html', 'app.js'))
+        ($f -join "`n") | Should Match 'index\.html: refers to missing\.png, which does not exist'
+        ($f -join "`n") | Should Not Match 'Illegal characters'
+        (Resolve-RelRef $p '' '<%= x %>') | Should BeNullOrEmpty
+        Remove-Item $p -Recurse -Force
+    }
     It 'says nothing for a project with a build tool or web server' {
         $p = New-PageProject
         Add-PageFile $p 'package.json' '{ "name": "x" }'

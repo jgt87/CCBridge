@@ -95,6 +95,28 @@ describe("KitData.parseCsv", () => {
     expect(KitData.parseCsv("D\n12/31/2024\n").rows[0].D).toBe("2024-12-31");
     expect(KitData.parseCsv("D\n31.12.2024\n01.02.2024\n").rows[1].D).toBe("2024-02-01");
   });
+  it("types a column by the first kind every value fits, in a fixed order", () => {
+    const type = KitData._internal.columnType;
+    expect(type(["1.5", "2"], ",")).toEqual({ type: "number", decimal: "." });
+    expect(type(["1,5", "2"], ",")).toEqual({ type: "number", decimal: "," });
+    expect(type(["1,234", "5"], ",")).toEqual({ type: "number", decimal: "." });   // both fit: the delimiter decides
+    expect(type(["1,234", "5"], ";")).toEqual({ type: "number", decimal: "," });
+    expect(type(["007", "8"], ",")).toEqual({ type: "text" });
+    expect(type(["true", "FALSE", ""], ",")).toEqual({ type: "boolean" });
+    expect(type(["2024-01-31", "2024-02-01T10:00Z"], ",")).toEqual({ type: "date", order: "iso" });
+    expect(type(["13/01/2024", "01/02/2024"], ",")).toEqual({ type: "date", order: "dmy" });
+    expect(type(["01/13/2024", "01/02/2024"], ",")).toEqual({ type: "date", order: "mdy" });
+    expect(type(["13/01/2024", "01/13/2024"], ",")).toEqual({ type: "text" });
+    expect(type(["01.02.2024"], ",")).toEqual({ type: "date", order: "dmy" });
+    expect(type(["01/02/2024"], ",")).toEqual({ type: "text" });
+    expect(type(["NA", ""], ",")).toEqual({ type: "text" });
+  });
+  it("splits lines: quotes, doubled quotes, CRLF, blank lines skipped, a line of empty fields kept", () => {
+    const split = KitData._internal.splitCsv;
+    expect(split('a,"b ""c""",d\r\n\r\n,\n"x\ny"', ",")).toEqual([["a", 'b "c"', "d"], ["", ""], ["x\ny"]]);
+    expect(split('""\nz', ",")).toEqual([[""], ["z"]]);
+    expect(split('a"b,c', ",")).toEqual([['a"b', "c"]]);
+  });
 });
 
 describe("KitData Office files", () => {

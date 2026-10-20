@@ -13,7 +13,9 @@ function New-RunWindowBatch {
     <# The batch file's text: title, the command echoed, each line run in turn (stopping at the first
        failure, like a run here), the exit code written to $CodeFile, then a pause. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Command, [Parameter(Mandatory)][string]$CodeFile)
-    $esc = { param($t) $t -replace '([&|<>^%])', '^$1' }
+    # Text echoed or set as the title: & | < > ^ take a caret; % is doubled (a caret does not stop
+    # %NAME% from expanding in a batch file, so ^%PATH^% would print the variable's value).
+    $esc = { param($t) ($t -replace '([&|<>^])', '^$1').Replace('%', '%%') }
     $lines = @($Command.Replace("`r`n", "`n").Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $sb = New-Object Text.StringBuilder
     [void]$sb.AppendLine('@echo off')

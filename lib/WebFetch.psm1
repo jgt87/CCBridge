@@ -49,7 +49,7 @@ function Test-M365Address([string]$Url) {
        gets a sign-in page. #>
     $u = $null
     if (-not [Uri]::TryCreate("$Url".Trim(), [UriKind]::Absolute, [ref]$u)) { return $false }
-    $h = $u.DnsSafeHost.ToLowerInvariant()
+    $h = $u.DnsSafeHost.ToLowerInvariant().TrimEnd('.')
     [bool]($h -match '(^|\.)(sharepoint\.com|sharepoint\.us|sharepoint\.cn|sharepoint-df\.com|onedrive\.live\.com|1drv\.ms|cloud\.microsoft)$' -or
         $h -match '^(teams|outlook|www\.office|office|onedrive)\.(microsoft|office|live|office365)\.com$')
 }
@@ -67,7 +67,7 @@ function Test-WebAddress {
     if (-not [Uri]::TryCreate($Url.Trim(), [UriKind]::Absolute, [ref]$u)) { return 'not a full web address (it must start with https://)' }
     if ($u.Scheme -notin 'http', 'https') { return "only http and https addresses can be read, not $($u.Scheme):" }
     if ($u.UserInfo) { return 'addresses with a user name or password are not read' }
-    $h = $u.DnsSafeHost.ToLowerInvariant()
+    $h = $u.DnsSafeHost.ToLowerInvariant().TrimEnd('.')   # a trailing dot names the same host (localhost.)
     if ($h -eq 'localhost' -or $h.EndsWith('.localhost') -or $h.EndsWith('.local') -or $h.EndsWith('.internal') -or $h.EndsWith('.lan') -or $h.EndsWith('.corp') -or $h.EndsWith('.home')) { return 'local and intranet addresses are not read' }
     $ip = $null
     if ([Net.IPAddress]::TryParse($h, [ref]$ip)) { if (Test-PrivateAddress $ip) { return 'local and private network addresses are not read' } ; return $null }

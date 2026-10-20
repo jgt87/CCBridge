@@ -654,6 +654,72 @@ function Find-KitPageIssues {
     @(Get-KitPageFindings $New $Rel | Where-Object { $before -notcontains ($_ -replace '^line \d+: ', '') })
 }
 
+function Find-KitIconScript {
+    <# A page that uses kit icons (data-kit-icon) but never loads styles/kit/kit-icons.js: each icon
+       shows as empty space. A one-file page gets the icons through its kit block, a React page
+       through the Icon part. Said once, when the change makes the page so. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(html?|cshtml|php)$' -or $Rel -match '(?i)(^|/)(styles/kit|\.streamhub|node_modules|dist|build)/') { return }
+    $missing = {
+        param([string]$t)
+        $t -match 'data-kit-icon' -and $t -notmatch '(?i)kit-icons(\.js)?\b' -and $t -notmatch 'data-streamhub\s*=\s*["'']kit["'']'
+    }
+    if (-not (& $missing $New) -or (& $missing $Old)) { return }
+    "the page uses kit icons (data-kit-icon) but does not load the kit's icon script, so every icon shows as empty space: add <script src=`"styles/kit/kit-icons.js`"></script> after the markup (the path to styles/kit/kit-icons.js from this page); the helper program writes that file with the icons the pages use"
+}
+
+# Action words a button label starts with, and the icon the kit's rule gives that action (English
+# and Dutch). Used by Find-IconlessActions.
+$script:ActionIcons = [ordered]@{
+    '(new|add|create|nieuwe?|toevoegen|aanmaken)' = 'plus'
+    '(export|download|exporteren|downloaden)'     = 'download'
+    '(import|upload|importeren|uploaden)'         = 'upload'
+    '(delete|remove|verwijderen|wissen)'          = 'trash-2'
+    '(edit|bewerken|wijzigen)'                    = 'pencil'
+    '(refresh|reload|vernieuwen|verversen)'       = 'refresh-cw'
+    '(search|zoeken)'                             = 'search'
+    '(filters?|filteren)'                         = 'filter'
+    '(print|afdrukken|printen)'                   = 'printer'
+    '(settings|instellingen)'                     = 'settings'
+    '(save|opslaan|bewaren)'                      = 'save'
+}
+
+function Get-IconlessActions([AllowEmptyString()][string]$Text) {
+    <# Kit buttons whose label starts with a common action word (New, Export, Delete...) and that
+       have no icon: @{ label; icon; line }. Markup and JSX; a button with any icon or picture inside
+       (data-kit-icon, <Icon>, <svg>, <img>) counts as having one. #>
+    $t = "$Text"
+    if ($t -notmatch 'kit-btn') { return @() }
+    $out = New-Object System.Collections.Generic.List[object]
+    foreach ($m in [regex]::Matches($t, '(?is)<button\b([^>]*)>(.*?)</button>')) {
+        if ($m.Groups[1].Value -notmatch '\bkit-btn\b') { continue }
+        $inner = $m.Groups[2].Value
+        if ($inner -match '(?i)data-kit-icon|<Icon\b|<svg\b|<img\b|KitIcons') { continue }
+        $label = ([regex]::Replace($inner, '<[^>]*>|\{[^}]*\}', ' ') -replace '\s+', ' ').Trim()
+        if (-not $label -or $label.Length -gt 40) { continue }
+        foreach ($k in $script:ActionIcons.Keys) {
+            if ($label -match "(?i)^$k\b") {
+                $out.Add(@{ label = $label; icon = $script:ActionIcons[$k]; line = ([regex]::Matches($t.Substring(0, $m.Index), "`n")).Count + 1 })
+                break
+            }
+        }
+    }
+    $out.ToArray()
+}
+
+function Find-IconlessActions {
+    <# Action buttons a change adds without an icon, with the UI kit and its icons on: one note per
+       file naming up to four of them with the icon the kit's rule gives each action. #>
+    param([Parameter(Mandatory)][string]$Rel, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
+    if ($Rel -notmatch '(?i)\.(html?|cshtml|razor|php|jsx|tsx|vue|svelte|astro|m?js)$' -or $Rel -match '(?i)(^|/)(styles/kit|\.streamhub|node_modules|dist|build|tests?)/') { return }
+    if (-not (Test-UiKitPart 'icons')) { return }
+    $before = @(Get-IconlessActions $Old | ForEach-Object { $_.label.ToLowerInvariant() })
+    $added = @(Get-IconlessActions $New | Where-Object { $before -notcontains $_.label.ToLowerInvariant() })
+    if (-not $added.Count) { return }
+    $named = @($added | Select-Object -First 4 | ForEach-Object { "'$($_.label)' ($($_.icon))" }) -join ', '
+    "line $($added[0].line): action buttons without an icon: $named. The kit's icon rule puts a leading icon on toolbar and panel actions: <span data-kit-icon=`"NAME`" aria-hidden=`"true`"></span> before the text, the same icon for the same action on every page (keep the word; in a table row an icon-only button with aria-label)"
+}
+
 function Find-PageBuildScript {
     <# A script that builds a page from a template page (OneFile Get-TemplateBuildPairs) without
        writing the Generated line first: the built page would be checked, reviewed and edited as
@@ -675,7 +741,7 @@ function Find-QualityIssues {
     # A one-file page: the helper program's kit and data blocks are not the change's own text.
     if ($Rel -match '(?i)\.html?$') { $loads = Find-OneFileLoads $Rel $Old $New; $Old = Hide-GeneratedBlocks $Old; $New = Hide-GeneratedBlocks $New } else { $loads = $null }
     if ($Rel -match '(?i)\.html?$' -and (Get-GeneratedPageInfo $New)) { return @($loads) }   # a page a script built: its template is checked
-    @($loads) + @(if ($UseKit) { Find-TableHeaderIssues $Rel $Old $New; Find-KitPageIssues $Rel $Old $New }) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageBuildScript $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New } }) | Where-Object { $_ }
+    @($loads) + @(if ($UseKit) { Find-TableHeaderIssues $Rel $Old $New; Find-KitPageIssues $Rel $Old $New; Find-KitIconScript $Rel $Old $New }) + @(Find-PersonalPaths $Rel $Old $New) + @(Find-LargeCode $Rel $Old $New) + @(Find-HtmlBasics $Rel $Old $New) + @(Find-ScriptBasics $Rel $Old $New) + @(Find-PageBuildScript $Rel $Old $New) + @(Find-PageCopyScript $Rel $Old $New) + @(Find-UnsortedTables $Rel $Old $New) + @(if (-not $UserLook) { Find-RoundedBarBase $Rel $Old $New; Find-UiSlop $Rel $Old $New -UseKit:$UseKit; if ($UseKit) { Find-KitBypass $Rel $Old $New; Find-TailwindSlop $Rel $Old $New; Find-IconlessActions $Rel $Old $New } }) | Where-Object { $_ }
 }
 
 function Get-DoneReminders {
@@ -728,4 +794,4 @@ function Get-DoneReminders {
     "Before finishing, one check:`n- " + ($notes -join "`n- ") + "`nThen send done again."
 }
 
-Export-ModuleMember -Function Find-TailwindSlop, Find-RoundedBarBase, Find-UnsortedTables, Find-TableHeaderIssues, Get-TableHeaderFindings, Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders, Find-PageBuildScript, Test-LiteralHtmlAssign, Get-KitPageFindings, Find-KitPageIssues
+Export-ModuleMember -Function Find-TailwindSlop, Find-RoundedBarBase, Find-UnsortedTables, Find-TableHeaderIssues, Get-TableHeaderFindings, Find-KitBypass, Find-PageCopyScript, Find-UiSlop, Test-GeneratedPath, Find-NewDependencies, Find-RiskyCode, Find-ChangeSmells, Find-UnignoredEnv, Find-PersonalPaths, Find-LargeCode, Find-HtmlBasics, Find-ScriptBasics, Find-QualityIssues, Get-DoneReminders, Find-PageBuildScript, Test-LiteralHtmlAssign, Get-KitPageFindings, Find-KitPageIssues, Find-KitIconScript, Get-IconlessActions, Find-IconlessActions

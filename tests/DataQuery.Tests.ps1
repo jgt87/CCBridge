@@ -22,6 +22,11 @@ Describe 'Querying the data' {
         Test-ReadOnlyQuery 'DELETE FROM sales_2026' | Should Match 'only SELECT'
         Test-ReadOnlyQuery 'SELECT 1; DROP TABLE x' | Should Match 'one statement'
         Test-ReadOnlyQuery '  ' | Should Match 'empty'
+        # SQLite runs WITH ... DELETE / INSERT / UPDATE too; a ; inside text is no statement.
+        Test-ReadOnlyQuery 'WITH q AS (SELECT 1) DELETE FROM sales_2026' | Should Match 'DELETE FROM'
+        Test-ReadOnlyQuery 'WITH q AS (SELECT 1) INSERT INTO sales_2026 SELECT * FROM q' | Should Match 'INSERT INTO'
+        Test-ReadOnlyQuery "SELECT ';' AS sep, ""a;b"" FROM sales_2026 /* ; drop */" | Should BeNullOrEmpty
+        Test-ReadOnlyQuery "SELECT 'x' FROM t WHERE note = 'delete from y'" | Should BeNullOrEmpty
     }
     It 'loads only the tables the query names, and formats the result' {
         $seen = @{}

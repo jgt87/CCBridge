@@ -178,8 +178,9 @@ if (-not $edge) { throw 'Microsoft Edge was not found.' }
 $out = Join-Path $root ('Runbooks\Exports\' + [IO.Path]::GetFileNameWithoutExtension($Page) + '-' + (Get-Date).ToString('yyyyMMdd-HHmm') + '.pdf')
 $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $out)
 $profile = Join-Path $env:TEMP ('export-page-' + [guid]::NewGuid().ToString('N'))
-$url = 'file:///' + (Resolve-Path -LiteralPath $src).Path.Replace('\', '/')
-$p = Start-Process -FilePath $edge -ArgumentList @('--headless=new', '--disable-gpu', "--user-data-dir=$profile", '--no-pdf-header-footer', '--virtual-time-budget=5000', "--print-to-pdf=$out", $url) -PassThru -WindowStyle Hidden
+$url = 'file:///' + (Resolve-Path -LiteralPath $src).Path.Replace('\', '/').Replace(' ', '%20')
+# Quoted: Start-Process joins the arguments with spaces and does not quote them itself, so a path with a space would be cut in two.
+$p = Start-Process -FilePath $edge -ArgumentList @('--headless=new', '--disable-gpu', "--user-data-dir=""$profile""", '--no-pdf-header-footer', '--virtual-time-budget=5000', "--print-to-pdf=""$out""", """$url""") -PassThru -WindowStyle Hidden
 $p.WaitForExit(120000) | Out-Null
 Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
 if (-not (Test-Path -LiteralPath $out)) { throw 'Edge did not save the PDF.' }

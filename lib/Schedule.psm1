@@ -45,8 +45,10 @@ function Get-NextRun {
        A one-time schedule returns its time even when that has passed: it was missed and runs once. #>
     param([Parameter(Mandatory)]$Schedule, [datetime]$After = (Get-Date))
     if ($Schedule.repeat -eq 'once') {
-        if ($Schedule.lastRun) { return $null }
-        return ConvertTo-LocalTime $Schedule.at
+        $at = ConvertTo-LocalTime $Schedule.at
+        # It ran, unless it was given a later time since (editing a finished schedule runs it again).
+        if ($Schedule.lastRun) { $last = ConvertTo-LocalTime "$($Schedule.lastRun)"; if (-not $at -or -not $last -or $last -ge $at) { return $null } }
+        return $at
     }
     $times = @(Get-ScheduleTimes $Schedule)
     $days = @($Schedule.days | ForEach-Object { [int]$_ })

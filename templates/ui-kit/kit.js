@@ -13,16 +13,18 @@
 
   // Hold to confirm: <button class="kit-btn kit-btn--hold" data-kit-hold="1500">Delete</button>
   // Fires "kit:hold" on the button when held long enough (mouse, touch, Space or Enter).
+  function isHoldKey(k) { return k === " " || k === "Enter"; }
   function setupHold(btn) {
     if (btn.kitHold) return;
     btn.kitHold = true;
     var ms = parseInt(btn.getAttribute("data-kit-hold"), 10) || 1500;
     var timer = null;
     btn.style.setProperty("--kit-hold-ms", ms + "ms");
+    function isKey(e) { return !!e && e.type === "keydown"; }
     function begin(e) {
       if (timer || btn.disabled) return;
-      if (e && e.type === "keydown" && e.key !== " " && e.key !== "Enter") return;
-      if (e && e.type === "keydown") e.preventDefault();
+      if (isKey(e) && !isHoldKey(e.key)) return;
+      if (isKey(e)) e.preventDefault();
       btn.classList.remove("is-done");
       btn.classList.add("is-holding");
       timer = setTimeout(function () {
@@ -149,6 +151,130 @@
   // data, sorts them on kit:sort, writes only the rows from start to end (kit:page; start counts
   // from 0, end not included) and sets data-kit-total="ROWS" (and data-kit-page="N" to go to a
   // page, e.g. 1 after a filter change) on the table, which the pager follows.
+  // What a cell sorts by: its data-sort, else its text.
+  function cellSortValue(row, i) {
+    var c = row.cells[i];
+    if (!c) return "";
+    var v = c.getAttribute("data-sort");
+    return v === null ? c.textContent.trim() : v;
+  }
+  // Numbers as people write them (kit-num columns): "1,234.56", "1.234,56", "41,7%", "(1,234)",
+  // "5.210". The column decides its decimal separator: a value with 1, 2 or 4+ digits after a
+  // separator makes that one the decimal; dots only in groups of three are thousands.
+  function columnSeparators(values) {
+    var comma = false, dot = false, dotGroups = true;
+    values.forEach(function (raw) {
+      var v = raw.replace(/[^\d.,]/g, "");
+      if (/,\d{3}\./.test(v) || /\.\d{1,2}$/.test(v) || /\.\d{4,}$/.test(v)) dot = true;
+      if (/\.\d{3},/.test(v) || /,\d{1,2}$/.test(v) || /,\d{4,}$/.test(v)) comma = true;
+      if (v.indexOf(".") >= 0 && !/^\d{1,3}(\.\d{3})+$/.test(v.replace(/,.*$/, ""))) dotGroups = false;
+    });
+    // groups: every dot in the column groups thousands ("5.210")
+    return { sep: comma && !dot ? "," : ".", groups: dotGroups && !dot };
+  }
+  // The digits of a number as parseFloat reads them, by the column's separators.
+  function plainDigits(v, seps) {
+    if (seps.sep === ",") return v.replace(/\./g, "").replace(",", ".");
+    v = v.replace(/,/g, "");
+    return seps.groups && /^\d{1,3}(\.\d{3})+$/.test(v) ? v.replace(/\./g, "") : v;
+  }
+  // Ascending order of two sort keys; what is not a number (empty, "n/a") sorts last, whichever way.
+  function compareKeys(x, y, asc) {
+    var c;
+    if (typeof x === "number" || typeof y === "number") {
+      var nx = typeof x === "number" && !isNaN(x), ny = typeof y === "number" && !isNaN(y);
+      if (!nx && !ny) return 0;
+      if (!nx) return 1;
+      if (!ny) return -1;
+      c = x - y;
+    } else c = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+    return asc ? c : -c;
+  }
+  function hasWords(row, words) { var t = row.textContent.toLowerCase(); return words.every(function (x) { return t.indexOf(x) >= 0; }); }
+  // A header cell's sort button (none for data-kit-nosort or a cell that has one).
+  function armHead(th, onSort) {
+    if (th.hasAttribute("data-kit-nosort") || th.querySelector(".kit-table__sort")) return;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "kit-table__sort";
+    while (th.firstChild) b.appendChild(th.firstChild);
+    th.appendChild(b);
+    th.setAttribute("aria-sort", "none");
+    b.addEventListener("click", function () { onSort(th); });
+  }
+  // The pager after the table (or its kit-table-wrap); go(-1) and go(1) on Previous and Next.
+  function makePager(table, go) {
+    var pager = document.createElement("div");
+    pager.className = "kit-pager";
+    pager.innerHTML = '<button class="kit-btn kit-btn--sm" type="button">Previous</button><span class="kit-pager__info" aria-live="polite"></span><button class="kit-btn kit-btn--sm" type="button">Next</button>';
+    var prev = pager.firstChild, info = prev.nextSibling, next = info.nextSibling;
+    var wrap = table.closest(".kit-table-wrap") || table;
+    wrap.parentNode.insertBefore(pager, wrap.nextSibling);
+    prev.addEventListener("click", function () { go(-1); });
+    next.addEventListener("click", function () { go(1); });
+    return { pager: pager, prev: prev, info: info, next: next };
+  }
+  // Row selection (data-kit-select): a checkbox column, "select all" in the header, picked rows
+  // marked aria-selected, a kit-bulk bar (data-kit-bulk="TABLE-ID") with the count and the actions,
+  // and "kit:selection" with detail.ids (the rows' data-id), rows and count. rows() and bodyOf()
+  // give the table's rows and body now; arm() puts the sort buttons in their places again.
+  function setupRowSelect(table, rows, bodyOf, arm) {
+    var bulk = table.id ? document.querySelector('[data-kit-bulk="' + table.id + '"]') : null;
+    var all = document.createElement("input");
+    all.type = "checkbox";
+    all.setAttribute("aria-label", "Select all rows");
+    var selHead = table.tHead && table.tHead.rows[0];
+    if (selHead && !selHead.querySelector("th.kit-table__select")) {
+      var th0 = document.createElement("th");
+      th0.className = "kit-table__select";
+      th0.setAttribute("data-kit-nosort", "");
+      th0.appendChild(all);
+      selHead.insertBefore(th0, selHead.firstChild);
+    }
+    var boxes = function () { return rows().map(function (r) { return r.querySelector("td.kit-table__select input"); }).filter(Boolean); };
+    var picked = function () { return rows().filter(function (r) { return r.getAttribute("aria-selected") === "true"; }); };
+    var tell = function () {
+      var p = picked(), sb = boxes().filter(function (b) { return !b.closest("tr").hidden; });
+      all.checked = sb.length > 0 && sb.every(function (b) { return b.checked; });
+      all.indeterminate = !all.checked && sb.some(function (b) { return b.checked; });
+      if (bulk) { bulk.hidden = p.length === 0; var c = bulk.querySelector(".kit-bulk__count"); if (c) c.textContent = p.length + " selected"; }
+      table.dispatchEvent(new CustomEvent("kit:selection", { bubbles: true, detail: { ids: p.map(function (r) { return r.getAttribute("data-id"); }), rows: p, count: p.length } }));
+    };
+    var armSelect = function () {
+      rows().forEach(function (r) {
+        if (r.querySelector("td.kit-table__select")) return;
+        var td = document.createElement("td"), box = document.createElement("input");
+        td.className = "kit-table__select";
+        box.type = "checkbox";
+        box.setAttribute("aria-label", "Select row");
+        box.addEventListener("change", function () { r.setAttribute("aria-selected", String(box.checked)); tell(); });
+        td.appendChild(box);
+        r.insertBefore(td, r.firstChild);
+      });
+      var body = bodyOf();
+      var emptyCell = body && body.querySelector("tr[data-kit-empty] td[colspan]");
+      if (emptyCell && !emptyCell.kitSpan) { emptyCell.kitSpan = true; emptyCell.colSpan = emptyCell.colSpan + 1; }
+    };
+    all.addEventListener("change", function () {
+      boxes().forEach(function (b) { var r = b.closest("tr"); if (!r.hidden) { b.checked = all.checked; r.setAttribute("aria-selected", String(all.checked)); } });
+      tell();
+    });
+    table.kitArmSelect = armSelect;
+    table.kitSelected = picked;
+    table.kitSelect = function (on) { all.checked = !!on; all.dispatchEvent(new Event("change")); };
+    armSelect();
+    arm();   // the header cells moved one to the right: the sort buttons learn their new places
+  }
+  // What a set of DOM changes touched: the header row, the rows, or (external) the table's attributes.
+  function tableChanges(table, list) {
+    var c = { head: false, rows: false, attrs: false };
+    list.forEach(function (m) {
+      if (m.type === "attributes") c.attrs = true;
+      else if (table.tHead && table.tHead.contains(m.target)) c.head = true;
+      else c.rows = true;
+    });
+    return c;
+  }
   function setupTable(table) {
     // Once per table; a table a script writes after the page loaded is set up when it appears, and a
     // header row or body it writes later is picked up too (startKit's observer, the one below).
@@ -161,103 +287,84 @@
     var col = -1, asc = true, page = 0, pager = null, info = null, prev = null, next = null, obs = null, query = "", matched = 0;
     var sortedCol = -1, sortedAsc = true, numSep = {};
     function rows() { return body ? Array.prototype.filter.call(body.rows, function (r) { return !r.hasAttribute("data-kit-empty"); }) : []; }
-    function value(row, i) {
-      var c = row.cells[i];
-      if (!c) return "";
-      var v = c.getAttribute("data-sort");
-      return v === null ? c.textContent.trim() : v;
-    }
-    // Numbers as people write them (kit-num columns): "1,234.56", "1.234,56", "41,7%", "(1,234)",
-    // "5.210". The column decides its decimal separator: a value with 1, 2 or 4+ digits after a
-    // separator makes that one the decimal; dots only in groups of three are thousands.
-    function decimalSep(i) {
-      if (numSep[i]) return numSep[i];
-      var comma = false, dot = false, dotGroups = true;
-      rows().forEach(function (r) {
-        var v = value(r, i).replace(/[^\d.,]/g, "");
-        if (/,\d{3}\./.test(v) || /\.\d{1,2}$/.test(v) || /\.\d{4,}$/.test(v)) dot = true;
-        if (/\.\d{3},/.test(v) || /,\d{1,2}$/.test(v) || /,\d{4,}$/.test(v)) comma = true;
-        if (v.indexOf(".") >= 0 && !/^\d{1,3}(\.\d{3})+$/.test(v.replace(/,.*$/, ""))) dotGroups = false;
-      });
-      numSep[i + "g"] = dotGroups && !dot;   // every dot in the column groups thousands ("5.210")
-      return (numSep[i] = comma && !dot ? "," : ".");
-    }
+    // A column's separators, read from its rows the first time a number in it is needed.
+    function separators(i) { return numSep[i] || (numSep[i] = columnSeparators(rows().map(function (r) { return cellSortValue(r, i); }))); }
     function toNumber(s, i) {
       var raw = String(s).trim();
       if (!raw) return NaN;
       var neg = /^\(.*\)$/.test(raw) || /^[^\d]*-/.test(raw);
       var v = raw.replace(/[^\d.,]/g, "");
       if (!v) return NaN;
-      var sep = decimalSep(i);
-      if (sep === ",") v = v.replace(/\./g, "").replace(",", ".");
-      else { v = v.replace(/,/g, ""); if (numSep[i + "g"] && /^\d{1,3}(\.\d{3})+$/.test(v)) v = v.replace(/\./g, ""); }
-      var n = parseFloat(v);
+      var n = parseFloat(plainDigits(v, separators(i)));
       return isNaN(n) ? NaN : (neg ? -n : n);
     }
     function sortKey(row) {
       var k = row.__kitKeys || (row.__kitKeys = {});
-      if (k[col] === undefined) k[col] = heads[col] && heads[col].classList.contains("kit-num") ? toNumber(value(row, col), col) : value(row, col);
+      if (k[col] === undefined) k[col] = heads[col] && heads[col].classList.contains("kit-num") ? toNumber(cellSortValue(row, col), col) : cellSortValue(row, col);
       return k[col];
     }
-    function compare(a, b) {
-      var x = sortKey(a), y = sortKey(b), c;
-      if (typeof x === "number" || typeof y === "number") {
-        var nx = typeof x === "number" && !isNaN(x), ny = typeof y === "number" && !isNaN(y);
-        if (!nx && !ny) return 0;
-        if (!nx) return 1;   // what is not a number (empty, "n/a") sorts last, whichever way
-        if (!ny) return -1;
-        c = x - y;
-      } else c = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
-      return asc ? c : -c;
-    }
+    function compare(a, b) { return compareKeys(sortKey(a), sortKey(b), asc); }
     function forgetKeys() { numSep = {}; sortedCol = -1; rows().forEach(function (r) { r.__kitKeys = null; }); }
     function slice(pages) {
       return { page: page + 1, pages: pages, start: page * size, end: size ? (page + 1) * size : Infinity };
     }
-    function apply() {
-      if (external) {
-        var total = Math.max(0, parseInt(table.getAttribute("data-kit-total"), 10) || 0);
-        var want = parseInt(table.getAttribute("data-kit-page"), 10);
-        var xpages = size ? Math.max(1, Math.ceil(total / size)) : 1;
-        if (want > 0) page = want - 1;
-        page = Math.max(0, Math.min(page, xpages - 1));
-        if (pager) {
-          pager.hidden = xpages < 2;
-          info.textContent = "Page " + (page + 1) + " of " + xpages + ", " + total.toLocaleString() + " rows";
-          prev.disabled = page === 0;
-          next.disabled = page >= xpages - 1;
-        }
-        return xpages;
-      }
-      var all = rows();
-      if (col >= 0 && body && (col !== sortedCol || asc !== sortedAsc)) {
+    function pageCount(n) { return size ? Math.max(1, Math.ceil(n / size)) : 1; }
+    function clampPage(pages) { page = Math.max(0, Math.min(page, pages - 1)); }
+    // The pager under the table (when there is one): "Page 2 of 5, 120 rows", Previous and Next.
+    function showPager(pages, count) {
+      if (!pager) return;
+      pager.hidden = pages < 2;
+      info.textContent = "Page " + (page + 1) + " of " + pages + ", " + count + " rows";
+      prev.disabled = page === 0;
+      next.disabled = page >= pages - 1;
+    }
+    // External rows are the page's own: only the pager follows data-kit-total and data-kit-page.
+    function applyExternal() {
+      var total = Math.max(0, parseInt(table.getAttribute("data-kit-total"), 10) || 0);
+      var want = parseInt(table.getAttribute("data-kit-page"), 10);
+      var xpages = pageCount(total);
+      if (want > 0) page = want - 1;
+      clampPage(xpages);
+      showPager(xpages, total.toLocaleString());
+      return xpages;
+    }
+    // Rows are moved only when the order asked for changed since they were last put in order.
+    function orderChanged() { return col !== sortedCol || asc !== sortedAsc; }
+    function sortRows(all) {
+      if (col < 0) return;
+      if (body && orderChanged()) {
         all.sort(compare).forEach(function (r) { body.appendChild(r); });
         sortedCol = col; sortedAsc = asc;
-      } else if (col >= 0) all.sort(compare);
-      // The search box (data-kit-filter): rows without the words are hidden, paging counts the rest.
-      var words = query.toLowerCase().split(/\s+/).filter(Boolean);
-      var list = all.filter(function (r) { var t = r.textContent.toLowerCase(); var hit = words.every(function (w) { return t.indexOf(w) >= 0; }); if (!hit) r.hidden = true; return hit; });
-      matched = list.length;
-      var pages = size ? Math.max(1, Math.ceil(list.length / size)) : 1;
-      page = Math.max(0, Math.min(page, pages - 1));
-      list.forEach(function (r, i) { r.hidden = !!size && (i < page * size || i >= (page + 1) * size); });
-      // No rows left (a search with no match, or no data yet): the empty row shows, the totals row hides.
+      } else all.sort(compare);
+    }
+    function searchWords() { return query.toLowerCase().split(/\s+/).filter(Boolean); }
+    // The search box (data-kit-filter): rows without the words are hidden, paging counts the rest.
+    function matching(all, words) { return all.filter(function (r) { var hit = hasWords(r, words); if (!hit) r.hidden = true; return hit; }); }
+    // No rows left (a search with no match, or no data yet): the empty row shows, the totals row hides.
+    function showEmpty(count) {
       var emptyRow = body && body.querySelector("tr[data-kit-empty]");
-      if (emptyRow) emptyRow.hidden = list.length > 0;
-      if (table.tFoot && table.tFoot.classList.contains("kit-table__total")) table.tFoot.hidden = list.length === 0;
-      if (pager) {
-        pager.hidden = pages < 2;
-        info.textContent = "Page " + (page + 1) + " of " + pages + ", " + list.length + (words.length ? " of " + all.length : "") + " rows";
-        prev.disabled = page === 0;
-        next.disabled = page >= pages - 1;
-      }
+      if (emptyRow) emptyRow.hidden = count > 0;
+      if (table.tFoot && table.tFoot.classList.contains("kit-table__total")) table.tFoot.hidden = count === 0;
+    }
+    function apply() {
+      if (external) return applyExternal();
+      var all = rows();
+      sortRows(all);
+      var words = searchWords();
+      var list = matching(all, words);
+      matched = list.length;
+      var pages = pageCount(list.length);
+      clampPage(pages);
+      list.forEach(function (r, i) { r.hidden = !!size && (i < page * size || i >= (page + 1) * size); });
+      showEmpty(list.length);
+      showPager(pages, list.length + (words.length ? " of " + all.length : ""));
       if (obs) obs.takeRecords();   // our own moves are not a new set of rows
       return pages;
     }
     // On paper every matching row shows (kit.js calls this around printing).
     table.kitPrint = function (on) {
       if (external || !size) return;
-      if (on) rows().forEach(function (r) { var t = r.textContent.toLowerCase(), words = query.toLowerCase().split(/\s+/).filter(Boolean); r.hidden = !words.every(function (w) { return t.indexOf(w) >= 0; }); });
+      if (on) { var words = searchWords(); rows().forEach(function (r) { r.hidden = !hasWords(r, words); }); }
       else apply();
     };
     // The search box: the page's own rows in external mode (kit:filter with the words), else here.
@@ -269,117 +376,49 @@
       var shown = external ? null : matched;
       table.dispatchEvent(new CustomEvent("kit:filter", { bubbles: true, detail: { query: query, pages: pages, shown: shown } }));
     };
+    // A header's sort button: sorts by that column, the other way round when it already was.
+    function sortBy(th) {
+      var i = heads.indexOf(th);
+      if (i < 0) return;
+      asc = col === i ? !asc : true;
+      col = i;
+      heads.forEach(function (h) { if (h.hasAttribute("aria-sort")) h.setAttribute("aria-sort", "none"); });
+      th.setAttribute("aria-sort", asc ? "ascending" : "descending");
+      page = 0;
+      if (external) table.setAttribute("data-kit-page", "1");
+      var pages = apply();
+      table.dispatchEvent(new CustomEvent("kit:sort", { bubbles: true, detail: { column: i, key: th.getAttribute("data-key"), ascending: asc, page: 1, pages: pages, start: 0, end: size || Infinity } }));
+    }
     // Sort buttons in the header cells that have none yet (also cells written later).
     function arm() {
       var headRow = table.tHead && table.tHead.rows[0];
       heads = headRow ? Array.prototype.slice.call(headRow.cells) : [];
       if (!table.hasAttribute("data-kit-sort")) return;
-      heads.forEach(function (th) {
-        if (th.hasAttribute("data-kit-nosort") || th.querySelector(".kit-table__sort")) return;
-        var b = document.createElement("button");
-        b.type = "button";
-        b.className = "kit-table__sort";
-        while (th.firstChild) b.appendChild(th.firstChild);
-        th.appendChild(b);
-        th.setAttribute("aria-sort", "none");
-        b.addEventListener("click", function () {
-          var i = heads.indexOf(th);
-          if (i < 0) return;
-          asc = col === i ? !asc : true;
-          col = i;
-          heads.forEach(function (h) { if (h.hasAttribute("aria-sort")) h.setAttribute("aria-sort", "none"); });
-          th.setAttribute("aria-sort", asc ? "ascending" : "descending");
-          page = 0;
-          if (external) table.setAttribute("data-kit-page", "1");
-          var pages = apply();
-          table.dispatchEvent(new CustomEvent("kit:sort", { bubbles: true, detail: { column: i, key: th.getAttribute("data-key"), ascending: asc, page: 1, pages: pages, start: 0, end: size || Infinity } }));
-        });
-      });
+      heads.forEach(function (th) { armHead(th, sortBy); });
+    }
+    function go(d) {
+      page += d;
+      if (external) table.setAttribute("data-kit-page", String(page + 1));
+      var pages = apply();
+      table.dispatchEvent(new CustomEvent("kit:page", { bubbles: true, detail: slice(pages) }));
+    }
+    // Rows written again are sorted and paged again (the page's own rows in external mode); a
+    // header row written again gets its sort buttons; a body put in later is the one used.
+    function onChange(list) {
+      var c = tableChanges(table, list);
+      if (table.tBodies[0] !== body) body = table.tBodies[0];
+      if (c.rows) forgetKeys();
+      if (c.head || c.rows) arm();
+      if (c.rows && table.kitArmSelect) table.kitArmSelect();
+      if (external) { if (c.attrs || c.rows) apply(); }
+      else if (c.rows) { page = 0; apply(); }
+      obs.takeRecords();
     }
     arm();
-    // Row selection (data-kit-select): a checkbox column, "select all" in the header, picked rows
-    // marked aria-selected, a kit-bulk bar (data-kit-bulk="TABLE-ID") with the count and the actions,
-    // and "kit:selection" with detail.ids (the rows' data-id), rows and count.
-    if (table.hasAttribute("data-kit-select")) {
-      var bulk = table.id ? document.querySelector('[data-kit-bulk="' + table.id + '"]') : null;
-      var all = document.createElement("input");
-      all.type = "checkbox";
-      all.setAttribute("aria-label", "Select all rows");
-      var selHead = table.tHead && table.tHead.rows[0];
-      if (selHead && !selHead.querySelector("th.kit-table__select")) {
-        var th0 = document.createElement("th");
-        th0.className = "kit-table__select";
-        th0.setAttribute("data-kit-nosort", "");
-        th0.appendChild(all);
-        selHead.insertBefore(th0, selHead.firstChild);
-      }
-      var boxes = function () { return rows().map(function (r) { return r.querySelector("td.kit-table__select input"); }).filter(Boolean); };
-      var picked = function () { return rows().filter(function (r) { return r.getAttribute("aria-selected") === "true"; }); };
-      var tell = function () {
-        var p = picked(), sb = boxes().filter(function (b) { return !b.closest("tr").hidden; });
-        all.checked = sb.length > 0 && sb.every(function (b) { return b.checked; });
-        all.indeterminate = !all.checked && sb.some(function (b) { return b.checked; });
-        if (bulk) { bulk.hidden = p.length === 0; var c = bulk.querySelector(".kit-bulk__count"); if (c) c.textContent = p.length + " selected"; }
-        table.dispatchEvent(new CustomEvent("kit:selection", { bubbles: true, detail: { ids: p.map(function (r) { return r.getAttribute("data-id"); }), rows: p, count: p.length } }));
-      };
-      var armSelect = function () {
-        rows().forEach(function (r) {
-          if (r.querySelector("td.kit-table__select")) return;
-          var td = document.createElement("td"), box = document.createElement("input");
-          td.className = "kit-table__select";
-          box.type = "checkbox";
-          box.setAttribute("aria-label", "Select row");
-          box.addEventListener("change", function () { r.setAttribute("aria-selected", String(box.checked)); tell(); });
-          td.appendChild(box);
-          r.insertBefore(td, r.firstChild);
-        });
-        var emptyCell = body && body.querySelector("tr[data-kit-empty] td[colspan]");
-        if (emptyCell && !emptyCell.kitSpan) { emptyCell.kitSpan = true; emptyCell.colSpan = emptyCell.colSpan + 1; }
-      };
-      all.addEventListener("change", function () {
-        boxes().forEach(function (b) { var r = b.closest("tr"); if (!r.hidden) { b.checked = all.checked; r.setAttribute("aria-selected", String(all.checked)); } });
-        tell();
-      });
-      table.kitArmSelect = armSelect;
-      table.kitSelected = picked;
-      table.kitSelect = function (on) { all.checked = !!on; all.dispatchEvent(new Event("change")); };
-      armSelect();
-      arm();   // the header cells moved one to the right: the sort buttons learn their new places
-    }
-    if (size) {
-      pager = document.createElement("div");
-      pager.className = "kit-pager";
-      pager.innerHTML = '<button class="kit-btn kit-btn--sm" type="button">Previous</button><span class="kit-pager__info" aria-live="polite"></span><button class="kit-btn kit-btn--sm" type="button">Next</button>';
-      prev = pager.firstChild; info = prev.nextSibling; next = info.nextSibling;
-      var wrap = table.closest(".kit-table-wrap") || table;
-      wrap.parentNode.insertBefore(pager, wrap.nextSibling);
-      var go = function (d) {
-        page += d;
-        if (external) table.setAttribute("data-kit-page", String(page + 1));
-        var pages = apply();
-        table.dispatchEvent(new CustomEvent("kit:page", { bubbles: true, detail: slice(pages) }));
-      };
-      prev.addEventListener("click", function () { go(-1); });
-      next.addEventListener("click", function () { go(1); });
-    }
+    if (table.hasAttribute("data-kit-select")) setupRowSelect(table, rows, function () { return body; }, arm);
+    if (size) { var parts = makePager(table, go); pager = parts.pager; prev = parts.prev; info = parts.info; next = parts.next; }
     if (window.MutationObserver) {
-      // Rows written again are sorted and paged again (the page's own rows in external mode); a
-      // header row written again gets its sort buttons; a body put in later is the one used.
-      obs = new MutationObserver(function (list) {
-        var headChanged = false, rowsChanged = false, attrs = false;
-        list.forEach(function (m) {
-          if (m.type === "attributes") attrs = true;
-          else if (table.tHead && table.tHead.contains(m.target)) headChanged = true;
-          else rowsChanged = true;
-        });
-        if (table.tBodies[0] !== body) body = table.tBodies[0];
-        if (rowsChanged) forgetKeys();
-        if (headChanged || rowsChanged) arm();
-        if (rowsChanged && table.kitArmSelect) table.kitArmSelect();
-        if (external) { if (attrs || rowsChanged) apply(); }
-        else if (rowsChanged) { page = 0; apply(); }
-        obs.takeRecords();
-      });
+      obs = new MutationObserver(onChange);
       obs.observe(table, external ? { childList: true, subtree: true, attributes: true, attributeFilter: ["data-kit-total", "data-kit-page"] } : { childList: true, subtree: true });
     }
     apply();
@@ -392,7 +431,7 @@
   // on <html>, which tokens.css follows. Its icon shows what a click switches to (moon, sun), its
   // label says so too. Fires "kit:theme" { theme: "light" | "dark" } on the button.
   var THEME_KEY = "kit-theme";
-  function readTheme() { try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; } }
+  function readTheme() { try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; } }   // blocked storage: follow the computer
   function isDark() {
     var t = document.documentElement.getAttribute("data-theme");
     if (t === "dark" || t === "light") return t === "dark";
@@ -464,8 +503,9 @@
     if (t.matches && t.matches("dialog[open]") && t.classList.contains(DRAWER)) { closePanel(t); return; }   // the backdrop
     if (t.closest && t.closest("[data-kit-print]")) window.print();
   });
+  function isKitPanel(el) { return !!el.matches && el.matches("dialog") && (el.classList.contains(DRAWER) || el.classList.contains(DIALOG)); }
   document.addEventListener("close", function (e) {
-    if (e.target.matches && e.target.matches("dialog") && (e.target.classList.contains(DRAWER) || e.target.classList.contains(DIALOG))) e.target.dispatchEvent(new CustomEvent("kit:close", { bubbles: true }));
+    if (isKitPanel(e.target)) e.target.dispatchEvent(new CustomEvent("kit:close", { bubbles: true }));
   }, true);
 
   // Toasts: KitUI.toast("Saved", { tone: "ok" | "warn" | "error", ms: 4000 }), read out by screen readers.
@@ -716,33 +756,51 @@
       var l = menuList(b); if (l) l.hidden = true;
     });
   }
-  document.addEventListener("click", function (e) {
-    var btn = e.target.closest && e.target.closest("[data-kit-menu]");
-    if (btn) {
-      var list = menuList(btn), open = btn.getAttribute("aria-expanded") === "true";
-      closeMenus(btn);
-      btn.setAttribute("aria-expanded", String(!open));
-      if (list) { list.hidden = open; if (!open) { var first = menuItems(list)[0]; if (first) first.focus(); } }
-      return;
-    }
-    var item = e.target.closest && e.target.closest(".kit-menu__item");
-    if (item) {
-      var menu = item.closest(".kit-menu");
-      var b2 = menu && menu.querySelector("[data-kit-menu]");
-      closeMenus();
-      if (menu) menu.dispatchEvent(new CustomEvent("kit:menu", { bubbles: true, detail: { value: item.getAttribute("data-value") || item.textContent.trim() } }));
-      if (b2) b2.focus();
-      return;
-    }
-    if (!(e.target.closest && e.target.closest(".kit-menu__list"))) closeMenus();
-  });
-  document.addEventListener("keydown", function (e) {
-    var list = e.target.closest && e.target.closest(".kit-menu__list");
+  function closestOf(target, selector) { return target.closest ? target.closest(selector) : null; }
+  function toggleMenu(btn) {
+    var list = menuList(btn), open = btn.getAttribute("aria-expanded") === "true";
+    closeMenus(btn);
+    btn.setAttribute("aria-expanded", String(!open));
     if (!list) return;
-    var items = menuItems(list), i = items.indexOf(document.activeElement);
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); var n = items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]; if (n) n.focus(); }
-    else if (e.key === "Home" || e.key === "End") { e.preventDefault(); var h = items[e.key === "Home" ? 0 : items.length - 1]; if (h) h.focus(); }
-    else if (e.key === "Escape" || e.key === "Tab") { var box = list.closest(".kit-menu"), mb = box ? box.querySelector("[data-kit-menu]") : (list.previousElementSibling && list.previousElementSibling.hasAttribute("data-kit-menu") ? list.previousElementSibling : null); closeMenus(); if (e.key === "Escape" && mb) mb.focus(); }
+    list.hidden = open;
+    if (open) return;
+    var first = menuItems(list)[0];
+    if (first) first.focus();
+  }
+  function pickMenuItem(item) {
+    var menu = item.closest(".kit-menu");
+    var b2 = menu && menu.querySelector("[data-kit-menu]");
+    closeMenus();
+    if (menu) menu.dispatchEvent(new CustomEvent("kit:menu", { bubbles: true, detail: { value: item.getAttribute("data-value") || item.textContent.trim() } }));
+    if (b2) b2.focus();
+  }
+  document.addEventListener("click", function (e) {
+    var btn = closestOf(e.target, "[data-kit-menu]");
+    if (btn) { toggleMenu(btn); return; }
+    var item = closestOf(e.target, ".kit-menu__item");
+    if (item) { pickMenuItem(item); return; }
+    if (!closestOf(e.target, ".kit-menu__list")) closeMenus();
+  });
+  // The menu's button: in its kit-menu, else the list's previous sibling when that is one.
+  function menuButtonOf(list) {
+    var box = list.closest(".kit-menu");
+    if (box) return box.querySelector("[data-kit-menu]");
+    var before = list.previousElementSibling;
+    return before && before.hasAttribute("data-kit-menu") ? before : null;
+  }
+  // The item a key moves to (Arrow keys wrap round, Home and End), or undefined for other keys.
+  function menuTarget(items, i, key) {
+    if (key === "ArrowDown" || key === "ArrowUp") return items[(i + (key === "ArrowDown" ? 1 : -1) + items.length) % items.length] || null;
+    if (key === "Home" || key === "End") return items[key === "Home" ? 0 : items.length - 1] || null;
+    return undefined;
+  }
+  document.addEventListener("keydown", function (e) {
+    var list = closestOf(e.target, ".kit-menu__list");
+    if (!list) return;
+    var items = menuItems(list);
+    var to = menuTarget(items, items.indexOf(document.activeElement), e.key);
+    if (to !== undefined) { e.preventDefault(); if (to) to.focus(); }
+    else if (e.key === "Escape" || e.key === "Tab") { var mb = menuButtonOf(list); closeMenus(); if (e.key === "Escape" && mb) mb.focus(); }
   });
 
   // Icon toolbar (from kokonutui toolbar): data-kit-iconbar="single" (one pressed) or "multiple";
@@ -871,6 +929,18 @@
     var to = card.parentNode;
     card.dispatchEvent(new CustomEvent("kit:move", { bubbles: true, detail: { id: card.getAttribute("data-id"), from: from.getAttribute("data-kit-board"), to: to.getAttribute("data-kit-board"), index: Array.prototype.indexOf.call(to.children, card) } }));
   }
+  // Alt+Arrow keys: up and down within the card's list, left and right into the next list. True when it moved.
+  function moveCardByKey(card, key) {
+    var from = card.parentNode;
+    if (key === "ArrowUp" && card.previousElementSibling) { from.insertBefore(card, card.previousElementSibling); return true; }
+    if (key === "ArrowDown" && card.nextElementSibling) { from.insertBefore(card.nextElementSibling, card); return true; }
+    if (key !== "ArrowLeft" && key !== "ArrowRight") return false;
+    var lists = boardLists(card);
+    var to = lists.length ? lists[lists.indexOf(from) + (key === "ArrowRight" ? 1 : -1)] : null;
+    if (!to) return false;
+    to.appendChild(card);
+    return true;
+  }
   function setupBoardCard(card) {
     if (card.kitCard) return;
     card.kitCard = true;
@@ -881,14 +951,8 @@
     card.addEventListener("keydown", function (e) {
       if (!e.altKey || !/^Arrow/.test(e.key)) return;
       e.preventDefault();
-      var from = card.parentNode, lists = boardLists(card), li = lists.indexOf(from);
-      if (e.key === "ArrowUp" && card.previousElementSibling) from.insertBefore(card, card.previousElementSibling);
-      else if (e.key === "ArrowDown" && card.nextElementSibling) from.insertBefore(card.nextElementSibling, card);
-      else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && lists.length) {
-        var to = lists[li + (e.key === "ArrowRight" ? 1 : -1)];
-        if (!to) return;
-        to.appendChild(card);
-      } else return;
+      var from = card.parentNode;
+      if (!moveCardByKey(card, e.key)) return;
       card.focus();
       moved(card, from);
     });
@@ -909,23 +973,18 @@
 
   // Calendar month: data-kit-calendar with data-month="YYYY-MM" (default this month); KitUI.calendar(el,
   // { month, events: [{ date, title, tone }] }) sets the events; "kit:day" (detail.date, events) and "kit:month".
-  function calendarDraw(el) {
-    var st = el.kitCal, y = st.year, m = st.month;
-    var start = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--kit-week-start"), 10);
-    if (isNaN(start)) start = 1;
-    var first = new Date(y, m, 1), lead = (first.getDay() - start + 7) % 7, today = isoDay(new Date());
-    var title;
-    try { title = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(first); } catch (e) { title = y + "-" + (m + 1); }
-    el.innerHTML = "";
+  function calendarTitle(first, y, m) {
+    try { return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(first); } catch (e) { return y + "-" + (m + 1); }
+  }
+  function calendarHead(title) {
     var head = document.createElement("div");
     head.className = "kit-calendar__head";
     head.innerHTML = '<button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-step="-1">Previous</button><h3 class="kit-calendar__title" aria-live="polite"></h3><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-step="1">Next</button>';
     head.querySelector("h3").textContent = title;
-    el.appendChild(head);
-    var grid = document.createElement("div");
-    grid.className = "kit-calendar__grid";
-    grid.setAttribute("role", "group");
-    grid.setAttribute("aria-label", title);
+    return head;
+  }
+  // The weekday names over the columns, from the week's first day (0 = Sunday).
+  function calendarWeekdays(grid, start) {
     var fmt = null;
     try { fmt = new Intl.DateTimeFormat(undefined, { weekday: "short" }); } catch (e) { fmt = null; }
     for (var d = 0; d < 7; d++) {
@@ -936,26 +995,45 @@
       dow.textContent = fmt ? fmt.format(ref) : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][ref.getDay()];
       grid.appendChild(dow);
     }
+  }
+  function calendarEvent(ev) {
+    var s = document.createElement("span");
+    s.className = "kit-calendar__event" + (/^(ok|warn|error)$/.test(ev.tone || "") ? " kit-calendar__event--" + ev.tone : "");
+    s.textContent = ev.title;
+    return s;
+  }
+  // One day's button: its number, up to three events and "+N" for the rest, a full date as its name.
+  function calendarDay(day, iso, st, m, today) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "kit-calendar__day" + (day.getMonth() !== m ? " is-other" : "") + (iso === today ? " is-today" : "");
+    b.setAttribute("data-date", iso);
+    var num = document.createElement("span"); num.className = "kit-calendar__num"; num.textContent = day.getDate(); b.appendChild(num);
+    var evs = (st.events || []).filter(function (ev) { return String(ev.date).slice(0, 10) === iso; });
+    evs.slice(0, 3).forEach(function (ev) { b.appendChild(calendarEvent(ev)); });
+    if (evs.length > 3) { var more = document.createElement("span"); more.className = "kit-calendar__event"; more.textContent = "+" + (evs.length - 3); b.appendChild(more); }
+    var label;
+    try { label = new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(day); } catch (e) { label = iso; }
+    b.setAttribute("aria-label", label + (evs.length ? ", " + evs.length + " item" + (evs.length > 1 ? "s" : "") : ""));
+    return b;
+  }
+  function calendarDraw(el) {
+    var st = el.kitCal, y = st.year, m = st.month;
+    var start = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--kit-week-start"), 10);
+    if (isNaN(start)) start = 1;
+    var first = new Date(y, m, 1), lead = (first.getDay() - start + 7) % 7, today = isoDay(new Date());
+    var title = calendarTitle(first, y, m);
+    el.innerHTML = "";
+    el.appendChild(calendarHead(title));
+    var grid = document.createElement("div");
+    grid.className = "kit-calendar__grid";
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", title);
+    calendarWeekdays(grid, start);
     var cells = Math.ceil((lead + new Date(y, m + 1, 0).getDate()) / 7) * 7;
     for (var c = 0; c < cells; c++) {
-      var day = new Date(y, m, 1 - lead + c), iso = isoDay(day);
-      var b = document.createElement("button");
-      b.type = "button";
-      b.className = "kit-calendar__day" + (day.getMonth() !== m ? " is-other" : "") + (iso === today ? " is-today" : "");
-      b.setAttribute("data-date", iso);
-      var num = document.createElement("span"); num.className = "kit-calendar__num"; num.textContent = day.getDate(); b.appendChild(num);
-      var evs = (st.events || []).filter(function (ev) { return String(ev.date).slice(0, 10) === iso; });
-      evs.slice(0, 3).forEach(function (ev) {
-        var s = document.createElement("span");
-        s.className = "kit-calendar__event" + (/^(ok|warn|error)$/.test(ev.tone || "") ? " kit-calendar__event--" + ev.tone : "");
-        s.textContent = ev.title;
-        b.appendChild(s);
-      });
-      if (evs.length > 3) { var more = document.createElement("span"); more.className = "kit-calendar__event"; more.textContent = "+" + (evs.length - 3); b.appendChild(more); }
-      var label;
-      try { label = new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(day); } catch (e) { label = iso; }
-      b.setAttribute("aria-label", label + (evs.length ? ", " + evs.length + " item" + (evs.length > 1 ? "s" : "") : ""));
-      grid.appendChild(b);
+      var day = new Date(y, m, 1 - lead + c);
+      grid.appendChild(calendarDay(day, isoDay(day), st, m, today));
     }
     el.appendChild(grid);
   }
@@ -1005,16 +1083,17 @@
   // one decimal unless whole), date(v, { time }) -> "9 Oct 2026" / "9 Oct 2026, 14:00", relative(v)
   // -> "2 hours ago"; "-" for what is not a number or date.
   function pageLang() { return document.documentElement.lang || undefined; }
+  function noNumber(v, n) { return v === null || v === undefined || v === "" || !isFinite(n); }
   var format = {
     number: function (v, opts) {
       var n = Number(v);
-      if (v === null || v === undefined || v === "" || !isFinite(n)) return "-";
+      if (noNumber(v, n)) return "-";
       var d = opts && opts.decimals;
       return n.toLocaleString(pageLang(), d === undefined ? { maximumFractionDigits: 2 } : { minimumFractionDigits: d, maximumFractionDigits: d });
     },
     percent: function (v, decimals) {
       var n = Number(v);
-      if (v === null || v === undefined || v === "" || !isFinite(n)) return "-";
+      if (noNumber(v, n)) return "-";
       var d = decimals === undefined ? (Math.round(n) === n ? 0 : 1) : decimals;
       return n.toLocaleString(pageLang(), { minimumFractionDigits: d, maximumFractionDigits: d }) + "%";
     },
@@ -1057,29 +1136,40 @@
       return true;
     }).map(function (li) { return li.querySelector(":scope > .kit-tree__row"); }).filter(Boolean);
   }
+  // An item's row (made from its text when the item has none).
+  function treeRowOf(li) {
+    var row = li.querySelector(":scope > .kit-tree__row");
+    if (row) return row;
+    row = document.createElement("div"); row.className = "kit-tree__row";
+    while (li.firstChild && li.firstChild.tagName !== "UL") row.appendChild(li.firstChild);
+    li.insertBefore(row, li.firstChild);
+    return row;
+  }
+  function armTreeBranch(li, row, group) {
+    if (!group.getAttribute("role")) group.setAttribute("role", "group");
+    if (!li.hasAttribute("aria-expanded")) li.setAttribute("aria-expanded", "false");
+    if (row.querySelector(".kit-tree__toggle")) return;
+    var t = document.createElement("button");
+    t.type = "button"; t.className = "kit-tree__toggle"; t.tabIndex = -1;
+    t.setAttribute("aria-label", "Open or close");
+    row.insertBefore(t, row.firstChild);
+  }
+  // An item: its role, its row, a toggle for a branch and a spacer for a leaf.
+  function armTreeItem(li) {
+    if (!li.getAttribute("role")) li.setAttribute("role", "treeitem");
+    var row = treeRowOf(li);
+    var group = li.querySelector(":scope > ul");
+    if (group) armTreeBranch(li, row, group);
+    else if (!row.querySelector(".kit-tree__spacer, .kit-tree__toggle")) {
+      var s = document.createElement("span"); s.className = "kit-tree__spacer"; s.setAttribute("aria-hidden", "true"); row.insertBefore(s, row.firstChild);
+    }
+    row.tabIndex = -1;
+  }
   function setupTree(tree) {
     if (tree.kitTree) return;
     tree.kitTree = true;
     if (!tree.getAttribute("role")) tree.setAttribute("role", "tree");
-    Array.prototype.forEach.call(tree.querySelectorAll("li"), function (li) {
-      if (!li.getAttribute("role")) li.setAttribute("role", "treeitem");
-      var row = li.querySelector(":scope > .kit-tree__row");
-      if (!row) { row = document.createElement("div"); row.className = "kit-tree__row"; while (li.firstChild && li.firstChild.tagName !== "UL") row.appendChild(li.firstChild); li.insertBefore(row, li.firstChild); }
-      var group = li.querySelector(":scope > ul");
-      if (group) {
-        if (!group.getAttribute("role")) group.setAttribute("role", "group");
-        if (!li.hasAttribute("aria-expanded")) li.setAttribute("aria-expanded", "false");
-        if (!row.querySelector(".kit-tree__toggle")) {
-          var t = document.createElement("button");
-          t.type = "button"; t.className = "kit-tree__toggle"; t.tabIndex = -1;
-          t.setAttribute("aria-label", "Open or close");
-          row.insertBefore(t, row.firstChild);
-        }
-      } else if (!row.querySelector(".kit-tree__spacer, .kit-tree__toggle")) {
-        var s = document.createElement("span"); s.className = "kit-tree__spacer"; s.setAttribute("aria-hidden", "true"); row.insertBefore(s, row.firstChild);
-      }
-      row.tabIndex = -1;
-    });
+    Array.prototype.forEach.call(tree.querySelectorAll("li"), function (li) { armTreeItem(li); });
     var roving = function (current) {
       var rows = treeRows(tree), cur = current || rows.filter(function (r) { return r.parentElement.getAttribute("aria-selected") === "true"; })[0] || rows[0];
       rows.forEach(function (r) { r.tabIndex = r === cur ? 0 : -1; });
@@ -1101,22 +1191,33 @@
       select(row);
       row.focus();
     });
+    var go = function (r) { if (r) { roving(r); r.focus(); } };
+    // Right opens a closed branch, else goes into it; Left closes an open branch, else goes to its parent.
+    var right = function (k) {
+      if (!k.branch) return;
+      if (k.li.getAttribute("aria-expanded") !== "true") toggle(k.li, true); else go(treeRows(tree)[k.i + 1]);
+    };
+    var left = function (k) {
+      if (k.branch && k.li.getAttribute("aria-expanded") === "true") { toggle(k.li, false); return; }
+      var up = k.li.parentElement && k.li.parentElement.closest("li");
+      if (up && tree.contains(up)) go(up.querySelector(":scope > .kit-tree__row"));
+    };
+    var keys = {
+      ArrowDown: function (k) { go(k.rows[k.i + 1]); },
+      ArrowUp: function (k) { go(k.rows[k.i - 1]); },
+      Home: function (k) { go(k.rows[0]); },
+      End: function (k) { go(k.rows[k.rows.length - 1]); },
+      ArrowRight: right,
+      ArrowLeft: left,
+      Enter: function (k) { select(k.row); },
+      " ": function (k) { select(k.row); }
+    };
     tree.addEventListener("keydown", function (e) {
       var row = e.target.closest && e.target.closest(".kit-tree__row");
-      if (!row) return;
-      var li = row.parentElement, rows = treeRows(tree), i = rows.indexOf(row), branch = !!li.querySelector(":scope > ul");
-      var go = function (r) { if (r) { roving(r); r.focus(); } };
-      if (e.key === "ArrowDown") { e.preventDefault(); go(rows[i + 1]); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); go(rows[i - 1]); }
-      else if (e.key === "Home") { e.preventDefault(); go(rows[0]); }
-      else if (e.key === "End") { e.preventDefault(); go(rows[rows.length - 1]); }
-      else if (e.key === "ArrowRight") { e.preventDefault(); if (branch && li.getAttribute("aria-expanded") !== "true") toggle(li, true); else if (branch) go(treeRows(tree)[i + 1]); }
-      else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        if (branch && li.getAttribute("aria-expanded") === "true") toggle(li, false);
-        else { var up = li.parentElement && li.parentElement.closest("li"); if (up && tree.contains(up)) go(up.querySelector(":scope > .kit-tree__row")); }
-      }
-      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(row); }
+      if (!row || !Object.prototype.hasOwnProperty.call(keys, e.key)) return;
+      var li = row.parentElement, rows = treeRows(tree);
+      e.preventDefault();
+      keys[e.key]({ row: row, li: li, rows: rows, i: rows.indexOf(row), branch: !!li.querySelector(":scope > ul") });
     });
     roving();
   }
@@ -1133,24 +1234,23 @@
       if (p && !p.hidden) { p.hidden = true; p.dispatchEvent(new CustomEvent("kit:close", { bubbles: true })); }
     });
   }
+  function togglePopover(btn) {
+    var p = popoverOf(btn);
+    if (!p) return;
+    var open = btn.getAttribute("aria-expanded") === "true";
+    closePopovers(btn);
+    btn.setAttribute("aria-expanded", String(!open));
+    if (!btn.getAttribute("aria-controls")) btn.setAttribute("aria-controls", p.id);
+    p.hidden = open;
+    if (open) { p.dispatchEvent(new CustomEvent("kit:close", { bubbles: true })); return; }
+    p.dispatchEvent(new CustomEvent("kit:open", { bubbles: true }));
+    var f = p.querySelector("input, select, textarea, button, a[href], [tabindex]:not([tabindex='-1'])");
+    if (f) f.focus(); else { p.tabIndex = -1; p.focus(); }
+  }
   document.addEventListener("click", function (e) {
-    var btn = e.target.closest && e.target.closest("[data-kit-popover]");
-    if (btn) {
-      var p = popoverOf(btn);
-      if (!p) return;
-      var open = btn.getAttribute("aria-expanded") === "true";
-      closePopovers(btn);
-      btn.setAttribute("aria-expanded", String(!open));
-      if (!btn.getAttribute("aria-controls")) btn.setAttribute("aria-controls", p.id);
-      p.hidden = open;
-      if (!open) {
-        p.dispatchEvent(new CustomEvent("kit:open", { bubbles: true }));
-        var f = p.querySelector("input, select, textarea, button, a[href], [tabindex]:not([tabindex='-1'])");
-        if (f) f.focus(); else { p.tabIndex = -1; p.focus(); }
-      } else p.dispatchEvent(new CustomEvent("kit:close", { bubbles: true }));
-      return;
-    }
-    if (!(e.target.closest && e.target.closest(".kit-popover"))) closePopovers();
+    var btn = closestOf(e.target, "[data-kit-popover]");
+    if (btn) { togglePopover(btn); return; }
+    if (!closestOf(e.target, ".kit-popover")) closePopovers();
   });
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
@@ -1256,44 +1356,56 @@
   // The table's <tr data-kit-empty> row stays (one is made with opts.empty, or "Nothing to show",
   // when there is none) and shows when the list is empty. Sorting, paging and search follow the
   // new rows by themselves. Returns the number of rows written.
+  function cellValue(c, row) { return typeof c.value === "function" ? c.value(row) : c.key ? row[c.key] : ""; }
+  function cellText(c, v, row) {
+    var f = c.format;
+    if (typeof f === "function") return f(v, row);
+    if (v === null || v === undefined || v === "") return c.missing !== undefined ? c.missing : "-";
+    if (f === "number") return format.number(v);
+    if (f === "percent") return format.percent(v);
+    if (f === "date") return format.date(v);
+    return String(v);
+  }
+  // A number column: marked num, formatted as a number or percentage, or (neither said) holding a number.
+  function isNumCell(c, v) { return c.num || c.format === "number" || c.format === "percent" || (c.num === undefined && c.format == null && typeof v === "number"); }
+  function fillCell(c, row) {
+    var td = document.createElement("td");
+    var v = cellValue(c, row);
+    td.textContent = cellText(c, v, row);
+    var isNum = isNumCell(c, v);
+    if (isNum) td.className = "kit-num";
+    if ((isNum && typeof v === "number") || c.format === "date") td.setAttribute("data-sort", v == null ? "" : String(v));
+    return td;
+  }
+  // The last header row's cells, without the row selection's checkbox column.
+  function headCells(t) {
+    return t.tHead ? Array.prototype.slice.call(t.tHead.rows[t.tHead.rows.length - 1].cells).filter(function (th) { return !th.classList.contains("kit-table__select"); }) : [];
+  }
+  function headColumn(th) {
+    return { key: th.getAttribute("data-key"), format: th.getAttribute("data-format") || (th.classList.contains("kit-num") ? "number" : null), num: th.classList.contains("kit-num") };
+  }
+  function newEmptyRow(span, text) {
+    var empty = document.createElement("tr");
+    empty.setAttribute("data-kit-empty", "");
+    empty.innerHTML = '<td><div class="kit-empty"><p class="kit-empty__title"></p></div></td>';
+    empty.cells[0].colSpan = Math.max(1, span);
+    empty.querySelector(".kit-empty__title").textContent = text || "Nothing to show";
+    return empty;
+  }
   function fillTable(table, list, columns, opts) {
     var t = typeof table === "string" ? document.querySelector(table) : table;
     if (!t) return 0;
     if (columns && !Array.isArray(columns)) { opts = columns; columns = null; }
     opts = opts || {};
-    var heads = t.tHead ? Array.prototype.slice.call(t.tHead.rows[t.tHead.rows.length - 1].cells).filter(function (th) { return !th.classList.contains("kit-table__select"); }) : [];
-    var cols = columns || heads.map(function (th) {
-      return { key: th.getAttribute("data-key"), format: th.getAttribute("data-format") || (th.classList.contains("kit-num") ? "number" : null), num: th.classList.contains("kit-num") };
-    });
+    var heads = headCells(t);
+    var cols = columns || heads.map(headColumn);
     var body = t.tBodies[0] || t.appendChild(document.createElement("tbody"));
-    var empty = body.querySelector("tr[data-kit-empty]");
-    if (!empty) {
-      empty = document.createElement("tr");
-      empty.setAttribute("data-kit-empty", "");
-      empty.innerHTML = '<td><div class="kit-empty"><p class="kit-empty__title"></p></div></td>';
-      empty.cells[0].colSpan = Math.max(1, cols.length);
-      empty.querySelector(".kit-empty__title").textContent = opts.empty || "Nothing to show";
-    }
+    var empty = body.querySelector("tr[data-kit-empty]") || newEmptyRow(cols.length, opts.empty);
     var frag = document.createDocumentFragment();
     (list || []).forEach(function (row) {
       var tr = document.createElement("tr");
       if (opts.id && row && row[opts.id] != null) tr.setAttribute("data-id", String(row[opts.id]));
-      cols.forEach(function (c) {
-        var td = document.createElement("td");
-        var v = typeof c.value === "function" ? c.value(row) : c.key ? row[c.key] : "";
-        var f = c.format, text;
-        if (typeof f === "function") text = f(v, row);
-        else if (v === null || v === undefined || v === "") text = c.missing !== undefined ? c.missing : "-";
-        else if (f === "number") text = format.number(v);
-        else if (f === "percent") text = format.percent(v);
-        else if (f === "date") text = format.date(v);
-        else text = String(v);
-        td.textContent = text;
-        var isNum = c.num || f === "number" || f === "percent" || (c.num === undefined && f == null && typeof v === "number");
-        if (isNum) td.className = "kit-num";
-        if ((isNum && typeof v === "number") || f === "date") td.setAttribute("data-sort", v == null ? "" : String(v));
-        tr.appendChild(td);
-      });
+      cols.forEach(function (c) { tr.appendChild(fillCell(c, row)); });
       frag.appendChild(tr);
     });
     Array.prototype.slice.call(body.rows).forEach(function (r) { if (r !== empty) body.removeChild(r); });

@@ -65,6 +65,23 @@ Describe 'Only the rules of the parts a page has' {
             $u.classes.Contains('kit-toast') | Should Be $false
         } finally { Remove-Item $p -Recurse -Force }
     }
+    It 'keeps the chart animations a page with a chart gets from kit-charts.js (keyframes named in full by the script)' {
+        $p = New-KitProject
+        try {
+            Copy-Item (Join-Path $root 'templates\ui-kit\kit-charts.js') (Join-Path $p 'styles\kit\kit-charts.js')
+            Add-File $p 'index.html' '<div class="kit-panel"><div data-kit-chart="bar"></div></div><script src="styles/kit/kit-charts.js"></script>'
+            Clear-KitScanCache
+            $u = Get-KitUsage $p
+            foreach ($c in 'kit-grow-y', 'kit-grow-x', 'kit-draw') { $u.classes.Contains($c) | Should Be $true }
+            $css = Select-KitCss ([IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))) $u
+            $css | Should Match '@keyframes kit-grow-y'
+            $css | Should Match '@keyframes kit-draw'
+            # Without a chart on the page: not kept.
+            Add-File $p 'index.html' '<div class="kit-panel">x</div><script src="styles/kit/kit-charts.js"></script>'
+            Clear-KitScanCache
+            (Get-KitUsage $p).classes.Contains('kit-grow-y') | Should Be $false
+        } finally { Remove-Item $p -Recurse -Force }
+    }
     It 'keeps keyframes a script names by a prefix' {
         $css = ".kit-a { color: red; }`n@keyframes kit-grow-x { from { transform: scaleX(0); } }`n@keyframes kit-other { to { opacity: 0; } }"
         $out = Select-KitCss $css @{ classes = (New-Object 'System.Collections.Generic.HashSet[string]' -ArgumentList (, [string[]]@('kit-a'))); prefixes = @('kit-grow-') }
@@ -175,6 +192,10 @@ Describe 'A project from an older kit gets the new tokens' {
         $l = Update-KitTokens $lightOnly $old $new
         $l | Should Match '--kit-title: #10069f;'
         $l | Should Not Match 'prefers-color-scheme'
+        # A CRLF file (a git checkout, Notepad) gets its new lines with CRLF too, never mixed endings.
+        $crlf = Update-KitTokens $lightOnly.Replace("`n", "`r`n") $old $new
+        $crlf | Should Match "`r`n  --kit-title: #10069f;`r`n"
+        ([regex]::Matches($crlf, "(?<!`r)`n")).Count | Should Be 0
     }
     It 'brings tokens.css up at a catalogue update, and keeps a value the project set' {
         $p = New-KitProject
@@ -196,6 +217,34 @@ Describe 'A project from an older kit gets the new tokens' {
             [IO.File]::ReadAllText((Join-Path $cat 'tokens.css')) | Should Match '--kit-title:'
             @(Update-UiKitCatalog $p $root).Count | Should Be 0   # up to date now
         } finally { Remove-Item $p -Recurse -Force }
+    }
+}
+
+Describe 'Kit icons on a page (UI kit on)' {
+    It 'reports a page that uses icons without loading kit-icons.js, once, and not a one-file page' {
+        $page = "<html><body class=`"kit-page`">`n<button class=`"kit-btn`"><span data-kit-icon=`"plus`" aria-hidden=`"true`"></span>New</button>`n</body></html>"
+        @(Find-KitIconScript 'index.html' '' $page)[0] | Should Match 'does not load the kit''s icon script.*styles/kit/kit-icons\.js'
+        @(Find-KitIconScript 'index.html' $page $page).Count | Should Be 0   # already so: not the change's doing
+        @(Find-KitIconScript 'index.html' '' ($page.Replace('</body>', '<script src="styles/kit/kit-icons.js"></script></body>'))).Count | Should Be 0
+        @(Find-KitIconScript 'index.html' '' ($page.Replace('</body>', '<script data-streamhub="kit"></script></body>'))).Count | Should Be 0   # one-file: the kit block
+        @(Find-KitIconScript 'src/App.tsx' '' '<span data-kit-icon="plus" />').Count | Should Be 0
+        (@(Find-QualityIssues 'index.html' '' $page -UseKit) -join "`n") | Should Match 'icon script'
+        (@(Find-QualityIssues 'index.html' '' $page) -join "`n") | Should Not Match 'icon script'
+    }
+    It 'reports kit action buttons a change adds without an icon, with the icon for each action' {
+        $new = "<div class=`"kit-toolbar`">`n<button class=`"kit-btn kit-btn--primary`" type=`"button`">New expense</button>`n<button class=`"kit-btn`">Export</button>`n<button class=`"kit-btn`"><span data-kit-icon=`"trash-2`" aria-hidden=`"true`"></span>Delete</button>`n<button class=`"kit-btn`">Verwijderen</button>`n<button class=`"kit-btn`">Monthly view</button>`n<button>Add</button>`n</div>"
+        $r = @(Find-IconlessActions 'index.html' '' $new)
+        $r.Count | Should Be 1
+        $r[0] | Should Match "^line 2: action buttons without an icon: 'New expense' \(plus\), 'Export' \(download\), 'Verwijderen' \(trash-2\)\."
+        $r[0] | Should Not Match "Delete|Monthly|'Add'"
+        @(Find-IconlessActions 'index.html' $new $new).Count | Should Be 0   # already there
+        @(Find-IconlessActions 'src/Toolbar.tsx' '' '<button className="kit-btn" onClick={add}>Add {kind}</button>')[0] | Should Match "'Add' \(plus\)"
+        @(Find-IconlessActions 'src/Toolbar.tsx' '' '<button className="kit-btn"><Icon name="plus" />Add</button>').Count | Should Be 0
+        @(Find-IconlessActions 'styles/kit/kit-examples.html' '' $new).Count | Should Be 0
+        (@(Find-QualityIssues 'index.html' '' $new -UseKit) -join "`n") | Should Match 'without an icon'
+        (@(Find-QualityIssues 'index.html' '' $new -UseKit -UserLook) -join "`n") | Should Not Match 'without an icon'
+        (@(Find-QualityIssues 'index.html' '' $new) -join "`n") | Should Not Match 'without an icon'
+        Get-CheckLevel 'line 2: action buttons without an icon' 'quality' | Should Be 'warning'
     }
 }
 

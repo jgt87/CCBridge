@@ -30,6 +30,10 @@ Describe 'Test-WebAddress' {
         Test-WebAddress 'https://wiki.corp/x' | Should Match 'intranet'
         Test-WebAddress 'file:///C:/x.txt' | Should Match 'only http'
         Test-WebAddress 'https://user:pw@example.com/' | Should Match 'user name'
+        # A trailing dot names the same host.
+        Test-WebAddress 'http://localhost./' | Should Match 'local'
+        Test-WebAddress 'http://10.0.0.1./x' | Should Match 'private'
+        Test-M365Address 'https://x.sharepoint.com./sites/a' | Should Be $true
     }
     It 'refuses a public name that points into the local network' {
         Test-WebAddress 'https://sneaky.example.com/' -Resolve -Lookup { @([Net.IPAddress]::Parse('127.0.0.1')) } | Should Match 'local or private'

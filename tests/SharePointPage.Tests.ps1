@@ -39,6 +39,10 @@ Describe 'What a SharePoint HTML page cannot do' {
         $f | Should Match 'uses <iframe>'
         $f | Should Match 'a form posts to an address'
         $f | Should Match 'a link with a javascript: address'
+        # url( counts in styles only: a script's new URL(...) is not a stylesheet.
+        @(Get-SharePointPageFindings '<html><body><script>const u = new URL(location.href);</script></body></html>') | Where-Object { $_ -match 'url\(\)' } | Should BeNullOrEmpty
+        @(Get-SharePointPageFindings '<html><body><div style="background: url(img/bg.png)"></div></body></html>') -join "`n" | Should Match 'address \(img/bg\.png\) with @import or url'
+        @(Get-SharePointPageFindings "<html><head><style>@import 'theme.css';</style></head><body></body></html>") -join "`n" | Should Match 'address \(theme\.css\) with @import'
     }
     It 'reports what the page''s own scripts do that the sandbox blocks or loses' {
         $p = "<html><body><script>`nfetch('data.json');`nimport('./x.js');`nhistory.pushState({}, '', '?a');`nwindow.open('https://example.com');`nalert('hi');`nlocalStorage.setItem('a', 1);`n</script></body></html>"

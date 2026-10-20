@@ -6,6 +6,43 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.143] - 2026-10-20
+
+### Security
+- SQL Server queries: the read-only check could be bypassed by hiding a second statement (such as `EXEC xp_cmdshell`) behind a comment, a string or a bracketed name, read in separate passes. The check now reads comments, strings and names in one pass, as SQL Server does; the generated `Scripts/Refresh-Database.ps1` uses the same check.
+- Queries on the project's own data (`ACTION sql`): a `WITH ... DELETE FROM`, `INSERT INTO` or `UPDATE ... SET` was accepted as read-only. It is now refused.
+- Four app routes skipped the rule that only the StreamHub page itself may use them: the response mode, Work IQ on/off, and the two "show in Explorer" routes (one opened any path it was given). Now only the app page can call them.
+- Web reads: an address with a trailing dot (`http://localhost./`, `http://10.0.0.1./`) passed the check for local and private addresses.
+- The diagnostics zip included the disputed-check log and the saved fix cases without masking personal paths. They are masked now, like the logs.
+
+### Added
+- Icons: a page that uses kit icons but never loads `styles/kit/kit-icons.js` is reported (in the file check and in the page check), since every icon shows as empty space. Kit buttons a change adds for common actions (New, Export, Delete, Edit, Refresh, Search, Filter, Print, Settings, Save; also in Dutch) without an icon get one note naming the icon for each. The kit's examples now show icons where the kit's rule puts them (toolbar and panel actions, notices, the empty state, menus, row actions).
+- The page check reports parts that stick out of their table cell, panel, card or grid cell (a fixed width, nowrap, a long word or a picture wider than the cell). The UI kit keeps content inside its box: long words break in cells, panels, cards, notices and dialogs, and pictures are at most 100% wide.
+
+### Changed
+- Sizes are compared, not held to a touch minimum: the design rule no longer asks for 24 x 24 px (44 x 44 for touch) click targets, and the page check and window-app test no longer report small controls. Instead the page check reports buttons and fields side by side of different heights, and the same control in different heights on one page; the design rule asks for one height per row and one size per control.
+- Internal clean-up with no change in behaviour: the chat transcript, action cards, the app's main screen, the chains, runbooks, review, queue, project picker, schedule, side and fetch panels, the tab and message box components, and the UI kit's `kit.js`, `kit-charts.js` and `kit-data.js` are split into named parts, with their logic in tested functions.
+
+### Fixed
+- A `.psd1` file Copilot changed was always reported as "not a valid data file" on Windows builds whose PowerShell 5.1 lacks `Import-PowerShellDataFile`. It is now read with PowerShell's own parser.
+- A page with template syntax in a link (`<%= ... %>`) or a Markdown link in angle brackets (`[x](<my notes.md>)`) made the round's file check fail, and could make an edit fail.
+- Reading a folder whose name starts with a dot (`.github/workflows`) said it had no files.
+- `cmd /c` with nothing after it was read as a command of its own by the delete check.
+- The fix-case notes of a file in a subfolder lost the slash in its path, so they never showed the change.
+- A one-time schedule that had run and was given a new time never ran again.
+- Review findings could point at a blank line above the quoted code.
+- The PDF export script (`Scripts/Export-Page.ps1`) broke on paths with spaces, as most OneDrive paths have.
+- SharePoint pages: a script's `new URL(...)` was reported as a blocked stylesheet.
+- Excel and Word files written from text with control characters (a vertical tab, a form feed) would not open.
+- Projects built as separate files lost the charts' grow and draw animations.
+- New tokens added to a `tokens.css` with Windows line endings were written with Unix line endings.
+- The message box: Enter sent the message while Japanese, Chinese or Korean input was still being composed; and after the history shrank, stepping through it could show "undefined".
+- Code review: opening two reports quickly could show the first one's findings under the second, and Fix selected would send them.
+- Open in a window: a `%` in the command was shown with variables already filled in (the command itself always ran as written).
+- The page check failed on a document without a body (an SVG or XML file opened as a page).
+- The installer could stop at the end, before making the shortcuts, when a virus scanner still held the downloaded zip.
+- The release scan now checks `.sh` and `.cmd` line endings as they are on disk, and reports non-ASCII characters in PowerShell files.
+
 ## [v0.1.142] - 2026-10-19
 
 ### Fixed

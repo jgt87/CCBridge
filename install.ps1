@@ -52,7 +52,9 @@ try {
     $null = & robocopy.exe $src $dir /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XF '*.local.json' 'capture-report.json' 'probe-report.txt' /XD '.git'
     if ($LASTEXITCODE -ge 8) { throw "copying files failed (robocopy code $LASTEXITCODE)" }
 } finally {
-    [IO.Directory]::Delete($tmp, $true)
+    # A file still open (a virus scanner reading the zip) must not turn a finished install into a
+    # failure before the shortcuts are made: the folder is left in %TEMP% (Windows cleans it up).
+    try { [IO.Directory]::Delete($tmp, $true) } catch { Write-Host "  (the download folder $tmp could not be removed yet; it can be deleted later)" -ForegroundColor DarkGray }
 }
 
 # Shortcuts: Start menu and desktop (skip with $env:CCBRIDGE_NO_SHORTCUTS = '1').

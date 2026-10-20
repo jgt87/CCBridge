@@ -628,6 +628,7 @@ function Update-KitTokens([AllowEmptyString()][string]$Current, [AllowEmptyStrin
         $os = @($oldSpans | Where-Object { $_.name -eq $name }); $old = if ($os.Count) { Get-BlockTokens $OldTemplate $os[0] } else { [ordered]@{} }
         $body = $text.Substring($cs[0].open + 1, $cs[0].close - $cs[0].open - 1)
         $indent = if ($name -eq 'darkMedia') { '    ' } else { '  ' }
+        $eol = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }   # the file's own line breaks, so a CRLF file does not end up mixed
         # Defaults the project never changed follow the new default.
         $sb = New-Object Text.StringBuilder; $pos = 0
         foreach ($m in [regex]::Matches($body, '(--kit-[\w-]+)(\s*:\s*)([^;]+);')) {
@@ -638,7 +639,7 @@ function Update-KitTokens([AllowEmptyString()][string]$Current, [AllowEmptyStrin
         $null = $sb.Append($body.Substring($pos)); $body = $sb.ToString()
         # Tokens the file lacks.
         $add = @(foreach ($k in $new.Keys) { if (-not $cur.Contains($k)) { "$indent${k}: $($new[$k]);" } })
-        if ($add.Count) { $body = $body.TrimEnd() + "`n" + ($add -join "`n") + "`n" }
+        if ($add.Count) { $body = $body.TrimEnd() + $eol + ($add -join $eol) + $eol }
         $text = $text.Substring(0, $cs[0].open + 1) + $body + $text.Substring($cs[0].close)
     }
     $text
@@ -911,7 +912,8 @@ function Get-KitUsage([string]$ProjectRoot) {
     $kitHooks = @{ pager = @('pages'); toasts = @('toast'); toast = @('toast'); tip = @('tip'); multi = @('multi'); range = @('range'); segmented = @('range'); search = @('search'); drop = @('drop');
         tags = @('tags'); board = @('board'); calendar = @('calendar'); avatar = @('avatar'); avatars = @('avatar'); 'slider-range' = @('slider-range'); slider = @('slider-range'); iconbar = @('iconbar');
         menu = @('menu'); chart = @('chart'); barlist = @('chart'); empty = @('chart'); icon = @('icon'); table = @('sort', 'pages', 'filter'); btn = @('multi', 'calendar', 'chart', 'range', 'pages', 'confirm', 'alert'); input = @('multi', 'range', 'tags'); tabs = @('tabs'); progress = @('progress')
-        dialog = @('confirm', 'alert'); h3 = @('confirm', 'alert'); tree = @('tree') }
+        dialog = @('confirm', 'alert'); h3 = @('confirm', 'alert'); tree = @('tree')
+        'grow-x' = @('chart'); 'grow-y' = @('chart'); draw = @('chart') }   # the chart animations (@keyframes kit-grow-x/y, kit-draw) kit-charts.js sets from code
     foreach ($f in $files) {
         $rel = $f.FullName.Substring($root.Length + 1).Replace('\', '/')
         $inKit = $rel.StartsWith("$kitDir/", [StringComparison]::OrdinalIgnoreCase)

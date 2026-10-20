@@ -20,31 +20,68 @@ const bigField =
 const flatButton =
   "kit-btn kit-btn--ghost kit-btn--sm";
 
+const SOURCES_PART = new Map([
+  ["web", "web only"],
+  ["work", "work data only"],
+  ["both", "work data and web"],
+]);
+const AGENT_PART = new Map([
+  ["researcher", "Researcher"],
+  ["analyst", "Analyst"],
+]);
+
+/** "1 page", "3 pages"; "" for none. */
+const countPart = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : n ? `${n} ${many}` : "");
+/** The addresses (http or https) in a list separated by spaces, commas or semicolons. */
+const pageCount = (pages: string) => pages.split(/[\s,;]+/).filter((p) => /^https?:\/\//i.test(p)).length;
+/** The names in a comma-separated list. */
+const fileCount = (files: string) => files.split(",").filter((x) => x.trim()).length;
+
 /** "web only · nodejs.org · 1 page · Analyst · 2 files": the header fields of a text runbook, or "" when it has none. */
 export function webSummary(it: Pick<FetchItem, "sources" | "sites" | "pages" | "agent" | "files">): string {
-  const parts: string[] = [];
-  if (it.sources === "web") parts.push("web only");
-  else if (it.sources === "work") parts.push("work data only");
-  else if (it.sources === "both") parts.push("work data and web");
-  if (it.sites?.trim()) parts.push(it.sites.trim());
-  const n = (it.pages ?? "").split(/[\s,;]+/).filter((p) => /^https?:\/\//i.test(p)).length;
-  if (n) parts.push(n === 1 ? "1 page" : `${n} pages`);
-  const a = (it.agent ?? "").trim().toLowerCase();
-  if (a === "researcher" || a === "analyst") parts.push(a === "researcher" ? "Researcher" : "Analyst");
-  const f = (it.files ?? "").split(",").filter((x) => x.trim()).length;
-  if (f) parts.push(f === 1 ? "1 file" : `${f} files`);
-  return parts.join(" · ");
+  return [
+    SOURCES_PART.get(it.sources ?? "") ?? "",
+    it.sites?.trim() ?? "",
+    countPart(pageCount(it.pages ?? ""), "page", "pages"),
+    AGENT_PART.get((it.agent ?? "").trim().toLowerCase()) ?? "",
+    countPart(fileCount(it.files ?? ""), "file", "files"),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** Where the data may come from, the sites and pages to read, who answers and the files to attach. */
+function WebFields({ web, onChange }: { web: Required<FetchWeb>; onChange: (part: Partial<FetchWeb>) => void }) {
+  return (
+    <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1 text-xs">
+      <span className="text-muted-foreground">Sources</span>
+      <select aria-label="Sources" className={field} onChange={(e) => onChange({ sources: e.target.value as FetchWeb["sources"] })} value={web.sources}>
+        <option value="">As the prompt says</option>
+        <option value="web">Web only</option>
+        <option value="work">Work data only</option>
+        <option value="both">Work data and the web</option>
+      </select>
+      <span className="text-muted-foreground">Sites</span>
+      <input aria-label="Only these websites" className={field} onChange={(e) => onChange({ sites: e.target.value })} placeholder="Optional: only these websites, e.g. nodejs.org, python.org" value={web.sites} />
+      <span className="text-muted-foreground">Pages</span>
+      <input aria-label="Pages to read" className={field} onChange={(e) => onChange({ pages: e.target.value })} placeholder="Optional: pages to read exactly, e.g. https://nodejs.org/en/about/previous-releases" value={web.pages} />
+      <span className="text-muted-foreground">Agent</span>
+      <select aria-label="Who answers" className={field} onChange={(e) => onChange({ agent: e.target.value as NonNullable<FetchWeb["agent"]> })} title="Researcher or Analyst answer instead of Copilot itself; they take several minutes" value={web.agent}>
+        <option value="">Copilot</option>
+        <option value="researcher">Researcher</option>
+        <option value="analyst">Analyst</option>
+      </select>
+      <span className="text-muted-foreground">Files</span>
+      <input aria-label="Files to attach" className={field} onChange={(e) => onChange({ files: e.target.value })} placeholder="Optional: project files to attach, e.g. Source/sales.csv" value={web.files} />
+    </div>
+  );
 }
 
 /** A new runbook with a text answer: its prompt, and where the data may come from and who answers. */
 export function TextRunbookForm({ onSave, onCancel }: { onSave: (name: string, prompt: string, web: FetchWeb) => Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [sources, setSources] = useState<FetchWeb["sources"]>("");
-  const [sites, setSites] = useState("");
-  const [pages, setPages] = useState("");
-  const [agent, setAgent] = useState<NonNullable<FetchWeb["agent"]>>("");
-  const [files, setFiles] = useState("");
+  const [web, setWeb] = useState<Required<FetchWeb>>({ sources: "", sites: "", pages: "", agent: "", files: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -52,7 +89,7 @@ export function TextRunbookForm({ onSave, onCancel }: { onSave: (name: string, p
     setSaving(true);
     setError("");
     try {
-      await onSave(name, prompt, { sources, sites, pages, agent, files });
+      await onSave(name, prompt, web);
       onCancel();
     } catch (e) {
       setError((e as Error).message);
@@ -71,27 +108,7 @@ export function TextRunbookForm({ onSave, onCancel }: { onSave: (name: string, p
         placeholder="What to get, e.g. List my meetings for today with times, attendees and the agenda."
         value={prompt}
       />
-      <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1 text-xs">
-        <span className="text-muted-foreground">Sources</span>
-        <select aria-label="Sources" className={field} onChange={(e) => setSources(e.target.value as FetchWeb["sources"])} value={sources}>
-          <option value="">As the prompt says</option>
-          <option value="web">Web only</option>
-          <option value="work">Work data only</option>
-          <option value="both">Work data and the web</option>
-        </select>
-        <span className="text-muted-foreground">Sites</span>
-        <input aria-label="Only these websites" className={field} onChange={(e) => setSites(e.target.value)} placeholder="Optional: only these websites, e.g. nodejs.org, python.org" value={sites} />
-        <span className="text-muted-foreground">Pages</span>
-        <input aria-label="Pages to read" className={field} onChange={(e) => setPages(e.target.value)} placeholder="Optional: pages to read exactly, e.g. https://nodejs.org/en/about/previous-releases" value={pages} />
-        <span className="text-muted-foreground">Agent</span>
-        <select aria-label="Who answers" className={field} onChange={(e) => setAgent(e.target.value as NonNullable<FetchWeb["agent"]>)} title="Researcher or Analyst answer instead of Copilot itself; they take several minutes" value={agent}>
-          <option value="">Copilot</option>
-          <option value="researcher">Researcher</option>
-          <option value="analyst">Analyst</option>
-        </select>
-        <span className="text-muted-foreground">Files</span>
-        <input aria-label="Files to attach" className={field} onChange={(e) => setFiles(e.target.value)} placeholder="Optional: project files to attach, e.g. Source/sales.csv" value={files} />
-      </div>
+      <WebFields onChange={(part) => setWeb((w) => ({ ...w, ...part }))} web={web} />
       {error && <p className="kit-error-text">{error}</p>}
       <div className="flex justify-end gap-1">
         <button className={flatButton} onClick={onCancel} type="button">

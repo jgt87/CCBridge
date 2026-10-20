@@ -130,4 +130,12 @@ Describe 'Test-DeleteScope: nothing hides a delete' {
         Test-DeleteScope $proj 'del "build\x. "' | Should Match 'dot or space'
         Test-DeleteScope $proj 'del build\x.txt' | Should BeNullOrEmpty
     }
+    It 'reads nothing into a shell switch with no command after it' {
+        # cmd /c alone: the inner command is empty, not the switch itself (a reversed range handed '/c' back).
+        $inner = & (Get-Module Executor) { param($g) Get-InnerShellCommand $g } @('cmd', '/c')
+        "$inner" | Should BeExactly ''
+        $inner = & (Get-Module Executor) { param($g) Get-InnerShellCommand $g } @('powershell', '-Command')
+        "$inner" | Should BeExactly ''
+        Test-DeleteScope $proj 'cmd /c' | Should BeNullOrEmpty
+    }
 }

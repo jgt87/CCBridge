@@ -189,8 +189,9 @@ function Invoke-GuiStep($Window, $Step) {
 }
 
 function Get-GuiAccessIssues {
-    <# What the window's controls miss (UI Automation): a name for screen readers, a click target of at
-       least 24 x 24, a place inside the window at its starting size. At most 8 lines. #>
+    <# What the window's controls miss (UI Automation): a name for screen readers and a place inside the
+       window at its starting size. Sizes are compared, not held to a minimum: Get-GuiLayoutIssues
+       reports controls on one line of different heights. At most 8 lines. #>
     param($Window)
     $out = New-Object System.Collections.Generic.List[string]
     $win = $Window.Current.BoundingRectangle
@@ -205,7 +206,6 @@ function Get-GuiAccessIssues {
         $what = "$($c.ControlType.ProgrammaticName -replace '^ControlType\.', '')" + $(if ($c.AutomationId) { " $($c.AutomationId)" } elseif ($c.Name) { " '$($c.Name)'" } else { '' })
         if (-not $c.Name -and $c.ControlType -in $CT::Button, $CT::Edit, $CT::ComboBox, $CT::Slider) { $out.Add("$what has no name for screen readers: give it visible text, AutomationProperties.Name or a Label with Target") }
         $r = $c.BoundingRectangle
-        if ($r.Width -gt 0 -and $c.ControlType -ne $CT::Edit -and ($r.Width -lt 24 -or $r.Height -lt 24)) { $out.Add("$what is $([int]$r.Width) x $([int]$r.Height); a click target needs at least 24 x 24") }
         if ($r.Width -gt 0 -and ($r.Right -gt $win.Right + 2 -or $r.Bottom -gt $win.Bottom + 2)) { $out.Add("$what is cut off at the window's starting size: make the window larger (Width, Height) or let the content wrap or scroll") }
         if ($out.Count -ge 8) { break }
     }

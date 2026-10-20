@@ -287,6 +287,13 @@ Describe 'PowerShell commands and local references' {
         @(Test-LocalReferences "[guide](docs/guide.md) [web](https://x.example) [bad](docs/none.md)" 'README.md' $p) -join '' | Should Match 'links to docs/none\.md'
         @(Test-LocalReferences "[guide](docs/guide.md)" 'README.md' $p).Count | Should Be 0
     }
+    It 'reads a Markdown link target in angle brackets (a name with a space) and never fails on one that is not a path' {
+        [IO.File]::WriteAllText((Join-Path $p 'docs\my guide.md'), '# guide')
+        @(Test-LocalReferences "[guide](<docs/my guide.md>) [also](<docs/my guide.md#top>)" 'README.md' $p).Count | Should Be 0
+        @(Test-LocalReferences "[gone](<docs/no such.md>)" 'README.md' $p) -join '' | Should Match 'links to docs/no such\.md'
+        @(Test-LocalReferences "[odd](docs/a|b.md) [odd2](<docs/a*b>)" 'README.md' $p) -join '' | Should Match 'links to docs/a\|b\.md'
+        @(Get-NewFileIssues 'README.md' '' "[guide](<docs/my guide.md>)" $false $p).Count | Should Be 0
+    }
     cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
 }
 

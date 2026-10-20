@@ -12,6 +12,7 @@
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
+import { fillClassOf, gridColumns, slideDirection, spareColumns } from "@/lib/smooth-tab";
 import { cn } from "@/lib/utils";
 
 export interface TabItem {
@@ -168,29 +169,14 @@ const transition = {
   ease: [0.32, 0.72, 0, 1],
 };
 
-export default function SmoothTab({
-  items = DEFAULT_TABS,
-  defaultTabId = DEFAULT_TABS[0].id,
-  className,
-  activeColor = "bg-[#1F9CFE]",
-  onChange,
-  columns,
-  request,
-}: SmoothTabProps & { columns?: number }) {
-  const [selected, setSelected] = React.useState<string>(defaultTabId);
-  const [direction, setDirection] = React.useState(0);
-  const [dimensions, setDimensions] = React.useState({ width: 0, height: 0, left: 0, top: 0 });
-  // CCBridge: the first placement (page load) is instant and the highlight stays hidden until the
-  // selected tab is measured, so a refresh shows the tab already selected instead of sliding in.
-  const [placed, setPlaced] = React.useState(false);
-  // CCBridge: tabs can wrap into a grid (e.g. 2 x 2), so the highlight follows both axes.
-  const cols = Math.max(1, Math.min(columns ?? items.length, items.length));
+type Box = { width: number; height: number; left: number; top: number };
 
-  // Reference for the selected button
-  const buttonRefs = React.useRef<Map<string, HTMLButtonElement>>(new Map());
-  // CCBridge: the icons of the tabs in the grid line up. Each tab's icon + title gets the width of
-  // the widest one (measured), centred in its button and left-aligned inside, so every icon sits as
-  // far from its button's left edge as the widest tab's icon. A tab spanning a row keeps its own.
+/**
+ * CCBridge: the icons of the tabs in the grid line up. Each tab's icon + title gets the width of
+ * the widest one (measured), centred in its button and left-aligned inside, so every icon sits as
+ * far from its button's left edge as the widest tab's icon. A tab spanning a row keeps its own.
+ */
+function useLabelWidth(items: TabItem[]) {
   const labelRefs = React.useRef<Map<string, HTMLSpanElement>>(new Map());
   const [labelWidth, setLabelWidth] = React.useState(0);
   React.useLayoutEffect(() => {
@@ -207,7 +193,25 @@ export default function SmoothTab({
     document.fonts?.ready.then(measure).catch(() => {});
     return () => ro.disconnect();
   }, [items]);
+  const labelRef = (id: string) => (el: HTMLSpanElement | null) => {
+    if (el) labelRefs.current.set(id, el);
+    else labelRefs.current.delete(id);
+  };
+  return { labelRef, labelWidth };
+}
+
+/**
+ * Where the sliding background goes: the selected button's box inside the tab bar, measured again
+ * on every change of tab and resize. CCBridge: the first placement (page load) is instant and the
+ * highlight stays hidden until the selected tab is measured, so a refresh shows the tab already
+ * selected instead of sliding in.
+ */
+function useHighlightBox(selected: string) {
+  // Reference for the selected button
+  const buttonRefs = React.useRef<Map<string, HTMLButtonElement>>(new Map());
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = React.useState<Box>({ width: 0, height: 0, left: 0, top: 0 });
+  const [placed, setPlaced] = React.useState(false);
 
   // Update dimensions whenever selected tab changes or on mount
   React.useLayoutEffect(() => {
@@ -245,10 +249,159 @@ export default function SmoothTab({
     };
   }, [selected]);
 
+  const buttonRef = (id: string) => (el: HTMLButtonElement | null) => {
+    if (el) buttonRefs.current.set(id, el);
+    else buttonRefs.current.delete(id);
+  };
+  return { containerRef, buttonRef, dimensions, placed };
+}
+
+/** Sliding Background */
+function TabHighlight({ dimensions, placed, color }: { dimensions: Box; placed: boolean; color: string }) {
+  return (
+    <motion.div
+      animate={{
+        width: dimensions.width,
+        height: dimensions.height,
+        x: dimensions.left,
+        y: dimensions.top,
+        opacity: dimensions.width > 0 ? 1 : 0,
+      }}
+      className={cn("absolute top-0 left-0 z-[1] rounded-lg", color)}
+      initial={false}
+      transition={placed ? { type: "spring", stiffness: 400, damping: 30 } : { duration: 0 }}
+    />
+  );
+}
+
+/** Icon, title and badge of a tab. */
+function TabLabelParts({ item }: { item: TabItem }) {
+  const Icon = item.icon;
+  return (
+    <>
+      {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
+      <span className="truncate">{item.title}</span>
+      {item.badge && <span className="shrink-0">{item.badge}</span>}
+    </>
+  );
+}
+
+function TabButton({
+  item,
+  isSelected,
+  spare,
+  labelWidth,
+  buttonRef,
+  labelRef,
+  onSelect,
+}: {
+  item: TabItem;
+  isSelected: boolean;
+  /** Extra columns this tab spans; such a tab keeps its own label width. */
+  spare: number;
+  labelWidth: number;
+  buttonRef: (el: HTMLButtonElement | null) => void;
+  labelRef: (el: HTMLSpanElement | null) => void;
+  onSelect: (tabId: string) => void;
+}) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onSelect(item.id);
+    }
+  };
+  return (
+    <motion.button
+      aria-controls={`panel-${item.id}`}
+      aria-selected={isSelected}
+      className={cn(
+        "relative flex items-center justify-center gap-1 rounded-lg px-1 py-1.5",
+        "font-medium text-sm transition-all duration-300",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "truncate",
+        isSelected
+          ? "text-white"
+          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+      )}
+      id={`tab-${item.id}`}
+      onClick={() => onSelect(item.id)}
+      onKeyDown={handleKeyDown}
+      ref={buttonRef}
+      role="tab"
+      style={spare ? { gridColumn: `span ${spare + 1} / span ${spare + 1}` } : undefined}
+      tabIndex={isSelected ? 0 : -1}
+      type="button"
+    >
+      {spare ? (
+        <TabLabelParts item={item} />
+      ) : (
+        <span className="flex min-w-0 max-w-full justify-start" style={labelWidth ? { width: labelWidth } : undefined}>
+          <span className="flex min-w-0 items-center gap-1" ref={labelRef}>
+            <TabLabelParts item={item} />
+          </span>
+        </span>
+      )}
+    </motion.button>
+  );
+}
+
+/** The selected tab's panel: item.content, else its card content, else the decorative card. */
+function TabPanel({ selected, selectedItem, direction }: { selected: string; selectedItem?: TabItem; direction: number }) {
+  return (
+    <div className="relative mt-3 min-h-0 flex-1">
+      <div className="absolute inset-0 overflow-hidden rounded-lg border bg-card">
+        <AnimatePresence custom={direction} initial={false} mode="popLayout">
+          <motion.div
+            animate="center"
+            className="absolute inset-0 h-full w-full overflow-y-auto bg-card will-change-transform"
+            custom={direction}
+            exit="exit"
+            id={`panel-${selected}`}
+            initial="enter"
+            key={`card-${selected}`}
+            role="tabpanel"
+            style={{
+              backfaceVisibility: "hidden",
+              WebkitBackfaceVisibility: "hidden",
+            }}
+            transition={transition as any}
+            variants={slideVariants as any}
+          >
+            {selectedItem?.content ??
+              selectedItem?.cardContent ??
+              (selectedItem && (
+                <TabCardContent
+                  description={selectedItem.description ?? ""}
+                  fillClass={fillClassOf(selectedItem.color)}
+                  title={selectedItem.title}
+                />
+              ))}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+export default function SmoothTab({
+  items = DEFAULT_TABS,
+  defaultTabId = DEFAULT_TABS[0].id,
+  className,
+  activeColor = "bg-[#1F9CFE]",
+  onChange,
+  columns,
+  request,
+}: SmoothTabProps & { columns?: number }) {
+  const [selected, setSelected] = React.useState<string>(defaultTabId);
+  const [direction, setDirection] = React.useState(0);
+  // CCBridge: tabs can wrap into a grid (e.g. 2 x 2), so the highlight follows both axes.
+  const cols = gridColumns(columns, items.length);
+
+  const { labelRef, labelWidth } = useLabelWidth(items);
+  const { containerRef, buttonRef, dimensions, placed } = useHighlightBox(selected);
+
   const handleTabClick = (tabId: string) => {
-    const currentIndex = items.findIndex((item) => item.id === selected);
-    const newIndex = items.findIndex((item) => item.id === tabId);
-    setDirection(newIndex > currentIndex ? 1 : -1);
+    setDirection(slideDirection(items.map((item) => item.id), selected, tabId));
     setSelected(tabId);
     onChange?.(tabId);
   };
@@ -257,16 +410,6 @@ export default function SmoothTab({
   React.useEffect(() => {
     if (request && request.id !== selected && items.some((i) => i.id === request.id)) handleTabClick(request.id);
   }, [request?.n]);
-
-  const handleKeyDown = (
-    e: React.KeyboardEvent<HTMLButtonElement>,
-    tabId: string
-  ) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      handleTabClick(tabId);
-    }
-  };
 
   const selectedItem = items.find((item) => item.id === selected);
 
@@ -286,122 +429,29 @@ export default function SmoothTab({
         ref={containerRef}
         role="tablist"
       >
-        {/* Sliding Background */}
-        <motion.div
-          animate={{
-            width: dimensions.width,
-            height: dimensions.height,
-            x: dimensions.left,
-            y: dimensions.top,
-            opacity: dimensions.width > 0 ? 1 : 0,
-          }}
-          className={cn(
-            "absolute top-0 left-0 z-[1] rounded-lg",
-            selectedItem?.color || activeColor
-          )}
-          initial={false}
-          transition={placed ? { type: "spring", stiffness: 400, damping: 30 } : { duration: 0 }}
-        />
+        <TabHighlight color={selectedItem?.color || activeColor} dimensions={dimensions} placed={placed} />
 
         <div
           className="relative z-[2] grid w-full gap-1"
           style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
         >
-          {items.map((item, index) => {
-            const isSelected = selected === item.id;
-            // The last tab spans the columns its row leaves free (room for a badge).
-            const spare = index === items.length - 1 ? (cols - (items.length % cols)) % cols : 0;
-            const Icon = item.icon;
-            return (
-              <motion.button
-                aria-controls={`panel-${item.id}`}
-                aria-selected={isSelected}
-                className={cn(
-                  "relative flex items-center justify-center gap-1 rounded-lg px-1 py-1.5",
-                  "font-medium text-sm transition-all duration-300",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  "truncate",
-                  isSelected
-                    ? "text-white"
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                )}
-                id={`tab-${item.id}`}
-                key={item.id}
-                onClick={() => handleTabClick(item.id)}
-                onKeyDown={(e) => handleKeyDown(e, item.id)}
-                ref={(el) => {
-                  if (el) buttonRefs.current.set(item.id, el);
-                  else buttonRefs.current.delete(item.id);
-                }}
-                role="tab"
-                style={spare ? { gridColumn: `span ${spare + 1} / span ${spare + 1}` } : undefined}
-                tabIndex={isSelected ? 0 : -1}
-                type="button"
-              >
-                {spare ? (
-                  <>
-                    {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
-                    <span className="truncate">{item.title}</span>
-                    {item.badge && <span className="shrink-0">{item.badge}</span>}
-                  </>
-                ) : (
-                  <span className="flex min-w-0 max-w-full justify-start" style={labelWidth ? { width: labelWidth } : undefined}>
-                    <span
-                      className="flex min-w-0 items-center gap-1"
-                      ref={(el) => {
-                        if (el) labelRefs.current.set(item.id, el);
-                        else labelRefs.current.delete(item.id);
-                      }}
-                    >
-                      {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
-                      <span className="truncate">{item.title}</span>
-                      {item.badge && <span className="shrink-0">{item.badge}</span>}
-                    </span>
-                  </span>
-                )}
-              </motion.button>
-            );
-          })}
+          {items.map((item, index) => (
+            <TabButton
+              buttonRef={buttonRef(item.id)}
+              isSelected={selected === item.id}
+              item={item}
+              key={item.id}
+              labelRef={labelRef(item.id)}
+              labelWidth={labelWidth}
+              onSelect={handleTabClick}
+              // The last tab spans the columns its row leaves free (room for a badge).
+              spare={spareColumns(index, items.length, cols)}
+            />
+          ))}
         </div>
       </div>
 
-      <div className="relative mt-3 min-h-0 flex-1">
-        <div className="absolute inset-0 overflow-hidden rounded-lg border bg-card">
-          <AnimatePresence custom={direction} initial={false} mode="popLayout">
-            <motion.div
-              animate="center"
-              className="absolute inset-0 h-full w-full overflow-y-auto bg-card will-change-transform"
-              custom={direction}
-              exit="exit"
-              id={`panel-${selected}`}
-              initial="enter"
-              key={`card-${selected}`}
-              role="tabpanel"
-              style={{
-                backfaceVisibility: "hidden",
-                WebkitBackfaceVisibility: "hidden",
-              }}
-              transition={transition as any}
-              variants={slideVariants as any}
-            >
-              {selectedItem?.content ??
-                selectedItem?.cardContent ??
-                (selectedItem && (
-                  <TabCardContent
-                    description={selectedItem.description ?? ""}
-                    fillClass={
-                      selectedItem.color
-                        .split(" ")
-                        .at(0)
-                        ?.replace("bg-", "") ?? "blue-500"
-                    }
-                    title={selectedItem.title}
-                  />
-                ))}
-            </motion.div>
-          </AnimatePresence>
-        </div>
-      </div>
+      <TabPanel direction={direction} selected={selected} selectedItem={selectedItem} />
     </div>
   );
 }

@@ -214,6 +214,116 @@ function TimeList({
   );
 }
 
+/** What runs: the list, the @ button and the file picker it opens. */
+function WhatRuns({
+  target,
+  setTarget,
+  fetchItems,
+  runbooks,
+  chains,
+  scripts,
+  files,
+  onPick,
+}: {
+  target: string;
+  setTarget: (t: string) => void;
+  fetchItems: FetchItem[];
+  runbooks: RunbookItem[];
+  chains: ChainItem[];
+  scripts: string[];
+  files: FileInfo[];
+  /** Applies a picked file; true closes the picker. */
+  onPick: (path: string) => boolean;
+}) {
+  const [picking, setPicking] = useState(false);
+  const [filter, setFilter] = useState("");
+  const pick = (path: string) => {
+    if (!onPick(path)) return;
+    setPicking(false);
+    setFilter("");
+  };
+  return (
+    <div className="space-y-1">
+      <span className="text-muted-foreground text-xs">What runs</span>
+      <div className="flex gap-1">
+        <TargetSelect chains={chains} fetchItems={fetchItems} runbooks={runbooks} scripts={scripts} setTarget={setTarget} target={target} />
+        <button
+          aria-label="Pick a project file"
+          className={cn("shrink-0 rounded-md border border-(--kit-border) px-2 hover:bg-(--kit-surface-2)", picking && "bg-(--kit-surface-2)")}
+          onClick={() => setPicking(!picking)}
+          title="Pick a project file: a runbook (Runbooks/*.runbook.md) runs as a runbook; any other file, such as a Markdown file with instructions, is attached to the message"
+          type="button"
+        >
+          <AtSign className="h-4 w-4" />
+        </button>
+      </div>
+      {picking && <FilePicker files={files} filter={filter} setFilter={setFilter} onClose={() => setPicking(false)} onPick={pick} />}
+    </div>
+  );
+}
+
+/** When it runs: Repeat (days and times) or Once (a date and time). */
+function WhenFields({
+  mode,
+  setMode,
+  at,
+  setAt,
+  days,
+  setDays,
+  times,
+  setTimes,
+  newTime,
+  setNewTime,
+}: {
+  mode: "once" | "repeat";
+  setMode: (m: "once" | "repeat") => void;
+  at: string;
+  setAt: (a: string) => void;
+  days: number[];
+  setDays: (update: (cur: number[]) => number[]) => void;
+  times: string[];
+  setTimes: (t: string[]) => void;
+  newTime: string;
+  setNewTime: (t: string) => void;
+}) {
+  return (
+    <>
+      <div className="flex gap-1">
+        {(["repeat", "once"] as const).map((m) => (
+          <button className={cn(flatButton, mode === m && "bg-(--kit-surface-2)")} key={m} onClick={() => setMode(m)} type="button">
+            {m === "repeat" ? "Repeat" : "Once"}
+          </button>
+        ))}
+      </div>
+
+      {mode === "once" ? (
+        <input aria-label="Date and time" className={field} onChange={(e) => setAt(e.target.value)} type="datetime-local" value={at} />
+      ) : (
+        <div className="space-y-2">
+          <DayPicker days={days} setDays={setDays} />
+          <TimeList newTime={newTime} setNewTime={setNewTime} setTimes={setTimes} times={times} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** What is still missing, Cancel and Schedule (Save changes when editing). */
+function FormActions({ missing, saving, editing, onCancel, onSave }: { missing: string[]; saving: boolean; editing: boolean; onCancel: () => void; onSave: () => void }) {
+  const valid = missing.length === 0;
+  return (
+    <div className="flex items-center justify-end gap-1">
+      {!valid && <span className="mr-auto text-muted-foreground text-xs">To schedule it: {missing.join(", ")}.</span>}
+      <button className={flatButton} onClick={onCancel} type="button">
+        Cancel
+      </button>
+      <button className={cn(flatButton, "bg-(--kit-surface-2)")} disabled={saving || !valid} onClick={onSave} title={valid ? undefined : `Still needed: ${missing.join(", ")}`} type="button">
+        {saving ? "Saving..." : editing ? "Save changes" : "Schedule"}
+      </button>
+    </div>
+  );
+}
+
 /** Schedule a message, fetch or runbook: once at a date and time, or on chosen days at one or more times. */
 export function ScheduleForm({
   initial,
@@ -239,33 +349,30 @@ export function ScheduleForm({
   onSave: (spec: ScheduleSpec) => Promise<void>;
   onCancel: () => void;
 }) {
+  const once = existing?.repeat === "once";
   const [target, setTarget] = useState(initial.kind === "chat" ? "chat" : `${initial.kind}:${initial.name ?? ""}`);
   const [text, setText] = useState(initial.text ?? "");
-  const [mode, setMode] = useState<"once" | "repeat">(existing?.repeat === "once" ? "once" : "repeat");
-  const [at, setAt] = useState(existing?.repeat === "once" && existing.at ? existing.at.slice(0, 16) : nextHour());
+  const [mode, setMode] = useState<"once" | "repeat">(once ? "once" : "repeat");
+  const [at, setAt] = useState(once && existing.at ? existing.at.slice(0, 16) : nextHour());
   const [days, setDays] = useState<number[]>(() => initialDays(existing));
   const [times, setTimes] = useState<string[]>(existing?.times?.length ? existing.times : ["08:00"]);
   const [newTime, setNewTime] = useState("");
   const [title, setTitle] = useState(() => initialTitle(existing));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [picking, setPicking] = useState(false);
-  const [filter, setFilter] = useState("");
 
   const pick = (path: string) => {
     const picked = pickFile(path, text);
     if ("error" in picked) {
       setError(picked.error);
-      return;
+      return false;
     }
     setTarget(picked.target);
     if (picked.text !== undefined) setText(picked.text);
-    setPicking(false);
-    setFilter("");
+    return true;
   };
 
-  const allTimes = withPendingTime(times, newTime);
-  const form = { target, text, title, mode, at, days, times: allTimes };
+  const form = { target, text, title, mode, at, days, times: withPendingTime(times, newTime) };
 
   const save = async () => {
     setSaving(true);
@@ -279,61 +386,20 @@ export function ScheduleForm({
     }
   };
 
-  const missing = missingParts(form);
-  const valid = missing.length === 0;
-
   return (
     <div className="kit-panel space-y-2 p-2">
       <div className="font-medium text-sm">{existing ? "Edit schedule" : "Schedule"}</div>
-      <div className="space-y-1">
-        <span className="text-muted-foreground text-xs">What runs</span>
-        <div className="flex gap-1">
-          <TargetSelect chains={chains} fetchItems={fetchItems} runbooks={runbooks} scripts={scripts} setTarget={setTarget} target={target} />
-          <button
-            aria-label="Pick a project file"
-            className={cn("shrink-0 rounded-md border border-(--kit-border) px-2 hover:bg-(--kit-surface-2)", picking && "bg-(--kit-surface-2)")}
-            onClick={() => setPicking(!picking)}
-            title="Pick a project file: a runbook (Runbooks/*.runbook.md) runs as a runbook; any other file, such as a Markdown file with instructions, is attached to the message"
-            type="button"
-          >
-            <AtSign className="h-4 w-4" />
-          </button>
-        </div>
-        {picking && <FilePicker files={files} filter={filter} setFilter={setFilter} onClose={() => setPicking(false)} onPick={pick} />}
-      </div>
+      <WhatRuns chains={chains} fetchItems={fetchItems} files={files} onPick={pick} runbooks={runbooks} scripts={scripts} setTarget={setTarget} target={target} />
       {target === "chat" && (
         <textarea aria-label="Message to send" className={cn(field, "min-h-16 resize-y")} onChange={(e) => setText(e.target.value)} placeholder="The message to send, e.g. Update the weekly report" value={text} />
       )}
 
-      <div className="flex gap-1">
-        {(["repeat", "once"] as const).map((m) => (
-          <button className={cn(flatButton, mode === m && "bg-(--kit-surface-2)")} key={m} onClick={() => setMode(m)} type="button">
-            {m === "repeat" ? "Repeat" : "Once"}
-          </button>
-        ))}
-      </div>
-
-      {mode === "once" ? (
-        <input aria-label="Date and time" className={field} onChange={(e) => setAt(e.target.value)} type="datetime-local" value={at} />
-      ) : (
-        <div className="space-y-2">
-          <DayPicker days={days} setDays={setDays} />
-          <TimeList newTime={newTime} setNewTime={setNewTime} setTimes={setTimes} times={times} />
-        </div>
-      )}
+      <WhenFields at={at} days={days} mode={mode} newTime={newTime} setAt={setAt} setDays={setDays} setMode={setMode} setNewTime={setNewTime} setTimes={setTimes} times={times} />
 
       <input aria-label="Schedule name" className={field} onChange={(e) => setTitle(e.target.value)} placeholder="Name (optional)" value={title} />
       <KeepOpenNote>{SCHEDULE_NOTE}</KeepOpenNote>
       {error && <p className="kit-error-text">{error}</p>}
-      <div className="flex items-center justify-end gap-1">
-        {!valid && <span className="mr-auto text-muted-foreground text-xs">To schedule it: {missing.join(", ")}.</span>}
-        <button className={flatButton} onClick={onCancel} type="button">
-          Cancel
-        </button>
-        <button className={cn(flatButton, "bg-(--kit-surface-2)")} disabled={saving || !valid} onClick={save} title={valid ? undefined : `Still needed: ${missing.join(", ")}`} type="button">
-          {saving ? "Saving..." : existing ? "Save changes" : "Schedule"}
-        </button>
-      </div>
+      <FormActions editing={!!existing} missing={missingParts(form)} onCancel={onCancel} onSave={save} saving={saving} />
     </div>
   );
 }

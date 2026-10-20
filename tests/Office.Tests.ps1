@@ -94,6 +94,15 @@ Describe 'An Excel workbook written from CSV' {
         $s[0].rows[2] -join '|' | Should Be 'South, east|-3|2026-02-01T10:30:00|FALSE|A1'
         $s[1].rows[1] -join '|' | Should Be "Say ${q}hi${q}"
     }
+    It 'drops control characters XML cannot hold, so Excel and Word open the file' {
+        $vt = [char]0x0B; $ff = [char]0x0C
+        $f = Join-Path $p 'control.xlsx'
+        Write-XlsxFile $f "name,note`nAnn,line${vt}break${ff}end`n"
+        (@(Read-XlsxSheets $f))[0].rows[1] -join '|' | Should Be 'Ann|linebreakend'
+        $d = Join-Path $p 'control.docx'
+        Write-DocxFile $d "Hello${vt}world`tand ${ff}tab"
+        (ConvertFrom-OfficeFile $d).text | Should Match 'Helloworld\tand tab'
+    }
     It 'reads semicolon CSV and a workbook without sheet lines' {
         @(Read-CsvTable "a;b`n1;2").Count | Should Be 2
         (@(Read-CsvTable "a;b`n1;2")[1]) -join ',' | Should Be '1,2'

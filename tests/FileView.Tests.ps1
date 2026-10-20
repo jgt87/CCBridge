@@ -43,6 +43,13 @@ Describe 'Reads of folders and of files that are not there' {
         (Invoke-ReadAction $p @('README.md')) -join "`n" | Should Match "The project's files: data\.csv, js/app\.js\."
         (Invoke-ReadAction $p @('README.md:outline')) -join "`n" | Should Match 'file not found: the project has no README\.md'
     }
+    It 'lists a folder whose name starts with a dot, and one written with ./' {
+        New-Item -ItemType Directory (Join-Path $p '.github\workflows') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $p '.github\workflows\ci.yml'), "on: push`n")
+        (Invoke-ReadAction $p @('.github/workflows')) -join "`n" | Should Match '\(a folder with 1 file\(s\)\)\n```\n\.github/workflows/ci\.yml'
+        (Invoke-ReadAction $p @('.github')) -join "`n" | Should Match '\(a folder with 1 file\(s\)\)'
+        (Invoke-ReadAction $p @('./js/')) -join "`n" | Should Match '\(a folder with 1 file\(s\)\)\n```\njs/app\.js'
+    }
     It 'says a project without files has none yet' {
         $q = Join-Path $env:TEMP ('ccb-readempty-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $q | Out-Null
         (Invoke-ReadAction $q @('.')) -join "`n" | Should Match 'the project has no files yet\. Create them with write actions'

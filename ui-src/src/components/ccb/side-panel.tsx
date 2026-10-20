@@ -181,57 +181,59 @@ function issueIndex(report: IssueReport | null) {
   return { counts, files: report?.summary?.files ?? 0, updated: report?.summary?.updated ?? null };
 }
 
-function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) => void }) {
+const TREE_ICON = "h-3.5 w-3.5 shrink-0 text-muted-foreground";
+const STREAMHUB_FOLDER_TITLE =
+  "StreamHub's own records: issues, imports, schedules, task reports, code reviews, earlier runbook results and plans. Not part of the project's code; Copilot does not see or change them.";
+
+/** Source/ is locked, .streamhub has StreamHub's own records, any other folder is plain. */
+function FolderIcon({ path }: { path: string }) {
+  if (/^source$/i.test(path)) return <FolderLock className={TREE_ICON} />;
+  if (path === ".streamhub") return <FolderCog className={TREE_ICON} />;
+  return <Folder className={TREE_ICON} />;
+}
+
+/** A folder: a toggle with its rows below while it is open. */
+function FolderRow({ node: n, rows, onOpen }: { node: TreeNode; rows: TreeNode[]; onOpen: (p: string) => void }) {
   const { closed, toggle } = useContext(ClosedFolders);
+  const open = !closed[n.path];
+  return (
+    <>
+      <button aria-expanded={open} className={ROW} onClick={() => toggle(n.path)} title={n.path === ".streamhub" ? STREAMHUB_FOLDER_TITLE : n.path} type="button">
+        <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <FolderIcon path={n.path} />
+        <span className="truncate">{n.name}</span>
+        <NewTag node={n} />
+        <ChangeBadge node={n} />
+      </button>
+      {open && (
+        <div className="ml-[13px]">
+          <TreeRows nodes={rows} onOpen={onOpen} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** A file: opens it; files in Source/ are read-only for Copilot. */
+function FileRow({ node: n, onOpen }: { node: TreeNode; onOpen: (p: string) => void }) {
+  const source = /^source\//i.test(n.path);
+  return (
+    <button className={ROW} onClick={() => onOpen(n.path)} title={`${n.path} (${n.size} bytes)${source ? " - source data, read-only for Copilot" : ""}`} type="button">
+      {source ? <Lock className={TREE_ICON} /> : <File className={TREE_ICON} />}
+      <span className="truncate">{n.name}</span>
+      <NewTag node={n} />
+      <ChangeBadge node={n} />
+      <IssueBadge path={n.path} />
+    </button>
+  );
+}
+
+function TreeRows({ nodes, onOpen }: { nodes: TreeNode[]; onOpen: (p: string) => void }) {
   return (
     <ul>
       {nodes.map((n) => (
         <li className={ITEM} key={n.path}>
-          {n.children ? (
-            <>
-              <button
-                aria-expanded={!closed[n.path]}
-                className={ROW}
-                onClick={() => toggle(n.path)}
-                title={n.path === ".streamhub" ? "StreamHub's own records: issues, imports, schedules, task reports, code reviews, earlier runbook results and plans. Not part of the project's code; Copilot does not see or change them." : n.path}
-                type="button"
-              >
-                <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !closed[n.path] && "rotate-90")} />
-                {/^source$/i.test(n.path) ? (
-                  <FolderLock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                ) : n.path === ".streamhub" ? (
-                  <FolderCog className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                ) : (
-                  <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                )}
-                <span className="truncate">{n.name}</span>
-                <NewTag node={n} />
-                <ChangeBadge node={n} />
-              </button>
-              {!closed[n.path] && (
-                <div className="ml-[13px]">
-                  <TreeRows nodes={n.children} onOpen={onOpen} />
-                </div>
-              )}
-            </>
-          ) : (
-            <button
-              className={ROW}
-              onClick={() => onOpen(n.path)}
-              title={`${n.path} (${n.size} bytes)${/^source\//i.test(n.path) ? " - source data, read-only for Copilot" : ""}`}
-              type="button"
-            >
-              {/^source\//i.test(n.path) ? (
-                <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              ) : (
-                <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="truncate">{n.name}</span>
-              <NewTag node={n} />
-              <ChangeBadge node={n} />
-              <IssueBadge path={n.path} />
-            </button>
-          )}
+          {n.children ? <FolderRow node={n} onOpen={onOpen} rows={n.children} /> : <FileRow node={n} onOpen={onOpen} />}
         </li>
       ))}
     </ul>
@@ -257,6 +259,65 @@ function ProjectRoot({ project, children }: { project: { name: string; path: str
         </button>
       </div>
       <div className={cn("ml-[13px]", LINE)}>{children}</div>
+    </div>
+  );
+}
+
+/** Project setup and the issue index: only with a project open. */
+function ProjectSections({
+  projectPath,
+  activity,
+  index,
+  indexing,
+  onShowIssues,
+}: {
+  projectPath: string;
+  activity: Activity | null;
+  index: ReturnType<typeof issueIndex>;
+  indexing: boolean;
+  onShowIssues?: () => void;
+}) {
+  return (
+    <>
+      <PanelSection defaultOpen={false} id="files.setup" summary="How pages are built, and a live data file outside the project." title="Project setup">
+        <ProjectSetupPanel key={projectPath} projectPath={projectPath} />
+      </PanelSection>
+      <PanelSection
+        actions={
+          <SectionButton disabled={indexing} onClick={() => void api.reindexIssues(true)} title="Scan every file again">
+            <RefreshCw className={cn("h-3.5 w-3.5", indexing && "animate-spin")} />
+          </SectionButton>
+        }
+        id="files.index"
+        title="Index"
+      >
+        <IndexBar activity={activity} files={index.files} onShowIssues={onShowIssues} updated={index.updated} withIssues={index.counts.size} />
+      </PanelSection>
+    </>
+  );
+}
+
+/** Opens the project's app entry page on the read-only preview address. */
+function OpenAppLink({ entry, previewBase }: { entry: string; previewBase: string }) {
+  return (
+    <a
+      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground text-xs hover:bg-(--kit-surface-2) hover:text-foreground"
+      href={appEntryUrl(previewBase, entry)}
+      onClick={openExternal}
+      rel="noopener noreferrer"
+      target="_blank"
+      title={`Open ${entry} in a new tab, served read-only by StreamHub (also works for built apps with module scripts)`}
+    >
+      <ExternalLink className="h-3.5 w-3.5" /> Open app
+    </a>
+  );
+}
+
+/** While the tree refreshes: a thin bar sweeping left to right. */
+function RefreshBar({ refreshing }: { refreshing: boolean }) {
+  return (
+    <div aria-hidden className={cn("mb-1 h-0.5 overflow-hidden rounded-full", refreshing ? "bg-(--kit-surface-2)" : "bg-transparent")}>
+      {refreshing && <div className="h-full w-1/3 animate-[ccb-sweep_0.9s_ease-in-out_infinite] rounded-full bg-foreground/60" />}
     </div>
   );
 }
@@ -317,46 +378,9 @@ function FilesPanel({
           upload={api.uploadSource}
         />
       </PanelSection>
-      {project && (
-        <PanelSection defaultOpen={false} id="files.setup" summary="How pages are built, and a live data file outside the project." title="Project setup">
-          <ProjectSetupPanel key={project.path} projectPath={project.path} />
-        </PanelSection>
-      )}
-      {project && (
-        <PanelSection
-          actions={
-            <SectionButton disabled={indexing} onClick={() => void api.reindexIssues(true)} title="Scan every file again">
-              <RefreshCw className={cn("h-3.5 w-3.5", indexing && "animate-spin")} />
-            </SectionButton>
-          }
-          id="files.index"
-          title="Index"
-        >
-          <IndexBar activity={activity} files={index.files} onShowIssues={onShowIssues} updated={index.updated} withIssues={index.counts.size} />
-        </PanelSection>
-      )}
-      <PanelSection
-        actions={
-          entry && previewBase ? (
-            <a
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground text-xs hover:bg-(--kit-surface-2) hover:text-foreground"
-              href={appEntryUrl(previewBase, entry)}
-              onClick={openExternal}
-              rel="noopener noreferrer"
-              target="_blank"
-              title={`Open ${entry} in a new tab, served read-only by StreamHub (also works for built apps with module scripts)`}
-            >
-              <ExternalLink className="h-3.5 w-3.5" /> Open app
-            </a>
-          ) : null
-        }
-        id="files.tree"
-        title="Files"
-      >
-        {/* While the tree refreshes: a thin bar sweeping left to right. */}
-        <div aria-hidden className={cn("mb-1 h-0.5 overflow-hidden rounded-full", refreshing ? "bg-(--kit-surface-2)" : "bg-transparent")}>
-          {refreshing && <div className="h-full w-1/3 animate-[ccb-sweep_0.9s_ease-in-out_infinite] rounded-full bg-foreground/60" />}
-        </div>
+      {project && <ProjectSections activity={activity} index={index} indexing={indexing} onShowIssues={onShowIssues} projectPath={project.path} />}
+      <PanelSection actions={entry && previewBase ? <OpenAppLink entry={entry} previewBase={previewBase} /> : null} id="files.tree" title="Files">
+        <RefreshBar refreshing={refreshing} />
         <ClosedFolders.Provider value={folders}>
           <IssueCounts.Provider value={index.counts}>{project ? <ProjectRoot project={project}>{rows}</ProjectRoot> : rows}</IssueCounts.Provider>
         </ClosedFolders.Provider>
@@ -493,6 +517,11 @@ function countBadge(n: number) {
   return n ? <SectionCount n={n} /> : null;
 }
 
+/** Restore on an older change set; a confirmation that is open stays until it is answered. */
+function canRestore(newer: number, changeSet: string | undefined, canUndoTo: boolean, confirming: boolean) {
+  return newer > 0 && Boolean(changeSet) && (canUndoTo || confirming);
+}
+
 /** One change set in History: its time, title and files with their line counts. */
 function ChangeSetCard({
   change: c,
@@ -517,8 +546,7 @@ function ChangeSetCard({
   onOpenChangeFile?: (changeSet: string, path: string) => void;
 }) {
   const counts = new Map((c.counts ?? []).map((x) => [x.path, x]));
-  // Restore on an older change set; a confirmation that is open stays until it is answered.
-  const restore = newer > 0 && Boolean(c.changeSet) && (Boolean(onUndoTo) || confirming);
+  const restore = canRestore(newer, c.changeSet, Boolean(onUndoTo), confirming);
   // With a change set id the file opens on the lines this change set changed.
   const changeSet = c.changeSet;
   const openChange = changeSet && onOpenChangeFile ? (f: string) => onOpenChangeFile(changeSet, f) : undefined;
@@ -539,7 +567,7 @@ function ChangeSetCard({
             onCancel={() => onConfirm(null)}
             onRestore={() => {
               onConfirm(null);
-              onUndoTo?.(c.changeSet as string);
+              onUndoTo?.(changeSet as string);
             }}
           />
         )}
@@ -550,7 +578,7 @@ function ChangeSetCard({
         </div>
       )}
       {c.files.map((f) => (
-        <ChangeSetFile count={counts.get(f)} key={f} onOpen={openChange ? () => openChange(f) : () => onOpenFile(f)} path={f} showsChange={Boolean(openChange)} />
+        <ChangeSetFile count={counts.get(f)} key={f} onOpen={() => (openChange ?? onOpenFile)(f)} path={f} showsChange={Boolean(openChange)} />
       ))}
     </div>
   );
@@ -746,29 +774,35 @@ function AutomationPanel({
   );
 }
 
-export function SidePanel(props: SidePanelProps) {
-  const { files, todos, changes, onOpenFile, onUndo, onUndoTo, onUploaded, busy, project, queue, pausedUntil, reviewTick } = props;
-  const { chains = [], scripts = [], issueStamp = "", activity = null, filesRefreshing = false } = props;
-  // "N file(s) with issues" on the Files tab leads to Changes > Issues: the section is opened,
-  // the tab switched, and the section scrolled into view once it is shown.
+/** Jumps from one tab to a place in another: the tab switched, the place scrolled into view once it is shown. */
+function useTabJumps() {
   const [tabRequest, setTabRequest] = useState<{ id: string; n: number } | null>(null);
-  // Open issues (not ignored) for the count next to the Issues heading; reloaded like the index line.
-  const report = useIssueReport(project, issueStamp, isIndexing(activity));
-  const openIssues = project && report ? report.items.filter((i) => i.status !== "ignored").length : 0;
+  const [litChange, setLitChange] = useState<number | null>(null);
+  const switchTo = (id: string) => setTabRequest((r) => ({ id, n: (r?.n ?? 0) + 1 }));
+  // "N file(s) with issues" on the Files tab leads to Changes > Issues, with that section opened.
   const showIssues = () => {
     openSection("health.issues");
-    setTabRequest((r) => ({ id: "health", n: (r?.n ?? 0) + 1 }));
+    switchTo("health");
     window.setTimeout(() => document.getElementById("section-health.issues")?.scrollIntoView({ behavior: "smooth", block: "start" }), 450);
   };
   // From Runs: the History tab, scrolled to that task's change set, which lights up briefly.
-  const [litChange, setLitChange] = useState<number | null>(null);
-  const [confirmUndo, setConfirmUndo] = useState<number | null>(null);
   const showChange = (seq: number) => {
-    setTabRequest((r) => ({ id: "changes", n: (r?.n ?? 0) + 1 }));
+    switchTo("changes");
     setLitChange(seq);
     window.setTimeout(() => document.getElementById(`change-${seq}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 450);
     window.setTimeout(() => setLitChange((x) => (x === seq ? null : x)), 2500);
   };
+  return { tabRequest, showIssues, showChange, litChange };
+}
+
+export function SidePanel(props: SidePanelProps) {
+  const { files, todos, changes, onOpenFile, onUndo, onUndoTo, onUploaded, busy, project, queue, pausedUntil, reviewTick } = props;
+  const { chains = [], scripts = [], issueStamp = "", activity = null, filesRefreshing = false } = props;
+  const { tabRequest, showIssues, showChange, litChange } = useTabJumps();
+  // Open issues (not ignored) for the count next to the Issues heading; reloaded like the index line.
+  const report = useIssueReport(project, issueStamp, isIndexing(activity));
+  const openIssues = project && report ? report.items.filter((i) => i.status !== "ignored").length : 0;
+  const [confirmUndo, setConfirmUndo] = useState<number | null>(null);
 
   return (
     <SmoothTab

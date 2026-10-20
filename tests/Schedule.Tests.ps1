@@ -28,6 +28,8 @@ Describe 'Get-NextRun' {
     It 'returns a one-time schedule until it has run, also when it was missed' {
         (Get-NextRun @{ repeat = 'once'; at = '2026-10-01T07:30' } $fri) | Should Be $fri.Date.AddDays(-1).AddHours(7).AddMinutes(30)
         Get-NextRun @{ repeat = 'once'; at = '2026-10-01T07:30'; lastRun = '2026-10-02T10:00:00' } $fri | Should BeNullOrEmpty
+        # Edited after it ran, with a later time: it runs again (Update-AgentSchedule enables it from this).
+        (Get-NextRun @{ repeat = 'once'; at = '2026-10-03T07:30'; lastRun = '2026-10-02T10:00:00' } $fri) | Should Be $fri.Date.AddDays(1).AddHours(7).AddMinutes(30)
     }
 }
 

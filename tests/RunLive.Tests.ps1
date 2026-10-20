@@ -66,6 +66,13 @@ Describe 'A command in a console window' {
         $b | Should Match '(?m)^pause >nul'
         $b | Should Match '(?m)^echo \^> npm run build'
     }
+    It 'shows a percent sign in the echoed command as written, not a variable''s value' {
+        $b = New-RunWindowBatch 'C:\Proj' 'echo 100% of %PATH%' 'C:\Temp\w.code'
+        $b | Should Match '(?m)^echo \^> echo 100%% of %%PATH%%?$'
+        $b | Should Match '(?m)^title StreamHub: echo 100%% of %%PATH%%?$'
+        $b | Should Not Match '\^%'
+        $b | Should Match '(?m)^cmd /d /s /c "echo 100% of %PATH%"?$'   # the command itself runs as typed
+    }
     It 'is running, finished with its code, or closed before the end' {
         $d = Join-Path $env:TEMP ('ccb-win-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $d | Out-Null
         $w = @{ codeFile = "$d\x.code"; batch = "$d\x.cmd"; process = [pscustomobject]@{ HasExited = $false } }

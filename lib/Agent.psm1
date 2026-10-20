@@ -2582,8 +2582,10 @@ function Test-WebPageCore {
                         foreach ($f in $list) {
                             if (-not $f) { continue }
                             $times = if ([int]$f.count -gt 1) { " ($($f.count) places)" } else { '' }
-                            if ($f.kind -eq 'target') {
-                                if ($mode -eq 'light') { $problems.Add("$page click target$(if ($f.text) { " '$($f.text)'" }) ($($f.where)) is $($f.w) x $($f.h) px; WCAG 2.2 needs at least 24 x 24 px (44 x 44 for touch)$times") }
+                            if ($f.kind -eq 'size') {
+                                $which = "$($f.where)$(if ($f.text) { " '$($f.text)'" })"; $other = "$($f.other)$(if ($f.otherText) { " '$($f.otherText)'" })"
+                                if ($mode -eq 'light' -and $f.scope -eq 'row') { $problems.Add("$page sizes: $which is $($f.h) px tall beside $other at $($f.otherH) px; controls side by side share one height (the kit's default size for all of them, or the small size for all), never a height, padding or font size of their own$times") }
+                                elseif ($mode -eq 'light') { $problems.Add("$page sizes: $which is $($f.h) px tall while the same control elsewhere on the page ($other) is $($f.otherH) px; the same control has one size everywhere: remove the height, padding or font size that sets this one apart$times") }
                                 continue
                             }
                             if ($f.kind -eq 'align') {
@@ -4963,7 +4965,7 @@ function Invoke-AgentTurn {
                         if ($gr.skipped) { Complete-OwnRunCard $State $card $true "not started: $($gr.skipped)"; continue }
                         if ($gr.shot) { $State.PageShots = @($State.PageShots) + @($shotRel) }
                         # Must be fixed: errors at start and steps of NAME.guitest that failed. Said once:
-                        # controls without a name, too small or cut off, the launcher, a missing test.
+                        # controls without a name or cut off, the launcher, a missing test.
                         $fails = @(@($gr.errors) + @($gr.steps) | Where-Object { $_ })
                         $notes = New-Object System.Collections.Generic.List[string]
                         foreach ($a in @($gr.access) + @($gr.layout)) { if ($a) { $notes.Add($a) } }
@@ -5195,8 +5197,8 @@ function Invoke-AgentTurn {
                 $n = [int]$errorRounds[$k]
                 $change = ''
                 if ($checkpoint.Files[$first.path] -eq 'existed') {
-                    $bk = Join-Path $checkpoint.Dir ($first.path.Replace('/', ''))
-                    $nowFull = Join-Path $State.ProjectRoot ($first.path.Replace('/', ''))
+                    $bk = Join-Path $checkpoint.Dir ($first.path.Replace('/', '\'))
+                    $nowFull = Join-Path $State.ProjectRoot ($first.path.Replace('/', '\'))
                     if ((Test-Path -LiteralPath $bk) -and (Test-Path -LiteralPath $nowFull)) { $change = Format-LineChange (Read-TextFile $bk).Text (Read-TextFile $nowFull).Text 60 }
                 }
                 $tries = @(for ($i = 1; $i -le $n; $i++) { @{ attempt = $i; how = $(if ($i -eq 1) { 'the change that brought it' } else { "Copilot's next change (with the evidence and a cause first from the second time on)" }); diagnosis = ''; left = @($first.text) } })

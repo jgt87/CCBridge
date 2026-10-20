@@ -74,7 +74,11 @@ Describe 'Settings, mode, tools, links, undo and history change only from the ap
         @{ path = '/api/open-link'; body = @{ url = 'https://example.test/' } },
         @{ path = '/api/undo'; body = @{} },
         @{ path = '/api/history/clear'; body = @{} },
-        @{ path = '/api/tools/install'; body = @{ tool = 'node' } }
+        @{ path = '/api/tools/install'; body = @{ tool = 'node' } },
+        @{ path = '/api/response-mode'; body = @{ value = 'deep' } },
+        @{ path = '/api/workiq'; body = @{ value = 'on' } },
+        @{ path = '/api/project/show'; body = @{} },
+        @{ path = '/api/diagnostics/show'; body = @{ path = 'C:\Windows' } }
     )
     It 'refuses the call without the page''s Origin (another program with the token, a preview page)' {
         foreach ($call in $calls) {

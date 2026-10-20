@@ -72,15 +72,17 @@ $od = if ($env:OneDriveCommercial) { $env:OneDriveCommercial } else { $env:OneDr
 if ($od -and (Test-Path -LiteralPath (Join-Path $od 'CCBridge'))) {
     foreach ($proj in @(Get-ChildItem -LiteralPath (Join-Path $od 'CCBridge') -Directory -ErrorAction SilentlyContinue)) {
         $f = Join-Path $proj.FullName '.streamhub\check-disputes.json'
+        # Both hold file paths, findings and code lines as the project wrote them (not masked when
+        # written, unlike the logs): masked here, like the logs, before they leave this computer.
         if (Test-Path -LiteralPath $f) {
             $dir = Join-Path $stage 'check-disputes'; $null = New-Item -ItemType Directory -Force -Path $dir
-            Copy-Item -LiteralPath $f -Destination (Join-Path $dir "$($proj.Name).json")
+            [IO.File]::WriteAllText((Join-Path $dir "$($proj.Name).json"), (Protect-LogText ([IO.File]::ReadAllText($f))))
         }
         # Fix cases: problems that needed more than one try (FixCases.psm1), to improve the checks and rules.
         $fc = Join-Path $proj.FullName '.streamhub\FixCases'
         if (Test-Path -LiteralPath $fc) {
             $dir = Join-Path $stage "fix-cases\$($proj.Name)"; $null = New-Item -ItemType Directory -Force -Path $dir
-            Get-ChildItem -LiteralPath $fc -Filter 'case-*.md' -File | Where-Object { $_.LastWriteTime -ge (Get-Date).Date.AddDays(1 - $Days) } | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $dir }
+            Get-ChildItem -LiteralPath $fc -Filter 'case-*.md' -File | Where-Object { $_.LastWriteTime -ge (Get-Date).Date.AddDays(1 - $Days) } | ForEach-Object { [IO.File]::WriteAllText((Join-Path $dir $_.Name), (Protect-LogText ([IO.File]::ReadAllText($_.FullName)))) }
         }
     }
 }

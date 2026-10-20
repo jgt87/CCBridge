@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { useAutoResizeTextarea } from "@/hooks/use-auto-resize-textarea";
+import { historyStep, historyText, isPlainArrow, isSendKey } from "@/lib/prompt-history";
 import { cn } from "@/lib/utils";
 
 export interface PromptMode {
@@ -64,24 +65,32 @@ const TOOL_IDLE = "bg-black/5 text-black/40 hover:text-black dark:bg-white/5 dar
 
 // --- Message history (CCBridge): Arrow Up / Down like a terminal ---------------------------
 
-/** An arrow key pressed on its own (with Shift, Alt, Ctrl or Meta the arrows keep their usual job). */
-function isPlainArrow(e: React.KeyboardEvent) {
-  const arrow = e.key === "ArrowUp" || e.key === "ArrowDown";
-  const modified = e.shiftKey || e.altKey || e.ctrlKey || e.metaKey;
-  return arrow && !modified;
-}
-
 /**
- * The history position an arrow key moves to, or null when it should move the cursor instead:
- * Up only from the first line and while older messages remain, Down only from the last line
- * while browsing. -1 = the text being typed; 0 = the newest earlier message.
+ * Message history like a terminal. -1 = the text being typed (kept in `draftRef`);
+ * 0 = the newest earlier message, 1 = the one before, and so on. `onArrow` recalls a message on a
+ * plain arrow key (else the key keeps its usual job); `reset` goes back to the text being typed.
  */
-function historyStep(key: string, el: HTMLTextAreaElement, index: number, count: number): number | null {
-  const onFirstLine = !el.value.slice(0, el.selectionStart).includes("\n");
-  const onLastLine = !el.value.slice(el.selectionEnd).includes("\n");
-  if (key === "ArrowUp" && onFirstLine && index < count - 1) return index + 1;
-  if (key === "ArrowDown" && onLastLine && index >= 0) return index - 1;
-  return null;
+function usePromptHistory(history: string[], onValueChange: (value: string) => void, textareaRef: React.RefObject<HTMLTextAreaElement | null>) {
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const draftRef = useRef("");
+  const recall = (index: number) => {
+    setHistoryIndex(index);
+    onValueChange(historyText(history, index, draftRef.current));
+    // Cursor to the end, after React has put the text in the box.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) el.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+  const onArrow = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!isPlainArrow(e) || !history.length) return;
+    const next = historyStep(e.key, e.currentTarget, historyIndex, history.length);
+    if (next === null) return;
+    e.preventDefault();
+    if (historyIndex < 0) draftRef.current = e.currentTarget.value; // leaving the typed text: keep it
+    recall(next);
+  };
+  return { onArrow, reset: () => setHistoryIndex(-1) };
 }
 
 // --- Parts of the bar under the message box --------------------------------------------------
@@ -199,6 +208,65 @@ function SendControls({ busy, canSend, onSubmit, onStop }: { busy: boolean; canS
   );
 }
 
+/** The line above the message box: the parent's own content left and right. */
+function PromptHeader({ left, right }: { left?: React.ReactNode; right?: React.ReactNode }) {
+  return (
+    <div className="mx-2 mb-2.5 flex items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2 text-black text-xs tracking-tighter dark:text-white/90">
+        {left}
+      </div>
+      <div className="text-black text-xs tracking-tighter dark:text-white/90">
+        {right}
+      </div>
+    </div>
+  );
+}
+
+/** The left part of the bar: mode picker, attach, and Clarify first and Schedule when the parent offers them. */
+function PromptTools({
+  modes,
+  selected,
+  onModeChange,
+  onAttach,
+  clarify,
+  onToggleClarify,
+  onSchedule,
+}: {
+  modes: PromptMode[];
+  selected: PromptMode;
+  onModeChange: (id: string) => void;
+  onAttach?: () => void;
+  clarify: boolean;
+  onToggleClarify?: () => void;
+  onSchedule?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <ModeMenu modes={modes} onModeChange={onModeChange} selected={selected} />
+      <div className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
+      <ToolButton label="Attach a project file" onClick={onAttach} title="Attach a project file (@path)">
+        <AtSign className="h-4 w-4 transition-colors" />
+      </ToolButton>
+      {onToggleClarify && (
+        <ToolButton
+          label="Clarify first"
+          onClick={onToggleClarify}
+          pressed={clarify}
+          showLabelWhenOn
+          title={clarify ? "Clarify first is on: Copilot asks its questions and makes a plan for you to approve before it builds" : "Clarify first: Copilot asks its questions and makes a plan for you to approve before it builds"}
+        >
+          <MessageCircleQuestion className="h-4 w-4 transition-colors" />
+        </ToolButton>
+      )}
+      {onSchedule && (
+        <ToolButton label="Schedule this message" onClick={onSchedule} title="Schedule: send this message (or run a runbook or chain) on set days and times">
+          <CalendarClock className="h-4 w-4 transition-colors" />
+        </ToolButton>
+      )}
+    </div>
+  );
+}
+
 // --- The prompt ------------------------------------------------------------------------------
 
 export default function AI_Prompt({
@@ -244,47 +312,24 @@ export default function AI_Prompt({
     adjustHeight(true);
   };
 
-  // CCBridge: message history like a terminal. -1 = the text being typed (kept in `draftRef`);
-  // 0 = the newest earlier message, 1 = the one before, and so on.
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const draftRef = useRef("");
-  const recall = (index: number) => {
-    setHistoryIndex(index);
-    const text = index < 0 ? draftRef.current : history[history.length - 1 - index];
-    onValueChange(text);
-    // Cursor to the end, after React has put the text in the box.
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (el) el.setSelectionRange(el.value.length, el.value.length);
-    });
-  };
+  // CCBridge: message history like a terminal.
+  const messageHistory = usePromptHistory(history, onValueChange, textareaRef);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Enter during an input method's composition (keyCode 229 in older browsers) only confirms it.
+    if (isSendKey({ key: e.key, shiftKey: e.shiftKey, composing: e.nativeEvent.isComposing || e.keyCode === 229 })) {
       e.preventDefault();
-      setHistoryIndex(-1);
+      messageHistory.reset();
       submit();
       return;
     }
-    if (!isPlainArrow(e) || !history.length) return;
-    const next = historyStep(e.key, e.currentTarget, historyIndex, history.length);
-    if (next === null) return;
-    e.preventDefault();
-    if (historyIndex < 0) draftRef.current = e.currentTarget.value; // leaving the typed text: keep it
-    recall(next);
+    messageHistory.onArrow(e);
   };
 
   return (
     <div className={cn("w-full py-4", className)}>
       <div className="rounded-2xl bg-black/5 p-1.5 pt-4 dark:bg-white/5">
-        <div className="mx-2 mb-2.5 flex items-center gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-2 text-black text-xs tracking-tighter dark:text-white/90">
-            {headerLeft}
-          </div>
-          <div className="text-black text-xs tracking-tighter dark:text-white/90">
-            {headerRight}
-          </div>
-        </div>
+        <PromptHeader left={headerLeft} right={headerRight} />
         <div className="relative">
           <div className="relative flex flex-col">
             <div className="overflow-y-auto" style={{ maxHeight: "400px" }}>
@@ -296,7 +341,7 @@ export default function AI_Prompt({
                 disabled={disabled}
                 id="ccb-prompt"
                 onChange={(e) => {
-                  setHistoryIndex(-1);
+                  messageHistory.reset();
                   onValueChange(e.target.value);
                 }}
                 onKeyDown={handleKeyDown}
@@ -308,29 +353,15 @@ export default function AI_Prompt({
 
             <div className="flex h-14 items-center rounded-b-xl bg-white dark:bg-white/5">
               <div className="absolute right-3 bottom-3 left-3 flex w-[calc(100%-24px)] items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ModeMenu modes={modes} onModeChange={onModeChange} selected={selected} />
-                  <div className="mx-0.5 h-4 w-px bg-black/10 dark:bg-white/10" />
-                  <ToolButton label="Attach a project file" onClick={onAttach} title="Attach a project file (@path)">
-                    <AtSign className="h-4 w-4 transition-colors" />
-                  </ToolButton>
-                  {onToggleClarify && (
-                    <ToolButton
-                      label="Clarify first"
-                      onClick={onToggleClarify}
-                      pressed={clarify}
-                      showLabelWhenOn
-                      title={clarify ? "Clarify first is on: Copilot asks its questions and makes a plan for you to approve before it builds" : "Clarify first: Copilot asks its questions and makes a plan for you to approve before it builds"}
-                    >
-                      <MessageCircleQuestion className="h-4 w-4 transition-colors" />
-                    </ToolButton>
-                  )}
-                  {onSchedule && (
-                    <ToolButton label="Schedule this message" onClick={() => onSchedule(value)} title="Schedule: send this message (or run a runbook or chain) on set days and times">
-                      <CalendarClock className="h-4 w-4 transition-colors" />
-                    </ToolButton>
-                  )}
-                </div>
+                <PromptTools
+                  clarify={clarify}
+                  modes={modes}
+                  onAttach={onAttach}
+                  onModeChange={onModeChange}
+                  onSchedule={onSchedule && (() => onSchedule(value))}
+                  onToggleClarify={onToggleClarify}
+                  selected={selected}
+                />
                 {/* CCBridge: Queue (while busy) sits right next to Stop / Send. */}
                 <SendControls busy={busy} canSend={canSend} onStop={onStop} onSubmit={submit} />
               </div>

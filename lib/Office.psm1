@@ -463,7 +463,11 @@ function Test-OwnDocx([string]$Path) {
 
 # --- Writing a .docx from Markdown ---------------------------------------------------------
 
-function ConvertTo-XmlText([string]$Text) { [Security.SecurityElement]::Escape($Text) }
+function ConvertTo-XmlText([string]$Text) {
+    # Escaped for XML; control characters XML 1.0 cannot hold (a vertical tab or form feed from
+    # pasted data) are dropped, since Excel and Word refuse a package with one in it.
+    [Security.SecurityElement]::Escape([regex]::Replace("$Text", '[\x00-\x08\x0B\x0C\x0E-\x1F]', ''))
+}
 
 function New-DocxRuns([string]$Text, [string]$Extra = '') {
     <# Runs for one line of Markdown text: **bold**, *italic*, ***both***, `code`, [text](link). #>

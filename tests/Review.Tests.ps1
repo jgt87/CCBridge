@@ -59,6 +59,9 @@ Describe 'Test-ReviewOutput and Test-ReviewQuote' {
         $f.status | Should Be 'verified'
         $f.line | Should Be 3
         $f.reportedLine | Should Be 9
+        # The line is the quoted line's own, not a blank line above it.
+        $f = Test-ReviewQuote $p @{ file = 'src/app.js'; line = 0; quote = '  return sum;' }
+        $f.line | Should Be 4
     }
     It 'marks invented code as unverified, and project-wide findings as general' {
         (Test-ReviewQuote $p @{ file = 'src/app.js'; line = 2; quote = 'let total = items.reduce(add);' }).status | Should Be 'unverified'

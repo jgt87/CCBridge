@@ -30,7 +30,11 @@ Describe 'A page as a report' {
             $f = Join-Path $p 'Scripts\Export-Page.ps1'
             $e = $null; $null = [Management.Automation.Language.Parser]::ParseFile($f, [ref]$null, [ref]$e)
             @($e).Count | Should Be 0
-            [IO.File]::ReadAllText($f) | Should Match '--print-to-pdf='
+            $t = [IO.File]::ReadAllText($f)
+            # Start-Process never quotes its arguments: a path with a space must be quoted in the script itself.
+            $t | Should Match '"--print-to-pdf=""\$out"""'
+            $t | Should Match '"--user-data-dir=""\$profile"""'
+            $t | Should Match '"""\$url"""'
         } finally { Remove-Item $p -Recurse -Force }
     }
 }

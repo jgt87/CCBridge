@@ -4,10 +4,12 @@ import type { IntakeGroup } from "@/lib/api";
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
 import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard, type PlanVariant } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RunLiveContext, type RunLive, type RunLiveView, type RunWindowState } from "@/lib/run-live";
 import { MarkdownView } from "./markdown-view";
-import { followBottom } from "@/lib/stick-to-bottom";
+import { useFollowBottom, usePagedItems } from "@/hooks/use-transcript-scroll";
+import { useNodeInstall } from "@/hooks/use-node-install";
+import { type NodeInstall, packagesNotes } from "@/lib/packages-card";
 import AITextLoading from "@/components/kokonutui/ai-text-loading";
 import type { Activity, AgentEvent, CheckFinding, Preview, Reference, UndoChange, WorkStatus } from "@/lib/api";
 import { ChecksCard } from "./checks-card";
@@ -352,37 +354,8 @@ function UnfinishedCard({ item, onSend }: { item: Extract<TranscriptItem, { kind
 /** A package.json lists packages that are not installed: npm install on a click (never by itself). */
 function PackagesCard({ item }: { item: Extract<TranscriptItem, { kind: "packages" }> }) {
   const [state, setState] = useState<"" | "started" | "later" | "failed">("");
-  // Without npm the card offers Node.js (which brings npm) first, the same install as Settings >
-  // This computer: started here, followed until it is done, then npm install can run.
-  const [npm, setNpm] = useState(item.npm);
-  const [node, setNode] = useState<"" | "installing" | "pending" | "done" | "failed">("");
-  const [nodeMessage, setNodeMessage] = useState("");
-  useEffect(() => {
-    if (node !== "installing") return;
-    let stop = false;
-    const look = () =>
-      import("@/lib/api")
-        .then(({ api }) => api.tools())
-        .then((tools) => {
-          if (stop) return;
-          const n = tools.find((t) => t.name === "node");
-          const s = n?.install?.state;
-          if (s === "done") {
-            setNode("done");
-            setNpm(true);
-          } else if (s === "failed" || s === "pending") {
-            setNode(s);
-            setNodeMessage(n?.install?.message ?? "");
-          }
-        })
-        .catch(() => undefined);
-    look();
-    const t = window.setInterval(look, 3000);
-    return () => {
-      stop = true;
-      window.clearInterval(t);
-    };
-  }, [node]);
+  // Without npm the card offers Node.js (which brings npm) first; once it is in, npm install can run.
+  const { npm, node, nodeMessage, installNode } = useNodeInstall(item.npm);
   if (item.restored || state === "later" || state === "started") {
     return (
       <div className="flex items-start gap-2 px-1 text-muted-foreground text-sm">
@@ -395,40 +368,36 @@ function PackagesCard({ item }: { item: Extract<TranscriptItem, { kind: "package
     setState("started");
     import("@/lib/api").then(({ api }) => api.installPackages(item.folder)).catch(() => setState("failed"));
   };
-  const installNode = () => {
-    setNode("installing");
-    import("@/lib/api")
-      .then(({ api }) => api.installTool("node"))
-      .catch(() => {
-        setNode("failed");
-        setNodeMessage("The install could not be started.");
-      });
-  };
-  const btn = "kit-btn kit-btn--ghost kit-btn--sm";
   return (
     <div className="kit-panel space-y-2 px-3 py-2 text-sm">
       <div>This project needs its packages: {item.text}. Install them with npm now? It downloads them from npm's registry and runs their install steps.</div>
-      {!npm && node === "" && <div className="text-muted-foreground text-xs">npm is not installed. Node.js brings it: an install for this user only, from nodejs.org (nothing needs admin rights).</div>}
-      {node === "installing" && <div className="text-muted-foreground text-xs">Installing Node.js in the background...</div>}
-      {node === "pending" && <div className="text-muted-foreground text-xs">Node.js is in use; it is installed at the next start of StreamHub. {nodeMessage}</div>}
-      {node === "done" && <div className="text-muted-foreground text-xs">Node.js and npm are installed.</div>}
-      {node === "failed" && <div className="kit-error-text">Node.js could not be installed. {nodeMessage}</div>}
-      {state === "failed" && <div className="kit-error-text">npm install could not be started.</div>}
-      <div className="flex flex-wrap items-center gap-2">
-        {!npm && node !== "done" && (
-          <GradientButton className="h-10 min-w-44" disabled={node === "installing" || node === "pending"} label="Install Node.js" onClick={installNode} variant="neutral" />
-        )}
-        {npm ? (
-          <GradientButton className="h-10 min-w-44" label="Run npm install" onClick={install} variant="neutral" />
-        ) : (
-          <button className={cn(btn, "h-10 px-3 text-sm")} disabled type="button">
-            Run npm install
-          </button>
-        )}
-        <button className={cn(btn, "h-10 px-3 text-sm")} onClick={() => setState("later")} type="button">
-          Not now
+      {packagesNotes(npm, node, nodeMessage, state === "failed").map((n) => (
+        <div className={n.error ? "kit-error-text" : "text-muted-foreground text-xs"} key={n.text}>
+          {n.text}
+        </div>
+      ))}
+      <PackagesButtons node={node} npm={npm} onInstall={install} onInstallNode={installNode} onLater={() => setState("later")} />
+    </div>
+  );
+}
+
+/** The packages card's buttons: Install Node.js while npm is missing, Run npm install once it is there, Not now. */
+function PackagesButtons({ npm, node, onInstall, onInstallNode, onLater }: { npm: boolean; node: NodeInstall; onInstall: () => void; onInstallNode: () => void; onLater: () => void }) {
+  const btn = "kit-btn kit-btn--ghost kit-btn--sm";
+  const nodeBusy = node === "installing" || node === "pending";
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {!npm && node !== "done" && <GradientButton className="h-10 min-w-44" disabled={nodeBusy} label="Install Node.js" onClick={onInstallNode} variant="neutral" />}
+      {npm ? (
+        <GradientButton className="h-10 min-w-44" label="Run npm install" onClick={onInstall} variant="neutral" />
+      ) : (
+        <button className={cn(btn, "h-10 px-3 text-sm")} disabled type="button">
+          Run npm install
         </button>
-      </div>
+      )}
+      <button className={cn(btn, "h-10 px-3 text-sm")} onClick={onLater} type="button">
+        Not now
+      </button>
     </div>
   );
 }
@@ -687,16 +656,11 @@ function ThinkingIndicator({
 /** Chat items shown at first, and added each time you scroll up to the oldest one shown. */
 const PAGE = 30;
 
-/** The element that scrolls the chat (the nearest parent with its own scrollbar). */
-function scrollParent(el: HTMLElement): HTMLElement | null {
-  for (let p = el.parentElement; p; p = p.parentElement) {
-    const y = getComputedStyle(p).overflowY;
-    if (y === "auto" || y === "scroll") return p;
-  }
-  return null;
-}
-
 const rowKey = (it: TranscriptItem) => (it.kind === "action" ? it.item.id : it.seq);
+
+/** A run without a card of its own (the project's verify command, tests): its console goes under the indicator. */
+const runWithoutCard = (items: TranscriptItem[], runLive: RunLive | null) =>
+  runLive && !items.some((i) => i.kind === "action" && i.item.id === runLive.id) ? runLive : null;
 
 export function Transcript({
   items,
@@ -745,60 +709,16 @@ export function Transcript({
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const follower = useRef<ReturnType<typeof followBottom> | null>(null);
   const awaiting = items.some((i) => i.kind === "action" && i.item.status === "awaiting");
   // A fresh chat shows the welcome view until something happens in it.
   const showEmpty = !busy && !activity?.label && items.every((i) => i.kind === "note" && i.tone === "info");
-
-  // Stay at the newest line while anything grows (a reply streaming in, a card getting its output,
-  // code and images laying out), unless the reader scrolled up to read.
-  useEffect(() => {
-    const content = contentRef.current;
-    const scroller = content ? scrollParent(content) : null;
-    if (!content || !scroller) return;
-    const f = followBottom(scroller, content);
-    follower.current = f;
-    return () => {
-      f.stop();
-      follower.current = null;
-    };
-  }, [showEmpty]);
-  // Sending a message, or a step that waits for approval, brings the view back to the bottom.
-  const last = items.length ? items[items.length - 1] : null;
-  const lastIsUser = last?.kind === "user";
-  useEffect(() => {
-    if (lastIsUser || awaiting) follower.current?.stick();
-  }, [items.length, lastIsUser, awaiting]);
-
-  // The newest PAGE items; scrolling up to the oldest one shown loads PAGE more, keeping the place.
-  const [shown, setShown] = useState(PAGE);
-  const firstKey = items.length ? rowKey(items[0]) : "";
-  useEffect(() => setShown(PAGE), [firstKey]); // a new chat, project or cleared history starts over
-  const hidden = Math.max(0, items.length - shown);
-  const visible = hidden ? items.slice(hidden) : items;
-  const topRef = useRef<HTMLDivElement>(null);
-  const keepFromBottom = useRef<number | null>(null);
-  const loadEarlier = () => {
-    const scroller = topRef.current ? scrollParent(topRef.current) : null;
-    if (scroller) keepFromBottom.current = scroller.scrollHeight - scroller.scrollTop;
-    setShown((n) => n + PAGE);
-  };
-  useEffect(() => {
-    const el = topRef.current;
-    if (!hidden || !el) return;
-    const io = new IntersectionObserver(([e]) => e.isIntersecting && loadEarlier(), { root: scrollParent(el), rootMargin: "120px 0px 0px 0px" });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [hidden, shown]);
-  useLayoutEffect(() => {
-    const scroller = topRef.current ? scrollParent(topRef.current) : endRef.current ? scrollParent(endRef.current) : null;
-    if (scroller && keepFromBottom.current !== null) scroller.scrollTop = scroller.scrollHeight - keepFromBottom.current;
-    keepFromBottom.current = null;
-  }, [shown]);
+  useFollowBottom(contentRef, showEmpty, items.length, items[items.length - 1]?.kind === "user", awaiting);
+  const { hidden, visible, topRef, loadEarlier } = usePagedItems(items, items.length ? rowKey(items[0]) : "", PAGE, endRef);
 
   const live = useMemo<RunLiveView>(() => ({ live: runLive, windows: runWindows }), [runLive, runWindows]);
-  // A run without a card of its own (the project's verify command, tests): its console goes under the indicator.
-  const liveWithoutCard = runLive && !items.some((i) => i.kind === "action" && i.item.id === runLive.id) ? runLive : null;
+  const liveWithoutCard = runWithoutCard(items, runLive);
+  // The waiting card, unless a step waits for approval (its card says what happens next).
+  const waiting = (busy || Boolean(activity?.label)) && !awaiting;
 
   if (showEmpty) return <>{empty}</>;
 
@@ -821,10 +741,10 @@ export function Transcript({
         </div>
       ))}
       {/* The same width as the items above, beside an empty time column. */}
-      {((busy || activity?.label) && !awaiting) || liveWithoutCard ? (
+      {waiting || liveWithoutCard ? (
         <div className="flex min-w-0 items-start gap-2">
           <div className="flex min-w-0 flex-1 flex-col gap-3">
-            {(busy || activity?.label) && !awaiting && <ThinkingIndicator activity={activity} look={look} onShowCopilot={onShowCopilot} onStop={onStop} progress={progress} stopping={stopping} work={work} />}
+            {waiting && <ThinkingIndicator activity={activity} look={look} onShowCopilot={onShowCopilot} onStop={onStop} progress={progress} stopping={stopping} work={work} />}
             {liveWithoutCard && <LiveConsole live={liveWithoutCard} />}
           </div>
           <span className="w-16 shrink-0" />

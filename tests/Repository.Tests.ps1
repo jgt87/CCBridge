@@ -35,6 +35,18 @@ Describe 'User and machine independence' {
         }
         @($hits) -join "`n" | Should BeNullOrEmpty
     }
+    It 'keeps PowerShell files ASCII-only and holds no backspace byte (a lost \b in a pattern)' {
+        # 5.1 reads a BOM-less .ps1 as ANSI, so other characters change on the way; a 0x08 byte is a
+        # regex \b that a shell or Python turned into a backspace (AGENTS.md). tools/scan-repo.ps1
+        # reports the first; this test covers both for everything the repository tracks.
+        $hits = foreach ($f in $files | Where-Object { $_.FullName -notmatch '\\(fixtures|vendor)\\' }) {
+            $b = [IO.File]::ReadAllBytes($f.FullName)
+            $i = [Array]::IndexOf($b, [byte]8)
+            if ($i -ge 0) { "$($f.FullName.Substring($root.Length + 1)): a 0x08 byte at offset $i" }
+            if ($f.Extension -match '(?i)^\.ps[md]?1$') { $j = [Array]::FindIndex($b, [Predicate[byte]]{ param($x) $x -gt 127 }); if ($j -ge 0) { "$($f.FullName.Substring($root.Length + 1)): a non-ASCII byte at offset $j" } }
+        }
+        @($hits) -join "`n" | Should BeNullOrEmpty
+    }
     It 'refers to no profile folder outside the tests' {
         $profilePath = '(?i)\b[a-z]:[\\/]{1,2}users[\\/]{1,2}(?!(public|default|name|user|username|you|me)\b)[a-z][\w.-]*'
         $hits = foreach ($f in $files | Where-Object { $_.FullName -notmatch '\\tests\\' }) {

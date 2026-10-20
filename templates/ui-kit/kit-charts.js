@@ -216,6 +216,57 @@
   // top of each other; data.horizontal for bars to the right. A series with type "line" is drawn
   // as a line over the bars (not with horizontal), on its own scale at the right with axis "right"
   // (a running total next to the counts per day).
+  // The largest value of any of these series (0 at least).
+  function seriesMax(list) { return Math.max.apply(null, [0].concat.apply([], list.map(function (x) { return x.values; }))); }
+  // Room around the plot; horizontal bars give their labels up to 40% of the width.
+  function barPad(horizontal, s, labels, rscale) {
+    if (!horizontal) return { t: 12, r: rscale ? 52 : 12, b: 28, l: 44 };
+    var labelRoom = Math.min(Math.round(s.w * 0.4), 16 + 7 * Math.max.apply(null, [4].concat(labels.map(function (l) { return String(l).length; }))));
+    return { t: 8, r: 16, b: 24, l: labelRoom };
+  }
+  // The right-hand axis of line series on their own scale (axis "right"), in their colour when there is one.
+  function rightAxis(svg, s, pad, rscale, right, data) {
+    for (var rv = 0; rv <= rscale.max + 1e-9; rv += rscale.step) {
+      var ry = pad.t + (s.h - pad.t - pad.b) * (1 - rv / rscale.max);
+      var rt = svgEl("text", { x: s.w - pad.r + 8, y: ry + 4, class: "kit-chart__label" }, svg);
+      rt.textContent = fmt(rv, data);
+      if (right.length === 1) rt.style.fill = color(right[0].i);
+    }
+  }
+  // A label along the bars; a horizontal bar's is shortened with an ellipsis to fit its room.
+  function barLabel(svg, s, pad, horizontal, start, inner, lab) {
+    var t = horizontal
+      ? svgEl("text", { x: pad.l - 8, y: start + inner / 2 + 4, "text-anchor": "end", class: "kit-chart__label" }, svg)
+      : svgEl("text", { x: start + inner / 2, y: s.h - 8, "text-anchor": "middle", class: "kit-chart__label" }, svg);
+    var maxChars = horizontal ? Math.max(3, Math.floor((pad.l - 16) / 7)) : Infinity, shown = String(lab);
+    if (shown.length > maxChars) shown = shown.slice(0, maxChars - 1) + "\u2026";
+    t.textContent = shown;
+    if (shown !== String(lab)) svgEl("title", {}, t).textContent = lab;   // the whole name on hover and for screen readers
+  }
+  // A line series over the bars, through the middle of each label's band, on its scale sc.
+  // k: the chart's host, svg, data, labels, pad, band, plotH and marks (what the legend fades).
+  function barLine(k, x, sc) {
+    var px = function (i) { return k.pad.l + k.band * (i + 0.5); }, py = function (v) { return k.pad.t + k.plotH * (1 - Math.max(0, v) / sc.max); };
+    var d = k.labels.map(function (l, i) { return (i ? "L" : "M") + px(i).toFixed(1) + " " + py(x.values[i] || 0).toFixed(1); }).join(" ");
+    var p = svgEl("path", { d: d, fill: "none", stroke: color(x.i), "stroke-width": 2.25, "stroke-linejoin": "round", "stroke-linecap": "round", class: "kit-chart__path" }, k.svg);
+    if (isOff(k.data.selectedSeries, x.name)) p.classList.add("is-off");
+    drawIn(k.host, p, 700);
+    k.marks.push({ el: p, s: x.i });
+    if (k.labels.length <= 60) k.labels.forEach(function (l, i) { k.marks.push({ el: svgEl("circle", { cx: px(i), cy: py(x.values[i] || 0), r: 3, fill: color(x.i), class: "kit-chart__dot" }, k.svg), s: x.i }); });
+  }
+  // The legend (hovering a series fades the others) and the data table for screen readers.
+  function barLegend(host, data, all, bars, marks, rscale) {
+    legend(host, all.map(function (x) { return x.name + (x.right && rscale ? " (right axis)" : ""); }), function (i) {
+      bars.forEach(function (b) { b.el.classList.toggle("is-faded", i >= 0 && b.s !== i); });
+      marks.forEach(function (m) { m.el.classList.toggle("is-faded", i >= 0 && m.s !== i); });
+    }, data, {
+      off: function (i) { return isOff(data.selectedSeries, all[i].name); },
+      pick: function (i) { return { chart: "bar", part: "legend", value: all[i].name, index: i, series: all[i].name, seriesIndex: i }; }
+    });
+    dataTable(host, [""].concat(all.map(function (x) { return x.name || "Value"; })), data.labels.map(function (l, li) { return [l].concat(all.map(function (x) { return fmt(x.values[li], data); })); }));
+  }
+  // The topmost part of a stacked bar (the one that gets the rounded end), -1 when none is above 0.
+  function topPart(sr, li) { var top = -1; sr.forEach(function (x, si) { if ((x.values[li] || 0) > 0) top = si; }); return top; }
   function bar(host, data) {
     clear(host);
     var all = series(data), labels = data.labels || [], s = size(host), horizontal = !!data.horizontal;
@@ -224,23 +275,16 @@
     var stacked = !!data.stacked && sr.length > 1;
     var pct = stacked && data.stacked === "percent";   // every bar 100%: the parts as shares
     var total = function (li) { return sr.reduce(function (a, x) { return a + Math.max(0, x.values[li] || 0); }, 0); };
-    var maxOf = function (list) { return Math.max.apply(null, [0].concat.apply([], list.map(function (x) { return x.values; }))); };
     var left = ln.filter(function (x) { return !x.right; }), right = ln.filter(function (x) { return x.right; });
-    var max = Math.max(stacked ? Math.max.apply(null, [0].concat(labels.map(function (l, li) { return total(li); }))) : maxOf(sr), maxOf(left));
-    var scale = pct ? { max: 100, step: 25 } : niceMax(Math.max(max, targetMax(data)), 4), rscale = right.length ? niceMax(maxOf(right), 4) : null;
+    var max = Math.max(stacked ? Math.max.apply(null, [0].concat(labels.map(function (l, li) { return total(li); }))) : seriesMax(sr), seriesMax(left));
+    var scale = pct ? { max: 100, step: 25 } : niceMax(Math.max(max, targetMax(data)), 4), rscale = right.length ? niceMax(seriesMax(right), 4) : null;
     var axis = pct ? Object.assign({}, data, { format: function (v) { return Math.round(v * 10) / 10 + "%"; } }) : data;
     var tip = null, bars = [], marks = [];
     var svg = frame(host, s, data.title);
-    var labelRoom = horizontal ? Math.min(Math.round(s.w * 0.4), 16 + 7 * Math.max.apply(null, [4].concat(labels.map(function (l) { return String(l).length; })))) : 0;
-    var pad = horizontal ? { t: 8, r: 16, b: 24, l: labelRoom } : { t: 12, r: rscale ? 52 : 12, b: 28, l: 44 };
+    var pad = barPad(horizontal, s, labels, rscale);
     var plotW = s.w - pad.l - pad.r, plotH = s.h - pad.t - pad.b;
     if (!horizontal) grid(svg, s, pad, scale, axis);
-    if (rscale) for (var rv = 0; rv <= rscale.max + 1e-9; rv += rscale.step) {
-      var ry = pad.t + (s.h - pad.t - pad.b) * (1 - rv / rscale.max);
-      var rt = svgEl("text", { x: s.w - pad.r + 8, y: ry + 4, class: "kit-chart__label" }, svg);
-      rt.textContent = fmt(rv, data);
-      if (right.length === 1) rt.style.fill = color(right[0].i);
-    }
+    if (rscale) rightAxis(svg, s, pad, rscale, right, data);
     var band = (horizontal ? plotH : plotW) / Math.max(1, labels.length);
     var lstep = horizontal ? 1 : labelStep(labels, plotW);
     var inner = band * 0.72, bw = stacked ? Math.max(1, inner) : Math.max(2, inner / Math.max(1, sr.length) - 2);
@@ -276,8 +320,7 @@
     };
     labels.forEach(function (lab, li) {
       var start = (horizontal ? pad.t : pad.l) + li * band + (band - inner) / 2;
-      var acc = 0, top = -1;
-      if (stacked) sr.forEach(function (x, si) { if ((x.values[li] || 0) > 0) top = si; });
+      var acc = 0, top = stacked ? topPart(sr, li) : -1;
       sr.forEach(function (x, si) {
         var v = valueAt(x, li);
         var len = room * (Math.max(0, v) / scale.max), from = room * (acc / scale.max);
@@ -292,36 +335,13 @@
         pickable(host, data, rect, { chart: "bar", part: "bar", value: lab, index: li, series: x.name, seriesIndex: x.i }, lab + (x.name ? ", " + x.name : "") + ": " + fmt(v, data));
         bars.push({ el: rect, s: x.i, li: li });
       });
-      if (li % lstep) return;
-      var t = horizontal
-        ? svgEl("text", { x: pad.l - 8, y: start + inner / 2 + 4, "text-anchor": "end", class: "kit-chart__label" }, svg)
-        : svgEl("text", { x: start + inner / 2, y: s.h - 8, "text-anchor": "middle", class: "kit-chart__label" }, svg);
-      var maxChars = horizontal ? Math.max(3, Math.floor((pad.l - 16) / 7)) : Infinity, shown = String(lab);
-      if (shown.length > maxChars) shown = shown.slice(0, maxChars - 1) + "\u2026";
-      t.textContent = shown;
-      if (shown !== String(lab)) svgEl("title", {}, t).textContent = lab;   // the whole name on hover and for screen readers
+      if (li % lstep === 0) barLabel(svg, s, pad, horizontal, start, inner, lab);
     });
     if (!pct) targets(svg, s, pad, scale, data, horizontal);
-    // Line series over the bars: through the middle of each label's band.
-    ln.forEach(function (x) {
-      var sc = x.right ? rscale : scale;
-      var px = function (i) { return pad.l + band * (i + 0.5); }, py = function (v) { return pad.t + plotH * (1 - Math.max(0, v) / sc.max); };
-      var d = labels.map(function (l, i) { return (i ? "L" : "M") + px(i).toFixed(1) + " " + py(x.values[i] || 0).toFixed(1); }).join(" ");
-      var p = svgEl("path", { d: d, fill: "none", stroke: color(x.i), "stroke-width": 2.25, "stroke-linejoin": "round", "stroke-linecap": "round", class: "kit-chart__path" }, svg);
-      if (isOff(data.selectedSeries, x.name)) p.classList.add("is-off");
-      drawIn(host, p, 700);
-      marks.push({ el: p, s: x.i });
-      if (labels.length <= 60) labels.forEach(function (l, i) { marks.push({ el: svgEl("circle", { cx: px(i), cy: py(x.values[i] || 0), r: 3, fill: color(x.i), class: "kit-chart__dot" }, svg), s: x.i }); });
-    });
+    var k = { host: host, svg: svg, data: data, labels: labels, pad: pad, band: band, plotH: plotH, marks: marks };
+    ln.forEach(function (x) { barLine(k, x, x.right ? rscale : scale); });
     tip = tooltip(host);
-    legend(host, all.map(function (x) { return x.name + (x.right && rscale ? " (right axis)" : ""); }), function (i) {
-      bars.forEach(function (b) { b.el.classList.toggle("is-faded", i >= 0 && b.s !== i); });
-      marks.forEach(function (m) { m.el.classList.toggle("is-faded", i >= 0 && m.s !== i); });
-    }, data, {
-      off: function (i) { return isOff(data.selectedSeries, all[i].name); },
-      pick: function (i) { return { chart: "bar", part: "legend", value: all[i].name, index: i, series: all[i].name, seriesIndex: i }; }
-    });
-    dataTable(host, [""].concat(all.map(function (x) { return x.name || "Value"; })), labels.map(function (l, li) { return [l].concat(all.map(function (x) { return fmt(x.values[li], data); })); }));
+    barLegend(host, data, all, bars, marks, rscale);
   }
 
   // Line chart (data.area for a fading fill under each line). A value that is not a number leaves
@@ -399,6 +419,29 @@
   // data.legend "values" for a legend with each value and its share (a list under the ring).
   // Colours follow the items' order, also past an item at 0, so an item keeps its colour; an
   // item's color (ok, warn, error, muted, accent, chart-N) gives it a colour by meaning instead.
+  // An arc of the ring from angle s0 to s1 (radians, clockwise).
+  function arcPath(cx, cy, r, s0, s1) {
+    var large = s1 - s0 > Math.PI ? 1 : 0;
+    return "M" + (cx + r * Math.cos(s0)) + " " + (cy + r * Math.sin(s0)) + " A" + r + " " + r + " 0 " + large + " 1 " + (cx + r * Math.cos(s1)) + " " + (cy + r * Math.sin(s1));
+  }
+  // legend: "values": a list with each item's value and share next to its colour.
+  function ringValues(host, data, items, share, hover, pick) {
+    var ul = document.createElement("ul");
+    ul.className = "kit-chart__legend kit-chart__legend--values";
+    items.forEach(function (it, i) {
+      var li = document.createElement("li");
+      if (!it.value) li.classList.add("is-zero");
+      li.style.setProperty("--kit-legend-color", it.color);
+      if (isOff(data.selected, it.label)) li.classList.add("is-off");
+      li.innerHTML = '<span class="kit-chart__swatch" style="background:' + it.color + '"></span><span class="kit-chart__legend-label">' + esc(it.label) +
+        '</span> <span class="kit-chart__legend-value">' + esc(fmt(it.value, data)) + '</span> <span class="kit-chart__legend-share">' + share(it.value) + "</span>";   // spaces: readable as text too
+      li.addEventListener("mouseenter", function () { hover(i); });
+      li.addEventListener("mouseleave", function () { hover(-1); });
+      pickable(host, data, li, pick(i));
+      ul.appendChild(li);
+    });
+    host.appendChild(ul);
+  }
   function ring(host, data) {
     clear(host);
     var items = (data.items || []).map(function (it, i) { return { label: String(it.label), value: Math.max(0, Number(it.value) || 0), color: tone(it.color, color(i)) }; });
@@ -415,13 +458,9 @@
       if (!it.value) { arcs.push(null); return; }
       var a1 = a0 + (it.value / total) * Math.PI * 2;
       var s0 = a0 + gap / 2, s1 = Math.max(s0 + 0.001, a1 - gap / 2);
-      var p;
-      if (shown === 1) p = svgEl("circle", { cx: cx, cy: cy, r: r, fill: "none", stroke: it.color, "stroke-width": w, class: "kit-chart__arc" }, svg);
-      else {
-        var large = s1 - s0 > Math.PI ? 1 : 0;
-        var d = "M" + (cx + r * Math.cos(s0)) + " " + (cy + r * Math.sin(s0)) + " A" + r + " " + r + " 0 " + large + " 1 " + (cx + r * Math.cos(s1)) + " " + (cy + r * Math.sin(s1));
-        p = svgEl("path", { d: d, fill: "none", stroke: it.color, "stroke-width": w, "stroke-linecap": "butt", class: "kit-chart__arc" }, svg);
-      }
+      var p = shown === 1
+        ? svgEl("circle", { cx: cx, cy: cy, r: r, fill: "none", stroke: it.color, "stroke-width": w, class: "kit-chart__arc" }, svg)
+        : svgEl("path", { d: arcPath(cx, cy, r, s0, s1), fill: "none", stroke: it.color, "stroke-width": w, "stroke-linecap": "butt", class: "kit-chart__arc" }, svg);
       if (isOff(data.selected, it.label)) p.classList.add("is-off");
       var show = function () {
         arcs.forEach(function (x) { if (x) x.classList.toggle("is-faded", x !== p); });
@@ -436,23 +475,8 @@
     if (data.center !== undefined) svgEl("text", { x: cx, y: cy + 6, "text-anchor": "middle", class: "kit-chart__center" }, svg).textContent = typeof data.center === "number" ? fmt(data.center, data) : data.center;   // a number in the same format as the legend
     var hover = function (i) { arcs.forEach(function (x, xi) { if (x) x.classList.toggle("is-faded", i >= 0 && xi !== i); }); };
     var pick = function (i) { return { chart: "ring", part: "legend", value: items[i].label, index: i }; };
-    if (data.legend === "values") {
-      var ul = document.createElement("ul");
-      ul.className = "kit-chart__legend kit-chart__legend--values";
-      items.forEach(function (it, i) {
-        var li = document.createElement("li");
-        if (!it.value) li.classList.add("is-zero");
-        li.style.setProperty("--kit-legend-color", it.color);
-        if (isOff(data.selected, it.label)) li.classList.add("is-off");
-        li.innerHTML = '<span class="kit-chart__swatch" style="background:' + it.color + '"></span><span class="kit-chart__legend-label">' + esc(it.label) +
-          '</span> <span class="kit-chart__legend-value">' + esc(fmt(it.value, data)) + '</span> <span class="kit-chart__legend-share">' + share(it.value) + "</span>";   // spaces: readable as text too
-        li.addEventListener("mouseenter", function () { hover(i); });
-        li.addEventListener("mouseleave", function () { hover(-1); });
-        pickable(host, data, li, pick(i));
-        ul.appendChild(li);
-      });
-      host.appendChild(ul);
-    } else legend(host, items.map(function (it) { return it.label; }), hover, data, { off: function (i) { return isOff(data.selected, items[i].label); }, pick: pick, colors: items.map(function (it) { return it.color; }) });
+    if (data.legend === "values") ringValues(host, data, items, share, hover, pick);
+    else legend(host, items.map(function (it) { return it.label; }), hover, data, { off: function (i) { return isOff(data.selected, items[i].label); }, pick: pick, colors: items.map(function (it) { return it.color; }) });
     dataTable(host, ["", "Value", "Share"], items.map(function (it) { return [it.label, fmt(it.value, data), share(it.value)]; }));
   }
 
@@ -525,7 +549,7 @@
     var limit = Number(data.limit) || 0, open = !!host.__kitOpen, sel = picked(data.selected);
     var shown = barlistShown(items, open ? 0 : limit, sel);
     var first = data.base === "first" ? Math.max(0, items[0].value) : 0;
-    var whole = Number(data.total) || first || items.reduce(function (a, it) { return a + Math.max(0, it.value); }, 0);
+    var whole = barlistWhole(data, items, first);
     var max = barlistMax(data, whole, first, shown);
     var list = document.createElement("div");
     list.className = data.share ? "kit-barlist kit-barlist--share" : "kit-barlist";
@@ -535,6 +559,8 @@
     host.appendChild(list);
     if (limit && items.length > limit) host.appendChild(barlistMore(host, data, items.length, limit, open));
   }
+  // What the shares are of: data.total, else the first item for a funnel, else the sum.
+  function barlistWhole(data, items, first) { return Number(data.total) || first || items.reduce(function (a, it) { return a + Math.max(0, it.value); }, 0); }
   // The rows to show: the first `limit` (0 = all) and every picked one.
   function barlistShown(items, limit, sel) {
     var shown = items.map(function (it, i) { return { it: it, i: i }; });
@@ -577,13 +603,24 @@
   // Scatter (is A related to B): data.series [{ name, points: [{ x, y, r, label }] }] with x and y
   // numbers, r 1..14 for a bubble, label for the tooltip; data.xLabel and data.yLabel name the axes.
   // Selectable points send kit:select with part "point", value the point's label (or "x, y"), series.
+  // A point with numbers for x and y (r kept within 2..14), or null.
+  function scatterPoint(p) {
+    var x = Number(p && p.x), y = Number(p && p.y);
+    return p && isFinite(x) && isFinite(y) ? { x: x, y: y, r: Math.max(2, Math.min(14, Number(p.r) || 4)), label: p.label } : null;
+  }
+  // The vertical grid lines and their values along the x axis.
+  function scatterXAxis(svg, s, pad, xr, data) {
+    var plotW = s.w - pad.l - pad.r, plotH = s.h - pad.t - pad.b;
+    for (var v = xr.min; v <= xr.max + 1e-9; v += xr.step) {
+      var gx = pad.l + plotW * ((v - xr.min) / (xr.max - xr.min));
+      svgEl("line", { x1: gx, x2: gx, y1: pad.t, y2: pad.t + plotH, "stroke-dasharray": "4 4", class: "kit-chart__line" }, svg);
+      svgEl("text", { x: gx, y: pad.t + plotH + 16, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = fmt(v, data);
+    }
+  }
   function scatter(host, data) {
     clear(host);
     var sr = (data.series || []).map(function (s, i) {
-      return { name: s.name || "", i: i, points: (s.points || []).map(function (p) {
-        var x = Number(p && p.x), y = Number(p && p.y);
-        return p && isFinite(x) && isFinite(y) ? { x: x, y: y, r: Math.max(2, Math.min(14, Number(p.r) || 4)), label: p.label } : null;
-      }).filter(Boolean) };
+      return { name: s.name || "", i: i, points: (s.points || []).map(scatterPoint).filter(Boolean) };
     });
     var all = [].concat.apply([], sr.map(function (s) { return s.points; }));
     if (!all.length) { empty(host, data); return; }
@@ -593,11 +630,7 @@
     if (xr.max === xr.min) xr.max = xr.min + 1;
     var svg = frame(host, s, data.title);
     grid(svg, s, pad, yr, data);
-    for (var v = xr.min; v <= xr.max + 1e-9; v += xr.step) {
-      var gx = pad.l + plotW * ((v - xr.min) / (xr.max - xr.min));
-      svgEl("line", { x1: gx, x2: gx, y1: pad.t, y2: pad.t + plotH, "stroke-dasharray": "4 4", class: "kit-chart__line" }, svg);
-      svgEl("text", { x: gx, y: pad.t + plotH + 16, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = fmt(v, data);
-    }
+    scatterXAxis(svg, s, pad, xr, data);
     if (data.xLabel) svgEl("text", { x: pad.l + plotW / 2, y: s.h - 6, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = data.xLabel;
     if (data.yLabel) svgEl("text", { x: 12, y: pad.t + plotH / 2, "text-anchor": "middle", class: "kit-chart__label", transform: "rotate(-90 12 " + (pad.t + plotH / 2) + ")" }, svg).textContent = data.yLabel;
     var px = function (x) { return pad.l + plotW * ((x - xr.min) / (xr.max - xr.min)); }, py = function (y) { return pad.t + plotH * (1 - (y - yr.min) / (yr.max - yr.min)); };
@@ -643,11 +676,16 @@
   }
   function readsItems(kind) { return kind === "ring" || kind === "barlist"; }
   function readsSeries(kind) { return kind === "bar" || kind === "line" || kind === "area"; }
+  // A plain list: a sparkline's values, a scatter's one series, else the items of the chart.
+  function fromList(kind, data) {
+    if (kind === "sparkline") return { values: data.map(function (v) { return typeof v === "object" && v ? pick(v, ["value", "count", "total", "y"]) : v; }) };
+    if (kind === "scatter") return { series: [{ name: "", points: data }] };
+    return { items: data };
+  }
   function shapeData(kind, data) {
     if (Array.isArray(data)) {
-      if (kind === "sparkline") return { values: data.map(function (v) { return typeof v === "object" && v ? pick(v, ["value", "count", "total", "y"]) : v; }) };
-      if (kind === "scatter") return { series: [{ name: "", points: data }] };
-      data = { items: data };
+      data = fromList(kind, data);
+      if (!data.items) return data;
     }
     if (!data || typeof data !== "object") return {};
     var out = Object.assign({}, data);
@@ -670,11 +708,16 @@
   }
   // A bar or line chart's series: from values, else from items or data (which become the labels);
   // a series without labels gets 1, 2, 3...
+  function seriesFrom(out, list) {
+    if (Array.isArray(out.values)) { out.series = [{ name: out.name || "", values: out.values }]; return; }
+    if (!list) return;
+    var it = asItems(list);
+    out.labels = it.map(function (x) { return x.label; });
+    out.series = [{ name: out.name || "", values: it.map(function (x) { return x.value; }) }];
+    delete out.items;
+  }
   function seriesOf(out, list) {
-    if (!Array.isArray(out.series)) {
-      if (Array.isArray(out.values)) out.series = [{ name: out.name || "", values: out.values }];
-      else if (list) { var it = asItems(list); out.labels = it.map(function (x) { return x.label; }); out.series = [{ name: out.name || "", values: it.map(function (x) { return x.value; }) }]; delete out.items; }
-    }
+    if (!Array.isArray(out.series)) seriesFrom(out, list);
     var first = Array.isArray(out.series) && out.series[0];
     if (first && first.values && !Array.isArray(out.labels)) out.labels = first.values.map(function (v, i) { return String(i + 1); });
   }
@@ -685,32 +728,39 @@
     var missing = NEEDS[kind].filter(function (k) { return data[k] === undefined || data[k] === null; });
     return missing.length ? "This chart's data is not in the shape it reads (missing " + missing.join(", ") + "). Expected: " + SHAPES[kind] : "";
   }
-  function render(host, kind, data) {
-    var fn = kinds[kind];
-    if (!fn) return;
-    var raw = data;
-    data = shapeData(kind, data || {});
-    var problem = shapeProblem(kind, raw, data);
-    if (problem) {
-      clear(host);
-      empty(host, { empty: problem });
-      host.setAttribute("data-kit-shape-error", "");
-      host.__kitChart = { kind: kind, data: data };
-      if (window.console) console.error("UI kit chart (" + kind + "): " + problem, host);
-      return;
-    }
-    host.removeAttribute("data-kit-shape-error");
-    var parts = function () { return Array.prototype.slice.call(host.querySelectorAll('[role="button"], button')); };
-    var at = document.activeElement, focusAt = at && host.contains(at) ? parts().indexOf(at) : -1;
+  // Data in a shape the chart cannot read: the expected shape instead of the chart, and in the console.
+  function showShapeProblem(host, kind, data, problem) {
+    clear(host);
+    empty(host, { empty: problem });
+    host.setAttribute("data-kit-shape-error", "");
     host.__kitChart = { kind: kind, data: data };
+    if (window.console) console.error("UI kit chart (" + kind + "): " + problem, host);
+  }
+  // A chart that fails to draw shows why as its empty state and leaves the next chart alone.
+  function drawGuarded(host, kind, fn, data) {
     try { fn(host, data); }
     catch (e) {
       clear(host);
       empty(host, { empty: "This chart could not be drawn: " + (e && e.message ? e.message : e) });
       if (window.console) console.error("UI kit chart (" + kind + ")", host, e);
     }
+  }
+  // The chart's focusable parts: a redraw puts keyboard focus back on the same one.
+  function chartParts(host) { return Array.prototype.slice.call(host.querySelectorAll('[role="button"], button')); }
+  function focusedPart(host) { var at = document.activeElement; return at && host.contains(at) ? chartParts(host).indexOf(at) : -1; }
+  function render(host, kind, data) {
+    var fn = kinds[kind];
+    if (!fn) return;
+    var raw = data;
+    data = shapeData(kind, data || {});
+    var problem = shapeProblem(kind, raw, data);
+    if (problem) { showShapeProblem(host, kind, data, problem); return; }
+    host.removeAttribute("data-kit-shape-error");
+    var focusAt = focusedPart(host);
+    host.__kitChart = { kind: kind, data: data };
+    drawGuarded(host, kind, fn, data);
     host.__kitDrawn = true;
-    if (focusAt >= 0) { var again = parts()[focusAt]; if (again) again.focus(); }
+    if (focusAt >= 0) { var again = chartParts(host)[focusAt]; if (again) again.focus(); }
   }
   // Redraw when the box changes width (the SVG is drawn for its size), once per frame.
   var pending = [], frameAsked = false;
