@@ -240,6 +240,9 @@ Describe 'Kit icons on a page (UI kit on)' {
         @(Find-IconlessActions 'index.html' $new $new).Count | Should Be 0   # already there
         @(Find-IconlessActions 'src/Toolbar.tsx' '' '<button className="kit-btn" onClick={add}>Add {kind}</button>')[0] | Should Match "'Add' \(plus\)"
         @(Find-IconlessActions 'src/Toolbar.tsx' '' '<button className="kit-btn"><Icon name="plus" />Add</button>').Count | Should Be 0
+        # A JSX click handler with an arrow does not end the tag: the label is read whole.
+        @(Find-IconlessActions 'src/Toolbar.tsx' '' '<button className="kit-btn" onClick={() => setOpen(true)}>Export</button>')[0] | Should Match "'Export' \(download\)"
+        @(Find-IconlessActions 'src/Toolbar.tsx' '' '<button className="kit-btn" onClick={() => add(row)}>Add row</button>')[0] | Should Match "'Add row' \(plus\)"
         @(Find-IconlessActions 'styles/kit/kit-examples.html' '' $new).Count | Should Be 0
         (@(Find-QualityIssues 'index.html' '' $new -UseKit) -join "`n") | Should Match 'without an icon'
         (@(Find-QualityIssues 'index.html' '' $new -UseKit -UserLook) -join "`n") | Should Not Match 'without an icon'

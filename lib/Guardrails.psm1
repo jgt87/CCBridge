@@ -219,7 +219,7 @@ function Find-UnignoredEnv {
         $covered = $false
         foreach ($r in $rules) {
             if ($r.StartsWith('!')) { continue }
-            $pat = $r.TrimStart('/')
+            $pat = $r.TrimStart('/') -replace '^\*\*/', ''   # **/.env matches .env in any folder, the root too
             if (($pat -eq $e) -or ($pat -eq $leaf) -or ($pat.Contains('*') -and (($leaf -like $pat) -or ($e -like $pat)))) { $covered = $true; break }
         }
         if (-not $covered) { "${e}: holds settings and secrets but .gitignore does not exclude it, so it would end up in git; add the line $leaf (or .env*) to .gitignore" }
@@ -691,7 +691,8 @@ function Get-IconlessActions([AllowEmptyString()][string]$Text) {
     $t = "$Text"
     if ($t -notmatch 'kit-btn') { return @() }
     $out = New-Object System.Collections.Generic.List[object]
-    foreach ($m in [regex]::Matches($t, '(?is)<button\b([^>]*)>(.*?)</button>')) {
+    # Attributes as Find-HtmlBasics reads them: a JSX value in braces and an arrow (=>) do not end the tag.
+    foreach ($m in [regex]::Matches($t, '(?is)<button\b((?:\{(?:[^{}]|\{[^{}]*\})*\}|=>|[^>{])*)>(.*?)</button>')) {
         if ($m.Groups[1].Value -notmatch '\bkit-btn\b') { continue }
         $inner = $m.Groups[2].Value
         if ($inner -match '(?i)data-kit-icon|<Icon\b|<svg\b|<img\b|KitIcons') { continue }

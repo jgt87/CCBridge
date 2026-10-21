@@ -167,7 +167,13 @@ function CardHeader({
     <button className="flex w-full items-center gap-2 px-3 py-2 text-left" disabled={!details} onClick={onToggle} type="button">
       {ICONS[item.action] ?? <Play className="h-4 w-4" />}
       <span className="font-medium">{verbFor(item.action)}</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground text-xs">{item.target}</span>
+      {/* One line while closed (the whole text on hover); open, the card shows all of it. */}
+      <span
+        className={cn("min-w-0 flex-1 font-mono text-muted-foreground text-xs", expanded ? "whitespace-pre-wrap break-words" : "truncate")}
+        title={expanded ? undefined : item.target}
+      >
+        {item.target}
+      </span>
       {todo ? (
         <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="Items done in this list">
           {todo.done}/{todo.total} done

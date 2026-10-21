@@ -126,6 +126,9 @@ Describe 'A look the person asks for' {
         foreach ($t in 'Add a chart of sales per month', 'Fix the error in the filter', 'Why is the total wrong?', 'Show the colour field in the table') { Test-LookRequest $t | Should Be $false }
         foreach ($t in 'Change the look of the header', 'Adjust the GUI of the settings page', 'Improve the user interface of the dashboard', 'Tweak the layout of the filters', 'Pas de opmaak van de tabel aan', 'Restyle the figures') { Test-LookRequest $t | Should Be $true }
         foreach ($t in 'Update the data of the dashboard', 'Improve the performance of the filter') { Test-LookRequest $t | Should Be $false }
+        # "look" as a verb (look into, look at, look up) is not a look request; the noun and "look better" are.
+        foreach ($t in 'Please look into why the totals are wrong and use the new rates', 'Can you look at the export? I want it to use semicolons', 'Look up the latest rates and use them') { Test-LookRequest $t | Should Be $false }
+        foreach ($t in 'Make it look more modern', 'The new look should use the kit colours') { Test-LookRequest $t | Should Be $true }
         # A plan build: only the request counts, not the plan Copilot wrote (run 7: more graphs, plan naming layout and colours).
         $plan = "Build this now, following the approved plan below. Change files with action blocks.`n`nRequest: any additional graphs you can include?`n`nApproved plan:`n1. Licence use by sector: a bar chart; adjust the layout of the chart grid and improve the colours of the legend."
         Test-LookRequest $plan | Should Be $false

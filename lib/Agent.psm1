@@ -14,6 +14,7 @@ function New-AgentState {
         Approvals = [hashtable]::Synchronized(@{})
         Mode = 'ask'; ProjectRoot = $null; Busy = $false; Cancel = $false; Stop = $false
         ProjectGate = New-Object object   # worker/project-open exclusion; never lock the shared state itself
+        SwitchWanted = $false   # a project open waits for the worker: it stops getting the current project ready
         Progress = ''; Copilot = 'idle'; CopilotMessage = ''
         Throttle = @{ used = 0; max = 0 }; Credits = $null; Todos = @(); ChatStarted = $false; NeedNewChat = $true; Summary = $null
         # This run of the app: event numbers start over with it, so an open tab knows to start over too.
@@ -3203,6 +3204,12 @@ function Test-AutoRun($State, [string]$Command) {
 
 function Get-PreviewText([string]$s) { if ($null -eq $s) { return $null } Limit-Text $s 200000 }
 
+function Get-DisputeCandidates($State, [string]$Path) {
+    <# The findings of the last file check on this file (texts), which an ACTION dispute may point at. #>
+    $want = "$Path".Trim().Replace('\', '/').TrimStart('.', '/').ToLowerInvariant()
+    @(@($State.LastFindings) | Where-Object { $_ -and "$($_.path)".Replace('\', '/').TrimStart('.', '/').ToLowerInvariant() -eq $want } | ForEach-Object { "$($_.text)" } | Select-Object -Unique)
+}
+
 function Invoke-AgentActionCore {
     <# Executes one action. Returns @{ ok; summary; output } where output goes back to Copilot. #>
     param($State, $Action, [string]$Id, $Checkpoint, [int]$Uncertain)
@@ -3266,9 +3273,19 @@ function Invoke-AgentActionCore {
             $bodyLines = @("$($Action.body)".Replace("`r", '').Split("`n") | Where-Object { $_.Trim() })
             $finding = if ($bodyLines.Count) { $bodyLines[0].Trim() -replace '^-\s*', '' -replace ('^' + [regex]::Escape($path) + ':\s*'), '' } else { '' }
             $reason = (@($bodyLines | Select-Object -Skip 1) -join ' ').Trim()
+            # Only a reason, without the finding first: the file's one open finding is the one meant.
+            # With several, Copilot is told which ones there are.
+            $open = @(Get-DisputeCandidates $State $path)
+            if ($finding -and -not $reason -and -not @($open | Where-Object { (Get-CheckKey $path $_) -eq (Get-CheckKey $path $finding) }).Count) {
+                if ($open.Count -eq 1) { $reason = $finding; $finding = $open[0] }
+                elseif ($open.Count -gt 1) {
+                    $evt.target = $path; Add-AgentEvent $State 'action' $evt
+                    return @{ ok = $false; summary = 'dispute: which finding?'; output = "error: $path has $($open.Count) findings; write the one you mean on the line after ACTION dispute $path, as it was reported, then why it is wrong on the next line. The findings:`n$(@($open | Select-Object -First 8 | ForEach-Object { "- $_" }) -join "`n")" }
+                }
+            }
             $evt.target = "$path$(if ($finding) { ": $finding" })"; Add-AgentEvent $State 'action' $evt
             if (-not $path -or -not $finding) { return @{ ok = $false; summary = 'dispute without a finding'; output = 'error: write ACTION dispute PATH, then the finding as it was reported on the next line, then why it is wrong.' } }
-            if (-not $reason) { return @{ ok = $false; summary = 'dispute without a reason'; output = 'error: say why the finding is wrong on the line after it (one line is enough); a dispute without a reason is not accepted.' } }
+            if (-not $reason) { return @{ ok = $false; summary = 'dispute without a reason'; output = "error: '$finding' has no reason: write why it is wrong on the line after it (one line is enough); a dispute without a reason is not accepted." } }
             if ($finding -match '(?i)\bnow has \d+ lines\b|\blines of inline data\b|\b(very )?complex\b|\bdeeply nested\b|\bbrain method\b|\btoo (long|many)\b') {
                 return @{ ok = $false; summary = 'a measurement cannot be disputed'; output = "error: '$finding' is a measurement (size or complexity), not a guess, so it is not wrong. Split the code, or leave it as it is and say why in the done summary." }
             }
@@ -4817,6 +4834,7 @@ function Invoke-AgentTurn {
                 $syntax = @($keep | Where-Object level -eq 'error' | ForEach-Object { "$(if ($_.path) { "$($_.path): " })$($_.text)" })
                 foreach ($f in @($keep | Where-Object { $_.level -eq 'error' -and $_.path })) { $k2 = $f.path.ToLowerInvariant(); if (-not $fixTargets.ContainsKey($k2)) { $fixTargets[$k2] = [int]$f.line } }
                 $ev.syntaxLast = @($syntax)
+                $State.LastFindings = @($keep | Where-Object { $_.path } | ForEach-Object { @{ path = $_.path; text = $_.text } })   # what an ACTION dispute may point at
                 if ($keep.Count) {
                     Write-CCBLog info agent 'File check findings after this round' @{ errors = $syntax.Count; warnings = $keep.Count - $syntax.Count }
                     Add-AgentEvent $State 'checks' @{ text = "File check: $($syntax.Count) problem(s) that break a file, $($keep.Count - $syntax.Count) likely mistake(s); Copilot is asked to look at them."; findings = @($keep | Select-Object -First 30 | ForEach-Object { @{ path = $_.path; line = $_.line; text = $_.text; level = $_.level; source = $_.source } }) }
@@ -5343,7 +5361,9 @@ function Start-AgentWorker {
             # converted for an open alone; a live data file the person chose is brought in at once.
             if ($State.OpenSync) {
                 $openRoot = $State.OpenSync; $State.OpenSync = $null
-                if ($openRoot -eq $State.ProjectRoot) {
+                # The person wants another project (Set-Project could not get in): this one's preparation
+                # stops here and runs again when it is opened next.
+                if ($openRoot -eq $State.ProjectRoot -and -not $State.SwitchWanted) {
                     $live = try { [bool](Get-ProjectSetup $openRoot).liveSource } catch { $false }
                     $prev = if ($live) { Enter-Activity $State 'index' 'Bringing in the live data file' } else { $null }
                     try { Sync-DataMirrors $State -Import:$live } catch { Write-CCBLogError agent 'data at project open' $_ } finally { if ($prev) { Exit-Activity $State $prev } }
@@ -5353,7 +5373,7 @@ function Start-AgentWorker {
                     try {
                         # The shared library beside the projects (one kit, shared notes, runbooks for all): made at the first open.
                         $null = Get-SharedRoot $openRoot -Create
-                        $kitNewer = @(if (Test-UiKitOn $State.AppRoot) { Update-UiKitCatalog $openRoot $State.AppRoot })   # only with the UI kit on (Settings)
+                        $kitNewer = @(if ((Test-UiKitOn $State.AppRoot) -and -not $State.SwitchWanted) { Update-UiKitCatalog $openRoot $State.AppRoot })   # only with the UI kit on (Settings)
                         if ($kitNewer.Count) {
                             Add-OwnChangeEvent $State 'write' "$(Get-UiKitFolder)/ (UI kit)" "StreamHub updated the project's UI kit to its newer version: the catalogue in $(Get-UiKitCatalog $State.ProjectRoot)/, new tokens in tokens.css (your own colours stay) and the kit files the pages use that the project had not changed ($($kitNewer -join ', ')). Kit files the project changed stay as they are." -Output ($kitNewer -join "`n")
                             $u = Update-UiKitProject $openRoot $State.AppRoot
@@ -5361,7 +5381,7 @@ function Start-AgentWorker {
                         }
                         # One-file pages carry their own copy of the kit: filled again from the (newer) catalogue
                         # at open too, so a kit fix reaches them without waiting for the next task.
-                        if (Test-UiKitOn $State.AppRoot) {
+                        if ((Test-UiKitOn $State.AppRoot) -and -not $State.SwitchWanted) {
                             $prev = Enter-Activity $State 'index' 'Bringing one-file pages up to date'
                             try { $null = Sync-OneFilePages $State } finally { Exit-Activity $State $prev }
                         }

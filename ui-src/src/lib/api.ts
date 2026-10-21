@@ -1,3 +1,4 @@
+import type { ProjectOpenAnswer } from "./project-open";
 import type { RunLive, RunWindowState } from "./run-live";
 import type { ResponseOption } from "./response-modes";
 
@@ -748,8 +749,8 @@ export const api = {
     })),
   projects: () => call<{ root: string; projects: ProjectInfo[] }>("GET", "/api/projects"),
   projectsQuick: () => call<{ root: string; projects: ProjectInfo[] }>("GET", "/api/projects?quick=1"),
-  createProject: (name: string) => call<{ ok: boolean; path: string }>("POST", "/api/projects", { name }),
-  openProject: (path: string) => call<{ ok: boolean }>("POST", "/api/project/open", { path }),
+  createProject: (name: string) => call<ProjectOpenAnswer & { path: string }>("POST", "/api/projects", { name }),
+  openProject: (path: string) => call<ProjectOpenAnswer>("POST", "/api/project/open", { path }),
   files: () => call<{ files: FileInfo[] }>("GET", "/api/files"),
   file: (path: string) =>
     call<{ path: string; text: string; truncated?: boolean; note?: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),

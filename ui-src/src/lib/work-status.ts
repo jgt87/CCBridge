@@ -15,7 +15,7 @@ export interface WorkView {
   phase: string;
   /** The task as a whole: "Task 6 min 40 s - round 3 - 4 actions - 2 files changed". */
   detail: string;
-  /** The last sign of life: "last reply data 5 s ago". */
+  /** When something last happened: "Copilot wrote 5 s ago", else "updated 5 s ago". */
   sign: string;
   /** How long nothing new happened. */
   quietMs: number;
@@ -36,7 +36,7 @@ export function workView(w: WorkStatus, now: number = Date.now()): WorkView {
   if (w.round > 1) parts.push(`round ${w.round}`);
   if (w.actions) parts.push(`${w.actions} action${w.actions === 1 ? "" : "s"}`);
   if (w.changed) parts.push(`${w.changed} file${w.changed === 1 ? "" : "s"} changed`);
-  const sign = data != null && data <= quietMs + 1000 ? `last reply data ${formatDuration(data)} ago` : `last sign of life ${formatDuration(quietMs)} ago`;
+  const sign = data != null && data <= quietMs + 1000 ? `Copilot wrote ${formatDuration(data)} ago` : `updated ${formatDuration(quietMs)} ago`;
   const quietText = w.waitSec
     ? `StreamHub keeps waiting while Copilot's page shows it is at work, up to ${formatDuration(w.waitSec * 1000)} in all; with no sign at all it stops after ${formatDuration(w.stallSec * 1000)}.`
     : "StreamHub is still on this step; it ends by itself when the step finishes or times out.";

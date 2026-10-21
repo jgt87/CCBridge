@@ -29,14 +29,14 @@ describe("workView", () => {
     const v = workView(work(), base + 400_000);
     expect(v.phase).toBe("Waiting for Copilot's reply · 2 min 10 s");
     expect(v.detail).toBe("Task 6 min 40 s · round 3 · 4 actions · 2 files changed");
-    expect(v.sign).toBe("last reply data 5 s ago");
+    expect(v.sign).toBe("Copilot wrote 5 s ago");
     expect(v.quiet).toBe(false);
     expect(v.steps).toHaveLength(1);
   });
   it("warns after three minutes without any sign, with how long StreamHub waits", () => {
     const v = workView(work({ lastSignAt: iso(100), lastDataAt: "" }), base + 400_000);
     expect(v.quiet).toBe(true);
-    expect(v.sign).toBe("last sign of life 5 min ago");
+    expect(v.sign).toBe("updated 5 min ago");
     expect(v.quietText).toMatch(/up to 30 min in all; with no sign at all it stops after 1 min 30 s/);
     expect(workView(work({ lastSignAt: iso(100), waitSec: 0 }), base + 400_000).quietText).toMatch(/still on this step/);
   });

@@ -199,9 +199,13 @@ function Compare-Health {
     <# Functions a change made worse: newly over a "very" limit (or a brain method), or clearly more
        complex than before (+5 CCN or +2 nesting). Returns "name (file:line): what" texts. #>
     param([string]$Path, [AllowEmptyString()][string]$Old, [AllowEmptyString()][string]$New)
-    $before = @{}; foreach ($f in @(Get-FunctionMetrics $Path $Old)) { $before[$f.name] = $f }
-    foreach ($f in @(Get-FunctionMetrics $Path $New)) {
-        $b = $before[$f.name]
+    # Keyed by name and its occurrence: anonymous functions (and methods of the same name) are
+    # matched first to first, second to second, not all to the last one.
+    $keyOf = { param($list) $seen = @{}; foreach ($f in $list) { $seen[$f.name] = 1 + [int]$seen[$f.name]; @{ key = "$($f.name)#$($seen[$f.name])"; f = $f } } }
+    $before = @{}; foreach ($x in @(& $keyOf @(Get-FunctionMetrics $Path $Old))) { $before[$x.key] = $x.f }
+    foreach ($x in @(& $keyOf @(Get-FunctionMetrics $Path $New))) {
+        $f = $x.f
+        $b = $before[$x.key]
         $was = if ($b) { "was CCN $($b.ccn), nesting $($b.nesting), $($b.lines) lines" } else { 'new function' }
         $bad = @($f.flags | Where-Object { $_ -match '^very|brain' })
         $badBefore = if ($b) { @($b.flags | Where-Object { $_ -match '^very|brain' }) } else { @() }

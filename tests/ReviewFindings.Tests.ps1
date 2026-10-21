@@ -109,10 +109,23 @@ Describe 'Disputes' {
     $s.ProjectRoot = $p
     $run = { param($body) & (Get-Module Agent) { param($st, $b) Invoke-AgentAction $st ([pscustomobject]@{ type = 'dispute'; arg = 'js/app.js'; body = $b }) 'd1' $null 0 } $s $body }
     It 'needs a reason, and does not accept one against a measurement' {
-        (& $run 'line 3: unused variable x').output | Should Match 'say why the finding is wrong'
+        (& $run 'line 3: unused variable x').output | Should Match 'has no reason: write why it is wrong'
         (& $run "the file now has 612 lines (over 400): split it`nit is fine").output | Should Match 'is a measurement'
         $ok = & $run "line 3: unused variable x`nit is used by the page through window"
         $ok.ok | Should Be $true
+    }
+    It 'takes a reason written without the finding as about the file''s one open finding, and lists several' {
+        $s.CheckDisputes = $null
+        $s.LastFindings = @(@{ path = 'js/app.js'; text = 'line 9: action buttons without an icon' }, @{ path = 'other.js'; text = 'line 1: x' })
+        $r = & $run 'The flagged button is a table sort control, not a kit action button.'
+        $r.ok | Should Be $true
+        $r.output | Should Match "'line 9: action buttons without an icon' in js/app.js is left out"
+        $s.LastFindings += @{ path = 'js/app.js'; text = 'line 12: a console.log left in' }
+        $s.CheckDisputes = $null
+        $r = & $run 'The flagged button is a table sort control.'
+        $r.ok | Should Be $false
+        $r.output | Should Match 'js/app.js has 2 findings'
+        $r.output | Should Match '- line 12: a console.log left in'
     }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }

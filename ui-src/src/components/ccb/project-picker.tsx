@@ -1,8 +1,9 @@
-import { Cloud, FolderGit2, FolderOpen, Loader2, RefreshCw } from "lucide-react";
+import { Cloud, FolderGit2, FolderOpen, Info, Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import { Input } from "@/components/ui/input";
 import { api, type ProjectInfo } from "@/lib/api";
+import { openWhenFree, type ProjectOpenAnswer } from "@/lib/project-open";
 import { overviewText } from "@/lib/project-overview";
 import { projectRowStatus, projectsWatch } from "@/lib/projects-watch";
 import { cn } from "@/lib/utils";
@@ -97,7 +98,7 @@ function ProjectRow({ project: p, opening, onOpen }: { project: ProjectInfo; ope
         "flex w-full items-center gap-3 rounded-xl border border-(--kit-border) px-4 py-3 text-left transition-colors hover:bg-(--kit-surface-2)",
         opening && !isOpening && "opacity-50",
       )}
-      disabled={Boolean(opening)}
+      disabled={isOpening}
       onClick={() => onOpen(p.path)}
       type="button"
     >
@@ -118,6 +119,9 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
   const [refreshing, setRefreshing] = useState(false);
   // The project being opened: shown on its row, and further clicks wait for it.
   const [opening, setOpening] = useState("");
+  // Why opening waits (StreamHub still getting the open project ready, or a task running): a note, not an error.
+  const [waitNote, setWaitNote] = useState("");
+  const openGen = useRef(0);
 
   const refresh = async () => {
     setError("");
@@ -129,40 +133,55 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
     }
   };
 
-  const open = async (path: string) => {
-    if (opening) return;
+  // Opens when StreamHub is free: while it still gets the open project ready, it tries again by
+  // itself and says so; a click on another project takes over from a waiting one.
+  const openWith = async (attempt: () => Promise<ProjectOpenAnswer>, path: string) => {
+    const gen = ++openGen.current;
     setError("");
+    setWaitNote("");
     setOpening(path);
     try {
-      await api.openProject(path);
-      onOpened();
+      const out = await openWhenFree(attempt, setWaitNote, () => gen !== openGen.current);
+      if (out.status === "cancelled") return;
+      if (out.status === "opened") onOpened();
+      else setWaitNote(out.message);
     } catch (e) {
-      setError((e as Error).message);
+      if (gen === openGen.current) setError((e as Error).message);
     } finally {
-      setOpening("");
+      if (gen === openGen.current) setOpening("");
     }
   };
-
-  const create = async (name: string) => {
-    setError("");
-    try {
-      await api.createProject(name);
-      onOpened();
-    } catch (e) {
-      setError((e as Error).message);
-    }
+  const open = (path: string) => {
+    if (opening === path) return;
+    void openWith(() => api.openProject(path), path);
+  };
+  // The folder is made on the first try; while StreamHub is busy, later tries open that folder.
+  const create = (name: string) => {
+    let made = "";
+    void openWith(async () => {
+      if (made) return api.openProject(made);
+      const r = await api.createProject(name);
+      made = r.path;
+      return r;
+    }, name);
   };
 
   return (
     <div className="mx-auto w-full max-w-xl space-y-6 px-4 py-10">
       <PickerHeader onRefresh={() => void refresh()} refreshing={refreshing} root={root} />
-      <NewProjectForm onCreate={(name) => void create(name)} />
+      <NewProjectForm onCreate={create} />
 
+      {waitNote && !error && (
+        <p className="kit-notice text-sm" role="status">
+          {opening ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" /> : <Info className="mt-0.5 h-4 w-4 shrink-0" />}
+          <span>{waitNote}</span>
+        </p>
+      )}
       {error && <p className="text-(--kit-error) text-sm">{error}</p>}
 
       <div className="space-y-2">
         {projects.map((p) => (
-          <ProjectRow key={p.path} onOpen={(path) => void open(path)} opening={opening} project={p} />
+          <ProjectRow key={p.path} onOpen={open} opening={opening} project={p} />
         ))}
         {!projects.length && root && (
           <p className="kit-empty py-4 text-sm">No projects yet. Create your first one above.</p>

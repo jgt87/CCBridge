@@ -6,6 +6,20 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.144] - 2026-10-21
+
+### Fixed
+- Opening a project right after StreamHub starts: while StreamHub was still getting the last project ready (its data copies, UI kit and one-file pages), a click on another project gave an error marked unexpected that blamed "the current task". The picker now says "Opening NAME as soon as StreamHub has finished getting OTHER ready" with a spinner and opens it by itself; StreamHub stops preparing the old project at its next step, so the switch comes quickly, and another project can be clicked meanwhile. When a task really runs, it says so plainly (wait for it or press Stop), not as an error.
+- Disputes: when Copilot gave only its reason and not the finding it disputed, the reason was taken as the finding and the dispute failed with "no reason". A reason on its own now counts for the file's one open finding; with several, Copilot is told which ones there are. The error for a finding without a reason names that finding.
+- Action cards: an opened card shows its whole title (a dispute, a long path or command) instead of cutting it off; closed, the title is one line with the whole text on hover.
+- The UI kit check for action buttons without an icon missed React buttons with an arrow-function handler (`onClick={() => ...}`), or read a garbled label from them.
+- A `.gitignore` line `**/.env` was not counted as covering a `.env` at the project root, so it was reported as not ignored.
+- Code health: every unnamed JavaScript function was compared with the last one, so an unchanged complex callback was reported as made worse after any edit.
+- "Look into ..." no longer counts as a request about how something looks (which sent the look rules and paused the kit's look checks for that turn); "the look", "look more modern" and "look like ..." still do.
+
+### Changed
+- The waiting card says "Copilot wrote 5 s ago" or "updated 5 s ago" instead of "last sign of life".
+
 ## [v0.1.143] - 2026-10-20
 
 ### Security

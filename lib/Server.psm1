@@ -239,14 +239,16 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/projects$' {
             $b = Read-JsonBody $Ctx
             $path = New-CCBridgeProject -Name $b.name -FolderName $State.Config.projectsFolder
-            Set-Project $State $path
+            try { Set-Project $State $path } catch { $busy = Get-ProjectSwitchBusy $State $_ $path; if (-not $busy) { throw }; $busy.path = $path; return Send-Json $Ctx $busy }
             return Send-Json $Ctx @{ ok = $true; path = $path }
         }
         '^POST /api/project/open$' {
             $b = Read-JsonBody $Ctx
             if (-not (Test-Path -LiteralPath $b.path -PathType Container)) { throw "Folder not found: $($b.path)" }
             if (-not (Test-UnderOneDrive $b.path)) { throw 'Projects must be inside your OneDrive folder.' }
-            Set-Project $State (Resolve-Path -LiteralPath $b.path).Path
+            $full = (Resolve-Path -LiteralPath $b.path).Path
+            # Refused for now (a task runs, or the open project is still being made ready): an answer, not an error.
+            try { Set-Project $State $full } catch { $busy = Get-ProjectSwitchBusy $State $_ $full; if (-not $busy) { throw }; return Send-Json $Ctx $busy }
             return Send-Json $Ctx @{ ok = $true }
         }
         '^GET /api/files$' {
@@ -1044,10 +1046,34 @@ function Invoke-ApiRequest($Ctx, $State) {
     Send-Json $Ctx @{ error = "Unknown API $method $path" } 404
 }
 
+# The two reasons a project cannot be opened right now start with these words (Get-ProjectSwitchBusy).
+$script:SwitchTaskText = 'A task is still running in'
+$script:SwitchPrepText = 'StreamHub is still getting'
+
+function Get-ProjectSwitchBusy($State, $ErrorRecord, [string]$Path) {
+    <# A refused project switch (Set-Project) as an answer for the page instead of an error:
+       @{ ok = $false; busy = 'task' | 'preparing'; retry; message }, or $null for any other error.
+       'preparing' ends by itself (the page tries again); 'task' waits for the person. #>
+    $msg = "$($ErrorRecord.Exception.Message)"
+    $to = if ($Path) { Split-Path $Path -Leaf } else { 'the project' }
+    if ($msg.StartsWith($script:SwitchTaskText)) { return @{ ok = $false; busy = 'task'; retry = $false; message = $msg } }
+    if ($msg.StartsWith($script:SwitchPrepText)) { return @{ ok = $false; busy = 'preparing'; retry = $true; message = "Opening $to as soon as StreamHub has finished getting $($msg.Substring($script:SwitchPrepText.Length).Trim())" } }
+    $null
+}
+
 function Set-Project($State, [string]$Path) {
-    if (-not [Threading.Monitor]::TryEnter($State.ProjectGate)) { throw 'Wait for the current task to finish or stop it before switching projects.' }
+    $current = if ($State.ProjectRoot) { Split-Path $State.ProjectRoot -Leaf } else { 'the project' }
+    if ($State.Busy) { throw "$($script:SwitchTaskText) $current. Wait for it to finish or press Stop, then open the project again." }
+    # Briefly held by the worker's own steps; while it gets the open project ready (data copies, the
+    # UI kit, one-file pages), SwitchWanted makes it stop at its next step so the switch comes soon.
+    if (-not [Threading.Monitor]::TryEnter($State.ProjectGate, 1500)) {
+        $State.SwitchWanted = $true
+        if ($State.Busy) { throw "$($script:SwitchTaskText) $current. Wait for it to finish or press Stop, then open the project again." }
+        throw "$($script:SwitchPrepText) $current ready (its data copies, UI kit and pages are brought up to date after it opens)."
+    }
     try {
-    if ($State.Busy) { throw 'Wait for the current task to finish or stop it before switching projects.' }
+    if ($State.Busy) { throw "$($script:SwitchTaskText) $current. Wait for it to finish or press Stop, then open the project again." }
+    $State.SwitchWanted = $false
     $State.ProjectRoot = $Path.TrimEnd('\')
     $State.SessionSince = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')   # line-change counts start here
     $State.OpenedAt = $State.SessionSince   # "last change" counts only changes made after this open

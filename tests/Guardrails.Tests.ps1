@@ -94,6 +94,19 @@ Describe 'Find-ChangeSmells' {
     }
 }
 
+Describe 'Compare-Health' {
+    It 'matches anonymous functions by their order, so an unchanged complex callback is not reported' {
+        Import-Module (Join-Path $root 'lib\Health.psm1') -Force
+        $branches = (1..25 | ForEach-Object { "    if (a == $_) { x++; }" }) -join "`n"
+        $old = "list.forEach(function (a) {`n$branches`n});`nlist.map(function (b) { return b; });`n"
+        @(Compare-Health 'app.js' $old ($old + "// a comment`n")).Count | Should Be 0
+        # Made worse: still reported.
+        $worse = (1..25 | ForEach-Object { "    if (b == $_) { y++; }" }) -join "`n"
+        $new = "list.forEach(function (a) {`n$branches`n});`nlist.map(function (b) {`n$worse`n return b; });`n"
+        @(Compare-Health 'app.js' $old $new)[0] | Should Match '^\(anonymous\) \(app\.js:28\): CCN 26.*\(was CCN 1'
+    }
+}
+
 Describe 'Find-UnignoredEnv' {
     It 'reports a new .env that .gitignore does not cover, in a git project' {
         $p = New-GuardProject
@@ -103,6 +116,15 @@ Describe 'Find-UnignoredEnv' {
         @(Find-UnignoredEnv $p @('.env', '.env.example'))[0] | Should Match '^\.env: .*add the line \.env'
         [IO.File]::WriteAllText((Join-Path $p '.gitignore'), "node_modules/`n.env*`n")
         @(Find-UnignoredEnv $p @('.env')).Count | Should Be 0
+        Remove-Item $p -Recurse -Force
+    }
+    It 'counts **/.env as covering a .env at the root and in a folder' {
+        $p = New-GuardProject
+        New-Item -ItemType Directory (Join-Path $p '.git'), (Join-Path $p 'app') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $p '.env'), 'KEY=1')
+        [IO.File]::WriteAllText((Join-Path $p 'app\.env'), 'KEY=1')
+        [IO.File]::WriteAllText((Join-Path $p '.gitignore'), "**/.env`n")
+        @(Find-UnignoredEnv $p @('.env', 'app/.env')).Count | Should Be 0
         Remove-Item $p -Recurse -Force
     }
     It 'stays quiet in a project without git (and the executor applies the rules)' {

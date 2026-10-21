@@ -122,9 +122,14 @@ Describe 'Worker project routing' {
 Describe 'Opening projects safely' {
     It 'refuses a switch while busy without changing any project state' {
         $s = New-AgentState -Config @{} -AppRoot $root; $s.ProjectRoot = $a; $s.Busy = $true
-        { & (Get-Module Server) { param($s, $p) Set-Project $s $p } $s $b } | Should Throw 'finish or stop'
+        { & (Get-Module Server) { param($s, $p) Set-Project $s $p } $s $b } | Should Throw 'A task is still running in a. Wait for it to finish or press Stop'
         $s.ProjectRoot | Should Be $a
         $s.Events.Count | Should Be 0
+        # For the page an answer, not an error with an id: it waits for the person.
+        $busy = & (Get-Module Server) { param($s, $p) try { Set-Project $s $p } catch { Get-ProjectSwitchBusy $s $_ $p } } $s $b
+        $busy.ok | Should Be $false
+        $busy.busy | Should Be 'task'
+        $busy.retry | Should Be $false
         Test-GateAvailable $s.ProjectGate | Should Be $true
     }
     It 'refuses a switch while another runspace owns the project, even between busy phases' {
@@ -139,8 +144,16 @@ Describe 'Opening projects safely' {
             }).AddArgument($s.ProjectGate).AddArgument($ready).AddArgument($release)
             $handle = $ps.BeginInvoke()
             $ready.WaitOne(5000) | Should Be $true
-            { & (Get-Module Server) { param($s, $p) Set-Project $s $p } $s $b } | Should Throw 'finish or stop'
+            # The worker getting the open project ready: told to stop at its next step, and the page
+            # gets a note to show while it tries again by itself.
+            $busy = & (Get-Module Server) { param($s, $p) try { Set-Project $s $p } catch { Get-ProjectSwitchBusy $s $_ $p } } $s $b
+            $busy.busy | Should Be 'preparing'
+            $busy.retry | Should Be $true
+            $busy.message | Should Be 'Opening b as soon as StreamHub has finished getting a ready (its data copies, UI kit and pages are brought up to date after it opens).'
+            $s.SwitchWanted | Should Be $true
             $s.ProjectRoot | Should Be $a
+            # Any other error stays an error.
+            & (Get-Module Server) { param($s) try { throw 'Folder not found' } catch { Get-ProjectSwitchBusy $s $_ 'x' } } $s | Should BeNullOrEmpty
         } finally { [void]$release.Set(); if ($handle) { $null = $ps.EndInvoke($handle) }; $ps.Dispose(); $ready.Dispose(); $release.Dispose() }
         Test-GateAvailable $s.ProjectGate | Should Be $true
     }
