@@ -9,6 +9,7 @@ import {
   hasDetails,
   needsTerminal,
   offersAllow,
+  runTitle,
   shortError,
   showsOutput,
   shownStatus,
@@ -105,5 +106,17 @@ describe("action card view rules", () => {
     expect(doneSummary({ ...edit, summary: "done" })).toBe("");
     expect(doneSummary({ ...edit, status: "failed", summary: "x" })).toBe("");
     expect(doneSummary({ ...edit, status: "already applied", summary: "x" })).toBe("x");
+  });
+});
+
+describe("runTitle", () => {
+  it("names the program, and the script it runs", () => {
+    expect(runTitle(`powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=(Get-Content 'x'); 'ok'"`)).toBe("powershell");
+    expect(runTitle("powershell -NoProfile -ExecutionPolicy Bypass -File Work/Test-Dashboard.ps1")).toBe("powershell Work/Test-Dashboard.ps1");
+    expect(runTitle(`"C:\\Program Files\\nodejs\\node.exe" scripts/build.js --watch`)).toBe("node scripts/build.js");
+    expect(runTitle("python -u Scripts/refresh.py")).toBe("python Scripts/refresh.py");
+    expect(runTitle("npm run build")).toBe("npm");
+    expect(runTitle("cmd /c dir")).toBe("cmd");
+    expect(runTitle("   ")).toBe("");
   });
 });

@@ -49,3 +49,18 @@ export function rowTime(time?: string, at?: string, endAt?: string, now: Date = 
   const took = end && end.getTime() >= d.getTime() ? formatDuration(end.getTime() - d.getTime()) : undefined;
   return { label: day ? `${day} ${hm}` : hm, title: took ? `${full} (took ${took})` : full, ...(took ? { took } : {}) };
 }
+
+/**
+ * The centered times between chat items: a time before an item when its label (the minute, with the
+ * day for an earlier day) differs from the last one shown, so items of the same minute share one.
+ * One entry per item: the time to show before it, or null.
+ */
+export function timeDividers(items: { time?: string; at?: string }[], now: Date = new Date()): (RowTime | null)[] {
+  let last = "";
+  return items.map((it) => {
+    const t = rowTime(it.time, it.at, undefined, now);
+    if (!t || t.label === last) return null;
+    last = t.label;
+    return t;
+  });
+}

@@ -31,6 +31,7 @@ import {
   hasDetails,
   needsTerminal,
   offersAllow,
+  runTitle,
   shortError,
   showsOutput,
   shownStatus,
@@ -153,6 +154,7 @@ function CardHeader({
   details,
   expanded,
   onToggle,
+  took,
 }: {
   item: ActionItem;
   todo: TodoState | null;
@@ -161,8 +163,11 @@ function CardHeader({
   details: boolean;
   expanded: boolean;
   onToggle: () => void;
+  took?: string;
 }) {
   const via = decidedVia(item.decidedBy);
+  // A run card is titled by its program (and script): the whole command is in its console below.
+  const title = item.action === "run" ? runTitle(item.target) || item.target : item.target;
   return (
     <button className="flex w-full items-center gap-2 px-3 py-2 text-left" disabled={!details} onClick={onToggle} type="button">
       {ICONS[item.action] ?? <Play className="h-4 w-4" />}
@@ -172,7 +177,7 @@ function CardHeader({
         className={cn("min-w-0 flex-1 font-mono text-muted-foreground text-xs", expanded ? "whitespace-pre-wrap break-words" : "truncate")}
         title={expanded ? undefined : item.target}
       >
-        {item.target}
+        {title}
       </span>
       {todo ? (
         <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="Items done in this list">
@@ -192,6 +197,11 @@ function CardHeader({
         </span>
       )}
       <StatusBadge status={shownStatus(item.status, sent)} />
+      {took && (
+        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="How long this step took">
+          {took}
+        </span>
+      )}
       {details && <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />}
     </button>
   );
@@ -375,7 +385,8 @@ function usePreviewSummary(item: ActionItem) {
   return { counts, todo };
 }
 
-export function ActionCard({ item }: { item: ActionItem }) {
+/** `took`: how long the step took, once it finished (shown in the header). */
+export function ActionCard({ item, took }: { item: ActionItem; took?: string }) {
   // null: follow the setting (Settings > This browser > Cards) until the person opens or closes it.
   const [open, setOpen] = useState<boolean | null>(null);
   const view = useCardView();
@@ -415,7 +426,7 @@ export function ActionCard({ item }: { item: ActionItem }) {
         awaiting ? "border-(--kit-border-strong) shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:shadow-[0_0_0_3px_rgba(255,255,255,0.05)]" : "border-(--kit-border)"
       )}
     >
-      <CardHeader counts={counts} details={details} expanded={expanded} item={item} onToggle={() => setOpen(!expanded)} sent={sent} todo={todo} />
+      <CardHeader counts={counts} details={details} expanded={expanded} item={item} onToggle={() => setOpen(!expanded)} sent={sent} todo={todo} took={took} />
 
       {expanded && (
         <div className="space-y-3 border-(--kit-border) border-t px-3 pt-3 pb-3">

@@ -4,7 +4,7 @@ import type { IntakeGroup } from "@/lib/api";
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
 import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard, type PlanVariant } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { RunLiveContext, type RunLive, type RunLiveView, type RunWindowState } from "@/lib/run-live";
 import { MarkdownView } from "./markdown-view";
 import { useFollowBottom, usePagedItems } from "@/hooks/use-transcript-scroll";
@@ -16,7 +16,7 @@ import { ChecksCard } from "./checks-card";
 import { SetupChoiceCard, type SetupChoiceItem } from "./project-setup";
 import { UndoCard } from "./undo-card";
 import { stripActionBlocks } from "@/lib/diff";
-import { formatDuration, rowTime } from "@/lib/row-time";
+import { formatDuration, type RowTime, rowTime, timeDividers } from "@/lib/row-time";
 import { workView } from "@/lib/work-status";
 import { activityTexts, thinkingTexts, writesStyles } from "@/lib/thinking-texts";
 import { cn } from "@/lib/utils";
@@ -478,15 +478,16 @@ function NextSteps({ steps, onUse }: { steps: string[]; onUse?: (text: string) =
   );
 }
 
-/** The time column next to an item: when it happened, and how long a finished action took. */
-function RowTimeLabel({ item }: { item: TranscriptItem }) {
-  const t = rowTime(item.time, item.at, item.kind === "action" ? item.endAt : undefined);
-  if (!t) return <span className="w-16 shrink-0" />;
+/** A centered time between items, when the minute changes; the full date and time on hover. */
+function TimeDivider({ time, at }: { time: RowTime; at?: string }) {
   return (
-    <span className="w-16 shrink-0 pt-1 text-right text-[11px] text-muted-foreground tabular-nums leading-tight" title={t.title}>
-      <time dateTime={item.at}>{t.label}</time>
-      {t.took && <span className="block opacity-80">{t.took}</span>}
-    </span>
+    <div className="flex items-center gap-3 text-[11px] text-muted-foreground tabular-nums" role="separator">
+      <span className="h-px flex-1 bg-(--kit-border) opacity-60" />
+      <time dateTime={at} title={time.title}>
+        {time.label}
+      </time>
+      <span className="h-px flex-1 bg-(--kit-border) opacity-60" />
+    </div>
   );
 }
 
@@ -521,7 +522,7 @@ function TranscriptRow({
     case "unfinished":
       return <UnfinishedCard item={item} onSend={onSend} />;
     case "action":
-      return <ActionCard item={item.item} />;
+      return <ActionCard item={item.item} took={rowTime(item.time, item.at, item.endAt)?.took} />;
     case "note":
       return <NoteLine onOpenFile={onOpenFile} path={item.path} text={item.text} tone={item.tone} />;
     case "undo":
@@ -714,6 +715,8 @@ export function Transcript({
   const showEmpty = !busy && !activity?.label && items.every((i) => i.kind === "note" && i.tone === "info");
   useFollowBottom(contentRef, showEmpty, items.length, items[items.length - 1]?.kind === "user", awaiting);
   const { hidden, visible, topRef, loadEarlier } = usePagedItems(items, items.length ? rowKey(items[0]) : "", PAGE, endRef);
+  // A centered time between items when the minute changes (the cards keep the full width).
+  const dividers = useMemo(() => timeDividers(visible), [visible]);
 
   const live = useMemo<RunLiveView>(() => ({ live: runLive, windows: runWindows }), [runLive, runWindows]);
   const liveWithoutCard = runWithoutCard(items, runLive);
@@ -732,22 +735,18 @@ export function Transcript({
           </button>
         </div>
       )}
-      {visible.map((it) => (
-        <div className="flex min-w-0 items-start gap-2" key={rowKey(it)}>
-          <div className="min-w-0 flex-1">
+      {visible.map((it, i) => (
+        <Fragment key={rowKey(it)}>
+          {dividers[i] && <TimeDivider at={it.at} time={dividers[i]} />}
+          <div className="min-w-0">
             <TranscriptRow item={it} onOpenFile={onOpenFile} onResendAsCoding={onResendAsCoding} onSend={onSend} onUsePrompt={onUsePrompt} />
           </div>
-          <RowTimeLabel item={it} />
-        </div>
+        </Fragment>
       ))}
-      {/* The same width as the items above, beside an empty time column. */}
       {waiting || liveWithoutCard ? (
-        <div className="flex min-w-0 items-start gap-2">
-          <div className="flex min-w-0 flex-1 flex-col gap-3">
-            {waiting && <ThinkingIndicator activity={activity} look={look} onShowCopilot={onShowCopilot} onStop={onStop} progress={progress} stopping={stopping} work={work} />}
-            {liveWithoutCard && <LiveConsole live={liveWithoutCard} />}
-          </div>
-          <span className="w-16 shrink-0" />
+        <div className="flex min-w-0 flex-col gap-3">
+          {waiting && <ThinkingIndicator activity={activity} look={look} onShowCopilot={onShowCopilot} onStop={onStop} progress={progress} stopping={stopping} work={work} />}
+          {liveWithoutCard && <LiveConsole live={liveWithoutCard} />}
         </div>
       ) : null}
       <div ref={endRef} />

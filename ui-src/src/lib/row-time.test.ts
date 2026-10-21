@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { eventDate, formatDuration, rowTime } from "./row-time";
+import { eventDate, formatDuration, rowTime, timeDividers } from "./row-time";
 
 const now = new Date(2026, 9, 19, 15, 30, 0);
 
@@ -29,5 +29,20 @@ describe("rowTime", () => {
     expect(formatDuration(8_000)).toBe("8 s");
     expect(formatDuration(120_000)).toBe("2 min");
     expect(formatDuration(3_840_000)).toBe("1 h 4 min");
+  });
+});
+
+describe("timeDividers", () => {
+  it("puts a time before the first item of each minute, not before every item", () => {
+    const now = new Date(2026, 9, 21, 12, 0, 0);
+    const at = (h: number, m: number, s = 0) => new Date(2026, 9, 21, h, m, s).toISOString();
+    const out = timeDividers([{ at: at(9, 5, 1) }, { at: at(9, 5, 40) }, {}, { at: at(9, 7) }, { at: at(9, 7, 30) }], now);
+    expect(out.map((t) => t?.label ?? null)).toEqual(["09:05", null, null, "09:07", null]);
+  });
+  it("shows the day for an earlier day, and again when the day changes", () => {
+    const now = new Date(2026, 9, 21, 12, 0, 0);
+    const out = timeDividers([{ at: new Date(2026, 9, 20, 23, 26).toISOString() }, { at: new Date(2026, 9, 21, 8, 1).toISOString() }], now);
+    expect(out[0]?.label).toMatch(/20.*23:26/);
+    expect(out[1]?.label).toBe("08:01");
   });
 });

@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.145] - 2026-10-21
+
+### Fixed
+- When Copilot put two steps in one block without closing the first (for example a run followed by `ACTION read`), the run took the next step into its command, so the command shown for approval held text that was not part of it. A line that starts a new action now ends the one before: each step gets its own card. A file write is left whole, since its content may hold such a line.
+
+### Changed
+- Times in the chat: the time column beside the cards is gone, so cards use the full width. A small centered time stands between items when the minute changes (items of the same minute share one), with the full date and time on hover. How long a step took is shown in the card's header.
+- Run cards are titled by their program, and the script they run: "Run powershell", "Run powershell Work/Test-Dashboard.ps1". The whole command stays in the card's console and on hover.
+
 ## [v0.1.144] - 2026-10-21
 
 ### Fixed

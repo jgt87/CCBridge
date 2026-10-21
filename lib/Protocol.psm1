@@ -62,6 +62,28 @@ function Get-ActionBlocks {
         $i = $j + 1
         if ($script:ActionTypes -notcontains $type) { continue }
 
+        # Several actions in one block (Copilot left out the fence between them): a line that starts
+        # a new ACTION ends the one before, so a run never takes the next step into its command.
+        # Not in a write or edit, whose body is file content and may hold such a line.
+        if ($type -notin 'write', 'edit') {
+            $cut = -1
+            for ($k = 0; $k -lt $body.Count; $k++) {
+                if ($body[$k] -match ('^\s*ACTION\s+(' + ($script:ActionTypes -join '|') + ')\b')) { $cut = $k; break }
+            }
+            if ($cut -ge 0) {
+                $rest = @($body.GetRange($cut, $body.Count - $cut))
+                $body.RemoveRange($cut, $body.Count - $cut)
+                # The rest is read again as a block of its own, after this action.
+                $restText = "$fence" + "text`n" + ($rest -join "`n") + "`n" + $(if ($closed) { $fence } else { '' })
+                $more = @(Get-ActionBlocks $restText)
+                $action = [pscustomobject]@{ type = $type; arg = $arg; body = (($body -join "`n").TrimEnd()); closed = $true; edits = @() }
+                if ($type -eq 'run' -and -not $action.body.Trim() -and $arg) { $action.body = $arg }
+                $actions.Add($action)
+                foreach ($x in $more) { $actions.Add($x) }
+                continue
+            }
+        }
+
         $action = [pscustomobject]@{ type = $type; arg = $arg; body = ($body -join "`n"); closed = $closed; edits = @() }
         # The command of a run block belongs on the line after ACTION run; Copilot also puts it on the
         # ACTION line itself (ACTION run powershell.exe ...), which is the same command.

@@ -70,6 +70,27 @@ ${fence3}
     }
 }
 
+Describe 'Get-ActionBlocks: several actions in one block' {
+    It 'ends an action where a line starts the next one, so a run never takes the next step into its command' {
+        $reply = "Checking.`n${fence3}text`nACTION run`npowershell -NoProfile -Command `"'ok'`"`n`nACTION read`nindex.html:130-145`n`nACTION grep`nDATA_OK`n${fence3}`n"
+        $a = @(Get-ActionBlocks $reply)
+        $a.Count | Should Be 3
+        $a[0].type | Should Be 'run'
+        $a[0].body | Should Be "powershell -NoProfile -Command `"'ok'`""
+        $a[1].type | Should Be 'read'
+        $a[1].body.Trim() | Should Be 'index.html:130-145'
+        $a[2].type | Should Be 'grep'
+        $a[2].body.Trim() | Should Be 'DATA_OK'
+    }
+    It 'leaves a write whole: its body is file content and may hold an ACTION line' {
+        $doc = "# How to ask`nACTION read`nPATH"
+        $a = @(Get-ActionBlocks ("${fence4}text`nACTION write docs/protocol.md`n$doc`n${fence4}`n"))
+        $a.Count | Should Be 1
+        $a[0].type | Should Be 'write'
+        $a[0].body | Should Be $doc
+    }
+}
+
 Describe 'Get-ActionBlocks' {
     It 'finds actions among prose and ignores ordinary code blocks' {
         $reply = @"

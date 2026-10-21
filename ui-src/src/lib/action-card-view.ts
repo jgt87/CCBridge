@@ -124,3 +124,22 @@ export function shortError(text: string): string {
   const first = text.split(/\n|\s(?:Current lines|The closest place|What differs:)/)[0].trim();
   return first.length > 320 ? `${first.slice(0, 317)}...` : first;
 }
+
+/**
+ * The short title of a run card: the program without its folder or .exe ("powershell", "npm"), plus
+ * the script it runs when it runs a file (-File X.ps1, python X.py, node X.js). The whole command is
+ * in the card's console.
+ */
+export function runTitle(command: string): string {
+  const words = command.trim().match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  if (!words.length) return "";
+  const bare = (w: string) => w.replace(/^["']|["']$/g, "");
+  const program = (bare(words[0] ?? "").split(/[\\/]/).pop() ?? "").replace(/\.(exe|cmd|bat)$/i, "");
+  const script = (() => {
+    const at = words.findIndex((w) => /^-file$/i.test(w));
+    if (at > 0 && words[at + 1]) return bare(words[at + 1]);
+    const first = words.slice(1).find((w) => !w.startsWith("-"));
+    return first && /\.(ps1|py|js|mjs|cjs|ts|bat|cmd|sh)$/i.test(bare(first)) ? bare(first) : "";
+  })();
+  return script ? `${program} ${script}` : program;
+}
