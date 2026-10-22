@@ -6,11 +6,10 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ScheduleForm, type ScheduleTarget } from "./schedule-form";
 import { formatWhen, SchedulesList } from "./schedules-panel";
+import { schedulesSummaryText } from "@/lib/schedule-form";
 
 /** The Scheduled entry in the Automation tab: how many schedules and the next run; opens the modal. */
 export function SchedulesSummary({ schedules, onOpen }: { schedules: ScheduleItem[]; onOpen: () => void }) {
-  const active = schedules.filter((s) => s.enabled && s.nextRun);
-  const next = [...active].sort((a, b) => String(a.nextRun).localeCompare(String(b.nextRun)))[0];
   return (
     <button
       className="kit-panel flex w-full items-center gap-2 p-2 text-left hover:bg-(--kit-surface-2)"
@@ -22,9 +21,7 @@ export function SchedulesSummary({ schedules, onOpen }: { schedules: ScheduleIte
       <span className="min-w-0 flex-1">
         <span className="block font-medium text-sm">Open schedules</span>
         <span className="block truncate text-muted-foreground text-xs">
-          {schedules.length === 0
-            ? "Run messages, runbooks and chains on set days and times"
-            : `${active.length} active${schedules.length > active.length ? `, ${schedules.length - active.length} paused or done` : ""}${next ? ` · next ${formatWhen(next.nextRun)}` : ""}`}
+          {schedulesSummaryText(schedules, formatWhen)}
         </span>
       </span>
       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -94,42 +91,90 @@ export function SchedulesModal({
           </div>
         </div>
         <div className={cn("min-h-0 flex-1 overflow-y-auto p-4")}>
-          {editing ? (
-            <ScheduleForm
-              existing={editing}
-              fetchItems={fetchItems}
-              files={files}
-              initial={{ kind: editing.kind, name: editing.name, text: editing.text }}
-              key={editing.id}
-              onCancel={() => setEditing(null)}
-              onSave={async (spec) => {
-                await api.editSchedule(editing.id, spec);
-                setEditing(null);
-              }}
-              runbooks={runbooks}
-              chains={chains}
-              scripts={scripts}
-            />
-          ) : target ? (
-            <ScheduleForm
-              fetchItems={fetchItems}
-              files={files}
-              initial={target}
-              key={JSON.stringify(target)}
-              onCancel={() => (initial ? onClose() : setTarget(null))}
-              onSave={async (spec) => {
-                await onCreate(spec);
-                setTarget(null);
-              }}
-              runbooks={runbooks}
-              chains={chains}
-              scripts={scripts}
-            />
-          ) : (
-            <SchedulesList onEdit={setEditing} schedules={schedules} />
-          )}
+          <SchedulesBody
+            chains={chains}
+            editing={editing}
+            fetchItems={fetchItems}
+            files={files}
+            onCancelNew={() => (initial ? onClose() : setTarget(null))}
+            onCreate={onCreate}
+            runbooks={runbooks}
+            schedules={schedules}
+            scripts={scripts}
+            setEditing={setEditing}
+            setTarget={setTarget}
+            target={target}
+          />
         </div>
       </div>
     </ModalBackdrop>
   );
+}
+
+/** What the modal shows: the form of the schedule being edited, the form for a new one, or the list. */
+function SchedulesBody({
+  schedules,
+  fetchItems,
+  runbooks,
+  chains,
+  scripts,
+  files,
+  editing,
+  target,
+  setEditing,
+  setTarget,
+  onCancelNew,
+  onCreate,
+}: {
+  schedules: ScheduleItem[];
+  fetchItems: FetchItem[];
+  runbooks: RunbookItem[];
+  chains: ChainItem[];
+  scripts: string[];
+  files: FileInfo[];
+  editing: ScheduleItem | null;
+  target: ScheduleTarget | null;
+  setEditing: (s: ScheduleItem | null) => void;
+  setTarget: (t: ScheduleTarget | null) => void;
+  onCancelNew: () => void;
+  onCreate: (spec: ScheduleSpec) => Promise<void>;
+}) {
+  if (editing) {
+    return (
+      <ScheduleForm
+        existing={editing}
+        fetchItems={fetchItems}
+        files={files}
+        initial={{ kind: editing.kind, name: editing.name, text: editing.text }}
+        key={editing.id}
+        onCancel={() => setEditing(null)}
+        onSave={async (spec) => {
+          await api.editSchedule(editing.id, spec);
+          setEditing(null);
+        }}
+        runbooks={runbooks}
+        chains={chains}
+        scripts={scripts}
+      />
+    );
+  }
+  if (target) {
+    return (
+      <ScheduleForm
+        fetchItems={fetchItems}
+        files={files}
+        initial={target}
+        key={JSON.stringify(target)}
+        onCancel={onCancelNew}
+        onSave={async (spec) => {
+          await onCreate(spec);
+          setTarget(null);
+        }}
+        runbooks={runbooks}
+        chains={chains}
+        scripts={scripts}
+      />
+    );
+  }
+  return <SchedulesList onEdit={setEditing} schedules={schedules} />;
 }

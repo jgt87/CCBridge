@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import AI_Prompt from "@/components/kokonutui/ai-prompt";
+import { useCallback, useState } from "react";
 import { SettingsPanel } from "@/components/ccb/settings-panel";
 import { SidePanel } from "@/components/ccb/side-panel";
-import type { ScheduleTarget } from "@/components/ccb/schedule-form";
-import { SchedulesModal } from "@/components/ccb/schedules-modal";
 import { FileViewer } from "@/components/ccb/file-viewer";
 import { SplitViewHint } from "@/components/ccb/split-view-hint";
-import { AppHeader, ErrorBar, InstallProblem, NoticeBar, PromptHeaderLeft, PromptHeaderRight, VersionLine } from "@/components/ccb/app-chrome";
+import { AppHeader, ErrorBar, InstallProblem, NoticeBar, VersionLine } from "@/components/ccb/app-chrome";
 import { ChatTranscript, PickerView, SideDrawer } from "@/components/ccb/app-layout";
-import { MODES, type Notice, useCommandPalette } from "@/components/ccb/command-palette";
-import { buildTranscript } from "@/components/ccb/transcript";
+import { ChatComposer, type Scheduling } from "@/components/ccb/chat-composer";
+import { type Notice, useCommandPalette } from "@/components/ccb/command-palette";
+import { useAppSetup } from "@/hooks/use-app-setup";
 import { useChatActions } from "@/hooks/use-chat-actions";
+import { useEventViews } from "@/hooks/use-event-views";
 import { useFileViewer } from "@/hooks/use-file-viewer";
 import { useProjectLists } from "@/hooks/use-project-lists";
 import { useServerPoll } from "@/hooks/use-server-poll";
@@ -19,11 +18,8 @@ import { useSidePanelActions } from "@/hooks/use-side-panel-actions";
 import { useStoredChoice } from "@/hooks/use-stored-choice";
 import { useWorkTitle } from "@/hooks/use-work-title";
 import { parseAgent, parseClarify, showAgent, showClarify } from "@/lib/app-view";
-import { changeSets, chatView, endsNewChat, inProject, keptView, projectKey, projectView, promptHistory as promptHistoryOf, touchesFiles, touchesReview } from "@/lib/event-views";
-import { prefetchSettings } from "@/lib/settings-cache";
-import { setLinksThroughEdge } from "@/lib/links";
-import type { ScheduleItem } from "@/lib/api";
-import { type AgentEvent, type AppState, api, type Mode } from "@/lib/api";
+import { endsNewChat, touchesFiles, touchesReview } from "@/lib/event-views";
+import type { AgentEvent, AppState } from "@/lib/api";
 
 const EMPTY_STATE: AppState = {
   project: null, mode: "ask", busy: false, progress: "", copilot: "idle", copilotMessage: "",
@@ -34,8 +30,7 @@ const EMPTY_STATE: AppState = {
 export default function App() {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const [events, setEvents] = useState<AgentEvent[]>([]);
-  // Schedules modal: closed (null), the list ({ target: null }) or a form for a target.
-  const [scheduling, setScheduling] = useState<{ target: ScheduleTarget | null; editing?: ScheduleItem } | null>(null);
+  const [scheduling, setScheduling] = useState<Scheduling>(null);
   const [reviewTick, setReviewTick] = useState(0);
   // Remembered in this browser: Clarify first, and who answers the next message (lib/app-view.ts).
   const [clarifyFirst, setClarifyFirst] = useStoredChoice("ccb.clarify", parseClarify, showClarify);
@@ -52,14 +47,7 @@ export default function App() {
   const { viewer, closeViewer, openFile, openChangeFile } = useFileViewer(() => setDrawerOpen(false), fail);
   const sideActions = useSidePanelActions(fail, refreshFiles);
 
-  // External links open through StreamHub's Edge when the app is a tab there (lib/links.ts).
-  useEffect(() => setLinksThroughEdge(Boolean(state.appInEdge)), [state.appInEdge]);
-
-  // Settings opens complete: what it shows is loaded once in the background, a little after start.
-  useEffect(() => {
-    const t = window.setTimeout(() => void prefetchSettings(), 4000);
-    return () => window.clearTimeout(t);
-  }, []);
+  useAppSetup(state.appInEdge);
 
   useServerPoll({
     onState: (s) => {
@@ -77,18 +65,7 @@ export default function App() {
   });
   useWorkTitle(state.busy, state.work);
 
-  const projectEvents = useMemo(() => projectView(events), [events]);
-  // After "Clear chat history" (Settings > Privacy) nothing earlier is shown or recalled; the Changes
-  // tab keeps its change sets (their backups still exist).
-  const keptEvents = useMemo(() => keptView(projectEvents), [projectEvents]);
-  const chatEvents = useMemo(() => chatView(keptEvents), [keptEvents]);
-  const transcript = useMemo(() => buildTranscript(chatEvents), [chatEvents]);
-  const promptHistory = useMemo(() => promptHistoryOf(keptEvents), [keptEvents]);
-  const changes = useMemo(() => changeSets(projectEvents), [projectEvents]);
-  // The side panel shows the open project only: its queue and schedules.
-  const key = projectKey(state.project?.path);
-  const queueHere = useMemo(() => inProject(state.queue, key), [state.queue, key]);
-  const schedulesHere = useMemo(() => inProject(state.schedules, key), [state.schedules, key]);
+  const views = useEventViews(events, state);
 
   const palette = useCommandPalette({
     state,
@@ -104,7 +81,7 @@ export default function App() {
     fail: setError,
   });
 
-  const scheduleFor = (s: { target: ScheduleTarget | null; editing?: ScheduleItem }) => {
+  const scheduleFor = (s: Scheduling) => {
     setScheduling(s);
     setDrawerOpen(false);
   };
@@ -136,7 +113,7 @@ export default function App() {
               key={state.project?.path ?? "none"}
               {...sideActions}
               busy={state.busy}
-              changes={changes}
+              changes={views.changes}
               fetchItems={fetchItems}
               files={files}
               onAttach={chat.attachPath}
@@ -146,8 +123,8 @@ export default function App() {
               chains={chains}
               scripts={scripts}
               project={state.project}
-              queue={queueHere}
-              schedules={schedulesHere}
+              queue={views.queueHere}
+              schedules={views.schedulesHere}
               reviewTick={reviewTick}
               filesRefreshing={lists.filesRefreshing}
               previewBase={state.previewBase}
@@ -166,9 +143,9 @@ export default function App() {
             {state.installProblem && <InstallProblem problem={state.installProblem} />}
             <div className="min-h-0 flex-1 overflow-y-auto">
               <ChatTranscript
-                chatEvents={chatEvents}
+                chatEvents={views.chatEvents}
                 fail={fail}
-                items={transcript}
+                items={views.transcript}
                 onOpenFile={openFile}
                 onStop={chat.stop}
                 onUsePrompt={chat.fillPrompt}
@@ -176,47 +153,21 @@ export default function App() {
                 stopping={chat.stopping}
               />
             </div>
-            <div className="shrink-0 px-4">
-              <div className="mx-auto max-w-[max(48rem,80%)]">
-                {scheduling && (
-                  <SchedulesModal
-                    fetchItems={fetchItems}
-                    files={files}
-                    initial={scheduling.target}
-                    initialEditing={scheduling.editing}
-                    onClose={() => setScheduling(null)}
-                    onCreate={async (spec) => {
-                      await api.createSchedule(spec);
-                      if (spec.kind === "chat" && spec.text === chat.draft) chat.setDraft("");
-                    }}
-                    runbooks={runbooks}
-                    chains={chains}
-                    scripts={scripts}
-                    schedules={schedulesHere}
-                  />
-                )}
-                <AI_Prompt
-                  busy={state.busy}
-                  disabled={!state.project}
-                  focusKey={chat.focusKey}
-                  history={promptHistory}
-                  headerLeft={<PromptHeaderLeft agent={agent} fail={setError} onAgent={setAgent} queuedNote={chat.queuedNote} state={state} />}
-                  headerRight={<PromptHeaderRight newChatPending={chat.newChatPending} onNewChat={chat.startNewChat} state={state} />}
-                  mode={state.mode}
-                  modes={MODES}
-                  onAttach={() => palette.open("attach")}
-                  onSchedule={(text) => setScheduling({ target: { kind: "chat", text } })}
-                  clarify={clarifyFirst}
-                  onToggleClarify={() => setClarifyFirst(!clarifyFirst)}
-                  onModeChange={(m) => api.setMode(m as Mode)}
-                  onStop={chat.stop}
-                  onSubmit={chat.send}
-                  onValueChange={chat.setDraft}
-                  placeholder="Ask Copilot to build or change something..."
-                  value={chat.draft}
-                />
-              </div>
-            </div>
+            <ChatComposer
+              agent={agent}
+              chat={chat}
+              clarify={clarifyFirst}
+              fail={setError}
+              history={views.promptHistory}
+              lists={lists}
+              onAgent={setAgent}
+              onAttach={() => palette.open("attach")}
+              onClarify={setClarifyFirst}
+              onScheduling={setScheduling}
+              schedules={views.schedulesHere}
+              scheduling={scheduling}
+              state={state}
+            />
           </main>
         </div>
       )}

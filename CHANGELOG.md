@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.147] - 2026-10-22
+
+### Changed
+- Internal clean-up with no change in what you see: the page check, the UI kit's scripts (kit.js, kit-charts.js) and several parts of the app (the main window, the chat transcript, action cards, Settings, code review and schedules) are split into smaller named parts, with new tests for them. Projects pick up the updated kit files at their next open.
+
 ## [v0.1.146] - 2026-10-22
 
 ### Added

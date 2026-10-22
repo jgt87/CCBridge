@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FileInfo, ScheduleItem } from "./api";
 import {
   addTime,
+  schedulesSummaryText,
   buildScheduleSpec,
   initialDays,
   initialTitle,
@@ -105,5 +106,24 @@ describe("saving", () => {
     expect(missingParts({ ...base, target: "runbook:" })).toEqual(["pick what runs"]);
     expect(missingParts({ ...base, mode: "once", at: "" })).toEqual(["pick the date and time"]);
     expect(missingParts({ ...base, days: [], times: [] })).toEqual(["pick at least one day", "add a time"]);
+  });
+});
+
+describe("schedules summary", () => {
+  const fmt = (iso: string | null) => `at ${iso}`;
+  it("invites to schedule when there is nothing", () => {
+    expect(schedulesSummaryText([], fmt)).toBe("Run messages, runbooks and chains on set days and times");
+  });
+  it("counts active and paused ones and names the next run", () => {
+    const list = [
+      item({ enabled: true, nextRun: "2026-10-23T09:00" }),
+      item({ enabled: true, nextRun: "2026-10-22T18:00" }),
+      item({ enabled: false, nextRun: "2026-10-22T10:00" }),
+    ];
+    expect(schedulesSummaryText(list, fmt)).toBe("2 active, 1 paused or done · next at 2026-10-22T18:00");
+  });
+  it("leaves out paused and next when there are none", () => {
+    expect(schedulesSummaryText([item({ enabled: true, nextRun: null })], fmt)).toBe("0 active, 1 paused or done");
+    expect(schedulesSummaryText([item({ enabled: true, nextRun: "2026-10-22T18:00" })], fmt)).toBe("1 active · next at 2026-10-22T18:00");
   });
 });

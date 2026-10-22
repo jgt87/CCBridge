@@ -9,6 +9,7 @@ import {
   hasDetails,
   needsTerminal,
   offersAllow,
+  ownsLive,
   runTitle,
   shortError,
   showsOutput,
@@ -106,6 +107,15 @@ describe("action card view rules", () => {
     expect(doneSummary({ ...edit, summary: "done" })).toBe("");
     expect(doneSummary({ ...edit, status: "failed", summary: "x" })).toBe("");
     expect(doneSummary({ ...edit, status: "already applied", summary: "x" })).toBe("x");
+  });
+
+  it("takes the live output only for its own running command", () => {
+    const running = { id: "a1", action: "run", target: "npm test", status: "running" };
+    expect(ownsLive(running, "a1")).toBe(true);
+    expect(ownsLive(running, "b2")).toBe(false);
+    expect(ownsLive(running, undefined)).toBe(false);
+    expect(ownsLive({ ...running, status: "ok" }, "a1")).toBe(false);
+    expect(ownsLive({ ...running, action: "edit" }, "a1")).toBe(false);
   });
 });
 

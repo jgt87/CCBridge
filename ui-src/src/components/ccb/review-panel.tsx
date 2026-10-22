@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReviewDetail, ReviewFinding, ReviewSummary } from "@/lib/api";
 import { api } from "@/lib/api";
 import {
+  canStartReview,
   DEFAULT_FOCUS,
   defaultPicked,
   estimateText,
@@ -141,31 +142,38 @@ function ReviewStarter({ tick, notice, setNotice }: { tick: number; notice: stri
         <option value="paths">Chosen files or folders</option>
       </select>
       {scope === "paths" && <input aria-label="Files or folders to review" className={field} onChange={(e) => setPaths(e.target.value)} placeholder="e.g. src, index.html" value={paths} />}
-      <div className="flex flex-wrap gap-1">
-        {FOCUS.map((f) => (
-          <button
-            className={cn(
-              "rounded-md border px-1.5 py-0.5 text-xs",
-              focus.includes(f) ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border) text-muted-foreground"
-            )}
-            key={f}
-            onClick={() => setFocus((cur) => toggleFocus(cur, f))}
-            type="button"
-          >
-            {f}
-          </button>
-        ))}
-      </div>
+      <FocusChips focus={focus} onToggle={(f) => setFocus((cur) => toggleFocus(cur, f))} />
       <p className="text-muted-foreground text-xs">{estimateText(estimateError, estimate)}</p>
       <button
         className={cn(flatButton, "w-full justify-center border border-(--kit-border) py-1.5")}
-        disabled={starting || !estimate?.files || !focus.length}
+        disabled={!canStartReview(starting, estimate, focus)}
         onClick={start}
         type="button"
       >
         <ScanSearch className="h-3.5 w-3.5" /> {starting ? "Starting..." : "Start review"}
       </button>
       {notice && <p className="text-muted-foreground text-xs">{notice}</p>}
+    </div>
+  );
+}
+
+/** The focus areas of a review as toggle chips. */
+function FocusChips({ focus, onToggle }: { focus: string[]; onToggle: (f: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {FOCUS.map((f) => (
+        <button
+          className={cn(
+            "rounded-md border px-1.5 py-0.5 text-xs",
+            focus.includes(f) ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border) text-muted-foreground"
+          )}
+          key={f}
+          onClick={() => onToggle(f)}
+          type="button"
+        >
+          {f}
+        </button>
+      ))}
     </div>
   );
 }

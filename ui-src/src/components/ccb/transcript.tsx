@@ -544,7 +544,17 @@ function activityText(a: Activity): string {
   return a.total ? `${a.label} (${a.done} of ${a.total} files)` : `${a.label}...`;
 }
 
-function indicatorTexts(progress: string, stopping: boolean, activity: Activity | null, seed: number, look: boolean): string[] {
+/** What the waiting card's rotating text is about. */
+interface IndicatorState {
+  progress: string;
+  stopping: boolean;
+  activity: Activity | null;
+  /** One order of the light lines per wait. */
+  seed: number;
+  look: boolean;
+}
+
+export function indicatorTexts({ progress, stopping, activity, seed, look }: IndicatorState): string[] {
   if (stopping) return ["Stopping..."];
   if (activity?.label) return activityTexts(activityText(activity), activity.kind, seed);
   return thinkingTexts(progress ? "writing" : "waiting", seed, look || writesStyles(progress));
@@ -641,7 +651,7 @@ function ThinkingIndicator({
         className="font-semibold text-base"
         containerClassName="justify-start p-0"
         interval={1800}
-        texts={indicatorTexts(progress, stopping, activity, seed, look)}
+        texts={indicatorTexts({ progress, stopping, activity, seed, look })}
       />
       {work && <WorkStatusLines onShowCopilot={onShowCopilot} onStop={onStop} stopping={stopping} work={work} />}
       {own && activity?.current && <div className="mt-1 truncate font-mono text-muted-foreground text-xs">{activity.current}</div>}
@@ -662,6 +672,30 @@ const rowKey = (it: TranscriptItem) => (it.kind === "action" ? it.item.id : it.s
 /** A run without a card of its own (the project's verify command, tests): its console goes under the indicator. */
 const runWithoutCard = (items: TranscriptItem[], runLive: RunLive | null) =>
   runLive && !items.some((i) => i.kind === "action" && i.item.id === runLive.id) ? runLive : null;
+
+/** What the transcript shows besides its items: the welcome view, the waiting card, a console without a card. */
+export function transcriptState(items: TranscriptItem[], busy: boolean, activity: Activity | null, runLive: RunLive | null) {
+  const awaiting = items.some((i) => i.kind === "action" && i.item.status === "awaiting");
+  const working = Boolean(activity?.label);
+  return {
+    awaiting,
+    // A fresh chat shows the welcome view until something happens in it.
+    showEmpty: !busy && !working && items.every((i) => i.kind === "note" && i.tone === "info"),
+    // The waiting card, unless a step waits for approval (its card says what happens next).
+    waiting: (busy || working) && !awaiting,
+    liveWithoutCard: runWithoutCard(items, runLive),
+  };
+}
+
+function EarlierItems({ hidden, topRef, onLoad }: { hidden: number; topRef: React.Ref<HTMLDivElement>; onLoad: () => void }) {
+  return (
+    <div className="flex justify-center" ref={topRef}>
+      <button className="rounded-md px-2 py-1 text-muted-foreground text-xs hover:bg-(--kit-surface-2) hover:text-foreground" onClick={onLoad} type="button">
+        {hidden} earlier item{hidden === 1 ? "" : "s"}: scroll up or click to show {Math.min(PAGE, hidden)} more
+      </button>
+    </div>
+  );
+}
 
 export function Transcript({
   items,
@@ -710,31 +744,20 @@ export function Transcript({
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const awaiting = items.some((i) => i.kind === "action" && i.item.status === "awaiting");
-  // A fresh chat shows the welcome view until something happens in it.
-  const showEmpty = !busy && !activity?.label && items.every((i) => i.kind === "note" && i.tone === "info");
+  const { awaiting, showEmpty, waiting, liveWithoutCard } = transcriptState(items, busy, activity, runLive);
   useFollowBottom(contentRef, showEmpty, items.length, items[items.length - 1]?.kind === "user", awaiting);
   const { hidden, visible, topRef, loadEarlier } = usePagedItems(items, items.length ? rowKey(items[0]) : "", PAGE, endRef);
   // A centered time between items when the minute changes (the cards keep the full width).
   const dividers = useMemo(() => timeDividers(visible), [visible]);
 
   const live = useMemo<RunLiveView>(() => ({ live: runLive, windows: runWindows }), [runLive, runWindows]);
-  const liveWithoutCard = runWithoutCard(items, runLive);
-  // The waiting card, unless a step waits for approval (its card says what happens next).
-  const waiting = (busy || Boolean(activity?.label)) && !awaiting;
 
   if (showEmpty) return <>{empty}</>;
 
   return (
     <RunLiveContext.Provider value={live}>
     <div className="mx-auto flex w-full max-w-[max(48rem,80%)] flex-col gap-3 px-4 py-6" ref={contentRef}>
-      {hidden > 0 && (
-        <div className="flex justify-center" ref={topRef}>
-          <button className="rounded-md px-2 py-1 text-muted-foreground text-xs hover:bg-(--kit-surface-2) hover:text-foreground" onClick={loadEarlier} type="button">
-            {hidden} earlier item{hidden === 1 ? "" : "s"}: scroll up or click to show {Math.min(PAGE, hidden)} more
-          </button>
-        </div>
-      )}
+      {hidden > 0 && <EarlierItems hidden={hidden} onLoad={loadEarlier} topRef={topRef} />}
       {visible.map((it, i) => (
         <Fragment key={rowKey(it)}>
           {dividers[i] && <TimeDivider at={it.at} time={dividers[i]} />}
@@ -743,12 +766,12 @@ export function Transcript({
           </div>
         </Fragment>
       ))}
-      {waiting || liveWithoutCard ? (
+      {(waiting || liveWithoutCard) && (
         <div className="flex min-w-0 flex-col gap-3">
           {waiting && <ThinkingIndicator activity={activity} look={look} onShowCopilot={onShowCopilot} onStop={onStop} progress={progress} stopping={stopping} work={work} />}
           {liveWithoutCard && <LiveConsole live={liveWithoutCard} />}
         </div>
-      ) : null}
+      )}
       <div ref={endRef} />
     </div>
     </RunLiveContext.Provider>

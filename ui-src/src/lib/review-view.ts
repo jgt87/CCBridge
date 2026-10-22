@@ -58,6 +58,11 @@ export function estimateText(error: string, estimate: ReviewEstimate | null): st
     : `No code files in ${estimate.scopeText}.`;
 }
 
+/** Start review is possible when nothing is starting, the estimate found code files and a focus is chosen. */
+export function canStartReview(starting: boolean, estimate: ReviewEstimate | null, focus: string[]): boolean {
+  return !starting && Boolean(estimate?.files) && focus.length > 0;
+}
+
 /** The counts line of a saved review. */
 export function reviewCounts(r: ReviewSummary): string {
   return `${r.scopeText} · ${r.high} high · ${r.medium} medium · ${r.low} low${r.unverified ? ` · ${r.unverified} unverified` : ""}${r.ignored ? ` · ${r.ignored} ignored` : ""}`;

@@ -145,6 +145,30 @@ describe("kit-charts.js", () => {
     expect(label.firstChild!.textContent!.length).toBeLessThan(30);   // the text node; the <title> holds the whole name
     expect(label.querySelector("title")!.textContent).toBe("Market square station entrance north side");
   });
+  it("rounds only the top of a stack, fills an area per run, draws one item as a whole ring and shortens big numbers", () => {
+    const [c, d] = host();
+    w.KitCharts.bar(c, { labels: ["Mon"], series: [{ name: "A", values: [3] }, { name: "B", values: [2] }], stacked: true });
+    const ds = Array.from(c.querySelectorAll(".kit-chart__bar")).map((b) => b.getAttribute("d")!);
+    expect(ds.map((x) => x.includes("A"))).toEqual([false, true]);
+    w.KitCharts.area(d, { labels: ["a", "b", "c", "d", "e"], series: [{ name: "S", values: [1, 2, null, 3, 4] }] });
+    expect(d.querySelector(".kit-chart__area")!.getAttribute("d")!.split("Z").length - 1).toBe(2);
+    expect(d.querySelector("linearGradient")).not.toBeNull();
+    w.KitCharts.ring(c, { items: [{ label: "Only", value: 5 }, { label: "None", value: 0 }] });
+    expect(c.querySelectorAll("circle.kit-chart__arc").length).toBe(1);
+    w.KitCharts.gauge(d, { value: 25000, max: 100000 });
+    expect(d.querySelector(".kit-chart__center")!.textContent).toBe("25k");
+  });
+  it("shows a dot and the values where the mouse is on a line chart", () => {
+    const [c] = host();
+    w.KitCharts.line(c, { labels: ["a", "b"], series: [{ name: "S", values: [1, 2] }, { name: "T", values: [null, 3] }] });
+    const svg = c.querySelector("svg")!;
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 260 }) as DOMRect;
+    const hit = svg.querySelector('rect[fill="transparent"]')!;
+    hit.dispatchEvent(new MouseEvent("mousemove", { clientX: 10 }));
+    const dots = Array.from(c.querySelectorAll("circle.kit-chart__dot")).map((x) => x.getAttribute("visibility"));
+    expect(dots).toEqual(["visible", "hidden"]);
+    expect(c.querySelector(".kit-chart__tip")!.textContent).toBe("aS: 1T: -");
+  });
 });
 
 type KitFormat = { number: (v: unknown, o?: { decimals?: number }) => string; percent: (v: unknown, d?: number) => string; date: (v: unknown, o?: { time?: boolean }) => string; relative: (v: unknown) => string };
@@ -560,6 +584,22 @@ describe("kit.js menus, boards, calendars, pagers and filled cells", () => {
     cal.addEventListener("kit:month", (e) => { month = (e as CustomEvent).detail.month; });
     (cal.querySelector('[data-step="1"]') as HTMLButtonElement).click();
     expect(month).toBe("2026-03");
+    ui().calendar(cal, { month: "2026-02" });
+    let picked = "";
+    cal.addEventListener("kit:day", (e) => { const d = (e as CustomEvent).detail; picked = d.date + ":" + d.events.length; });
+    (cal.querySelector('[data-date="2026-02-10"]') as HTMLElement).click();
+    expect(picked).toBe("2026-02-10:5");
+  });
+  it("writes an avatar's initials and gives the same name the same colour", async () => {
+    document.body.innerHTML = '<span data-kit-avatar="ada  de lovelace"></span><span data-kit-avatar="Grace"></span><span data-kit-avatar="ada  de lovelace"><img alt=""></span>';
+    load(kitJs);
+    await tick();
+    const [a, b, c] = Array.from(document.querySelectorAll("[data-kit-avatar]")) as HTMLElement[];
+    expect([a.textContent, b.textContent]).toEqual(["AL", "G"]);
+    expect(c.querySelector("img")).not.toBeNull();
+    expect(a.style.getPropertyValue("--kit-avatar-color")).toMatch(/^var\(--kit-chart-[1-6]\)$/);
+    expect(c.style.getPropertyValue("--kit-avatar-color")).toBe(a.style.getPropertyValue("--kit-avatar-color"));
+    expect([a.getAttribute("role"), a.getAttribute("aria-label")]).toEqual(["img", "ada  de lovelace"]);
   });
   it("pages a table with external rows by data-kit-total and data-kit-page", async () => {
     document.body.innerHTML = '<table class="kit-table" id="x" data-kit-sort data-kit-pages="10" data-kit-rows="external" data-kit-total="35"><thead><tr><th>Name</th></tr></thead><tbody><tr><td>a</td></tr></tbody></table>';

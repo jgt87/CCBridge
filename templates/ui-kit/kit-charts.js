@@ -50,13 +50,16 @@
   function blank(v) { return v === null || v === undefined || v === ""; }
   // A value as a number, or null when it is none (empty, missing, text): a gap, "-" in the table.
   function num(v) { var n = Number(v); return blank(v) || !isFinite(n) ? null : n; }
+  // A number in the page's language, shortened to k or M from ten thousand on.
+  function compact(n) {
+    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (Math.abs(n) >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
+    return n.toLocaleString(document.documentElement.lang || undefined, { maximumFractionDigits: 2 });
+  }
   function fmt(v, opts) {
     if (opts && typeof opts.format === "function") return opts.format(v);
-    var n = num(v), unit = (opts && opts.unit) || "";
-    if (n === null) return "-";
-    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M" + unit;
-    if (Math.abs(n) >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k" + unit;
-    return n.toLocaleString(document.documentElement.lang || undefined, { maximumFractionDigits: 2 }) + unit;
+    var n = num(v);
+    return n === null ? "-" : compact(n) + ((opts && opts.unit) || "");
   }
   // Round axis steps: 1, 2 or 5 times a power of ten.
   function niceMax(max, ticks) {
@@ -267,6 +270,19 @@
   }
   // The topmost part of a stacked bar (the one that gets the rounded end), -1 when none is above 0.
   function topPart(sr, li) { var top = -1; sr.forEach(function (x, si) { if ((x.values[li] || 0) > 0) top = si; }); return top; }
+  // The scales of a bar chart: the bars' (with left-axis lines and targets; 0-100 for percent bars)
+  // and the right axis of line series on their own scale (null when there are none).
+  function barScales(data, labels, sr, ln, stacked, pct, total) {
+    var left = ln.filter(function (x) { return !x.right; }), right = ln.filter(function (x) { return x.right; });
+    var barsMax = stacked ? Math.max.apply(null, [0].concat(labels.map(function (l, li) { return total(li); }))) : seriesMax(sr);
+    var max = Math.max(barsMax, seriesMax(left));
+    return {
+      right: right,
+      scale: pct ? { max: 100, step: 25 } : niceMax(Math.max(max, targetMax(data)), 4),
+      rscale: right.length ? niceMax(seriesMax(right), 4) : null,
+      axis: pct ? Object.assign({}, data, { format: function (v) { return Math.round(v * 10) / 10 + "%"; } }) : data
+    };
+  }
   function bar(host, data) {
     clear(host);
     var all = series(data), labels = data.labels || [], s = size(host), horizontal = !!data.horizontal;
@@ -275,10 +291,8 @@
     var stacked = !!data.stacked && sr.length > 1;
     var pct = stacked && data.stacked === "percent";   // every bar 100%: the parts as shares
     var total = function (li) { return sr.reduce(function (a, x) { return a + Math.max(0, x.values[li] || 0); }, 0); };
-    var left = ln.filter(function (x) { return !x.right; }), right = ln.filter(function (x) { return x.right; });
-    var max = Math.max(stacked ? Math.max.apply(null, [0].concat(labels.map(function (l, li) { return total(li); }))) : seriesMax(sr), seriesMax(left));
-    var scale = pct ? { max: 100, step: 25 } : niceMax(Math.max(max, targetMax(data)), 4), rscale = right.length ? niceMax(seriesMax(right), 4) : null;
-    var axis = pct ? Object.assign({}, data, { format: function (v) { return Math.round(v * 10) / 10 + "%"; } }) : data;
+    var sc = barScales(data, labels, sr, ln, stacked, pct, total);
+    var scale = sc.scale, rscale = sc.rscale, right = sc.right, axis = sc.axis;
     var tip = null, bars = [], marks = [];
     var svg = frame(host, s, data.title);
     var pad = barPad(horizontal, s, labels, rscale);
@@ -318,22 +332,25 @@
       var hide = function () { bars.forEach(function (b) { b.el.classList.remove("is-faded"); }); tip.hide(); };
       hoverable(rect, show, hide);
     };
+    var growFrom = horizontal ? (pad.l + "px 0") : ("0 " + (pad.t + plotH) + "px");
+    // One bar of series x at label lab, at a; only the outer end of a stack is rounded.
+    var drawBar = function (x, lab, li, a, v, rounded) {
+      var rect = svgEl("path", { d: barPath(a, rounded ? Math.min(bw / 4, 4) : 0, horizontal), fill: color(x.i), class: "kit-chart__bar" }, svg);
+      if (isOff(data.selected, lab) || isOff(data.selectedSeries, x.name)) rect.classList.add("is-off");
+      growIn(host, rect, horizontal, growFrom);
+      barHover(rect, li, tipText(lab, li, x, v));
+      pickable(host, data, rect, { chart: "bar", part: "bar", value: lab, index: li, series: x.name, seriesIndex: x.i }, lab + (x.name ? ", " + x.name : "") + ": " + fmt(v, data));
+      bars.push({ el: rect, s: x.i, li: li });
+    };
     labels.forEach(function (lab, li) {
       var start = (horizontal ? pad.t : pad.l) + li * band + (band - inner) / 2;
       var acc = 0, top = stacked ? topPart(sr, li) : -1;
       sr.forEach(function (x, si) {
         var v = valueAt(x, li);
-        var len = room * (Math.max(0, v) / scale.max), from = room * (acc / scale.max);
         if (stacked && v <= 0) return;
-        var a = place(start, si, len, from);
+        var a = place(start, si, room * (Math.max(0, v) / scale.max), room * (acc / scale.max));
         if (stacked) acc += Math.max(0, v);
-        var r = stacked && si !== top ? 0 : Math.min(bw / 4, 4);
-        var rect = svgEl("path", { d: barPath(a, r, horizontal), fill: color(x.i), class: "kit-chart__bar" }, svg);
-        if (isOff(data.selected, lab) || isOff(data.selectedSeries, x.name)) rect.classList.add("is-off");
-        growIn(host, rect, horizontal, horizontal ? (pad.l + "px 0") : ("0 " + (pad.t + plotH) + "px"));
-        barHover(rect, li, tipText(lab, li, x, v));
-        pickable(host, data, rect, { chart: "bar", part: "bar", value: lab, index: li, series: x.name, seriesIndex: x.i }, lab + (x.name ? ", " + x.name : "") + ": " + fmt(v, data));
-        bars.push({ el: rect, s: x.i, li: li });
+        drawBar(x, lab, li, a, v, !stacked || si === top);
       });
       if (li % lstep === 0) barLabel(svg, s, pad, horizontal, start, inner, lab);
     });
@@ -344,6 +361,47 @@
     barLegend(host, data, all, bars, marks, rscale);
   }
 
+  // Runs of known points [x, y]: a gap where a value is missing.
+  function lineRuns(values, px, py) {
+    var runs = [], run = [];
+    values.forEach(function (v, i) { if (v === null) { if (run.length) runs.push(run); run = []; } else run.push([px(i), py(v)]); });
+    if (run.length) runs.push(run);
+    return runs;
+  }
+  function runPath(r) { return r.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" "); }
+  // The fading fill under one series' line, down to the zero line (base), in its colour.
+  function lineArea(svg, defs, gid, si, runs, base) {
+    var lg = svgEl("linearGradient", { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    svgEl("stop", { offset: "0%", "stop-color": color(si), "stop-opacity": 0.32 }, lg);
+    svgEl("stop", { offset: "100%", "stop-color": color(si), "stop-opacity": 0 }, lg);
+    var fill = runs.filter(function (r) { return r.length > 1; }).map(function (r) {
+      return runPath(r) + " L" + r[r.length - 1][0].toFixed(1) + " " + base.toFixed(1) + " L" + r[0][0].toFixed(1) + " " + base.toFixed(1) + " Z";
+    }).join(" ");
+    if (fill) svgEl("path", { d: fill, fill: "url(#" + gid + ")", class: "kit-chart__area" }, svg);
+  }
+  // Hover: a guide line, a dot per series and the values at that point.
+  // k: the chart's host, svg, s, sr, labels, data, pad, plotW, plotH, px and py.
+  function lineHover(k) {
+    var guide = svgEl("line", { y1: k.pad.t, y2: k.pad.t + k.plotH, class: "kit-chart__guide", visibility: "hidden" }, k.svg);
+    var dots = k.sr.map(function (x, si) { return svgEl("circle", { r: 4, fill: color(si), class: "kit-chart__dot", visibility: "hidden" }, k.svg); });
+    var tip = tooltip(k.host);
+    var hit = svgEl("rect", { x: k.pad.l, y: k.pad.t, width: k.plotW, height: k.plotH, fill: "transparent" }, k.svg);
+    hit.addEventListener("mousemove", function (e) {
+      var r = k.svg.getBoundingClientRect(), x = (e.clientX - r.left) * (k.s.w / r.width), labels = k.labels;
+      var i = Math.max(0, Math.min(labels.length - 1, Math.round(((x - k.pad.l) / k.plotW) * (labels.length - 1))));
+      guide.setAttribute("x1", k.px(i)); guide.setAttribute("x2", k.px(i)); guide.setAttribute("visibility", "visible");
+      var html = "<strong>" + esc(labels[i]) + "</strong>";
+      var ys = [];
+      k.sr.forEach(function (sx, si) {
+        var v = sx.values[i];
+        if (v === null) dots[si].setAttribute("visibility", "hidden");
+        else { dots[si].setAttribute("cx", k.px(i)); dots[si].setAttribute("cy", k.py(v)); dots[si].setAttribute("visibility", "visible"); ys.push(k.py(v)); }
+        html += "<br>" + (sx.name ? esc(sx.name) + ": " : "") + esc(fmt(v, k.data));
+      });
+      tip.show(html, k.px(i) * (r.width / k.s.w), (ys.length ? Math.min.apply(null, ys) : k.pad.t) * (r.height / k.s.h));
+    });
+    hit.addEventListener("mouseleave", function () { guide.setAttribute("visibility", "hidden"); dots.forEach(function (d) { d.setAttribute("visibility", "hidden"); }); tip.hide(); });
+  }
   // Line chart (data.area for a fading fill under each line). A value that is not a number leaves
   // a gap in the line; values below zero get an axis below zero.
   function line(host, data, area) {
@@ -363,22 +421,9 @@
     var defs = svgEl("defs", {}, svg), paths = [];
     var uid = "k" + Math.random().toString(36).slice(2, 8);
     sr.forEach(function (x, si) {
-      // Runs of known points: a gap where a value is missing.
-      var runs = [], run = [];
-      x.values.forEach(function (v, i) { if (v === null) { if (run.length) runs.push(run); run = []; } else run.push([px(i), py(v)]); });
-      if (run.length) runs.push(run);
-      var d = runs.map(function (r) { return r.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" "); }).join(" ");
-      if (area || data.area) {
-        var gid = uid + "a" + si;
-        var lg = svgEl("linearGradient", { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
-        svgEl("stop", { offset: "0%", "stop-color": color(si), "stop-opacity": 0.32 }, lg);
-        svgEl("stop", { offset: "100%", "stop-color": color(si), "stop-opacity": 0 }, lg);
-        var fill = runs.filter(function (r) { return r.length > 1; }).map(function (r) {
-          return r.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ") + " L" + r[r.length - 1][0].toFixed(1) + " " + base.toFixed(1) + " L" + r[0][0].toFixed(1) + " " + base.toFixed(1) + " Z";
-        }).join(" ");
-        if (fill) svgEl("path", { d: fill, fill: "url(#" + gid + ")", class: "kit-chart__area" }, svg);
-      }
-      var p = svgEl("path", { d: d, fill: "none", stroke: color(si), "stroke-width": 2.25, "stroke-linejoin": "round", "stroke-linecap": "round", class: "kit-chart__path" }, svg);
+      var runs = lineRuns(x.values, px, py);
+      if (area || data.area) lineArea(svg, defs, uid + "a" + si, si, runs, base);
+      var p = svgEl("path", { d: runs.map(runPath).join(" "), fill: "none", stroke: color(si), "stroke-width": 2.25, "stroke-linejoin": "round", "stroke-linecap": "round", class: "kit-chart__path" }, svg);
       drawIn(host, p, 700);
       paths.push(p);
     });
@@ -387,26 +432,7 @@
       if (i % lstep) return;
       svgEl("text", { x: px(i), y: s.h - 8, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = lab;
     });
-    // Hover: a guide line, a dot per series and the values at that point.
-    var guide = svgEl("line", { y1: pad.t, y2: pad.t + plotH, class: "kit-chart__guide", visibility: "hidden" }, svg);
-    var dots = sr.map(function (x, si) { return svgEl("circle", { r: 4, fill: color(si), class: "kit-chart__dot", visibility: "hidden" }, svg); });
-    var tip = tooltip(host);
-    var hit = svgEl("rect", { x: pad.l, y: pad.t, width: plotW, height: plotH, fill: "transparent" }, svg);
-    hit.addEventListener("mousemove", function (e) {
-      var r = svg.getBoundingClientRect(), x = (e.clientX - r.left) * (s.w / r.width);
-      var i = Math.max(0, Math.min(labels.length - 1, Math.round(((x - pad.l) / plotW) * (labels.length - 1))));
-      guide.setAttribute("x1", px(i)); guide.setAttribute("x2", px(i)); guide.setAttribute("visibility", "visible");
-      var html = "<strong>" + esc(labels[i]) + "</strong>";
-      var ys = [];
-      sr.forEach(function (x, si) {
-        var v = x.values[i];
-        if (v === null) dots[si].setAttribute("visibility", "hidden");
-        else { dots[si].setAttribute("cx", px(i)); dots[si].setAttribute("cy", py(v)); dots[si].setAttribute("visibility", "visible"); ys.push(py(v)); }
-        html += "<br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(v, data));
-      });
-      tip.show(html, px(i) * (r.width / s.w), (ys.length ? Math.min.apply(null, ys) : pad.t) * (r.height / s.h));
-    });
-    hit.addEventListener("mouseleave", function () { guide.setAttribute("visibility", "hidden"); dots.forEach(function (d) { d.setAttribute("visibility", "hidden"); }); tip.hide(); });
+    lineHover({ host: host, svg: svg, s: s, sr: sr, labels: labels, data: data, pad: pad, plotW: plotW, plotH: plotH, px: px, py: py });
     paths.forEach(function (p, pi) { if (isOff(data.selectedSeries, sr[pi].name)) p.classList.add("is-off"); });
     legend(host, sr.map(function (x) { return x.name; }), function (i) { paths.forEach(function (p, pi) { p.classList.toggle("is-faded", i >= 0 && pi !== i); }); }, data, {
       off: function (i) { return isOff(data.selectedSeries, sr[i].name); },
@@ -423,6 +449,11 @@
   function arcPath(cx, cy, r, s0, s1) {
     var large = s1 - s0 > Math.PI ? 1 : 0;
     return "M" + (cx + r * Math.cos(s0)) + " " + (cy + r * Math.sin(s0)) + " A" + r + " " + r + " 0 " + large + " 1 " + (cx + r * Math.cos(s1)) + " " + (cy + r * Math.sin(s1));
+  }
+  // One item's arc on the ring g (cx, cy, r, w): the whole circle when span is null (the only item).
+  function ringArc(svg, g, span, stroke) {
+    if (!span) return svgEl("circle", { cx: g.cx, cy: g.cy, r: g.r, fill: "none", stroke: stroke, "stroke-width": g.w, class: "kit-chart__arc" }, svg);
+    return svgEl("path", { d: arcPath(g.cx, g.cy, g.r, span[0], span[1]), fill: "none", stroke: stroke, "stroke-width": g.w, "stroke-linecap": "butt", class: "kit-chart__arc" }, svg);
   }
   // legend: "values": a list with each item's value and share next to its colour.
   function ringValues(host, data, items, share, hover, pick) {
@@ -458,9 +489,7 @@
       if (!it.value) { arcs.push(null); return; }
       var a1 = a0 + (it.value / total) * Math.PI * 2;
       var s0 = a0 + gap / 2, s1 = Math.max(s0 + 0.001, a1 - gap / 2);
-      var p = shown === 1
-        ? svgEl("circle", { cx: cx, cy: cy, r: r, fill: "none", stroke: it.color, "stroke-width": w, class: "kit-chart__arc" }, svg)
-        : svgEl("path", { d: arcPath(cx, cy, r, s0, s1), fill: "none", stroke: it.color, "stroke-width": w, "stroke-linecap": "butt", class: "kit-chart__arc" }, svg);
+      var p = ringArc(svg, { cx: cx, cy: cy, r: r, w: w }, shown === 1 ? null : [s0, s1], it.color);
       if (isOff(data.selected, it.label)) p.classList.add("is-off");
       var show = function () {
         arcs.forEach(function (x) { if (x) x.classList.toggle("is-faded", x !== p); });
@@ -617,6 +646,24 @@
       svgEl("text", { x: gx, y: pad.t + plotH + 16, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = fmt(v, data);
     }
   }
+  // The axis titles: data.xLabel under the plot, data.yLabel upright at its left.
+  function scatterTitles(svg, s, pad, data) {
+    var plotW = s.w - pad.l - pad.r, mid = pad.t + (s.h - pad.t - pad.b) / 2;
+    if (data.xLabel) svgEl("text", { x: pad.l + plotW / 2, y: s.h - 6, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = data.xLabel;
+    if (data.yLabel) svgEl("text", { x: 12, y: mid, "text-anchor": "middle", class: "kit-chart__label", transform: "rotate(-90 12 " + mid + ")" }, svg).textContent = data.yLabel;
+  }
+  // One point p (index pi) of series x; k: host, svg, data, tip, dots (the points so far), px, py.
+  function scatterDot(k, x, p, pi) {
+    var data = k.data, dots = k.dots;
+    var c = svgEl("circle", { cx: k.px(p.x).toFixed(1), cy: k.py(p.y).toFixed(1), r: p.r, fill: color(x.i), "fill-opacity": 0.75, class: "kit-chart__point" }, k.svg);
+    var name = (p.label ? p.label + ": " : "") + fmt(p.x, data) + ", " + fmt(p.y, data);
+    if (isOff(data.selectedSeries, x.name) || isOff(data.selected, p.label || name)) c.classList.add("is-off");
+    var show = function () { dots.forEach(function (d) { d.el.classList.toggle("is-faded", d.el !== c); }); k.tip.show("<strong>" + esc(x.name || p.label || "Point") + "</strong><br>" + esc(name), k.px(p.x), k.py(p.y) - p.r); };
+    var hide = function () { dots.forEach(function (d) { d.el.classList.remove("is-faded"); }); k.tip.hide(); };
+    hoverable(c, show, hide);
+    pickable(k.host, data, c, { chart: "scatter", part: "point", value: p.label || name, index: pi, series: x.name, seriesIndex: x.i }, (x.name ? x.name + ", " : "") + name);
+    dots.push({ el: c, s: x.i });
+  }
   function scatter(host, data) {
     clear(host);
     var sr = (data.series || []).map(function (s, i) {
@@ -631,22 +678,11 @@
     var svg = frame(host, s, data.title);
     grid(svg, s, pad, yr, data);
     scatterXAxis(svg, s, pad, xr, data);
-    if (data.xLabel) svgEl("text", { x: pad.l + plotW / 2, y: s.h - 6, "text-anchor": "middle", class: "kit-chart__label" }, svg).textContent = data.xLabel;
-    if (data.yLabel) svgEl("text", { x: 12, y: pad.t + plotH / 2, "text-anchor": "middle", class: "kit-chart__label", transform: "rotate(-90 12 " + (pad.t + plotH / 2) + ")" }, svg).textContent = data.yLabel;
+    scatterTitles(svg, s, pad, data);
     var px = function (x) { return pad.l + plotW * ((x - xr.min) / (xr.max - xr.min)); }, py = function (y) { return pad.t + plotH * (1 - (y - yr.min) / (yr.max - yr.min)); };
-    var tip = tooltip(host), dots = [];
-    sr.forEach(function (x) {
-      x.points.forEach(function (p, pi) {
-        var c = svgEl("circle", { cx: px(p.x).toFixed(1), cy: py(p.y).toFixed(1), r: p.r, fill: color(x.i), "fill-opacity": 0.75, class: "kit-chart__point" }, svg);
-        var name = (p.label ? p.label + ": " : "") + fmt(p.x, data) + ", " + fmt(p.y, data);
-        if (isOff(data.selectedSeries, x.name) || isOff(data.selected, p.label || name)) c.classList.add("is-off");
-        var show = function () { dots.forEach(function (d) { d.el.classList.toggle("is-faded", d.el !== c); }); tip.show("<strong>" + esc(x.name || p.label || "Point") + "</strong><br>" + esc(name), px(p.x), py(p.y) - p.r); };
-        var hide = function () { dots.forEach(function (d) { d.el.classList.remove("is-faded"); }); tip.hide(); };
-        hoverable(c, show, hide);
-        pickable(host, data, c, { chart: "scatter", part: "point", value: p.label || name, index: pi, series: x.name, seriesIndex: x.i }, (x.name ? x.name + ", " : "") + name);
-        dots.push({ el: c, s: x.i });
-      });
-    });
+    var k = { host: host, svg: svg, data: data, tip: tooltip(host), dots: [], px: px, py: py };
+    sr.forEach(function (x) { x.points.forEach(function (p, pi) { scatterDot(k, x, p, pi); }); });
+    var dots = k.dots;
     legend(host, sr.map(function (x) { return x.name; }), function (i) { dots.forEach(function (d) { d.el.classList.toggle("is-faded", i >= 0 && d.s !== i); }); }, data, {
       off: function (i) { return isOff(data.selectedSeries, sr[i].name); },
       pick: function (i) { return { chart: "scatter", part: "legend", value: sr[i].name, index: i, series: sr[i].name, seriesIndex: i }; }

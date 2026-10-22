@@ -118,3 +118,12 @@ export function missingParts(s: Omit<ScheduleFormState, "title">): string[] {
   if (!s.times.length) missing.push("add a time");
   return missing;
 }
+
+/** The line under "Open schedules": how many are active, paused or done, and when the next one runs. */
+export function schedulesSummaryText(schedules: ScheduleItem[], formatWhen: (iso: string | null) => string): string {
+  if (schedules.length === 0) return "Run messages, runbooks and chains on set days and times";
+  const active = schedules.filter((s) => s.enabled && s.nextRun);
+  const next = [...active].sort((a, b) => String(a.nextRun).localeCompare(String(b.nextRun)))[0];
+  const paused = schedules.length - active.length;
+  return `${active.length} active${paused > 0 ? `, ${paused} paused or done` : ""}${next ? ` · next ${formatWhen(next.nextRun)}` : ""}`;
+}

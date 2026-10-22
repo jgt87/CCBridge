@@ -81,6 +81,10 @@ export const showsOutput = (item: ActionView, awaiting: boolean, isTodo: boolean
 export const canOpenInWindow = (item: ActionView, awaiting: boolean, running: boolean, liveState?: string): boolean =>
   item.action === "run" && !awaiting && (!running || liveState === "question" || liveState === "stuck") && Boolean(item.target.trim());
 
+/** Whether the live output now is this card's command: a run of this id that is running. */
+export const ownsLive = (item: ActionView & { id: string }, liveId?: string): boolean =>
+  item.action === "run" && item.status === "running" && liveId === item.id;
+
 /** The web approval's choice of what to allow from now on. */
 export const offersAllow = (item: ActionView, awaiting: boolean): boolean => awaiting && item.action === "web" && (item.allowOptions?.length ?? 0) > 0;
 

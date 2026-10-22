@@ -275,6 +275,23 @@
     });
     return c;
   }
+  // A number as people write it ("(1.234,5)", "-12 %"), with the column's separators; NaN when none.
+  function parseSortNumber(s, sep) {
+    var raw = String(s).trim();
+    if (!raw) return NaN;
+    var neg = /^\(.*\)$/.test(raw) || /^[^\d]*-/.test(raw);
+    var v = raw.replace(/[^\d.,]/g, "");
+    if (!v) return NaN;
+    var n = parseFloat(plainDigits(v, sep));
+    return isNaN(n) ? NaN : (neg ? -n : n);
+  }
+  // Watches the table's rows (and, external, its data-kit-total and data-kit-page); null without MutationObserver.
+  function observeTable(table, external, onChange) {
+    if (!window.MutationObserver) return null;
+    var obs = new MutationObserver(onChange);
+    obs.observe(table, external ? { childList: true, subtree: true, attributes: true, attributeFilter: ["data-kit-total", "data-kit-page"] } : { childList: true, subtree: true });
+    return obs;
+  }
   function setupTable(table) {
     // Once per table; a table a script writes after the page loaded is set up when it appears, and a
     // header row or body it writes later is picked up too (startKit's observer, the one below).
@@ -289,15 +306,7 @@
     function rows() { return body ? Array.prototype.filter.call(body.rows, function (r) { return !r.hasAttribute("data-kit-empty"); }) : []; }
     // A column's separators, read from its rows the first time a number in it is needed.
     function separators(i) { return numSep[i] || (numSep[i] = columnSeparators(rows().map(function (r) { return cellSortValue(r, i); }))); }
-    function toNumber(s, i) {
-      var raw = String(s).trim();
-      if (!raw) return NaN;
-      var neg = /^\(.*\)$/.test(raw) || /^[^\d]*-/.test(raw);
-      var v = raw.replace(/[^\d.,]/g, "");
-      if (!v) return NaN;
-      var n = parseFloat(plainDigits(v, separators(i)));
-      return isNaN(n) ? NaN : (neg ? -n : n);
-    }
+    function toNumber(s, i) { return parseSortNumber(s, separators(i)); }
     function sortKey(row) {
       var k = row.__kitKeys || (row.__kitKeys = {});
       if (k[col] === undefined) k[col] = heads[col] && heads[col].classList.contains("kit-num") ? toNumber(cellSortValue(row, col), col) : cellSortValue(row, col);
@@ -417,10 +426,7 @@
     arm();
     if (table.hasAttribute("data-kit-select")) setupRowSelect(table, rows, function () { return body; }, arm);
     if (size) { var parts = makePager(table, go); pager = parts.pager; prev = parts.prev; info = parts.info; next = parts.next; }
-    if (window.MutationObserver) {
-      obs = new MutationObserver(onChange);
-      obs.observe(table, external ? { childList: true, subtree: true, attributes: true, attributeFilter: ["data-kit-total", "data-kit-page"] } : { childList: true, subtree: true });
-    }
+    obs = observeTable(table, external, onChange);
     apply();
     if (obs) obs.takeRecords();
   }
@@ -790,9 +796,10 @@
   }
   // The item a key moves to (Arrow keys wrap round, Home and End), or undefined for other keys.
   function menuTarget(items, i, key) {
-    if (key === "ArrowDown" || key === "ArrowUp") return items[(i + (key === "ArrowDown" ? 1 : -1) + items.length) % items.length] || null;
-    if (key === "Home" || key === "End") return items[key === "Home" ? 0 : items.length - 1] || null;
-    return undefined;
+    var n = items.length;
+    var places = { ArrowDown: (i + 1 + n) % n, ArrowUp: (i - 1 + n) % n, Home: 0, End: n - 1 };
+    if (!Object.prototype.hasOwnProperty.call(places, key)) return undefined;
+    return items[places[key]] || null;
   }
   document.addEventListener("keydown", function (e) {
     var list = closestOf(e.target, ".kit-menu__list");
@@ -830,15 +837,24 @@
 
   // Avatars (from kokonutui team-selector): data-kit-avatar="NAME" writes the initials and gives every
   // name its own chart colour (the same name always the same colour); an <img> inside stays.
+  // The first letters of the first and the last word.
+  function initialsOf(name) {
+    var words = name.split(/\s+/).filter(Boolean);
+    var last = words.length > 1 ? words[words.length - 1].charAt(0) : "";
+    return ((words[0] || "").charAt(0) + last).toUpperCase();
+  }
+  // A chart colour (1-6) for a name, always the same one.
+  function nameColor(name) {
+    var h = 0;
+    for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+    return (Math.abs(h) % 6) + 1;
+  }
   function setupAvatar(el) {
     var name = (el.getAttribute("data-kit-avatar") || "").trim();
     if (!name || el.kitAvatar === name) return;
     el.kitAvatar = name;
-    var words = name.split(/\s+/).filter(Boolean);
-    if (!el.querySelector("img")) el.textContent = ((words[0] || "").charAt(0) + (words.length > 1 ? words[words.length - 1].charAt(0) : "")).toUpperCase();
-    var h = 0;
-    for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
-    el.style.setProperty("--kit-avatar-color", "var(--kit-chart-" + ((Math.abs(h) % 6) + 1) + ")");
+    if (!el.querySelector("img")) el.textContent = initialsOf(name);
+    el.style.setProperty("--kit-avatar-color", "var(--kit-chart-" + nameColor(name) + ")");
     el.setAttribute("title", name);
     if (!el.hasAttribute("aria-label")) { el.setAttribute("role", "img"); el.setAttribute("aria-label", name); }
   }
@@ -1037,30 +1053,33 @@
     }
     el.appendChild(grid);
   }
+  // Previous or next month (a button with data-step="-1" or "1"): drawn again, "kit:month".
+  function calendarStep(el, stepBtn) {
+    var d = new Date(el.kitCal.year, el.kitCal.month + parseInt(stepBtn.getAttribute("data-step"), 10), 1);
+    el.kitCal.year = d.getFullYear(); el.kitCal.month = d.getMonth();
+    calendarDraw(el);
+    el.dispatchEvent(new CustomEvent("kit:month", { bubbles: true, detail: { month: d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) } }));
+  }
+  // A day clicked: "kit:day" with that day's events.
+  function calendarPick(el, day) {
+    var date = day.getAttribute("data-date");
+    var events = (el.kitCal.events || []).filter(function (ev) { return String(ev.date).slice(0, 10) === date; });
+    el.dispatchEvent(new CustomEvent("kit:day", { bubbles: true, detail: { date: date, events: events } }));
+  }
+  function calendarClick(el, e) {
+    var stepBtn = e.target.closest("[data-step]");
+    if (stepBtn) { calendarStep(el, stepBtn); return; }
+    var day = e.target.closest(".kit-calendar__day");
+    if (day) calendarPick(el, day);
+  }
   function setupCalendar(el, opts) {
     var now = new Date(), mm = /^(\d{4})-(\d{2})$/.exec((opts && opts.month) || el.getAttribute("data-month") || "");
     if (!el.kitCal) {
       el.kitCal = { year: mm ? +mm[1] : now.getFullYear(), month: mm ? +mm[2] - 1 : now.getMonth(), events: [] };
-      el.addEventListener("click", function (e) {
-        var stepBtn = e.target.closest("[data-step]");
-        if (stepBtn) {
-          var d = new Date(el.kitCal.year, el.kitCal.month + parseInt(stepBtn.getAttribute("data-step"), 10), 1);
-          el.kitCal.year = d.getFullYear(); el.kitCal.month = d.getMonth();
-          calendarDraw(el);
-          el.dispatchEvent(new CustomEvent("kit:month", { bubbles: true, detail: { month: d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) } }));
-          return;
-        }
-        var day = e.target.closest(".kit-calendar__day");
-        if (day) {
-          var date = day.getAttribute("data-date");
-          el.dispatchEvent(new CustomEvent("kit:day", { bubbles: true, detail: { date: date, events: (el.kitCal.events || []).filter(function (ev) { return String(ev.date).slice(0, 10) === date; }) } }));
-        }
-      });
+      el.addEventListener("click", function (e) { calendarClick(el, e); });
     }
-    if (opts) {
-      if (mm) { el.kitCal.year = +mm[1]; el.kitCal.month = +mm[2] - 1; }
-      if (opts.events) el.kitCal.events = opts.events;
-    }
+    if (opts && mm) { el.kitCal.year = +mm[1]; el.kitCal.month = +mm[2] - 1; }
+    if (opts && opts.events) el.kitCal.events = opts.events;
     calendarDraw(el);
   }
 
@@ -1327,19 +1346,31 @@
   // KitUI.options(select, values, { all: "All ITEMS", selected }) writes a select's options:
   // values are texts or { value, label }; "all" adds a first option with the value "" (no filter);
   // the current choice stays when it is still among the values. Returns the select.
+  // An element given itself or by a selector.
+  function elementOf(x) { return typeof x === "string" ? document.querySelector(x) : x; }
+  function newOption(value, label) {
+    var o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    return o;
+  }
+  // One value as an option: a text, or { value, label }; null for a value that is not there.
+  function optionOf(v) {
+    var isObj = !!v && typeof v === "object";
+    var val = isObj ? v.value : v;
+    if (val === null || val === undefined) return null;
+    return newOption(String(val), isObj && v.label !== undefined ? String(v.label) : String(val));
+  }
   function fillOptions(select, values, opts) {
-    var el = typeof select === "string" ? document.querySelector(select) : select;
+    var el = elementOf(select);
     if (!el) return el;
     opts = opts || {};
     var keep = opts.selected !== undefined ? String(opts.selected) : el.value;
     var frag = document.createDocumentFragment(), seen = {};
-    if (opts.all !== undefined && opts.all !== false) { var a = document.createElement("option"); a.value = ""; a.textContent = opts.all; frag.appendChild(a); seen[""] = true; }
+    if (opts.all !== undefined && opts.all !== false) { frag.appendChild(newOption("", opts.all)); seen[""] = true; }
     (values || []).forEach(function (v) {
-      var val = v && typeof v === "object" ? v.value : v;
-      if (val === null || val === undefined) return;
-      var o = document.createElement("option");
-      o.value = String(val);
-      o.textContent = v && typeof v === "object" && v.label !== undefined ? String(v.label) : String(val);
+      var o = optionOf(v);
+      if (!o) return;
       seen[o.value] = true;
       frag.appendChild(o);
     });
@@ -1357,14 +1388,14 @@
   // when there is none) and shows when the list is empty. Sorting, paging and search follow the
   // new rows by themselves. Returns the number of rows written.
   function cellValue(c, row) { return typeof c.value === "function" ? c.value(row) : c.key ? row[c.key] : ""; }
+  var CELL_FORMATS = { number: "number", percent: "percent", date: "date" };
+  function isMissing(v) { return v === null || v === undefined || v === ""; }
   function cellText(c, v, row) {
     var f = c.format;
     if (typeof f === "function") return f(v, row);
-    if (v === null || v === undefined || v === "") return c.missing !== undefined ? c.missing : "-";
-    if (f === "number") return format.number(v);
-    if (f === "percent") return format.percent(v);
-    if (f === "date") return format.date(v);
-    return String(v);
+    if (isMissing(v)) return c.missing !== undefined ? c.missing : "-";
+    var named = Object.prototype.hasOwnProperty.call(CELL_FORMATS, f) ? CELL_FORMATS[f] : null;
+    return named ? format[named](v) : String(v);
   }
   // A number column: marked num, formatted as a number or percentage, or (neither said) holding a number.
   function isNumCell(c, v) { return c.num || c.format === "number" || c.format === "percent" || (c.num === undefined && c.format == null && typeof v === "number"); }
@@ -1392,27 +1423,33 @@
     empty.querySelector(".kit-empty__title").textContent = text || "Nothing to show";
     return empty;
   }
-  function fillTable(table, list, columns, opts) {
-    var t = typeof table === "string" ? document.querySelector(table) : table;
-    if (!t) return 0;
-    if (columns && !Array.isArray(columns)) { opts = columns; columns = null; }
-    opts = opts || {};
-    var heads = headCells(t);
-    var cols = columns || heads.map(headColumn);
-    var body = t.tBodies[0] || t.appendChild(document.createElement("tbody"));
-    var empty = body.querySelector("tr[data-kit-empty]") || newEmptyRow(cols.length, opts.empty);
-    var frag = document.createDocumentFragment();
-    (list || []).forEach(function (row) {
-      var tr = document.createElement("tr");
-      if (opts.id && row && row[opts.id] != null) tr.setAttribute("data-id", String(row[opts.id]));
-      cols.forEach(function (c) { tr.appendChild(fillCell(c, row)); });
-      frag.appendChild(tr);
-    });
+  // One table row from a data row; idField names the field for data-id.
+  function fillRow(row, cols, idField) {
+    var tr = document.createElement("tr");
+    if (idField && row && row[idField] != null) tr.setAttribute("data-id", String(row[idField]));
+    cols.forEach(function (c) { tr.appendChild(fillCell(c, row)); });
+    return tr;
+  }
+  // The body's rows replaced by frag, the empty row kept last.
+  function replaceRows(body, frag, empty) {
     Array.prototype.slice.call(body.rows).forEach(function (r) { if (r !== empty) body.removeChild(r); });
     body.insertBefore(frag, body.firstChild);
     if (empty.parentNode !== body) body.appendChild(empty);
-    empty.hidden = (list || []).length > 0;
-    return (list || []).length;
+  }
+  function fillTable(table, list, columns, opts) {
+    var t = elementOf(table);
+    if (!t) return 0;
+    if (columns && !Array.isArray(columns)) { opts = columns; columns = null; }
+    opts = opts || {};
+    var rowsIn = list || [];
+    var cols = columns || headCells(t).map(headColumn);
+    var body = t.tBodies[0] || t.appendChild(document.createElement("tbody"));
+    var empty = body.querySelector("tr[data-kit-empty]") || newEmptyRow(cols.length, opts.empty);
+    var frag = document.createDocumentFragment();
+    rowsIn.forEach(function (row) { frag.appendChild(fillRow(row, cols, opts.id)); });
+    replaceRows(body, frag, empty);
+    empty.hidden = rowsIn.length > 0;
+    return rowsIn.length;
   }
 
   window.KitUI = {

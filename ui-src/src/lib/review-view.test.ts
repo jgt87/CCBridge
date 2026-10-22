@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewFinding, ReviewSummary } from "./api";
-import { defaultPicked, estimateText, findingGroups, findingTags, reviewCounts, splitPaths, toggleFocus, togglePicked } from "./review-view";
+import { canStartReview, defaultPicked, estimateText, findingGroups, findingTags, reviewCounts, splitPaths, toggleFocus, togglePicked } from "./review-view";
 
 const finding = (id: string, over: Partial<ReviewFinding> = {}): ReviewFinding => ({
   id,
@@ -85,5 +85,14 @@ describe("latestOnly", () => {
     // The latest one still shows when it is the slow one.
     const c = latest("C", () => Promise.resolve("report C"));
     await expect(c).resolves.toBe("report C");
+  });
+
+  it("allows a start only with code files, a focus and nothing starting", () => {
+    const est = { files: 3, messages: 1, scopeText: "the project" };
+    expect(canStartReview(false, est, ["bugs"])).toBe(true);
+    expect(canStartReview(true, est, ["bugs"])).toBe(false);
+    expect(canStartReview(false, { ...est, files: 0 }, ["bugs"])).toBe(false);
+    expect(canStartReview(false, null, ["bugs"])).toBe(false);
+    expect(canStartReview(false, est, [])).toBe(false);
   });
 });

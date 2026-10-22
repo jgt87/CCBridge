@@ -14,6 +14,7 @@ import { formatBytes } from "@/lib/project-overview";
 import { notifyEnabled, notifySupported, setNotifyEnabled } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { settingControlKind } from "./setting-kind";
+import { resetNoteText, responseOptionsHelp } from "@/lib/settings-view";
 import { cachedEdgeCache, cachedSettings, loadEdgeCache, loadSettings, rememberEdgeCache, rememberSettings } from "@/lib/settings-cache";
 
 /** A setting's value as text: a command list one per line, a switch as on/off. */
@@ -248,7 +249,6 @@ function ClearHistoryRow() {
   );
 }
 
-/** Settings > Privacy: Edge's caches in StreamHub's own profile; the Copilot sign-in stays. */
 /** Settings > Copilot: what Copilot's response picker offers (read weekly) and Read now. */
 function ResponseOptionsRow() {
   const [read, setRead] = useState("");
@@ -286,7 +286,6 @@ function ResponseOptionsRow() {
       setBusy(false);
     }
   };
-  const when = read ? new Date(read).toLocaleString() : "never";
   return (
     <SettingLine
       control={
@@ -294,15 +293,14 @@ function ResponseOptionsRow() {
           {busy ? "Reading..." : "Read now"}
         </button>
       }
-      help={`Opens Copilot's response picker and reads what it offers, for the Response menu next to New chat. Last read: ${when}.${
-        options.length ? ` Offered: ${options.map((o) => (o.parent ? `${o.title} (${o.parent})` : o.title)).join(", ")}.` : ""
-      }`}
+      help={responseOptionsHelp(read, options)}
       notes={note ? <div className="text-muted-foreground text-xs">{note}</div> : null}
       title="Copilot's response options"
     />
   );
 }
 
+/** Settings > Privacy: Edge's caches in StreamHub's own profile; the Copilot sign-in stays. */
 function ClearEdgeCacheRow() {
   const [info, setInfoState] = useState<EdgeCacheInfo | null>(cachedEdgeCache());
   const setInfo = (i: EdgeCacheInfo) => {
@@ -561,6 +559,24 @@ function CardViewSetting() {
   );
 }
 
+/** The modal's header: title, Reset all and Close. It stays in place; only the settings below it scroll. */
+function SettingsHeader({ anyCustom, onReset, onClose }: { anyCustom: boolean; onReset: () => void; onClose: () => void }) {
+  return (
+    <div className="flex shrink-0 items-center justify-between overflow-hidden border-(--kit-border) border-b px-5 py-3 [scrollbar-gutter:stable_both-edges]">
+      <div>
+        <div className="font-semibold">Settings</div>
+        <div className="text-muted-foreground text-xs">For this computer; changes apply right away and are kept across updates.</div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <ResetAllControl anyCustom={anyCustom} onReset={onReset} />
+        <button className="rounded p-1.5 hover:bg-(--kit-surface-2)" onClick={onClose} title="Close (Esc)" type="button">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Settings for this computer (saved in config\harness.local.json; kept across updates). */
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // Shown at once from what was loaded in the background; refreshed quietly while open.
@@ -586,8 +602,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       setSettings(r.settings);
       const themeReset = theme !== "system";
       if (themeReset) changeTheme("system");
-      const n = r.changed.length + (themeReset ? 1 : 0);
-      setResetNote(n ? `${n} setting(s) set back to the app defaults.` : "All settings already had the app defaults.");
+      setResetNote(resetNoteText(r.changed.length, themeReset));
       window.setTimeout(() => setResetNote(""), 4000);
     } catch (e) {
       setError((e as Error).message);
@@ -601,19 +616,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         className="kit-dialog flex h-[min(80vh,760px)] w-full max-w-[960px] flex-col overflow-hidden p-0"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header stays in place; only the settings below it scroll. */}
-        <div className="flex shrink-0 items-center justify-between overflow-hidden border-(--kit-border) border-b px-5 py-3 [scrollbar-gutter:stable_both-edges]">
-          <div>
-            <div className="font-semibold">Settings</div>
-            <div className="text-muted-foreground text-xs">For this computer; changes apply right away and are kept across updates.</div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <ResetAllControl anyCustom={anyCustom} onReset={resetAll} />
-            <button className="rounded p-1.5 hover:bg-(--kit-surface-2)" onClick={onClose} title="Close (Esc)" type="button">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
+        <SettingsHeader anyCustom={anyCustom} onClose={onClose} onReset={resetAll} />
         {error && <div className="shrink-0 px-5 pt-2 text-(--kit-error) text-sm">{error}</div>}
         {/* The first time, before the background load: everything at once, not group by group. */}
         {!settings && !error && <div className="px-5 pt-4 text-muted-foreground text-sm">Loading settings...</div>}

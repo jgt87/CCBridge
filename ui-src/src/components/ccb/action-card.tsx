@@ -31,6 +31,7 @@ import {
   hasDetails,
   needsTerminal,
   offersAllow,
+  ownsLive,
   runTitle,
   shortError,
   showsOutput,
@@ -385,32 +386,100 @@ function usePreviewSummary(item: ActionItem) {
   return { counts, todo };
 }
 
+/** The command running now, when it is this card's: its live output and its own console window. */
+function useMyRun(item: ActionItem) {
+  const { live, windows } = useRunLive();
+  const running = item.status === "running";
+  const myLive = live && ownsLive(item, live.id) ? live : null;
+  const myWindow = item.window && running ? windows.find((w) => w.id === item.id) : undefined;
+  return { running, myLive, myWindow };
+}
+
+/** The warning, the error and the reasons a step failed. */
+function CardNotices({ item }: { item: ActionItem }) {
+  return (
+    <>
+      {item.warning && (
+        <div className="kit-notice text-xs">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {item.warning}
+        </div>
+      )}
+      {item.error && <div className="kit-error-text">{shortError(item.error)}</div>}
+      <FailureReasons item={item} />
+    </>
+  );
+}
+
+/** What a step did: a run's console and notes, the result text, and Open in a window. */
+function CardResult({
+  item,
+  todo,
+  awaiting,
+  running,
+  myLive,
+  myWindow,
+}: {
+  item: ActionItem;
+  todo: ReturnType<typeof todoChange> | null;
+  awaiting: boolean;
+  running: boolean;
+  myLive: RunLive | null;
+  myWindow?: RunWindowState;
+}) {
+  const ran = item.action === "run" && item.output ? parseRunOutput(item.output) : null;
+  return (
+    <>
+      {item.action === "run" && <RunConsole awaiting={awaiting} item={item} myLive={myLive} myWindow={myWindow} ran={ran} running={running} />}
+      {ran?.notes && !awaiting && <div className="whitespace-pre-wrap text-muted-foreground text-xs">{ran.notes}</div>}
+      {/* A to-do list that was written shows as its checklist; the result text would only repeat its lines. */}
+      {showsOutput(item, awaiting, Boolean(todo)) && <ActionOutput fallbackPath={item.target} output={item.output ?? ""} />}
+      {canOpenInWindow(item, awaiting, running, myLive?.state) && (
+        <OpenInWindow command={item.target} strong={needsTerminal(item) || myLive?.state === "question"} />
+      )}
+    </>
+  );
+}
+
+/** The approval: what to allow on the web, which blocks of a change, and the decision itself. */
+function ApprovalParts({ item, choice, decide }: { item: ActionItem; choice: ReturnType<typeof useApprovalChoice>; decide: (decision: "approve" | "reject") => void }) {
+  const blocks = asBlocks(item.preview?.hunks);
+  return (
+    <>
+      {offersAllow(item, true) && <AllowSelect allow={choice.allow} options={item.allowOptions ?? []} setAllow={choice.setAllow} />}
+      {blocks.length > 1 && <BlockPicker blocks={blocks} setSkip={choice.setSkip} skip={choice.skip} />}
+      <DecisionBar decide={decide} item={item} note={choice.note} setNote={choice.setNote} />
+    </>
+  );
+}
+
+/** What the person chose with an approval; kept on the card, so a send that fails keeps it. */
+function useApprovalChoice() {
+  const [note, setNote] = useState("");
+  // Blocks of a change the person unticked: left out when approving (the rest is written).
+  const [skip, setSkip] = useState<number[]>([]);
+  // web: a part of the site to allow from now on with this approval ("" = only these pages).
+  const [allow, setAllow] = useState("");
+  return { note, setNote, skip, setSkip, allow, setAllow };
+}
+
 /** `took`: how long the step took, once it finished (shown in the header). */
 export function ActionCard({ item, took }: { item: ActionItem; took?: string }) {
   // null: follow the setting (Settings > This browser > Cards) until the person opens or closes it.
   const [open, setOpen] = useState<boolean | null>(null);
   const view = useCardView();
-  const [note, setNote] = useState("");
   const [sent, setSent] = useState(false);
-  // Blocks of a change the person unticked: left out when approving (the rest is written).
-  const [skip, setSkip] = useState<number[]>([]);
-  // web: a part of the site to allow from now on with this approval ("" = only these pages).
-  const [allow, setAllow] = useState("");
-  const blocks = asBlocks(item.preview?.hunks);
+  const choice = useApprovalChoice();
   const awaiting = item.status === "awaiting" && !sent;
   // The command running now: its output as it comes (the card opens to show it).
-  const { live, windows } = useRunLive();
-  const running = item.status === "running";
-  const myLive = item.action === "run" && running && live?.id === item.id ? live : null;
-  const myWindow = item.window && running ? windows.find((w) => w.id === item.id) : undefined;
+  const { running, myLive, myWindow } = useMyRun(item);
   // Open by default; with auto-collapse a finished step folds up (the reader can still open or close any card).
   const expanded = awaiting || (open ?? (Boolean(myLive) || cardOpen(shownStatus(item.status, sent), view)));
-  const ran = item.action === "run" && item.output ? parseRunOutput(item.output) : null;
   const { counts, todo } = usePreviewSummary(item);
-  const details = hasDetails(item);
   const summary = doneSummary(item);
 
   const decide = async (decision: "approve" | "reject") => {
+    const { note, skip, allow } = choice;
     setSent(true);
     try {
       await api.approve(item.id, decision, note, decision === "approve" ? skip : [], decision === "approve" ? allow : "");
@@ -426,30 +495,14 @@ export function ActionCard({ item, took }: { item: ActionItem; took?: string }) 
         awaiting ? "border-(--kit-border-strong) shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:shadow-[0_0_0_3px_rgba(255,255,255,0.05)]" : "border-(--kit-border)"
       )}
     >
-      <CardHeader counts={counts} details={details} expanded={expanded} item={item} onToggle={() => setOpen(!expanded)} sent={sent} todo={todo} took={took} />
+      <CardHeader counts={counts} details={hasDetails(item)} expanded={expanded} item={item} onToggle={() => setOpen(!expanded)} sent={sent} todo={todo} took={took} />
 
       {expanded && (
         <div className="space-y-3 border-(--kit-border) border-t px-3 pt-3 pb-3">
-          {item.warning && (
-            <div className="kit-notice text-xs">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              {item.warning}
-            </div>
-          )}
-          {item.error && <div className="kit-error-text">{shortError(item.error)}</div>}
-          <FailureReasons item={item} />
+          <CardNotices item={item} />
           <PreviewBody item={item} todo={todo} />
-          {item.action === "run" && <RunConsole awaiting={awaiting} item={item} myLive={myLive} myWindow={myWindow} ran={ran} running={running} />}
-          {ran?.notes && !awaiting && <div className="whitespace-pre-wrap text-muted-foreground text-xs">{ran.notes}</div>}
-          {/* A to-do list that was written shows as its checklist; the result text would only repeat its lines. */}
-          {showsOutput(item, awaiting, Boolean(todo)) && <ActionOutput fallbackPath={item.target} output={item.output ?? ""} />}
-          {canOpenInWindow(item, awaiting, running, myLive?.state) && (
-            <OpenInWindow command={item.target} strong={needsTerminal(item) || myLive?.state === "question"} />
-          )}
-
-          {offersAllow(item, awaiting) && <AllowSelect allow={allow} options={item.allowOptions ?? []} setAllow={setAllow} />}
-          {awaiting && blocks.length > 1 && <BlockPicker blocks={blocks} setSkip={setSkip} skip={skip} />}
-          {awaiting && <DecisionBar decide={decide} item={item} note={note} setNote={setNote} />}
+          <CardResult awaiting={awaiting} item={item} myLive={myLive} myWindow={myWindow} running={running} todo={todo} />
+          {awaiting && <ApprovalParts choice={choice} decide={decide} item={item} />}
           {summary && (
             <div className="flex items-center gap-1 text-muted-foreground text-xs">
               <Check className="h-3.5 w-3.5" /> {summary}
