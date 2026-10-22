@@ -266,7 +266,8 @@ Describe 'The kit charts' {
     }
     It 'leave the choice of chart to Copilot and give each choice its kit part and colours by meaning' {
         $rule = [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md'))
-        $rule | Should Match '- Your choice, the kit''s look: which data to show, and as what, is yours to decide; the kit sets no limits on it'
+        $rule | Should Match '- Your choice, the kit''s look: which data to show, and as what, is yours to decide unless the person names a form \(what they ask wins, also over a form you chose before\); the kit sets no limits on it'
+        $rule | Should Match 'every chart kind can filter the page \(selectable\), rings included'
         $rule | Should Match '\(vertical, horizontal or stacked bars'
         $rule | Should Match '- Dashboards: what a dashboard shows is your choice'
         $rule | Should Match 'bar "horizontal": true'
