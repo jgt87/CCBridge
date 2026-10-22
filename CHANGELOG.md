@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.148] - 2026-10-22
+
+### Changed
+- Development notes only: CLAUDE.md lists lessons from earlier work for coding agents on this repository. Nothing in StreamHub itself changed.
+
 ## [v0.1.147] - 2026-10-22
 
 ### Changed
