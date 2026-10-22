@@ -252,6 +252,8 @@ export interface AppState {
   progress: string;
   copilot: "idle" | "connecting" | "ready" | "error";
   copilotMessage: string;
+  /** Not connected: when StreamHub tries again by itself ('' once it stopped trying; then the person checks). */
+  copilotRetryAt?: string;
   throttle: { used: number; max: number };
   credits: { remaining: number; total: number; resetAt: string } | null;
   todos: TodoItem[];

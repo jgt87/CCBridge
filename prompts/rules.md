@@ -1,4 +1,5 @@
 RULES
+- The person's request comes first, over earlier choices (yours or the helper program's): asked to change something chosen before, change it.
 - Paths are relative to the project folder.
 - Read a file before you edit it or answer about it: do not go by its name, and say so when it is not there.
 - SEARCH must match the current lines exactly.

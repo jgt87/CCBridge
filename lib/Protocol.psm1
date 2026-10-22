@@ -225,6 +225,15 @@ function Test-ProposalText([AllowEmptyString()][string]$Text) {
     [bool]($heading -or $words)
 }
 
+function Test-DefendedChoice([AllowEmptyString()][string]$Text) {
+    <# Whether a reply defends what is there instead of changing it: "the change was intentional",
+       "by design", "on purpose", "not a bug", "as intended", "a deliberate choice" (English and
+       Dutch). A fixed text rule; the code blocks are left out. #>
+    $t = ($Text -replace '(?s)`{3,}.*?`{3,}', '')
+    if (-not $t.Trim()) { return $false }
+    [bool]($t -match '(?i)\b(?:intentional(?:ly)?|by design|on purpose|deliberate(?:ly)?|not a bug|as intended|working as designed|(?:a |my )?conscious (?:choice|decision)|bewust(?:e keuze)?|opzettelijk|geen bug|zo bedoeld)\b')
+}
+
 function Test-UnfinishedText([AllowEmptyString()][string]$Text) {
     <# Whether a reply that changed nothing says, in the first person, work it still has to do
        before the change ("Need to inspect the CSS before making the change", "I will update",
@@ -275,4 +284,4 @@ function Get-NextSteps {
     @($steps | Select-Object -First $Max)
 }
 
-Export-ModuleMember -Function Test-UnfinishedText, Get-ScreenshotSteps, Test-ProposalText, Get-ActionBlocks, Get-ActionPaths, Get-TodoItems, Get-NextSteps
+Export-ModuleMember -Function Test-DefendedChoice, Test-UnfinishedText, Get-ScreenshotSteps, Test-ProposalText, Get-ActionBlocks, Get-ActionPaths, Get-TodoItems, Get-NextSteps

@@ -115,6 +115,8 @@ function Get-StateSnapshot($State) {
         project = $(if ($State.ProjectRoot) { @{ name = (Split-Path $State.ProjectRoot -Leaf); path = $State.ProjectRoot; location = @(Get-ProjectLocation $State.ProjectRoot) } } else { $null })
         mode = $State.Mode; busy = $State.Busy; progress = $State.Progress
         copilot = $State.Copilot; copilotMessage = $State.CopilotMessage
+        # After a failed connect: when the idle worker tries again ('' when it stopped trying by itself).
+        copilotRetryAt = $(if ($State.Copilot -eq 'error' -and $State.NextConnectAttempt) { ([datetime]$State.NextConnectAttempt).ToString('o') } else { '' })
         throttle = $State.Throttle; credits = $State.Credits; todos = @($State.Todos)
         promptLimit = $State.Config.promptCharBudget
         logLevel = (Sync-LogLevel $State)   # the shared level, not this thread's copy: the menu steps from it

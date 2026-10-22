@@ -38,7 +38,7 @@ Describe 'New-PromptMessage' {
         $m | Should Match 'OneDrive > CCBridge > budget tracker'
         $m | Should Match 'Request: Fix the build$'
         $m | Should Not Match 'app\.py|hello\.py|dotnet build|CCBridge sends'
-        $m.Length -lt 6300 | Should Be $true     # includes the folder rules, the work method (read before answering, honest done, no apology, check the installed version) and WHAT CAN RUN HERE (tools, installs, commands, web, checks, what to suggest)
+        $m.Length -lt 6500 | Should Be $true     # includes the person-first rule, the folder rules, the work method (read before answering, honest done, no apology, check the installed version) and WHAT CAN RUN HERE (tools, installs, commands, web, checks, what to suggest)
     }
 
     It 'gives assistant tasks only the role, the read-only rule, saving and the location' {

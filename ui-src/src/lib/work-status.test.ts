@@ -36,7 +36,12 @@ describe("workView", () => {
   it("warns after three minutes without any sign, with how long StreamHub waits", () => {
     const v = workView(work({ lastSignAt: iso(100), lastDataAt: "" }), base + 400_000);
     expect(v.quiet).toBe(true);
-    expect(v.sign).toBe("updated 5 min ago");
+    // Nothing since the step began: the step's own time and the warning say it; no third timer.
+    expect(v.sign).toBe("");
+    // Something during the step (a step or reply data after it began): said, with how long ago.
+    expect(workView(work({ phaseAt: iso(100), lastSignAt: iso(380), lastDataAt: "" }), base + 400_000).sign).toBe("updated 20 s ago");
+    // Right at the start of the step: the same as the step's time, so left out.
+    expect(workView(work({ phaseAt: iso(380), lastSignAt: iso(381), lastDataAt: "" }), base + 400_000).sign).toBe("");
     expect(v.quietText).toMatch(/up to 30 min in all; with no sign at all it stops after 1 min 30 s/);
     expect(workView(work({ lastSignAt: iso(100), waitSec: 0 }), base + 400_000).quietText).toMatch(/still on this step/);
   });

@@ -1,7 +1,8 @@
-import { CircleX } from "lucide-react";
+import { CircleX, RefreshCw } from "lucide-react";
 import { useRef } from "react";
 import type { AppState } from "@/lib/api";
 import { api } from "@/lib/api";
+import { copilotRetry } from "@/lib/copilot-retry";
 import { cn } from "@/lib/utils";
 
 const LABELS: Record<AppState["copilot"], string> = {
@@ -41,17 +42,37 @@ function ConnectIcon({ done }: { done: boolean }) {
   );
 }
 
-/** Copilot connection state for the header: an icon (spinner that turns into a check, or a cross) and a word. */
-export function CopilotStatus({ copilot, message }: { copilot: AppState["copilot"]; message: string }) {
+/**
+ * Copilot connection state for the header: an icon (spinner that turns into a check, or a cross) and a
+ * word. Not connected: when StreamHub tries again by itself, with Retry; once it stopped trying by
+ * itself, a Check connection button.
+ */
+export function CopilotStatus({ copilot, message, retryAt }: { copilot: AppState["copilot"]; message: string; retryAt?: string }) {
   const tip = message ? `Copilot in Edge: ${message}` : `Copilot in Edge: ${LABELS[copilot].toLowerCase()}`;
   const connecting = copilot === "connecting" || copilot === "ready";
+  const retry = copilotRetry(copilot, retryAt);
   return (
     <span className="flex items-center gap-1.5 text-muted-foreground text-xs" title={tip}>
       {connecting ? <ConnectIcon done={copilot === "ready"} /> : <CircleX aria-hidden className="h-3.5 w-3.5" />}
       <span>Copilot {LABELS[copilot].toLowerCase()}</span>
-      {copilot === "error" && (
-        <button className="kit-link no-underline hover:underline" onClick={() => api.connect()} type="button">
-          Retry
+      {retry.kind === "auto" && (
+        <>
+          <span aria-hidden>·</span>
+          <span>tries again at {retry.at}</span>
+          <button className="kit-link no-underline hover:underline" onClick={() => api.connect()} type="button">
+            Retry now
+          </button>
+        </>
+      )}
+      {retry.kind === "stopped" && (
+        <button
+          className="kit-btn kit-btn--sm"
+          onClick={() => api.connect()}
+          title="StreamHub stopped trying by itself. Check that Edge is open and you are signed in to Copilot there, then check again."
+          type="button"
+        >
+          <RefreshCw aria-hidden className="h-3.5 w-3.5" />
+          Check connection
         </button>
       )}
     </span>

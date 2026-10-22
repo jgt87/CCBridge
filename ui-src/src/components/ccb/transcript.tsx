@@ -572,7 +572,7 @@ function WorkStatusLines({ work, onStop, onShowCopilot, stopping }: { work: Work
       <div className="text-foreground/80 text-sm">{v.phase}</div>
       <div className="text-muted-foreground text-xs tabular-nums">
         {v.detail}
-        {v.detail ? " · " : ""}
+        {v.detail && v.sign ? " · " : ""}
         {v.sign}
       </div>
       {v.quiet && (

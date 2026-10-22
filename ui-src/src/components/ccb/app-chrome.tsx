@@ -50,7 +50,7 @@ export function AppHeader({ state, showDrawerButton, onOpenDrawer, onSwitchProje
         </button>
       )}
       <div className="flex-1" />
-      <CopilotStatus copilot={state.copilot} message={state.copilotMessage} />
+      <CopilotStatus copilot={state.copilot} message={state.copilotMessage} retryAt={state.copilotRetryAt} />
       <button
         aria-label="Settings"
         className="kit-btn kit-btn--ghost kit-btn--icon h-8 w-8 text-muted-foreground hover:text-foreground"

@@ -39,6 +39,7 @@ function New-AgentState {
         ResponseOptions = @((Read-ResponseOptionsFile).options); ResponseOptionsRead = (Read-ResponseOptionsFile).read   # what Copilot's picker offers (read weekly)
         ReviewByCaller = $false   # MCP tasks: the calling model checks the result, so no Copilot review round
         NextConnectAttempt = $null
+        ConnectFailures = 0   # failed connects in a row: the idle worker's retries wait longer, then stop (Get-ConnectRetryDelay)
         OpenSync = $null   # a project just opened: its data files are converted at the next idle moment
         TurnAnswers = @{}   # request-scope setup answers (ProjectSetup) for the turn at hand
         ReadStamps = @{}   # per file: the fingerprint at Copilot's last read (line-range edits) and the last it saw (the stale note)
@@ -271,7 +272,7 @@ function Get-Bridge($State) {
         $save = if ($null -ne $State.Config.saveReplyFrames) { [bool]$State.Config.saveReplyFrames } else { $true }
         $signIn = if ("$($State.Config.signIn)" -eq 'private') { 'private' } else { 'single-sign-on' }
             $script:Bridge = Connect-Copilot -Port $State.Config.cdpPort -SaveReplyFrames $save -SignIn $signIn
-        $State.Copilot = 'ready'; $State.CopilotMessage = ''
+        $State.Copilot = 'ready'; $State.CopilotMessage = ''; $State.ConnectFailures = 0
         $State.CopilotThemeApplied = $null; Update-CopilotTheme $State   # a new connection: the tab gets StreamHub's theme again
         # What the response picker offers on this tenant (Advanced reasoning, models...), for the app's picker.
         if (Test-ResponseOptionsDue $State) { Update-ResponseOptions $State $script:Bridge }
@@ -289,9 +290,28 @@ function Get-Bridge($State) {
         $script:Bridge
     } catch {
         $State.Copilot = 'error'; $State.CopilotMessage = $_.Exception.Message
-        $State.NextConnectAttempt = (Get-Date).AddSeconds(30)   # the idle worker retries, so Copilot is ready before the first prompt
+        # The idle worker retries, so Copilot is ready before the first prompt: waiting longer each
+        # time, and stopping by itself after a while (Edge closed, signed out, no network).
+        $State.ConnectFailures = [int]$State.ConnectFailures + 1
+        $wait = Get-ConnectRetryDelay $State.ConnectFailures
+        if ($null -ne $wait) { $State.NextConnectAttempt = (Get-Date).AddSeconds($wait) }
+        else {
+            $State.NextConnectAttempt = $null
+            $State.CopilotMessage = "$($_.Exception.Message) StreamHub stopped trying by itself after $($State.ConnectFailures) attempts: press Check connection, or send a message to try again."
+            Write-CCBLog info agent "Copilot connection: no more automatic retries after $($State.ConnectFailures) attempts"
+        }
         throw
     }
+}
+
+function Get-ConnectRetryDelay([int]$Failures) {
+    <# Seconds before the idle worker tries to connect to Copilot again after this many failures in a
+       row, or $null to stop trying by itself: 30 s, 1 min, 2 min, 5 min, then every 10 min, about an
+       hour in all. A Retry or a message the person sends starts the count over. #>
+    $waits = @(30, 60, 120, 300, 600, 600, 600)
+    if ($Failures -lt 1) { return $waits[0] }
+    if ($Failures -gt $waits.Count) { return $null }
+    $waits[$Failures - 1]
 }
 
 function Get-CopilotThemeWanted($State) {
@@ -3204,6 +3224,19 @@ function Test-AutoRun($State, [string]$Command) {
 
 function Get-PreviewText([string]$s) { if ($null -eq $s) { return $null } Limit-Text $s 200000 }
 
+function Get-LastDoneText($State) {
+    <# What Copilot last reported as done in this chat (the text of the newest done event since the last
+       New chat or cleared history), or $null when it reported nothing done yet. #>
+    $events = @($State.Events)
+    for ($i = $events.Count - 1; $i -ge 0; $i--) {
+        $e = $events[$i]
+        if (-not $e) { continue }
+        if ($e.type -in 'newchat', 'history-cleared') { return $null }
+        if ($e.type -eq 'done') { return "$($e.text)" }
+    }
+    $null
+}
+
 function Get-DisputeCandidates($State, [string]$Path) {
     <# The findings of the last file check on this file (texts), which an ACTION dispute may point at. #>
     $want = "$Path".Trim().Replace('\', '/').TrimStart('.', '/').ToLowerInvariant()
@@ -4374,6 +4407,7 @@ function Invoke-AgentTurn {
         }
 
         $nudges = 0   # times this message was sent again because Copilot explained instead of acting
+        $userFirstSent = $false   # the request sent back once because Copilot kept an earlier choice the person asked to change
         $failSeen = @{}; $stopLoop = $false   # the same step failing the same way: warn at 2, stop at 3
         $errorRounds = @{}   # file-check errors per key: still there a round later = evidence and a diagnosis first
         $errorFirst = @{}; $lastErrorKeys = @(); $turnSeq = [int]$State.Seq   # for the fix case log of errors that needed more than one change
@@ -4383,7 +4417,27 @@ function Invoke-AgentTurn {
         $guiNudges = 0      # times "done" was refused because a window app did not open (GuiTest)
         $doneReminded = $false   # the one reminder at "done" (tests, README) was sent
         $shotShown = $false; $attach = @(); $fileAttach = @()   # a screenshot of a changed page goes to Copilot once per task
-        $State.BeforeShots = @{}; $State.ReadRanges = @{}; $shotAgain = $false; $sameNudged = $false; $shotNote = ''   # before/after comparison (Save-BeforeShot)
+        $State.BeforeShots = @{}; $State.ReadRanges = @{}; $shotAgain = $false; $sameNudges = 0; $shotNote = ''   # before/after comparison (Save-BeforeShot)
+        # The person says the last change did not take effect (Prompts Test-NotAppliedReport, after an
+        # earlier done in this chat): Copilot starts from the page as it is now, finds the cause first,
+        # and done is earned, not claimed: refused while no file changed, and the before/after check
+        # sends it back up to three times while the page looks exactly the same.
+        $askKind0 = if ($kind -eq 'chat' -and $State.ChatKind) { $State.ChatKind } else { $kind }
+        $lastDone = Get-LastDoneText $State
+        $notApplied = $askKind0 -in 'coding', 'mixed', 'project' -and $State.Mode -ne 'plan' -and -not $State.IssueFix -and $null -ne $lastDone -and (Test-NotAppliedReport $Text)
+        $notAppliedNudges = 0; $sameLimit = $(if ($notApplied) { 3 } else { 1 })
+        if ($notApplied) {
+            $hasShot = $false
+            $shotPage = if ($State.LastShotPage) { "$($State.LastShotPage)" } elseif (Test-Path -LiteralPath (Join-Path $State.ProjectRoot 'index.html')) { 'index.html' } else { '' }
+            if ($shotPage) {
+                try { Save-BeforeShot $State $shotPage } catch { Write-CCBLogError agent 'screenshot at a not-applied report' $_ }
+                $b = "$($State.BeforeShots[$shotPage])"
+                if ($b) { $attach = @(Join-Path $State.ProjectRoot $b.Replace('/', '\')); $hasShot = $true }
+            }
+            $message += "`n`n" + (Get-NotAppliedBrief $lastDone $hasShot)
+            Write-CCBLog info agent 'The person says the last change did not take effect; cause first, done only with a visible change' @{ screenshot = $hasShot }
+            Add-AgentEvent $State 'status' @{ text = "You said the change did not take effect: Copilot first finds out why$(if ($hasShot) { ', starting from the page as it looks now' }). Done is accepted only when files changed and the page looks different." }
+        }
         $warnedKeys = New-Object System.Collections.Generic.HashSet[string]   # likely mistakes are said once per task
         $enf = Get-Enforcement "$($State.Config.enforcement)"; $warnNudges = 0   # setting enforcement: light, standard, strict
         # Files Copilot is fixing (path -> line of the problem) and rollbacks of changes that made a file worse.
@@ -4533,6 +4587,18 @@ function Invoke-AgentTurn {
                 $notesOnlyGo = $true
                 Write-CCBLog info agent 'Reply held only the notes asked for; asking Copilot to carry out the task'
                 $message = (Get-NotesGoAhead)
+                continue
+            }
+            # The person asked to change something and Copilot defends what is there ("intentional",
+            # "by design", "not a bug") without changing anything: the person's request comes first,
+            # over earlier choices of Copilot or the helper program. Sent back once per message.
+            $askKind = if ($kind -eq 'chat' -and $State.ChatKind) { $State.ChatKind } else { $kind }
+            if (-not $userFirstSent -and $lastProgress -eq 0 -and $askKind -in 'coding', 'mixed', 'project' -and $State.Mode -ne 'plan' -and -not $State.IssueFix -and
+                -not @($actions | Where-Object { $_.type -in 'write', 'edit', 'run' }).Count -and (Test-ChangeAsk $Text) -and (Test-DefendedChoice $r.Text)) {
+                $userFirstSent = $true
+                Write-CCBLog info agent 'Copilot kept an earlier choice the person asked to change; sending the request back, the person first'
+                Add-AgentEvent $State 'status' @{ text = 'Copilot kept its earlier choice instead of making the change you asked for. StreamHub sent your request back: what you ask comes first.' }
+                $message = Get-UserFirstMessage
                 continue
             }
             if (-not $actions.Count) {
@@ -4868,6 +4934,14 @@ function Invoke-AgentTurn {
             if ($State.Cancel) { Add-AgentEvent $State 'status' @{ text = 'Stopped. Changes made so far in this message can be undone.' }; break }
             if ($stopLoop) { break }
             if ($isDone) {
+                # The person said the last change did not take effect: done with no file changed in this
+                # message is not a fix (at most three times, then it is taken as it is).
+                if ($notApplied -and -not $checkpoint.Files.Count -and $notAppliedNudges -lt 3 -and -not $State.Cancel) {
+                    $notAppliedNudges++
+                    Add-AgentEvent $State 'status' @{ text = "Copilot said done without changing any file, while you said the change did not take effect. Sent back to find the cause and fix it ($notAppliedNudges of 3)." }
+                    $message = Get-NotAppliedRefusal
+                    continue
+                }
                 # Once per task: code changed without a test (in a project with tests), or a new part
                 # in src/ or Scripts/ without a README line (Get-DoneReminders). Not for issue fixes.
                 if (-not $doneReminded -and $checkpoint.Files.Count -and -not $State.IssueFix -and $State.Mode -ne 'plan' -and -not $State.Cancel) {
@@ -5073,7 +5147,11 @@ function Invoke-AgentTurn {
                                 $p0 = @($ba.pairs)[0]
                                 $attach = @((Join-Path $State.ProjectRoot $p0.after.Replace('/', '\')), (Join-Path $State.ProjectRoot $p0.before.Replace('/', '\')))
                                 $shotNote += ' The first image is the page now, the second the page before your changes. If your change should show on this page as it opens, it is not working yet: check that the page loads the changed file, that the selectors match and that nothing overrides the new style, fix it and send done again. If it is in another view, use ACTION screenshot with the steps to get there.'
-                                if (-not $sameNudged) { $sameNudged = $true; $shotAgain = $true }
+                                if ($notApplied) { $shotNote = 'The person already said the change did not show, and it still does not. ' + $shotNote }
+                                if ($sameNudges -lt $sameLimit) { $sameNudges++; $shotAgain = $true }
+                                elseif ($notApplied) {
+                                    Add-AgentEvent $State 'error' @{ text = "After $sameNudges more tries, $(@($ba.same) -join ', ') still looks exactly the same as when you said the change did not take effect. Copilot's done is not a visible change."; code = 'NOT-APPLIED'; hint = 'Check the page yourself; if the change belongs in another view, say which one. Otherwise describe what you see, or try a New chat.' }
+                                }
                             } else {
                                 $shotNote += ' Check that this is the change that was asked for, and that nothing changed where it should not.'
                                 $c0 = @($ba.crops)[0]
@@ -5351,8 +5429,8 @@ function Start-AgentWorker {
             # Keep Copilot staged: after a failed connect, try again while nothing else is happening.
             if (-not $State.Headless -and $State.Copilot -eq 'error' -and $State.NextConnectAttempt -and (Get-Date) -gt $State.NextConnectAttempt) {
                 $State.NextConnectAttempt = $null
-                Write-CCBLog info agent 'Retrying the Copilot connection'
-                $State.Tasks.Enqueue(@{ kind = 'connect' })
+                Write-CCBLog info agent "Retrying the Copilot connection (attempt $([int]$State.ConnectFailures + 1))"
+                $State.Tasks.Enqueue(@{ kind = 'connect'; auto = $true })
             }
             Update-CopilotTheme $State   # idle: a theme just chosen in the app reaches the Copilot tab at once
             [Threading.Monitor]::Enter($State.ProjectGate)
@@ -5444,7 +5522,11 @@ function Start-AgentWorker {
             if ($State.ProjectRoot -and -not $State.Headless -and (-not $task.source -or $task.source -eq 'user')) { try { Use-BigTaskPreference $State $task } catch { Write-CCBLogError agent 'big task preference' $_ } }
             if ($State.ProjectRoot -and $task.kind -notin 'connect', 'newchat') { try { Sync-ProtectedVault $State.ProjectRoot } catch { Write-CCBLogError agent 'protected files' $_ } }
             switch ($task.kind) {
-                'connect' { $null = Get-Bridge $State }
+                'connect' {
+                    # Retry in the app (not the idle worker's own retry): the count of failures starts over.
+                    if (-not $task.auto) { $State.ConnectFailures = 0 }
+                    $null = Get-Bridge $State
+                }
                 'chat'    {
                     if ($task.newChat) { $State.NeedNewChat = $true }
                     $force = if ($task.forceKind) { "$($task.forceKind)" } elseif ($task.source -eq 'mcp' -or $task.source -eq 'api') { 'work' } else { '' }

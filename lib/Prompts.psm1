@@ -162,6 +162,57 @@ function Test-BuildRequest([string]$Text) {
     [bool]("$Text" -match $script:BuildPattern)
 }
 
+# A message that asks to change something already there, back or into another form ("change it back
+# to a donut", "make the chart a ring again", "switch to", "revert", "zet het terug"): with
+# Test-DefendedChoice, the turn sends the request back when Copilot keeps its earlier choice.
+$script:ChangeAskPattern = '(?i)\b(change|switch|turn|revert|undo|restore|replace|convert|back to|again|instead|make (?:it|the|them|this|that)|use (?:a|an|the)|verander|wijzig|zet|terug|vervang|maak (?:er|het|de|dit|dat)|weer)\b'
+
+function Test-ChangeAsk([string]$Text) {
+    <# Whether a message asks to change something already there (see $script:ChangeAskPattern). #>
+    [bool]("$Text" -match $script:ChangeAskPattern)
+}
+
+# A follow-up that says the last change did not take effect ("nothing changed", "it still shows the
+# old header", "try again", "the change wasn't executed properly"; English and Dutch).
+$script:NotAppliedPattern = '(?ix)
+    \b(?:nothing\s+(?:has\s+)?(?:happened|changed|is\s+different|shows|moved)|no(?:thing)?\s+(?:has\s+)?changed|no\s+(?:visible\s+)?(?:change|difference)
+    |did(?:n.?t|\s+not)\s+(?:change|work|happen|apply|take\s+effect|show(?:\s+up)?)
+    |(?:has|have)(?:n.?t|\s+not)\s+(?:changed|worked|been\s+(?:applied|executed|done|changed|made))
+    |(?:was|were)(?:n.?t|\s+not)\s+(?:applied|executed|done|changed|made)
+    |not\s+(?:executed|applied|working|visible|changed)
+    |still\s+(?:the\s+same|shows?|looks?|has|says|a\b|an\b|there|visible)|(?:is|are|stays?)\s+(?:\w+\s+){0,3}?still\b(?!\s+(?:possible|able|allowed|needed|required|supported|valid|okay|ok|fine|working|correct|open|to\b))
+    |same\s+as\s+(?:before|it\s+was)|looks\s+(?:exactly\s+)?the\s+same
+    |(?:try|do)\s+(?:it\s+)?again
+    |(?:i|we)\s+(?:can.?t|cannot|don.?t|do\s+not)\s+see\s+(?:the|any|a|your)\s+(?:change|difference)
+    |niets\s+(?:is\s+)?(?:veranderd|gewijzigd)|niet\s+(?:veranderd|aangepast|doorgevoerd|uitgevoerd|zichtbaar|gelukt)
+    |werkt\s+(?:nog\s+)?niet|nog\s+steeds|(?:het\s+)?zelfde\s+als\s+(?:eerst|voorheen|daarvoor)
+    |probeer\s+(?:het\s+)?(?:nog\s+eens|opnieuw)
+    )'
+
+function Test-NotAppliedReport([string]$Text) {
+    <# Whether a message reports that the last change did not take effect (see $script:NotAppliedPattern). #>
+    [bool]("$Text" -match $script:NotAppliedPattern)
+}
+
+function Get-NotAppliedBrief([string]$LastDone, [bool]$HasShot) {
+    <# Sent with a message that reports the last change did not take effect (Agent, Test-NotAppliedReport):
+       what Copilot claimed, the page as it is now, and the cause first. #>
+    $claim = if ($LastDone) { "Your last answer said: `"$(("$LastDone" -replace '\s+', ' ').Trim().Substring(0, [Math]::Min(300, ("$LastDone" -replace '\s+', ' ').Trim().Length)))`". " } else { '' }
+    "THE PERSON SAYS YOUR LAST CHANGE DID NOT TAKE EFFECT. ${claim}What they see does not show it$(if ($HasShot) { ' (attached: the page as it looks now)' }). Do not send the same edit again. First find out why it did not show: read the file the page really loads for that part (follow its link and script tags, not the file you expected to be used); look for a later or more specific CSS rule, an inline style or a script that overrides it; check that the selector, class or id matches the markup; check whether the page is built from another file (a build step, a template, a page another script writes, a one-file page's kit or data block) or the change sits in a view the page does not open with. Say in one line what the cause was, then fix it. The helper program compares the page before and after: done is not accepted while no file changed or while the page still looks exactly the same."
+}
+
+function Get-NotAppliedRefusal {
+    <# Done refused in a turn where the person said the last change did not take effect, and no file changed. #>
+    "Done is not accepted yet: no file changed in this message, and the person said the change did not take effect. Find the cause (the file the page really loads, a rule or script that overrides the change, a selector that does not match, a build step or generated page) and change the files so it shows; then send done."
+}
+
+function Get-UserFirstMessage {
+    <# Sent back when Copilot kept an earlier choice (its own or the helper program's) that the person
+       asked to change, defending it as intentional (Agent, Test-DefendedChoice). The request itself
+       goes with every message of the turn already (Agent Format-TaskMessage), so it is not repeated. #>
+    "You kept what is there instead of making the change the person asked for (the request above). What the person asks comes before any earlier choice, yours or the helper program's, and before the general rules about what to choose: that something was intentional is no reason to keep it. Make the change they asked for now, with action blocks; if it truly cannot be done, say exactly what stops it."
+}
+
 function Test-LookRequest {
     <# The message asks to change how something looks (a fixed rule on its words): then the person's
        look wins over the UI kit's for this change (rules/userlook.md, and the kit's look checks rest). #>
@@ -274,6 +325,9 @@ function Get-TaskIntent {
     param([string]$Text, [string]$Mode = '', [string]$Previous = '')
     if ($Mode -eq 'plan' -or $Text -match '(?i)\b(do not|don.t|without|no|geen|niet)\s+(make\s+)?(changes?|edit\w*|modif\w*|chang\w*|wijzig\w*|aanpass\w*)\b|\b(review|plan|explain|analyse|analyze) only\b') { return 'investigate' }
     if ($Text -match '(?i)^\s*(continue|go ahead|do it|proceed|ga door)[.!\s]*$' -and $Previous -in 'answer', 'investigate', 'change') { return $Previous }
+    # "Nothing changed", "it is still blue", "try again": the last change did not take effect, so this
+    # asks for a working change, also when worded as a question ("why is it still blue?").
+    if (Test-NotAppliedReport $Text) { return 'change' }
     if ($Text -match '(?i)^\s*(how (do|can|should|would)|why|what (does|is|are|would)|where (is|are)|which|explain|hoe|waarom|wat doet)\b' -and $Text -notmatch '(?i)\b(and|then|en)\s+(please\s+)?(fix|implement|apply|change|update|edit|repareer)\b') { return 'answer' }
     if ($Text -match $script:ChangePattern -or $Text -match $script:FixPattern -or $Text -match '(?i)\b(write|save|export|schrijf|sla op)\b') { return 'change' }
     if ($Text -match '(?i)\b(review|investigate|inspect|diagnos\w*|analy[sz]e|audit|check|read|find|search|onderzoek|controleer|lees)\b') { return 'investigate' }
@@ -520,4 +574,4 @@ function Get-AutoAgent {
     @{ agent = ''; why = '' }
 }
 
-Export-ModuleMember -Function Get-TaskIntent, Test-LeakReport, Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage, Test-BuildRequest, Test-LookUnclear
+Export-ModuleMember -Function Test-NotAppliedReport, Get-NotAppliedBrief, Get-NotAppliedRefusal, Test-ChangeAsk, Get-UserFirstMessage, Get-TaskIntent, Test-LeakReport, Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage, Test-BuildRequest, Test-LookUnclear

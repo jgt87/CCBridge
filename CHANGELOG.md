@@ -6,6 +6,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.146] - 2026-10-22
+
+### Added
+- Your request comes first: what you ask now wins over choices Copilot or StreamHub made before (a chart's form, a layout, a wording). Copilot is told so with every message, and the rules that leave a choice to Copilot (charts, dashboards, how data is shown) now say "unless the person names a form". When you ask for a change and Copilot keeps what is there because it was "intentional", "by design" or "not a bug" without changing anything, StreamHub sends your request back once and says so in the chat. Filtering also keeps a chart's form: every chart kind, donut included, can filter the page.
+- "The change did not take effect": a follow-up such as "nothing changed", "it is still blue", "try again" or "er is niets veranderd" (after Copilot reported a change as done) now gets Copilot a screenshot of the page as it is now and what it claimed last time, and asks it to find the cause before editing (the file the page really loads, a rule or script that overrides the change, a selector that does not match, a build step or generated page). Done is not accepted while no file changed; a page that still looks exactly the same is sent back up to three times, then an error card says so instead of a claimed success.
+- Copilot not connected: StreamHub tries again by itself after 30 s, 1, 2 and 5 minutes, then every 10 minutes, and stops after about an hour. The header says when the next try is (with Retry now); once it stopped, a Check connection button tries again.
+
+### Fixed
+- A follow-up saying the last change did not take effect ("Nothing changed, the header is still blue") was sent to Copilot as a question, with the instruction not to change project files. It now counts as a request to make the change work.
+
+### Changed
+- The waiting card shows "updated … ago" or "Copilot wrote … ago" only when something happened after the current step began; before, it often repeated the step's own time.
+
 ## [v0.1.145] - 2026-10-21
 
 ### Fixed
