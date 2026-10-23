@@ -15,6 +15,7 @@ Read and follow this list in every session. When a mistake happens (a failed gat
   - Run the combined checks only after all of them are done: `tsc -b`, lint, all vitest, `npm run build`, the kit Pester tests and the 0x08 check. Errors a fork reports in another fork's files are usually work still in progress.
   - Read their patches for duplicated blocks; once a reviewer's patch duplicated whole functions in `SqlServer.psm1`.
   - Usage limits stop them; resume with SendMessage, one at a time.
+  - Tell each one never to run `git stash`, `git checkout -- .`, `git reset` or anything else that touches the whole tree: they share one working tree, and a stash hides every other fork's work in progress. To compare with the committed version, use `git show HEAD:PATH` or `git diff`.
 - **Line endings.** After scripted edits, check that a file has not ended up with mixed LF/CRLF endings, and normalise it to the file's majority.
 - **A gate failure in code the release did not touch:** run that test file on its own (twice) before changing anything. If it passes, run the gate again and tell the user it looked flaky (as `Issues.Tests.ps1` "The fix cycle cannot loop" did in v0.1.147). If it fails again, find the cause.
 - **Repowise health findings.**

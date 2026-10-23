@@ -140,26 +140,10 @@ function reportAction(ctx: CommandContext, a: { id: string; label: string; descr
   };
 }
 
-function commandActions(ctx: CommandContext, show: (p: PaletteKind) => void, setTestRuns: (items: TestRunItem[]) => void, appEntry: string | null): Action[] {
-  const { state } = ctx;
-  const later = (f: () => void) => () => setTimeout(f, 0);
-  const saveName = (state.project?.name || "Test").replace(/[^\w .-]/g, "").trim().slice(0, 48) || "Test";
+/** Saving this chat as a test run, and the list of saved test runs to run again. */
+function testRunCommands(ctx: CommandContext, show: (p: PaletteKind) => void, setTestRuns: (items: TestRunItem[]) => void): Action[] {
+  const saveName = (ctx.state.project?.name || "Test").replace(/[^\w .-]/g, "").trim().slice(0, 48) || "Test";
   return [
-    { id: "new-chat", label: "New chat", description: "Start a fresh Copilot chat; the project stays open", icon: icon(MessageSquarePlus), end: "Command", onSelect: ctx.startNewChat },
-    { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: icon(RotateCcw), end: "Command", onSelect: () => api.undo() },
-    { id: "settings", label: "Settings", icon: icon(Settings), end: "Command", onSelect: later(ctx.openSettings) },
-    { id: "project", label: "Switch project", description: "Open or create a OneDrive project folder", icon: icon(FolderOpen), end: "Command", onSelect: ctx.openPicker },
-    { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: icon(AtSign), end: "Command", onSelect: later(() => show("attach")) },
-    {
-      // Opens a second list with the levels to choose from (loggingActions).
-      id: "logging",
-      label: `Logging: ${state.logLevel || "info"}`,
-      description: "Choose how much the diagnostic log records; stays on after restarts",
-      icon: icon(ScrollText),
-      end: "Diagnostics",
-      onSelect: later(() => show("logging")),
-    },
-    ...(appEntry ? exportActions(ctx, appEntry) : []),
     {
       id: "testrun-save",
       label: "Save this chat as a test run",
@@ -188,6 +172,12 @@ function commandActions(ctx: CommandContext, show: (p: PaletteKind) => void, set
           (e) => ctx.fail((e as Error).message)
         ),
     },
+  ];
+}
+
+/** The session report and the diagnostics zip. */
+function reportActions(ctx: CommandContext): Action[] {
+  return [
     reportAction(ctx, {
       id: "session-report",
       label: "Session report",
@@ -206,7 +196,35 @@ function commandActions(ctx: CommandContext, show: (p: PaletteKind) => void, set
       doneText: "Diagnostics saved",
       run: api.diagnostics,
     }),
-    ...MODES.map((m) => ({ id: `mode:${m.id}`, label: `Mode: ${m.label}`, description: m.description, icon: m.icon, end: state.mode === m.id ? "Active" : "Mode", onSelect: () => api.setMode(m.id as Mode) })),
+  ];
+}
+
+/** One entry per mode; the current one says Active. */
+function modeActions(ctx: CommandContext): Action[] {
+  return MODES.map((m) => ({ id: `mode:${m.id}`, label: `Mode: ${m.label}`, description: m.description, icon: m.icon, end: ctx.state.mode === m.id ? "Active" : "Mode", onSelect: () => api.setMode(m.id as Mode) }));
+}
+
+function commandActions(ctx: CommandContext, show: (p: PaletteKind) => void, setTestRuns: (items: TestRunItem[]) => void, appEntry: string | null): Action[] {
+  const later = (f: () => void) => () => setTimeout(f, 0);
+  return [
+    { id: "new-chat", label: "New chat", description: "Start a fresh Copilot chat; the project stays open", icon: icon(MessageSquarePlus), end: "Command", onSelect: ctx.startNewChat },
+    { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: icon(RotateCcw), end: "Command", onSelect: () => api.undo() },
+    { id: "settings", label: "Settings", icon: icon(Settings), end: "Command", onSelect: later(ctx.openSettings) },
+    { id: "project", label: "Switch project", description: "Open or create a OneDrive project folder", icon: icon(FolderOpen), end: "Command", onSelect: ctx.openPicker },
+    { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: icon(AtSign), end: "Command", onSelect: later(() => show("attach")) },
+    {
+      // Opens a second list with the levels to choose from (loggingActions).
+      id: "logging",
+      label: `Logging: ${ctx.state.logLevel || "info"}`,
+      description: "Choose how much the diagnostic log records; stays on after restarts",
+      icon: icon(ScrollText),
+      end: "Diagnostics",
+      onSelect: later(() => show("logging")),
+    },
+    ...(appEntry ? exportActions(ctx, appEntry) : []),
+    ...testRunCommands(ctx, show, setTestRuns),
+    ...reportActions(ctx),
+    ...modeActions(ctx),
     ...fileActions(ctx, false),
   ];
 }

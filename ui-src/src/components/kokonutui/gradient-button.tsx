@@ -116,33 +116,42 @@ const gradientColors: Record<Exclude<ColorVariant, "subtle">, GradientColors> = 
   },
 };
 
+type ButtonRest = Omit<GradientButtonProps, "label" | "className" | "variant">;
+
+// CCBridge: flat design. "neutral" is a solid primary button, "subtle" a flat secondary one.
+function FlatButton({
+  label,
+  className,
+  variant,
+  ...props
+}: ButtonRest & { label: string; className?: string; variant: "neutral" | "subtle" }) {
+  return (
+    <Button
+      className={cn(
+        "h-10 rounded-md px-4 font-medium text-sm shadow-none transition-colors disabled:opacity-40",
+        variant === "neutral"
+          ? "bg-foreground text-background hover:bg-foreground/85 hover:text-background"
+          : "bg-black/5 text-foreground hover:bg-black/10 hover:text-foreground dark:bg-white/10 dark:hover:bg-white/15",
+        className
+      )}
+      variant="ghost"
+      {...props}
+    >
+      {label}
+    </Button>
+  );
+}
+
 export default function GradientButton({
   label = "Welcome",
   className,
   variant = "neutral",
   ...props
 }: GradientButtonProps) {
-  // CCBridge: flat design. "neutral" is a solid primary button, "subtle" a flat secondary one;
-  // the layered gradient rendering below is kept for the original colour variants.
+  // The layered gradient rendering is kept for the original colour variants.
   if (variant === "neutral" || variant === "subtle") {
-    return (
-      <Button
-        className={cn(
-          "h-10 rounded-md px-4 font-medium text-sm shadow-none transition-colors disabled:opacity-40",
-          variant === "neutral"
-            ? "bg-foreground text-background hover:bg-foreground/85 hover:text-background"
-            : "bg-black/5 text-foreground hover:bg-black/10 hover:text-foreground dark:bg-white/10 dark:hover:bg-white/15",
-          className
-        )}
-        variant="ghost"
-        {...props}
-      >
-        {label}
-      </Button>
-    );
+    return <FlatButton className={className} label={label} variant={variant} {...props} />;
   }
-
-  const colors = gradientColors[variant];
 
   return (
     <Button
@@ -153,6 +162,15 @@ export default function GradientButton({
       variant="ghost"
       {...props}
     >
+      <GradientLayers colors={gradientColors[variant]} label={label} />
+    </Button>
+  );
+}
+
+// The original look: border, base, overlay, accent and glow layers under the gradient label.
+function GradientLayers({ colors, label }: { colors: GradientColors; label: string }) {
+  return (
+    <>
       <div
         className={cn(
           "absolute inset-0 rounded-lg bg-linear-to-b p-[2px]",
@@ -228,6 +246,6 @@ export default function GradientButton({
           colors.dark.hover
         )}
       />
-    </Button>
+    </>
   );
 }

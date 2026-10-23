@@ -26,20 +26,13 @@ const field =
 
 type Scope = "all" | "changes" | "paths";
 
-/** Code review: Copilot reviews the code read-only; every finding is checked against the file; pick findings to fix. */
-export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; tick: number }) {
-  const [notice, setNotice] = useState("");
-  const [reviews, setReviews] = useState<ReviewSummary[]>([]);
-  const [openId, setOpenId] = useState<string | null>(null);
+/** The open report: its findings, the ones picked to fix, and Fix and Ignore; a problem goes to setNotice. */
+function useReviewReport(openId: string | null, tick: number, setNotice: (text: string) => void) {
   const [detail, setDetail] = useState<ReviewDetail | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [fixing, setFixing] = useState(false);
   // One report opened right after another: only the one opened last may show (lib/review-view.ts).
   const latest = useRef(latestOnly<string, ReviewDetail>()).current;
-
-  useEffect(() => {
-    api.reviews().then(setReviews, () => {});
-  }, [tick]);
 
   const load = (id: string) => {
     latest(id, () => api.getReview(id)).then((r) => {
@@ -78,6 +71,20 @@ export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; 
   };
 
   const toggle = (id: string) => setPicked((cur) => togglePicked(cur, id));
+
+  return { detail, picked, fixing, fix, ignore, toggle };
+}
+
+/** Code review: Copilot reviews the code read-only; every finding is checked against the file; pick findings to fix. */
+export function ReviewPanel({ onOpen, tick }: { onOpen: (path: string) => void; tick: number }) {
+  const [notice, setNotice] = useState("");
+  const [reviews, setReviews] = useState<ReviewSummary[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const { detail, picked, fixing, fix, ignore, toggle } = useReviewReport(openId, tick, setNotice);
+
+  useEffect(() => {
+    api.reviews().then(setReviews, () => {});
+  }, [tick]);
 
   return (
     <div className="space-y-2">

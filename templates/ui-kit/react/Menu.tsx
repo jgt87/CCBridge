@@ -11,6 +11,15 @@ export interface MenuItem {
   separatorBefore?: boolean;
 }
 
+const MOVE_KEYS = ["ArrowDown", "ArrowUp", "Home", "End"];
+
+// The item a key moves to among n items from item i: Home and End go to the ends, the arrows wrap around.
+function nextIndex(key: string, i: number, n: number) {
+  if (key === "Home") return 0;
+  if (key === "End") return n - 1;
+  return (i + (key === "ArrowDown" ? 1 : -1) + n) % n;
+}
+
 /** A menu of actions (per row, or a user menu with a head): arrow keys move, Escape or a click beside it closes. */
 export function Menu({ label, items, head, onPick, align = "right" }: { label: ReactNode; items: MenuItem[]; head?: ReactNode; onPick: (value: string) => void; align?: "left" | "right" }) {
   const [open, setOpen] = useState(false);
@@ -30,8 +39,12 @@ export function Menu({ label, items, head, onPick, align = "right" }: { label: R
     const all = Array.from(list.current?.querySelectorAll<HTMLButtonElement>(".kit-menu__item:not([disabled])") ?? []);
     if (!all.length) return;
     const i = all.indexOf(document.activeElement as HTMLButtonElement);
-    const next = key === "Home" ? 0 : key === "End" ? all.length - 1 : (i + (key === "ArrowDown" ? 1 : -1) + all.length) % all.length;
-    all[next].focus();
+    all[nextIndex(key, i, all.length)].focus();
+  };
+  // Escape closes and goes back to the menu button; Tab closes and lets focus move on.
+  const close = (key: string) => {
+    setOpen(false);
+    if (key === "Escape") button.current?.focus();
   };
   return (
     <div className={"kit-menu" + (align === "left" ? " kit-menu--left" : "")} ref={wrap}>
@@ -42,13 +55,10 @@ export function Menu({ label, items, head, onPick, align = "right" }: { label: R
         className="kit-menu__list"
         hidden={!open}
         onKeyDown={(e) => {
-          if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+          if (MOVE_KEYS.includes(e.key)) {
             e.preventDefault();
             move(e.key);
-          } else if (e.key === "Escape" || e.key === "Tab") {
-            setOpen(false);
-            if (e.key === "Escape") button.current?.focus();
-          }
+          } else if (e.key === "Escape" || e.key === "Tab") close(e.key);
         }}
         ref={list}
         role="menu"

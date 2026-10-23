@@ -12,22 +12,26 @@
     return '<svg class="kit-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"' +
       (label ? ' role="img" aria-label="' + esc(label) + '"' : ' aria-hidden="true" focusable="false"') + ">" + inner + "</svg>";
   }
+  // A button, link, field or an element with its own role or tab stop.
+  function isInteractive(el) {
+    return /^(button|a|input|select|textarea|summary)$/i.test(el.tagName) || el.hasAttribute("tabindex") || !!el.getAttribute("role");
+  }
+  function drawIcon(el) {
+    var name = el.getAttribute("data-kit-icon");
+    if (el.getAttribute("data-kit-icon-drawn") === name) return;
+    var markup = svg(name);
+    if (!markup && name) console.warn("Unknown icon: " + name + " (kit-icons.js has no icon of that name)");
+    // The icon goes before any text the element already has (a button with an icon and a word).
+    var old = el.querySelector("svg.kit-icon");
+    if (old) old.parentNode.removeChild(old);
+    if (el.firstChild) el.insertAdjacentHTML("afterbegin", markup); else el.innerHTML = markup;
+    el.setAttribute("data-kit-icon-drawn", name);
+    // A named icon on its own is an image; a button, link or field with a label stays what it is.
+    if (el.getAttribute("aria-label") && !isInteractive(el)) el.setAttribute("role", "img");
+  }
   function paint(root) {
     var list = (root && root.querySelectorAll) ? root.querySelectorAll("[data-kit-icon]") : [];
-    Array.prototype.forEach.call(list, function (el) {
-      var name = el.getAttribute("data-kit-icon");
-      if (el.getAttribute("data-kit-icon-drawn") === name) return;
-      var markup = svg(name);
-      if (!markup && name) console.warn("Unknown icon: " + name + " (kit-icons.js has no icon of that name)");
-      // The icon goes before any text the element already has (a button with an icon and a word).
-      var old = el.querySelector("svg.kit-icon");
-      if (old) old.parentNode.removeChild(old);
-      if (el.firstChild) el.insertAdjacentHTML("afterbegin", markup); else el.innerHTML = markup;
-      el.setAttribute("data-kit-icon-drawn", name);
-      // A named icon on its own is an image; a button, link or field with a label stays what it is.
-      var interactive = /^(button|a|input|select|textarea|summary)$/i.test(el.tagName) || el.hasAttribute("tabindex") || el.getAttribute("role");
-      if (el.getAttribute("aria-label") && !interactive) el.setAttribute("role", "img");
-    });
+    Array.prototype.forEach.call(list, drawIcon);
     if (root && root.getAttribute && root.hasAttribute("data-kit-icon")) paint({ querySelectorAll: function () { return [root]; } });
   }
   window.KitIcons = { svg: svg, paint: paint, names: function () { return Object.keys(data); } };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fillClassOf, gridColumns, slideDirection, spareColumns } from "./smooth-tab";
+import { boxWithin, fillClassOf, gridColumns, slideDirection, spareColumns } from "./smooth-tab";
 
 describe("smooth tab layout", () => {
   it("puts the tabs in one row unless columns are given, within 1 and the number of tabs", () => {
@@ -30,5 +30,11 @@ describe("smooth tab layout", () => {
   it("takes the card colour from the first colour class", () => {
     expect(fillClassOf("bg-blue-500 hover:bg-blue-600")).toBe("blue-500");
     expect(fillClassOf("")).toBe("");
+  });
+
+  it("places the highlight at the selected button's box inside the tab bar", () => {
+    const bar = { width: 600, height: 80, left: 100, top: 40 };
+    expect(boxWithin({ width: 150, height: 36, left: 250, top: 44 }, bar)).toEqual({ width: 150, height: 36, left: 150, top: 4 });
+    expect(boxWithin({ width: 0, height: 0, left: 0, top: 0 }, bar)).toEqual({ width: 0, height: 0, left: -100, top: -40 });
   });
 });

@@ -1,6 +1,7 @@
 import { CalendarClock, Pause, Pencil, Play, Trash2 } from "lucide-react";
 import type { ScheduleItem } from "@/lib/api";
 import { api } from "@/lib/api";
+import { scheduleFinished, scheduleStatusText } from "@/lib/schedule-form";
 import { cn } from "@/lib/utils";
 
 const flatButton =
@@ -23,54 +24,53 @@ export function formatWhen(iso: string | null): string {
   return `${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${time}`;
 }
 
+/** One schedule: its title, kind, when and project, its status line and its buttons. */
+function ScheduleRow({ s, onEdit }: { s: ScheduleItem; onEdit?: (s: ScheduleItem) => void }) {
+  const finished = scheduleFinished(s);
+  return (
+    <div className={cn("kit-panel p-2", !s.enabled && "opacity-60")}>
+      <div className="flex items-start gap-2">
+        <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="line-clamp-2 min-w-0 flex-1 text-sm" title={s.title}>
+          {s.title}
+        </span>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 pl-5 text-muted-foreground text-xs">
+        <span>{KIND[s.kind]}</span>
+        <span>{s.when}</span>
+        {s.project && <span className="truncate">{s.project}</span>}
+      </div>
+      <div className="mt-0.5 pl-5 text-muted-foreground text-xs">{scheduleStatusText(s, formatWhen)}</div>
+      <div className="mt-1 flex flex-wrap gap-0.5 pl-4">
+        {onEdit && (
+          <button className={flatButton} onClick={() => onEdit(s)} title="Change what it runs, when, or its title" type="button">
+            <Pencil className="h-3 w-3" /> Edit
+          </button>
+        )}
+        <button className={flatButton} onClick={() => api.runSchedule(s.id)} title="Add it to the queue now (the schedule stays as it is)" type="button">
+          <Play className="h-3 w-3" /> Run now
+        </button>
+        {!finished && (
+          <button className={flatButton} onClick={() => api.updateSchedule(s.id, { enabled: !s.enabled })} type="button">
+            <Pause className="h-3 w-3" /> {s.enabled ? "Pause" : "Resume"}
+          </button>
+        )}
+        <button className={flatButton} onClick={() => api.deleteSchedule(s.id)} title="Delete this schedule" type="button">
+          <Trash2 className="h-3 w-3" /> Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Scheduled messages, runbooks and chains, with the next run, edit, run now, pause and delete. */
 export function SchedulesList({ schedules, onEdit }: { schedules: ScheduleItem[]; onEdit?: (s: ScheduleItem) => void }) {
   return (
     <div className="space-y-1.5">
       {schedules.length === 0 && <p className="kit-empty py-3 text-xs">Nothing scheduled yet. The calendar button in the message box schedules a message too.</p>}
-      {schedules.map((s) => {
-        const finished = !s.enabled && s.repeat === "once" && s.lastRun;
-        return (
-          <div className={cn("kit-panel p-2", !s.enabled && "opacity-60")} key={s.id}>
-            <div className="flex items-start gap-2">
-              <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="line-clamp-2 min-w-0 flex-1 text-sm" title={s.title}>
-                {s.title}
-              </span>
-            </div>
-            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 pl-5 text-muted-foreground text-xs">
-              <span>{KIND[s.kind]}</span>
-              <span>{s.when}</span>
-              {s.project && <span className="truncate">{s.project}</span>}
-            </div>
-            <div className="mt-0.5 pl-5 text-muted-foreground text-xs">
-              {finished
-                ? `ran ${formatWhen(s.lastRun)}`
-                : s.enabled
-                  ? `next ${formatWhen(s.nextRun)}`
-                  : "paused"}
-            </div>
-            <div className="mt-1 flex flex-wrap gap-0.5 pl-4">
-              {onEdit && (
-                <button className={flatButton} onClick={() => onEdit(s)} title="Change what it runs, when, or its title" type="button">
-                  <Pencil className="h-3 w-3" /> Edit
-                </button>
-              )}
-              <button className={flatButton} onClick={() => api.runSchedule(s.id)} title="Add it to the queue now (the schedule stays as it is)" type="button">
-                <Play className="h-3 w-3" /> Run now
-              </button>
-              {!finished && (
-                <button className={flatButton} onClick={() => api.updateSchedule(s.id, { enabled: !s.enabled })} type="button">
-                  <Pause className="h-3 w-3" /> {s.enabled ? "Pause" : "Resume"}
-                </button>
-              )}
-              <button className={flatButton} onClick={() => api.deleteSchedule(s.id)} title="Delete this schedule" type="button">
-                <Trash2 className="h-3 w-3" /> Delete
-              </button>
-            </div>
-          </div>
-        );
-      })}
+      {schedules.map((s) => (
+        <ScheduleRow key={s.id} onEdit={onEdit} s={s} />
+      ))}
     </div>
   );
 }

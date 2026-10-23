@@ -20,6 +20,7 @@ import {
 import { motion, useAnimation } from "motion/react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { type HoldVariant, holdCompleted, holdFillClass, holdIconVariant } from "@/lib/hold-button";
 import { cn } from "@/lib/utils";
 
 const holdButtonVariants = cva("relative min-w-40 touch-none overflow-hidden", {
@@ -73,22 +74,22 @@ interface HoldButtonProps
   onHoldComplete?: () => void;
 }
 
-export default function HoldButton({
-  className,
-  variant = "red",
-  holdDuration = 3000,
-  label = "Hold me",
-  holdingLabel = "Release",
-  icon,
-  onHoldComplete,
-  ...props
-}: HoldButtonProps) {
+const VARIANT_ICON: Record<HoldVariant, typeof Trash2Icon> = {
+  red: Trash2Icon,
+  green: ArchiveXIcon,
+  blue: XCircleIcon,
+  orange: AlertCircleIcon,
+  grey: BanIcon,
+};
+
+// CCBridge: the hold itself: the fill animation, and onHoldComplete once it was held the whole time.
+function useHold(holdDuration: number, disabled: boolean | undefined, onHoldComplete?: () => void) {
   const [isHolding, setIsHolding] = useState(false);
   const holdingRef = useRef(false);
   const controls = useAnimation();
 
   async function handleHoldStart() {
-    if (props.disabled) return;
+    if (disabled) return;
     setIsHolding(true);
     holdingRef.current = true;
     const started = Date.now();
@@ -101,7 +102,7 @@ export default function HoldButton({
       },
     });
     // The promise also resolves when the hold is released early, so check both.
-    if (holdingRef.current && Date.now() - started >= holdDuration - 50) {
+    if (holdCompleted(holdingRef.current, started, Date.now(), holdDuration)) {
       holdingRef.current = false;
       setIsHolding(false);
       onHoldComplete?.();
@@ -118,6 +119,22 @@ export default function HoldButton({
     });
   }
 
+  return { isHolding, controls, handleHoldStart, handleHoldEnd };
+}
+
+export default function HoldButton({
+  className,
+  variant = "red",
+  holdDuration = 3000,
+  label = "Hold me",
+  holdingLabel = "Release",
+  icon,
+  onHoldComplete,
+  ...props
+}: HoldButtonProps) {
+  const { isHolding, controls, handleHoldStart, handleHoldEnd } = useHold(holdDuration, props.disabled, onHoldComplete);
+  const Icon = VARIANT_ICON[holdIconVariant(variant)];
+
   return (
     <Button
       className={cn(holdButtonVariants({ variant, className }))}
@@ -131,25 +148,11 @@ export default function HoldButton({
     >
       <motion.div
         animate={controls}
-        className={cn("absolute top-0 left-0 h-full", {
-          "bg-red-200/30 dark:bg-red-300/30": variant === "red",
-          "bg-green-200/30 dark:bg-green-300/30": variant === "green",
-          "bg-blue-200/30 dark:bg-blue-300/30": variant === "blue",
-          "bg-orange-200/30 dark:bg-orange-300/30": variant === "orange",
-          "bg-black/10 dark:bg-white/15": variant === "grey",
-        })}
+        className={cn("absolute top-0 left-0 h-full", holdFillClass(variant))}
         initial={{ width: "0%" }}
       />
       <span className="relative z-10 flex w-full items-center justify-center gap-2">
-        {icon ?? (
-          <>
-            {(variant === "red" || !variant) && <Trash2Icon className="h-4 w-4" />}
-            {variant === "green" && <ArchiveXIcon className="h-4 w-4" />}
-            {variant === "blue" && <XCircleIcon className="h-4 w-4" />}
-            {variant === "orange" && <AlertCircleIcon className="h-4 w-4" />}
-            {variant === "grey" && <BanIcon className="h-4 w-4" />}
-          </>
-        )}
+        {icon ?? (Icon && <Icon className="h-4 w-4" />)}
         {isHolding ? holdingLabel : label}
       </span>
     </Button>

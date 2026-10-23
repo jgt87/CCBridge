@@ -12,7 +12,7 @@
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
-import { fillClassOf, gridColumns, slideDirection, spareColumns } from "@/lib/smooth-tab";
+import { type Box, boxWithin, fillClassOf, gridColumns, slideDirection, spareColumns } from "@/lib/smooth-tab";
 import { cn } from "@/lib/utils";
 
 export interface TabItem {
@@ -169,8 +169,6 @@ const transition = {
   ease: [0.32, 0.72, 0, 1],
 };
 
-type Box = { width: number; height: number; left: number; top: number };
-
 /**
  * CCBridge: the icons of the tabs in the grid line up. Each tab's icon + title gets the width of
  * the widest one (measured), centred in its button and left-aligned inside, so every icon sits as
@@ -200,6 +198,17 @@ function useLabelWidth(items: TabItem[]) {
   return { labelRef, labelWidth };
 }
 
+/** Calls `update` on window resizes and resizes of `el` itself (side panel opened, closed or resized); returns the cleanup. */
+function watchResize(el: HTMLElement | null, update: () => void): () => void {
+  window.addEventListener("resize", update);
+  const ro = typeof ResizeObserver !== "undefined" && el ? new ResizeObserver(update) : null;
+  if (ro && el) ro.observe(el);
+  return () => {
+    window.removeEventListener("resize", update);
+    ro?.disconnect();
+  };
+}
+
 /**
  * Where the sliding background goes: the selected button's box inside the tab bar, measured again
  * on every change of tab and resize. CCBridge: the first placement (page load) is instant and the
@@ -218,19 +227,10 @@ function useHighlightBox(selected: string) {
     const updateDimensions = () => {
       const selectedButton = buttonRefs.current.get(selected);
       const container = containerRef.current;
-
-      if (selectedButton && container) {
-        const rect = selectedButton.getBoundingClientRect();
-        const containerRect = container.getBoundingClientRect();
-
-        setDimensions({
-          width: rect.width,
-          height: rect.height,
-          left: rect.left - containerRect.left,
-          top: rect.top - containerRect.top,
-        });
-        if (rect.width > 0 && !placed) requestAnimationFrame(() => setPlaced(true));
-      }
+      if (!selectedButton || !container) return;
+      const box = boxWithin(selectedButton.getBoundingClientRect(), container.getBoundingClientRect());
+      setDimensions(box);
+      if (box.width > 0 && !placed) requestAnimationFrame(() => setPlaced(true));
     };
 
     // Initial update: measure now (layout is ready in a layout effect) and once more after paint
@@ -239,14 +239,7 @@ function useHighlightBox(selected: string) {
       updateDimensions();
     });
 
-    // Update on resize, also of the tab bar itself (side panel opened, closed or resized)
-    window.addEventListener("resize", updateDimensions);
-    const ro = typeof ResizeObserver !== "undefined" && containerRef.current ? new ResizeObserver(updateDimensions) : null;
-    if (ro && containerRef.current) ro.observe(containerRef.current);
-    return () => {
-      window.removeEventListener("resize", updateDimensions);
-      ro?.disconnect();
-    };
+    return watchResize(containerRef.current, updateDimensions);
   }, [selected]);
 
   const buttonRef = (id: string) => (el: HTMLButtonElement | null) => {

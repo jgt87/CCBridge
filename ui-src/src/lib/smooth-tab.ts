@@ -19,3 +19,13 @@ export function slideDirection(ids: string[], from: string, to: string): number 
 export function fillClassOf(color: string): string {
   return color.split(" ").at(0)?.replace("bg-", "") ?? "blue-500";
 }
+
+/** A box in pixels, relative to the tab bar. */
+export type Box = { width: number; height: number; left: number; top: number };
+
+type Rect = { width: number; height: number; left: number; top: number };
+
+/** Where `inner` (the selected button's rectangle) lies inside `outer` (the tab bar's). */
+export function boxWithin(inner: Rect, outer: Rect): Box {
+  return { width: inner.width, height: inner.height, left: inner.left - outer.left, top: inner.top - outer.top };
+}

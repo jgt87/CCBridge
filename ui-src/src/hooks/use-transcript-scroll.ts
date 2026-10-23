@@ -9,6 +9,7 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
   }
   return null;
 }
+const scrollParentOf = (el: HTMLElement | null) => (el ? scrollParent(el) : null);
 
 /** Stay at the newest line while anything grows (a reply streaming in, a card getting its output,
  *  code and images laying out), unless the reader scrolled up to read. Sending a message (`lastIsUser`),
@@ -41,7 +42,7 @@ export function usePagedItems<T>(items: T[], firstKey: string | number, page: nu
   const topRef = useRef<HTMLDivElement>(null);
   const keepFromBottom = useRef<number | null>(null);
   const loadEarlier = useCallback(() => {
-    const scroller = topRef.current ? scrollParent(topRef.current) : null;
+    const scroller = scrollParentOf(topRef.current);
     if (scroller) keepFromBottom.current = scroller.scrollHeight - scroller.scrollTop;
     setShown((n) => n + page);
   }, [page]);
@@ -53,7 +54,7 @@ export function usePagedItems<T>(items: T[], firstKey: string | number, page: nu
     return () => io.disconnect();
   }, [hidden, shown, loadEarlier]);
   useLayoutEffect(() => {
-    const scroller = topRef.current ? scrollParent(topRef.current) : endRef.current ? scrollParent(endRef.current) : null;
+    const scroller = scrollParentOf(topRef.current ?? endRef.current);
     if (scroller && keepFromBottom.current !== null) scroller.scrollTop = scroller.scrollHeight - keepFromBottom.current;
     keepFromBottom.current = null;
   }, [endRef, shown]);

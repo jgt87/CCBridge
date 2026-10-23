@@ -2,9 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { FileInfo, ScheduleItem } from "./api";
 import {
   addTime,
+  scheduleFinished,
+  scheduleStatusText,
   schedulesSummaryText,
   buildScheduleSpec,
+  initialAt,
   initialDays,
+  initialTarget,
+  initialTimes,
   initialTitle,
   missingParts,
   nextHour,
@@ -31,6 +36,28 @@ describe("nextHour", () => {
     const now = new Date(2026, 9, 19, 13, 45).getTime();
     expect(nextHour(now)).toBe("2026-10-19T14:00");
     expect(nextHour(new Date(2026, 11, 31, 23, 10).getTime())).toBe("2027-01-01T00:00");
+  });
+});
+
+describe("what the form opens with", () => {
+  it("names the target as the picker does", () => {
+    expect(initialTarget({ kind: "chat", name: "x" })).toBe("chat");
+    expect(initialTarget({ kind: "runbook", name: "weekly" })).toBe("runbook:weekly");
+    expect(initialTarget({ kind: "fetch" })).toBe("fetch:");
+  });
+
+  it("takes an edited one-time schedule's date and time, else the next full hour", () => {
+    const now = new Date(2026, 9, 19, 13, 45).getTime();
+    expect(initialAt(item({ repeat: "once", at: "2026-11-02T09:30:00" }), now)).toBe("2026-11-02T09:30");
+    expect(initialAt(item({ repeat: "once" }), now)).toBe("2026-10-19T14:00");
+    expect(initialAt(item({ repeat: "daily", at: "2026-11-02T09:30:00" }), now)).toBe("2026-10-19T14:00");
+    expect(initialAt(undefined, now)).toBe("2026-10-19T14:00");
+  });
+
+  it("takes an edited schedule's times, else 08:00", () => {
+    expect(initialTimes(item({ times: ["07:30", "17:00"] }))).toEqual(["07:30", "17:00"]);
+    expect(initialTimes(item({ times: [] }))).toEqual(["08:00"]);
+    expect(initialTimes(undefined)).toEqual(["08:00"]);
   });
 });
 
@@ -125,5 +152,20 @@ describe("schedules summary", () => {
   it("leaves out paused and next when there are none", () => {
     expect(schedulesSummaryText([item({ enabled: true, nextRun: null })], fmt)).toBe("0 active, 1 paused or done");
     expect(schedulesSummaryText([item({ enabled: true, nextRun: "2026-10-22T18:00" })], fmt)).toBe("1 active · next at 2026-10-22T18:00");
+  });
+});
+
+describe("a schedule's status line", () => {
+  const fmt = (iso: string | null) => `at ${iso}`;
+  it("says when a finished one-time schedule ran", () => {
+    const s = item({ enabled: false, repeat: "once", lastRun: "2026-10-22T08:00" });
+    expect(scheduleFinished(s)).toBe(true);
+    expect(scheduleStatusText(s, fmt)).toBe("ran at 2026-10-22T08:00");
+  });
+  it("gives the next run of an active one and 'paused' for one that is off", () => {
+    expect(scheduleStatusText(item({ enabled: true, nextRun: "2026-10-23T08:00" }), fmt)).toBe("next at 2026-10-23T08:00");
+    expect(scheduleStatusText(item({ enabled: false, lastRun: "2026-10-22T08:00" }), fmt)).toBe("paused");
+    expect(scheduleStatusText(item({ enabled: false, repeat: "once", lastRun: null }), fmt)).toBe("paused");
+    expect(scheduleFinished(item({ enabled: true, repeat: "once", lastRun: "2026-10-22T08:00" }))).toBe(false);
   });
 });

@@ -2,6 +2,7 @@ import { Columns2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
+import { splitHintEligible } from "@/lib/split-view-hint";
 
 const HINT = "splitView";
 const LOCAL_KEY = "ccb.hint.splitView";
@@ -10,8 +11,26 @@ function seenHere() {
   try {
     return localStorage.getItem(LOCAL_KEY) === "1";
   } catch {
-    return false;
+    return false; // storage blocked: the data folder's record (shownBefore) still decides
   }
+}
+
+/** The four steps to Edge's Split screen. */
+function SplitViewSteps() {
+  return (
+    <ol className="list-decimal space-y-1.5 pl-5 text-xs">
+      <li>
+        Open Edge's menu: the <span className="font-medium">…</span> button at the top right of Edge, where this card points.
+      </li>
+      <li>
+        Choose <span className="font-medium">Split screen</span>. The window splits into two halves.
+      </li>
+      <li>
+        In the right half, Edge lists your open tabs: pick the <span className="font-medium">Copilot</span> tab.
+      </li>
+      <li>Drag the bar in the middle to give each side the room you want.</li>
+    </ol>
+  );
 }
 
 /**
@@ -20,8 +39,8 @@ function seenHere() {
  * and only once: it is marked as shown in the data folder (and this browser) when it appears.
  */
 export function SplitViewHint({ appWindow, shownBefore }: { appWindow?: string; shownBefore: boolean }) {
-  const isEdge = typeof navigator !== "undefined" && /\bEdg\//.test(navigator.userAgent);
-  const eligible = isEdge && (appWindow ?? "copilot-tab") === "copilot-tab" && !shownBefore && !seenHere();
+  const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const eligible = splitHintEligible(userAgent, appWindow, shownBefore, seenHere());
   const [open, setOpen] = useState(false);
   const marked = useRef(false);
 
@@ -35,7 +54,7 @@ export function SplitViewHint({ appWindow, shownBefore }: { appWindow?: string; 
     } catch {
       /* storage blocked: the data folder still records it */
     }
-    void api.markHintShown(HINT).catch(() => undefined);
+    void api.markHintShown(HINT).catch(() => undefined); // best effort: this browser already remembers it
   }, [eligible]);
 
   useEffect(() => {
@@ -66,18 +85,7 @@ export function SplitViewHint({ appWindow, shownBefore }: { appWindow?: string; 
           </button>
         </div>
         <p className="mb-2 text-xs opacity-75">Edge can show this tab and the Copilot tab in one window, so you can watch Copilot work:</p>
-        <ol className="list-decimal space-y-1.5 pl-5 text-xs">
-          <li>
-            Open Edge's menu: the <span className="font-medium">…</span> button at the top right of Edge, where this card points.
-          </li>
-          <li>
-            Choose <span className="font-medium">Split screen</span>. The window splits into two halves.
-          </li>
-          <li>
-            In the right half, Edge lists your open tabs: pick the <span className="font-medium">Copilot</span> tab.
-          </li>
-          <li>Drag the bar in the middle to give each side the room you want.</li>
-        </ol>
+        <SplitViewSteps />
         <div className="mt-3 flex justify-end">
           <button
             className="rounded-md bg-background px-3 py-1 font-medium text-foreground text-xs hover:opacity-90"

@@ -6,6 +6,11 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.149] - 2026-10-23
+
+### Changed
+- Internal clean-up with no change in what you see: more parts of the app (file upload, search bar, hold buttons, tabs, file viewer, schedules, code review, undo cards, the command menu, the intake card and the split screen hint) and the UI kit's data reader, icon runtime and React tree, menu and board parts are split into smaller named parts, with new tests for them. Projects pick up the updated kit files at their next open.
+
 ## [v0.1.148] - 2026-10-22
 
 ### Changed

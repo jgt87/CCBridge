@@ -6,11 +6,13 @@ import {
   buildScheduleSpec,
   DAYS,
   EVERY_DAY,
+  initialAt,
   initialDays,
+  initialTarget,
+  initialTimes,
   initialTitle,
   isRunbookFile,
   missingParts,
-  nextHour,
   pickableFiles,
   pickFile,
   WEEKDAYS,
@@ -349,13 +351,12 @@ export function ScheduleForm({
   onSave: (spec: ScheduleSpec) => Promise<void>;
   onCancel: () => void;
 }) {
-  const once = existing?.repeat === "once";
-  const [target, setTarget] = useState(initial.kind === "chat" ? "chat" : `${initial.kind}:${initial.name ?? ""}`);
+  const [target, setTarget] = useState(() => initialTarget(initial));
   const [text, setText] = useState(initial.text ?? "");
-  const [mode, setMode] = useState<"once" | "repeat">(once ? "once" : "repeat");
-  const [at, setAt] = useState(once && existing.at ? existing.at.slice(0, 16) : nextHour());
+  const [mode, setMode] = useState<"once" | "repeat">(existing?.repeat === "once" ? "once" : "repeat");
+  const [at, setAt] = useState(() => initialAt(existing));
   const [days, setDays] = useState<number[]>(() => initialDays(existing));
-  const [times, setTimes] = useState<string[]>(existing?.times?.length ? existing.times : ["08:00"]);
+  const [times, setTimes] = useState<string[]>(() => initialTimes(existing));
   const [newTime, setNewTime] = useState("");
   const [title, setTitle] = useState(() => initialTitle(existing));
   const [saving, setSaving] = useState(false);

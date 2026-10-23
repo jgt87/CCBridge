@@ -645,3 +645,26 @@ describe("kit-charts.js bar charts with a line series", () => {
     expect(right.length).toBeGreaterThan(1);   // the right axis's values, in the line's colour
   });
 });
+
+describe("kit-icons-runtime.js", () => {
+  it("draws icons before existing text and makes only a named, non-interactive icon an image", () => {
+    const iconsJs = fs.readFileSync(path.join(repo, "templates/ui-kit/kit-icons-runtime.js"), "utf8");
+    (window as unknown as { KitIconData: Record<string, string> }).KitIconData = { plus: '<path d="M5 12h14"/>' };
+    document.body.innerHTML = `<span id="img" data-kit-icon="plus" aria-label="Add"></span>
+      <button id="btn" data-kit-icon="plus" aria-label="Add">New</button>
+      <div id="tab" data-kit-icon="plus" aria-label="Add" tabindex="0"></div>
+      <span id="role" data-kit-icon="plus" aria-label="Add" role="button"></span>
+      <span id="plain" data-kit-icon="plus"></span>`;
+    load(iconsJs);
+    const el = (id: string) => document.getElementById(id) as HTMLElement;
+    expect(el("img").getAttribute("role")).toBe("img");
+    expect(el("btn").getAttribute("role")).toBeNull();
+    expect(el("btn").firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    expect(el("btn").textContent).toBe("New");
+    expect(el("tab").getAttribute("role")).toBeNull();
+    expect(el("role").getAttribute("role")).toBe("button");
+    expect(el("plain").getAttribute("role")).toBeNull();
+    expect(el("plain").querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(el("plain").getAttribute("data-kit-icon-drawn")).toBe("plus");
+  });
+});

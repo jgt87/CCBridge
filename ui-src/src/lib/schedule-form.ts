@@ -49,6 +49,21 @@ export function initialTitle(existing: ScheduleItem | undefined): string {
   return existing.title === auto || existing.title === auto.slice(0, 117) + "..." ? "" : existing.title;
 }
 
+/** The target picker's value for what the form opens with: "chat", or "KIND:NAME". */
+export function initialTarget(initial: { kind: string; name?: string }): string {
+  return initial.kind === "chat" ? "chat" : `${initial.kind}:${initial.name ?? ""}`;
+}
+
+/** When a one-time schedule runs: the edited one's date and time, else the next full hour. */
+export function initialAt(existing: ScheduleItem | undefined, now = Date.now()): string {
+  return existing?.repeat === "once" && existing.at ? existing.at.slice(0, 16) : nextHour(now);
+}
+
+/** The times of a repeating schedule: the edited one's, else 08:00. */
+export function initialTimes(existing: ScheduleItem | undefined): string[] {
+  return existing?.times?.length ? existing.times : ["08:00"];
+}
+
 export function isRunbookFile(path: string): boolean {
   return RUNBOOK_FILE.test(path);
 }
@@ -126,4 +141,15 @@ export function schedulesSummaryText(schedules: ScheduleItem[], formatWhen: (iso
   const next = [...active].sort((a, b) => String(a.nextRun).localeCompare(String(b.nextRun)))[0];
   const paused = schedules.length - active.length;
   return `${active.length} active${paused > 0 ? `, ${paused} paused or done` : ""}${next ? ` · next ${formatWhen(next.nextRun)}` : ""}`;
+}
+
+/** A one-time schedule that has run and is off: it shows when it ran and cannot be paused or resumed. */
+export function scheduleFinished(s: ScheduleItem): boolean {
+  return !s.enabled && s.repeat === "once" && Boolean(s.lastRun);
+}
+
+/** A schedule's status line: "ran ...", "next ..." or "paused". */
+export function scheduleStatusText(s: ScheduleItem, formatWhen: (iso: string | null) => string): string {
+  if (scheduleFinished(s)) return `ran ${formatWhen(s.lastRun)}`;
+  return s.enabled ? `next ${formatWhen(s.nextRun)}` : "paused";
 }

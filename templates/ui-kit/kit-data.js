@@ -84,20 +84,23 @@
     st.row = []; st.field = ""; st.any = false;
   }
 
+  // One character outside quotes: a quote opening a field, a delimiter, a line end (CRLF as one) or
+  // a character of the field. Returns the next index.
+  function plainStep(text, i, st, rows, delimiter) {
+    var ch = text[i];
+    if (ch === '"' && st.field === "") { st.quoted = true; st.any = true; }
+    else if (ch === delimiter) { st.row.push(st.field); st.field = ""; st.any = true; }
+    else if (ch === "\r" || ch === "\n") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      endLine(st, rows);
+    } else { st.field += ch; st.any = true; }
+    return i + 1;
+  }
+
   function splitCsv(text, delimiter) {
     // Rows of fields: quoted fields, "" inside quotes, line breaks inside quotes; blank lines skipped.
     var rows = [], st = { row: [], field: "", quoted: false, any: false }, i = 0, n = text.length;
-    while (i < n) {
-      var ch = text[i];
-      if (st.quoted) { i = quotedStep(text, i, st); continue; }
-      if (ch === '"' && st.field === "") { st.quoted = true; st.any = true; }
-      else if (ch === delimiter) { st.row.push(st.field); st.field = ""; st.any = true; }
-      else if (ch === "\r" || ch === "\n") {
-        if (ch === "\r" && text[i + 1] === "\n") i++;
-        endLine(st, rows);
-      } else { st.field += ch; st.any = true; }
-      i++;
-    }
+    while (i < n) i = st.quoted ? quotedStep(text, i, st) : plainStep(text, i, st, rows, delimiter);
     if (st.field !== "" || st.row.length || st.any) { st.row.push(st.field); rows.push(st.row); }
     return rows;
   }
@@ -184,6 +187,9 @@
     return v;
   }
 
+  // A CSV row's field as trimmed text; a short row's missing fields are empty.
+  function rowField(row, c) { return String(row[c] == null ? "" : row[c]).trim(); }
+
   function toTable(rows, delimiter, name) {
     // Rows of text (first = header) as typed records.
     if (!rows.length) return { name: name || "", columns: [], rows: [] };
@@ -192,13 +198,13 @@
     var names = columnNames(rows[0], width), types = [];
     for (var c = 0; c < width; c++) {
       var vals = [];
-      for (var i = 1; i < rows.length; i++) vals.push(String(rows[i][c] == null ? "" : rows[i][c]).trim());
+      for (var i = 1; i < rows.length; i++) vals.push(rowField(rows[i], c));
       types.push(columnType(vals, delimiter));
     }
     var records = [];
     for (var r = 1; r < rows.length; r++) {
       var o = {};
-      for (var k = 0; k < width; k++) o[names[k]] = typedValue(String(rows[r][k] == null ? "" : rows[r][k]).trim(), types[k]);
+      for (var k = 0; k < width; k++) o[names[k]] = typedValue(rowField(rows[r], k), types[k]);
       records.push(o);
     }
     return { name: name || "", columns: names.map(function (n, i) { return { name: n, type: types[i].type }; }), rows: records };
@@ -534,6 +540,12 @@
 
   function extension(name) { var m = /\.([^.]+)$/.exec(name || ""); return m ? m[1].toLowerCase() : ""; }
 
+  // A CSV or TSV file, or a .txt file whose first line holds a delimiter, is read as a table.
+  function readsAsTable(ext, text) {
+    if (ext === "csv" || ext === "tsv") return true;
+    return ext === "txt" && /[,;\t|]/.test(text.split("\n", 1)[0]);
+  }
+
   function readFile(file) {
     var ext = extension(file.name);
     return readBuffer(file).then(function (buf) {
@@ -546,7 +558,7 @@
       }
       var text = decodeText(buf);
       if (ext === "json") return { kind: "json", data: JSON.parse(text) };
-      if (ext === "csv" || ext === "tsv" || (ext === "txt" && /[,;\t|]/.test(text.split("\n", 1)[0]))) {
+      if (readsAsTable(ext, text)) {
         var delimiter = ext === "tsv" ? "\t" : guessDelimiter(text);
         var t = toTable(splitCsv(text, delimiter), delimiter, file.name);
         return { kind: "table", sheets: [t], rows: t.rows };

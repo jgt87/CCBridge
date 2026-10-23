@@ -12,10 +12,20 @@ export function setLinksThroughEdge(on: boolean) {
   throughEdge = on;
 }
 
+/** A web address the server opens in a new Edge tab (only while the app is in Edge). */
+export function opensThroughEdge(href: string, inEdge: boolean): boolean {
+  return inEdge && /^https?:\/\//i.test(href);
+}
+
+/** Ctrl, Cmd or Shift held: the person chose where the link opens, so the browser handles it. */
+export function chosenByKeys(keys: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): boolean {
+  return keys.ctrlKey || keys.metaKey || keys.shiftKey;
+}
+
 /** onClick for an external <a target="_blank">: opens it as a new tab when the app is in Edge. */
 export function openExternal(e: React.MouseEvent<HTMLAnchorElement>) {
   const href = e.currentTarget.href;
-  if (!throughEdge || !/^https?:\/\//i.test(href) || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (!opensThroughEdge(href, throughEdge) || chosenByKeys(e)) return;
   e.preventDefault();
   // The API client is loaded on the first click: it reads the page's session token when loaded.
   import("./api")

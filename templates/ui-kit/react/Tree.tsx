@@ -30,23 +30,35 @@ export function Tree({ nodes, label, selected, onSelect, defaultOpen = [] }: { n
     setCurrent(r.parentElement?.getAttribute("data-value") ?? undefined);
     r.focus();
   };
+  const parentRow = (parent: TreeNode) => root.current?.querySelector<HTMLDivElement>(`li[data-value="${parent.value}"] > .kit-tree__row`) ?? undefined;
+  // What each key does on a row; other keys are left to the browser.
   const onKey = (e: KeyboardEvent<HTMLDivElement>, node: TreeNode, parent?: TreeNode) => {
     const list = rows();
     const i = list.indexOf(e.currentTarget);
     const branch = !!node.children?.length;
     const isOpen = open.has(node.value);
-    if (e.key === "ArrowDown") focusRow(list[i + 1]);
-    else if (e.key === "ArrowUp") focusRow(list[i - 1]);
-    else if (e.key === "Home") focusRow(list[0]);
-    else if (e.key === "End") focusRow(list[list.length - 1]);
-    else if (e.key === "ArrowRight") {
-      if (branch && !isOpen) toggle(node.value, true);
-      else if (branch) focusRow(list[i + 1]);
-    } else if (e.key === "ArrowLeft") {
-      if (branch && isOpen) toggle(node.value, false);
-      else if (parent) focusRow(root.current?.querySelector<HTMLDivElement>(`li[data-value="${parent.value}"] > .kit-tree__row`) ?? undefined);
-    } else if (e.key === "Enter" || e.key === " ") onSelect(node.value);
-    else return;
+    const pick = () => onSelect(node.value);
+    const keys: Record<string, () => void> = {
+      ArrowDown: () => focusRow(list[i + 1]),
+      ArrowUp: () => focusRow(list[i - 1]),
+      Home: () => focusRow(list[0]),
+      End: () => focusRow(list[list.length - 1]),
+      // Right opens a closed branch, then goes into it.
+      ArrowRight: () => {
+        if (branch && !isOpen) toggle(node.value, true);
+        else if (branch) focusRow(list[i + 1]);
+      },
+      // Left closes an open branch, else goes up to the parent.
+      ArrowLeft: () => {
+        if (branch && isOpen) toggle(node.value, false);
+        else if (parent) focusRow(parentRow(parent));
+      },
+      Enter: pick,
+      " ": pick,
+    };
+    const act = Object.prototype.hasOwnProperty.call(keys, e.key) ? keys[e.key] : undefined;
+    if (!act) return;
+    act();
     e.preventDefault();
   };
   const render = (list: TreeNode[], parent?: TreeNode) =>

@@ -197,6 +197,9 @@ describe("KitData Office files", () => {
     expect((await KitData.readFile(fileOf("a.json", '{"a":[1,2]}'))).data).toEqual({ a: [1, 2] });
     expect((await KitData.readFile(fileOf("a.tsv", "x\ty\n1\t2\n"))).rows).toEqual([{ x: 1, y: 2 }]);
     expect((await KitData.readFile(fileOf("a.md", "# Hi"))).kind).toBe("text");
+    // A .txt file is a table only when its first line holds a delimiter; a short row's missing field is empty.
+    expect((await KitData.readFile(fileOf("a.txt", "x;y\n1;2\n3\n"))).rows).toEqual([{ x: 1, y: 2 }, { x: 3, y: null }]);
+    expect((await KitData.readFile(fileOf("b.txt", "Just a note\nx;y\n"))).kind).toBe("text");
     expect(KitData._internal.decodeText(new Uint8Array([0x63, 0x61, 0x66, 0xe9]).buffer)).toBe("café");
     expect(KitData._internal.serialToText(45322.5, false)).toBe("2024-01-31T12:00:00");
   });

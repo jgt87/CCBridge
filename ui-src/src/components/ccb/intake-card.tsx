@@ -1,9 +1,44 @@
 import { FolderInput } from "lucide-react";
 import { useState } from "react";
 import type { IntakeGroup } from "@/lib/api";
+import { intakeFilesLine, intakeSavedText } from "@/lib/intake-card";
 import { cn } from "@/lib/utils";
 
 const loadApi = () => import("@/lib/api").then((m) => m.api);
+
+/** One type of file: its files, and one button per use (the chosen one filled). */
+function IntakeGroupChoice({
+  group: g,
+  chosen,
+  disabled,
+  onChoose,
+}: {
+  group: IntakeGroup;
+  chosen: string | undefined;
+  disabled: boolean;
+  onChoose: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-muted-foreground text-xs">{intakeFilesLine(g)}</div>
+      <div className="kit-segmented flex-wrap" role="group" aria-label={`What the ${g.label.toLowerCase()} are for`}>
+        {g.options.map((o) => (
+          <button
+            aria-pressed={chosen === o.value}
+            className={cn("kit-btn kit-btn--sm", chosen === o.value ? "" : "kit-btn--ghost")}
+            disabled={disabled}
+            key={o.value}
+            onClick={() => onChoose(o.value)}
+            title={o.help}
+            type="button"
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * The files a person put in a new project before its first request, by type, with what each type
@@ -18,10 +53,7 @@ export function IntakeCard({ groups, text, restored }: { groups: IntakeGroup[]; 
   const apply = async () => {
     setBusy(true);
     try {
-      const r = await (await loadApi()).intake(choices);
-      setDone(
-        `Saved.${r.moved.length ? ` ${r.moved.length} data file(s) moved into Source/.` : ""}${r.queued ? " Copilot is on it now." : " Copilot gets this with every task."}`,
-      );
+      setDone(intakeSavedText(await (await loadApi()).intake(choices)));
     } catch (e) {
       setDone((e as Error).message);
     } finally {
@@ -35,27 +67,13 @@ export function IntakeCard({ groups, text, restored }: { groups: IntakeGroup[]; 
         {text}
       </div>
       {groups.map((g) => (
-        <div className="space-y-1.5" key={g.kind}>
-          <div className="text-muted-foreground text-xs">
-            {g.label} ({g.count}): {g.files.slice(0, 4).join(", ")}
-            {g.count > 4 ? ` and ${g.count - 4} more` : ""}
-          </div>
-          <div className="kit-segmented flex-wrap" role="group" aria-label={`What the ${g.label.toLowerCase()} are for`}>
-            {g.options.map((o) => (
-              <button
-                aria-pressed={choices[g.kind] === o.value}
-                className={cn("kit-btn kit-btn--sm", choices[g.kind] === o.value ? "" : "kit-btn--ghost")}
-                disabled={busy || Boolean(done)}
-                key={o.value}
-                onClick={() => setChoices((c) => ({ ...c, [g.kind]: o.value }))}
-                title={o.help}
-                type="button"
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <IntakeGroupChoice
+          chosen={choices[g.kind]}
+          disabled={busy || Boolean(done)}
+          group={g}
+          key={g.kind}
+          onChoose={(value) => setChoices((c) => ({ ...c, [g.kind]: value }))}
+        />
       ))}
       {done ? (
         <div className="text-muted-foreground text-xs">{done}</div>

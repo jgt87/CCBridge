@@ -13,19 +13,16 @@ import { UploadCloud } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   type DragEvent,
+  type RefObject,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
+import { type FileError, fileTypesHint, firstFileError, formatBytes } from "@/lib/file-upload";
 import { cn } from "@/lib/utils";
 
 type FileStatus = "idle" | "dragging" | "uploading" | "error";
-
-interface FileError {
-  message: string;
-  code: string;
-}
 
 interface FileUploadProps {
   onUploadSuccess?: (file: File) => void;
@@ -46,26 +43,6 @@ interface FileUploadProps {
 
 const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const UPLOAD_STEP_SIZE = 5;
-const FILE_SIZES = [
-  "Bytes",
-  "KB",
-  "MB",
-  "GB",
-  "TB",
-  "PB",
-  "EB",
-  "ZB",
-  "YB",
-] as const;
-
-const formatBytes = (bytes: number, decimals = 2): string => {
-  if (!+bytes) return "0 Bytes";
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const unit = FILE_SIZES[i] || FILE_SIZES[FILE_SIZES.length - 1];
-  return `${Number.parseFloat((bytes / k ** i).toFixed(dm))} ${unit}`;
-};
 
 const UploadIllustration = () => (
   <div className="relative h-16 w-16">
@@ -240,20 +217,31 @@ const UploadingAnimation = ({ progress }: { progress: number }) => (
   </div>
 );
 
-export default function FileUpload({
-  onUploadSuccess = () => {},
-  onUploadError = () => {},
-  acceptedFileTypes = [],
-  maxFileSize = DEFAULT_MAX_FILE_SIZE,
-  currentFile: initialFile = null,
-  onFileRemove = () => {},
-  uploadDelay = 2000,
-  validateFile = () => null,
-  className,
+type UploadOptions = Required<
+  Pick<
+    FileUploadProps,
+    | "onUploadSuccess"
+    | "onUploadError"
+    | "acceptedFileTypes"
+    | "maxFileSize"
+    | "onFileRemove"
+    | "uploadDelay"
+    | "validateFile"
+  >
+> & { initialFile: File | null; upload?: FileUploadProps["upload"] };
+
+// CCBridge: the upload box's state and handlers, apart from its markup.
+function useFileUpload({
+  onUploadSuccess,
+  onUploadError,
+  acceptedFileTypes,
+  maxFileSize,
+  initialFile,
+  onFileRemove,
+  uploadDelay,
+  validateFile,
   upload,
-  title = "Drag and drop or",
-  hint,
-}: FileUploadProps) {
+}: UploadOptions) {
   const [file, setFile] = useState<File | null>(initialFile);
   const [status, setStatus] = useState<FileStatus>("idle");
   const [progress, setProgress] = useState(0);
@@ -268,37 +256,6 @@ export default function FileUpload({
       }
     },
     []
-  );
-
-  const validateFileSize = useCallback(
-    (file: File): FileError | null => {
-      if (file.size > maxFileSize) {
-        return {
-          message: `File size exceeds ${formatBytes(maxFileSize)}`,
-          code: "FILE_TOO_LARGE",
-        };
-      }
-      return null;
-    },
-    [maxFileSize]
-  );
-
-  const validateFileType = useCallback(
-    (file: File): FileError | null => {
-      if (!acceptedFileTypes?.length) return null;
-
-      const fileType = file.type.toLowerCase();
-      if (
-        !acceptedFileTypes.some((type) => fileType.match(type.toLowerCase()))
-      ) {
-        return {
-          message: `File type must be ${acceptedFileTypes.join(", ")}`,
-          code: "INVALID_FILE_TYPE",
-        };
-      }
-      return null;
-    },
-    [acceptedFileTypes]
   );
 
   const handleError = useCallback(
@@ -361,21 +318,9 @@ export default function FileUpload({
       setError(null);
 
       // Validate file
-      const sizeError = validateFileSize(selectedFile);
-      if (sizeError) {
-        handleError(sizeError);
-        return;
-      }
-
-      const typeError = validateFileType(selectedFile);
-      if (typeError) {
-        handleError(typeError);
-        return;
-      }
-
-      const customError = validateFile?.(selectedFile);
-      if (customError) {
-        handleError(customError);
+      const fileError = firstFileError(selectedFile, maxFileSize, acceptedFileTypes, validateFile);
+      if (fileError) {
+        handleError(fileError);
         return;
       }
 
@@ -400,8 +345,8 @@ export default function FileUpload({
       upload,
       onUploadSuccess,
       simulateUpload,
-      validateFileSize,
-      validateFileType,
+      maxFileSize,
+      acceptedFileTypes,
       validateFile,
       handleError,
     ]
@@ -469,6 +414,191 @@ export default function FileUpload({
     if (onFileRemove) onFileRemove();
   }, [onFileRemove]);
 
+  return {
+    file,
+    status,
+    progress,
+    error,
+    fileInputRef,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+    handleFileInputChange,
+    triggerFileInput,
+    resetState,
+  };
+}
+
+// What the views read while rendering; the file input's ref goes to the drop area on its own.
+type UploadState = Omit<ReturnType<typeof useFileUpload>, "fileInputRef">;
+
+// The drop area: illustration, title, accepted types and size, the Upload File button.
+const DropzoneView = ({
+  up,
+  inputRef,
+  title,
+  hint,
+  acceptedFileTypes,
+  maxFileSize,
+}: {
+  up: UploadState;
+  inputRef: RefObject<HTMLInputElement | null>;
+  title: string;
+  hint?: string;
+  acceptedFileTypes: string[];
+  maxFileSize: number;
+}) => (
+  <motion.div
+    animate={{
+      opacity: up.status === "dragging" ? 0.8 : 1,
+      y: 0,
+      scale: up.status === "dragging" ? 0.98 : 1,
+    }}
+    className="absolute inset-0 flex flex-col items-center justify-center px-6 py-6"
+    exit={{ opacity: 0, y: -10 }}
+    initial={{ opacity: 0, y: 10 }}
+    key="dropzone"
+    onDragLeave={up.handleDragLeave}
+    onDragOver={up.handleDragOver}
+    onDrop={up.handleDrop}
+    transition={{ duration: 0.2 }}
+  >
+    <div className="mb-3">
+      <UploadIllustration />
+    </div>
+
+    <div className="mb-4 space-y-1.5 text-center">
+      <h3 className="font-semibold text-foreground text-lg tracking-tight">
+        {title}
+      </h3>
+      <p className="text-muted-foreground text-xs">
+        {fileTypesHint(hint, acceptedFileTypes)}{" "}
+        {maxFileSize && `up to ${formatBytes(maxFileSize)}`}
+      </p>
+    </div>
+
+    <button
+      className="group flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
+      onClick={up.triggerFileInput}
+      type="button"
+    >
+      <span>Upload File</span>
+      <UploadCloud className="h-4 w-4 transition-transform duration-200 group-hover:scale-110" />
+    </button>
+
+    <p className="mt-3 text-muted-foreground text-xs">
+      or drag and drop your file here
+    </p>
+
+    <input
+      accept={acceptedFileTypes?.join(",")}
+      aria-label="File input"
+      className="sr-only"
+      onChange={up.handleFileInputChange}
+      multiple
+      ref={inputRef}
+      type="file"
+    />
+  </motion.div>
+);
+
+// While a file uploads: the progress rings, its name, size and percentage, and Cancel.
+const UploadingView = ({ up }: { up: UploadState }) => (
+  <motion.div
+    animate={{ opacity: 1, scale: 1 }}
+    className="absolute inset-0 flex flex-col items-center justify-center p-6"
+    exit={{ opacity: 0, scale: 0.95 }}
+    initial={{ opacity: 0, scale: 0.95 }}
+    key="uploading"
+  >
+    <div className="mb-3">
+      <UploadingAnimation progress={up.progress} />
+    </div>
+
+    <div className="mb-4 space-y-1.5 text-center">
+      <h3 className="truncate font-semibold text-foreground text-sm">
+        {up.file?.name}
+      </h3>
+      <div className="flex items-center justify-center gap-2 text-xs">
+        <span className="text-muted-foreground">
+          {formatBytes(up.file?.size || 0)}
+        </span>
+        <span className="font-medium text-muted-foreground">
+          {Math.round(up.progress)}%
+        </span>
+      </div>
+    </div>
+
+    <button
+      className="flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
+      onClick={up.resetState}
+      type="button"
+    >
+      Cancel
+    </button>
+  </motion.div>
+);
+
+const UploadErrorNote = ({ error }: { error: FileError | null }) => (
+  <AnimatePresence>
+    {error && (
+      <motion.div
+        animate={{ opacity: 1, y: 0 }}
+        className="absolute bottom-4 left-1/2 -translate-x-1/2 transform rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2"
+        exit={{ opacity: 0, y: -10 }}
+        initial={{ opacity: 0, y: 10 }}
+      >
+        <p className="text-red-500 text-sm dark:text-red-400">
+          {error.message}
+        </p>
+      </motion.div>
+    )}
+  </AnimatePresence>
+);
+
+// The glow along the edges while a file is dragged over the box.
+const DragGlow = ({ dragging }: { dragging: boolean }) => (
+  <div
+    className={cn(
+      "absolute inset-0 transition-opacity duration-300",
+      dragging ? "opacity-100" : "opacity-0"
+    )}
+  >
+    <div className="absolute inset-x-0 top-0 h-[20%] bg-gradient-to-b from-zinc-500/10 to-transparent" />
+    <div className="absolute inset-x-0 bottom-0 h-[20%] bg-gradient-to-t from-zinc-500/10 to-transparent" />
+    <div className="absolute inset-y-0 left-0 w-[20%] bg-gradient-to-r from-zinc-500/10 to-transparent" />
+    <div className="absolute inset-y-0 right-0 w-[20%] bg-gradient-to-l from-zinc-500/10 to-transparent" />
+    <div className="absolute inset-[20%] animate-pulse rounded-lg bg-zinc-500/5 transition-all duration-300" />
+  </div>
+);
+
+export default function FileUpload({
+  onUploadSuccess = () => {},
+  onUploadError = () => {},
+  acceptedFileTypes = [],
+  maxFileSize = DEFAULT_MAX_FILE_SIZE,
+  currentFile: initialFile = null,
+  onFileRemove = () => {},
+  uploadDelay = 2000,
+  validateFile = () => null,
+  className,
+  upload,
+  title = "Drag and drop or",
+  hint,
+}: FileUploadProps) {
+  const { fileInputRef, ...up } = useFileUpload({
+    onUploadSuccess,
+    onUploadError,
+    acceptedFileTypes,
+    maxFileSize,
+    initialFile,
+    onFileRemove,
+    uploadDelay,
+    validateFile,
+    upload,
+  });
+  const { status, error } = up;
+
   return (
     <div
       aria-label="File upload"
@@ -485,134 +615,29 @@ export default function FileUpload({
               error ? "border-red-500/50" : ""
             )}
           >
-            <div
-              className={cn(
-                "absolute inset-0 transition-opacity duration-300",
-                status === "dragging" ? "opacity-100" : "opacity-0"
-              )}
-            >
-              <div className="absolute inset-x-0 top-0 h-[20%] bg-gradient-to-b from-zinc-500/10 to-transparent" />
-              <div className="absolute inset-x-0 bottom-0 h-[20%] bg-gradient-to-t from-zinc-500/10 to-transparent" />
-              <div className="absolute inset-y-0 left-0 w-[20%] bg-gradient-to-r from-zinc-500/10 to-transparent" />
-              <div className="absolute inset-y-0 right-0 w-[20%] bg-gradient-to-l from-zinc-500/10 to-transparent" />
-              <div className="absolute inset-[20%] animate-pulse rounded-lg bg-zinc-500/5 transition-all duration-300" />
-            </div>
+            <DragGlow dragging={status === "dragging"} />
 
             <div className="absolute -top-4 -right-4 h-8 w-8 bg-gradient-to-br from-zinc-500/20 to-transparent opacity-0 blur-md transition-opacity duration-500 group-hover:opacity-100" />
 
             <div className="relative h-[260px]">
               <AnimatePresence mode="wait">
                 {status === "idle" || status === "dragging" ? (
-                  <motion.div
-                    animate={{
-                      opacity: status === "dragging" ? 0.8 : 1,
-                      y: 0,
-                      scale: status === "dragging" ? 0.98 : 1,
-                    }}
-                    className="absolute inset-0 flex flex-col items-center justify-center px-6 py-6"
-                    exit={{ opacity: 0, y: -10 }}
-                    initial={{ opacity: 0, y: 10 }}
+                  <DropzoneView
+                    acceptedFileTypes={acceptedFileTypes}
+                    hint={hint}
+                    inputRef={fileInputRef}
                     key="dropzone"
-                    onDragLeave={handleDragLeave}
-                    onDragOver={handleDragOver}
-                    onDrop={handleDrop}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <div className="mb-3">
-                      <UploadIllustration />
-                    </div>
-
-                    <div className="mb-4 space-y-1.5 text-center">
-                      <h3 className="font-semibold text-foreground text-lg tracking-tight">
-                        {title}
-                      </h3>
-                      <p className="text-muted-foreground text-xs">
-                        {hint ??
-                          (acceptedFileTypes?.length
-                            ? `${acceptedFileTypes
-                                .map((t) => t.split("/")[1])
-                                .join(", ")
-                                .toUpperCase()}`
-                            : "SVG, PNG, JPG or GIF")}{" "}
-                        {maxFileSize && `up to ${formatBytes(maxFileSize)}`}
-                      </p>
-                    </div>
-
-                    <button
-                      className="group flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
-                      onClick={triggerFileInput}
-                      type="button"
-                    >
-                      <span>Upload File</span>
-                      <UploadCloud className="h-4 w-4 transition-transform duration-200 group-hover:scale-110" />
-                    </button>
-
-                    <p className="mt-3 text-muted-foreground text-xs">
-                      or drag and drop your file here
-                    </p>
-
-                    <input
-                      accept={acceptedFileTypes?.join(",")}
-                      aria-label="File input"
-                      className="sr-only"
-                      onChange={handleFileInputChange}
-                      multiple
-                      ref={fileInputRef}
-                      type="file"
-                    />
-                  </motion.div>
+                    maxFileSize={maxFileSize}
+                    title={title}
+                    up={up}
+                  />
                 ) : status === "uploading" ? (
-                  <motion.div
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="absolute inset-0 flex flex-col items-center justify-center p-6"
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    key="uploading"
-                  >
-                    <div className="mb-3">
-                      <UploadingAnimation progress={progress} />
-                    </div>
-
-                    <div className="mb-4 space-y-1.5 text-center">
-                      <h3 className="truncate font-semibold text-foreground text-sm">
-                        {file?.name}
-                      </h3>
-                      <div className="flex items-center justify-center gap-2 text-xs">
-                        <span className="text-muted-foreground">
-                          {formatBytes(file?.size || 0)}
-                        </span>
-                        <span className="font-medium text-muted-foreground">
-                          {Math.round(progress)}%
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      className="flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
-                      onClick={resetState}
-                      type="button"
-                    >
-                      Cancel
-                    </button>
-                  </motion.div>
+                  <UploadingView key="uploading" up={up} />
                 ) : null}
               </AnimatePresence>
             </div>
 
-            <AnimatePresence>
-              {error && (
-                <motion.div
-                  animate={{ opacity: 1, y: 0 }}
-                  className="absolute bottom-4 left-1/2 -translate-x-1/2 transform rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2"
-                  exit={{ opacity: 0, y: -10 }}
-                  initial={{ opacity: 0, y: 10 }}
-                >
-                  <p className="text-red-500 text-sm dark:text-red-400">
-                    {error.message}
-                  </p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <UploadErrorNote error={error} />
           </div>
         </div>
       </div>

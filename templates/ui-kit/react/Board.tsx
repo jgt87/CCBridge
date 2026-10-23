@@ -13,6 +13,14 @@ export interface BoardCard {
   content: ReactNode;
 }
 
+// The place a dropped card takes: before the first card whose middle is below the pointer, counted
+// among the other cards (the dragged one leaves its slot).
+function dropIndex(listEl: HTMLElement, id: string, clientY: number) {
+  const items = (Array.from(listEl.children) as HTMLElement[]).filter((el) => el.getAttribute("data-id") !== id);
+  const index = items.findIndex((el) => el.getBoundingClientRect().top + el.offsetHeight / 2 > clientY);
+  return index < 0 ? items.length : index;
+}
+
 /**
  * A board of columns with cards (kanban): drag a card, or focus it and press Alt with an arrow key
  * (left and right: the next column, up and down: the order). onMove gets the card, its new column and
@@ -22,16 +30,26 @@ export function Board({ columns, cards, onMove }: { columns: BoardColumn[]; card
   const dragging = useRef<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const inColumn = (col: string) => cards.filter((c) => c.column === col);
-  const keyMove = (card: BoardCard, key: string) => {
+  // The end of the column `by` columns away, or null at the board's edge.
+  const otherColumn = (ci: number, by: number): [string, number] | null => {
+    const col = columns[ci + by];
+    return col ? [col.id, inColumn(col.id).length] : null;
+  };
+  // Where Alt+arrow moves a card (column and place), or null when it is already at that edge.
+  const keyTarget = (card: BoardCard, key: string): [string, number] | null => {
     const list = inColumn(card.column);
     const i = list.findIndex((c) => c.id === card.id);
     const ci = columns.findIndex((c) => c.id === card.column);
-    if (key === "ArrowUp" && i > 0) onMove(card.id, card.column, i - 1);
-    else if (key === "ArrowDown" && i < list.length - 1) onMove(card.id, card.column, i + 1);
-    else if (key === "ArrowLeft" && ci > 0) onMove(card.id, columns[ci - 1].id, inColumn(columns[ci - 1].id).length);
-    else if (key === "ArrowRight" && ci < columns.length - 1) onMove(card.id, columns[ci + 1].id, inColumn(columns[ci + 1].id).length);
-    else return false;
-    return true;
+    if (key === "ArrowUp") return i > 0 ? [card.column, i - 1] : null;
+    if (key === "ArrowDown") return i < list.length - 1 ? [card.column, i + 1] : null;
+    if (key === "ArrowLeft") return ci > 0 ? otherColumn(ci, -1) : null;
+    if (key === "ArrowRight") return ci < columns.length - 1 ? otherColumn(ci, 1) : null;
+    return null;
+  };
+  const keyMove = (card: BoardCard, key: string) => {
+    const to = keyTarget(card, key);
+    if (to) onMove(card.id, to[0], to[1]);
+    return !!to;
   };
   return (
     <div className="kit-board">
@@ -59,12 +77,7 @@ export function Board({ columns, cards, onMove }: { columns: BoardColumn[]; card
                 const id = dragging.current;
                 dragging.current = null;
                 if (!id) return;
-                // The place: before the first card whose middle is below the pointer, counted among
-                // the other cards (the dragged one leaves its slot).
-                const items = (Array.from(e.currentTarget.children) as HTMLElement[]).filter((el) => el.getAttribute("data-id") !== id);
-                let index = items.findIndex((el) => el.getBoundingClientRect().top + el.offsetHeight / 2 > e.clientY);
-                if (index < 0) index = items.length;
-                onMove(id, col.id, index);
+                onMove(id, col.id, dropIndex(e.currentTarget, id, e.clientY));
               }}
             >
               {list.map((card) => (
