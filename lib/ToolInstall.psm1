@@ -20,17 +20,55 @@ $script:Installable = [ordered]@{
 function Get-ToolsDir { Join-Path $env:LOCALAPPDATA 'CCBridge\tools' }
 function Get-ToolStatusFile([string]$Name) { Join-Path $env:LOCALAPPDATA "CCBridge\tool-install-$Name.json" }
 
+function Get-ExeVersion([string]$Path) {
+    # A program's version from its file (no process started), or $null.
+    try { ConvertTo-ToolVersion ((Get-Item -LiteralPath $Path).VersionInfo.ProductVersion) } catch { $null }
+}
+
+function Test-OwnCopyFirst {
+    <# Whether StreamHub's own copy of a tool (node, dotnet in its tools folder) goes in front of the
+       PATH: only when no other copy is found ($Others: the other programs of that name, first one
+       first), or the first other one is below the tool's minimum, or older than StreamHub's. A copy
+       the person installed at or above the minimum and not older than StreamHub's is never shadowed. #>
+    param([string]$Name, [string]$OwnExe, [string[]]$Others)
+    $other = @($Others | Where-Object { $_ }) | Select-Object -First 1
+    if (-not $other) { return $true }
+    $theirs = Get-ExeVersion $other
+    if (-not $theirs) { return $false }   # unknown: theirs stays first
+    $min = Get-ToolMinimum $Name
+    if ($min -and $theirs -lt $min) { return $true }
+    $mine = Get-ExeVersion $OwnExe
+    [bool]($mine -and $theirs -lt $mine)
+}
+
 function Add-ToolPaths {
-    <# Puts StreamHub's own tools (node, dotnet) and the user's PATH from the registry (per-user
-       installs change it for new programs only) in front of this process's PATH, so a tool
-       installed a moment ago is found here and by the commands this process starts. #>
-    $dirs = New-Object System.Collections.Generic.List[string]
-    foreach ($d in 'node', 'dotnet') { $p = Join-Path (Get-ToolsDir) $d; if (Test-Path -LiteralPath $p) { $dirs.Add($p) } }
+    <# Puts the user's PATH from the registry (per-user installs change it for new programs only) in
+       front of this process's PATH, so a tool installed a moment ago is found here and by the
+       commands this process starts. StreamHub's own tools (node, dotnet) go in front only when
+       Test-OwnCopyFirst says so, else at the end: a newer copy the person has stays the one used. #>
+    $own = foreach ($d in 'node', 'dotnet') { $p = Join-Path (Get-ToolsDir) $d; if (Test-Path -LiteralPath $p) { @{ name = $d; dir = $p; exe = Join-Path $p "$d.exe" } } }
+    $ownDirs = @($own | ForEach-Object { $_.dir })
+    # StreamHub's folders out first: their place is decided again each time.
+    $now = @($env:Path.Split(';') | Where-Object { $_ -and $ownDirs -notcontains $_ })
     $user = [Environment]::GetEnvironmentVariable('Path', 'User')
-    foreach ($d in @("$user".Split(';') | Where-Object { $_.Trim() })) { $dirs.Add([Environment]::ExpandEnvironmentVariables($d.Trim())) }
-    $now = @($env:Path.Split(';') | Where-Object { $_ })
-    $add = @($dirs | Where-Object { $now -notcontains $_ } | Select-Object -Unique)
-    if ($add.Count) { $env:Path = (($add + $now) -join ';') }
+    $userDirs = @("$user".Split(';') | Where-Object { $_.Trim() } | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_.Trim()) } | Where-Object { $ownDirs -notcontains $_ })
+    $search = @($userDirs + $now | Select-Object -Unique)
+    $front = New-Object System.Collections.Generic.List[string]; $back = New-Object System.Collections.Generic.List[string]
+    foreach ($o in @($own)) {
+        $others = @($search | ForEach-Object { Join-Path $_ "$($o.name).exe" } | Where-Object { $_ -notmatch '\\WindowsApps\\' -and (Test-Path -LiteralPath $_) })
+        if (Test-OwnCopyFirst $o.name $o.exe $others) { $front.Add($o.dir) } else { $back.Add($o.dir) }
+    }
+    $add = @($userDirs | Where-Object { $now -notcontains $_ } | Select-Object -Unique)
+    $env:Path = ((@($front) + $add + $now + @($back)) -join ';')
+}
+
+function Test-OwnInstall([string]$Name) {
+    <# Whether the copy of a tool in use is StreamHub's: in its tools folder, or installed by it
+       (its install status says done). Only those, and versions below the minimum, are updated. #>
+    $c = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($c -and $c.Source.StartsWith((Get-ToolsDir), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    $st = Get-ToolInstallStatus $Name
+    [bool]($st -and $st.state -eq 'done')
 }
 
 function Get-PythonVenv {
@@ -45,9 +83,7 @@ function Get-PythonVenv {
 
 function Get-VersionNumber([string]$Text) {
     # The first version number in a tool's text ("v24.14.1, npm 11" -> 24.14.1), or $null.
-    $m = [regex]::Match("$Text", '(\d+)\.(\d+)(?:\.(\d+))?')
-    if (-not $m.Success) { return $null }
-    [version]("$($m.Groups[1].Value).$($m.Groups[2].Value).$(if ($m.Groups[3].Success) { $m.Groups[3].Value } else { '0' })")
+    ConvertTo-ToolVersion $Text
 }
 
 function Get-LatestToolVersions {
@@ -116,11 +152,14 @@ function Get-InstallableTools {
         }
         if (-not $check) { continue }   # pytest without Python
         $st = Get-ToolInstallStatus $k
-        # A newer release than the one installed (the minimum versions only decide "too old").
+        # A newer release than the one installed: offered for StreamHub's own copy, or one below the
+        # minimum. A copy the person installed at or above the minimum is theirs to update.
         $newest = if ($latest) { "$($latest.$k)" } else { '' }
-        $have = Get-VersionNumber $(if ($k -eq 'python') { ($check.detail -split ',')[0] } else { $check.detail })
+        $haveText = if ($k -eq 'python') { ($check.detail -split ',')[0] } else { $check.detail }
+        $have = Get-VersionNumber $haveText
         $want = Get-VersionNumber $newest
-        $update = [bool]($check.status -ne 'INFO' -and $have -and $want -and $have -lt $want)
+        $mayUpdate = ($k -eq 'pytest') -or (Test-BelowToolMinimum $k $haveText) -or (Test-OwnInstall $k)
+        $update = [bool]($check.status -ne 'INFO' -and $have -and $want -and $have -lt $want -and $mayUpdate)
         $blocked = $venv -and $k -in 'python', 'pytest'
         $hint = "$($check.hint)"
         if ($update -and $blocked) { $hint = "Newer: $newest. The python found first is a virtual environment ($venv), often another program's; StreamHub does not update it." }
@@ -221,6 +260,10 @@ function Install-OptionalTool {
     $latest = try { Get-LatestToolVersions } catch { $null }
     $newest = if ($latest) { "$($latest.$Name)" } else { '' }
     $before = if ($Name -eq 'pytest') { $null } else { Get-ToolVersion $Name }   # installed already: this is an update
+    # A copy the person installed at or above the minimum is theirs: never installed over or shadowed.
+    if ($before -and -not (Test-BelowToolMinimum $Name $before) -and -not (Test-OwnInstall $Name)) {
+        return "$($t.label) $before is installed already (at or above the minimum StreamHub needs); StreamHub uses it as it is."
+    }
     $tmp = Join-Path $env:TEMP ('streamhub-tool-' + [guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Force -Path $tmp
     try {
@@ -298,4 +341,4 @@ function Install-OptionalTool {
     "$($t.label) installed for your user"
 }
 
-Export-ModuleMember -Function Test-FolderInUse, Add-PendingToolInstall, Start-PendingToolInstalls, Get-VersionNumber, Get-LatestToolVersions, Get-ToolsDir, Add-ToolPaths, Get-InstallableTools, Get-ToolInstallStatus, Set-ToolInstallStatus, Start-ToolInstall, Install-OptionalTool
+Export-ModuleMember -Function Test-OwnCopyFirst, Test-OwnInstall, Test-FolderInUse, Add-PendingToolInstall, Start-PendingToolInstalls, Get-VersionNumber, Get-LatestToolVersions, Get-ToolsDir, Add-ToolPaths, Get-InstallableTools, Get-ToolInstallStatus, Set-ToolInstallStatus, Start-ToolInstall, Install-OptionalTool

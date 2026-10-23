@@ -140,7 +140,9 @@
                                                 "71e5a5b031fb2437f5bf792aec78725bfdf6620f5790b8ff923f9a1064d81a9e"
                                             ],
                   "LICENSE-lucide.txt":  [
+                                             "1e244dd4e902431148eac652e1d9c90299bff9f7fea58a3b2da846bb81bdc86f",
                                              "44d902c2ac0f3742d3d2f976d7dc305c87214e11608d945c6068a307fdf6f1b6",
+                                             "74e082374c75eba2520f4b09a7f9d2c06be0f463f9ef4172252cb092daff4309",
                                              "c3a6496001b314a783fb03ea1151bcc6d48e52e04288ef36115b7a47dfa5badb"
                                          ],
                   "react/Avatar.tsx":  [

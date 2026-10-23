@@ -128,6 +128,32 @@ function Test-NpmRegistry {
     }
 }
 
+# The oldest version of each optional tool that StreamHub's use of it works with. A version at or
+# above it, whoever installed it, is used as it is: StreamHub never installs over it, never puts its
+# own copy in front of it, and never offers to update it (ToolInstall Get-InstallableTools,
+# Add-ToolPaths). Only a missing tool, one below its minimum, or StreamHub's own copy is installed
+# or updated. Git has none: StreamHub does not use it.
+$script:ToolMinimums = [ordered]@{ python = '3.8'; node = '18.0'; dotnet = '6.0' }
+
+function ConvertTo-ToolVersion([string]$Text) {
+    # The first version number in a tool's text ("v24.14.1, npm 11" -> 24.14.1), or $null.
+    $m = [regex]::Match("$Text", '(\d+)\.(\d+)(?:\.(\d+))?')
+    if (-not $m.Success) { return $null }
+    [version]("$($m.Groups[1].Value).$($m.Groups[2].Value).$(if ($m.Groups[3].Success) { $m.Groups[3].Value } else { '0' })")
+}
+
+function Get-ToolMinimum([string]$Name) {
+    # The minimum version of a tool (python, node, dotnet), or $null when there is none.
+    if ($script:ToolMinimums.Contains($Name)) { [version]$script:ToolMinimums[$Name] } else { $null }
+}
+
+function Test-BelowToolMinimum([string]$Name, [string]$VersionText) {
+    # True when the version a tool reports is older than its minimum (unknown versions are not).
+    $min = Get-ToolMinimum $Name
+    $v = ConvertTo-ToolVersion $VersionText
+    [bool]($min -and $v -and $v -lt $min)
+}
+
 function Get-OptionalToolChecks {
     <# Optional tools StreamHub uses when they are there: Pester (ships with Windows) and Python,
        Node.js, the .NET SDK and Git for projects that need them. Never a failure: INFO when a tool
@@ -147,24 +173,26 @@ function Get-OptionalToolChecks {
         # No quotes in the Python code: Windows PowerShell 5.1 drops them when it starts a program.
         $test = Get-ToolVersion 'python' @('-c', 'import pytest; print(pytest.__version__)')
         $pytest = if ("$test" -match '^\d+\.\d') { "pytest $test" } else { 'no pytest (tests run with unittest)' }
-        $old = ($v -match '(\d+)\.(\d+)') -and ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 8))
-        New-Check 'Python' $(if ($old) { 'WARN' } else { 'OK' }) "$v, $pytest" $(if ($old) { 'Python 3.8 or newer is recommended.' } else { '' }) $(if ($old) { 'https://www.python.org/downloads/windows/' } else { '' })
+        $old = Test-BelowToolMinimum 'python' $v
+        New-Check 'Python' $(if ($old) { 'WARN' } else { 'OK' }) "$v, $pytest" $(if ($old) { "Python $(Get-ToolMinimum 'python') or newer is recommended." } else { '' }) $(if ($old) { 'https://www.python.org/downloads/windows/' } else { '' })
     }))
     $out.Add((Invoke-SafeCheck 'Node.js' {
         $v = Get-ToolVersion 'node'
         if (-not $v) { return New-Check 'Node.js' 'INFO' 'not installed' 'Optional: only for projects with a package.json (npm scripts and tests). StreamHub runs without it.' 'https://nodejs.org/' }
         $npm = Get-ToolVersion 'npm'
-        $old = ($v -match 'v?(\d+)\.') -and [int]$Matches[1] -lt 18
+        $old = Test-BelowToolMinimum 'node' $v
         $reg = if ($npm -and $Registry) { Test-NpmRegistry } else { $null }
         $blocked = $reg -eq 'blocked'
-        $hint = @($(if ($old) { 'Node.js 18 or newer is recommended.' }), $(if ($blocked) { 'npm cannot reach its package registry (network or proxy): npm install will not work, so React and other npm projects cannot be built; plain HTML and JavaScript still work.' })) | Where-Object { $_ }
+        $hint = @($(if ($old) { "Node.js $((Get-ToolMinimum 'node').Major) or newer is recommended." }), $(if ($blocked) { 'npm cannot reach its package registry (network or proxy): npm install will not work, so React and other npm projects cannot be built; plain HTML and JavaScript still work.' })) | Where-Object { $_ }
         New-Check 'Node.js' $(if ($old -or $blocked) { 'WARN' } else { 'OK' }) "$v$(if ($npm) { ", npm $npm$(if ($reg) { ", registry $reg" })" } else { ', no npm' })" ($hint -join ' ') $(if ($old) { 'https://nodejs.org/' } else { '' })
     }))
     foreach ($t in @(@('.NET SDK', 'dotnet', 'Optional: only for C# and .NET projects. StreamHub itself uses the .NET Framework that ships with Windows.', 'https://dotnet.microsoft.com/download'),
                      @('Git', 'git', 'Optional: StreamHub has no Git features, but your own Git tools work next to it.', 'https://git-scm.com/download/win'))) {
         $out.Add((Invoke-SafeCheck $t[0] {
             $v = Get-ToolVersion $t[1]
-            if ($v) { New-Check $t[0] 'OK' $v } else { New-Check $t[0] 'INFO' 'not installed' $t[2] $t[3] }
+            if (-not $v) { return New-Check $t[0] 'INFO' 'not installed' $t[2] $t[3] }
+            if (Test-BelowToolMinimum $t[1] $v) { return New-Check $t[0] 'WARN' $v "$($t[0]) $(Get-ToolMinimum $t[1]) or newer is recommended." $t[3] }
+            New-Check $t[0] 'OK' $v
         }))
     }
     $out.ToArray()
@@ -385,4 +413,4 @@ function Write-PrereqReport {
     -not @($Checks | Where-Object { $_.status -eq 'FAIL' }).Count
 }
 
-Export-ModuleMember -Function Get-ToolVersion, Get-OptionalToolChecks, Get-UiKitCheck, Rename-AppShortcuts, Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText
+Export-ModuleMember -Function Get-ToolVersion, ConvertTo-ToolVersion, Get-ToolMinimum, Test-BelowToolMinimum, Get-OptionalToolChecks, Get-UiKitCheck, Rename-AppShortcuts, Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText

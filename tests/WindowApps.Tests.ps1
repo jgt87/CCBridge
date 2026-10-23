@@ -220,7 +220,8 @@ Describe 'Window app alignment' {
         @(Find-XamlLayoutIssues 'App.ps1' "Add-Type -AssemblyName PresentationFramework`n`$w = [Windows.Markup.XamlReader]::Parse([IO.File]::ReadAllText((Join-Path `$PSScriptRoot 'MainWindow.xaml')))").Count | Should Be 0
     }
     It 'writes the layout of tagged panels into the XAML, once' {
-        $x = "$head`n<DockPanel>`n  <StackPanel Tag=`"row`">`n    <TextBox Width=`"240`"/>`n    <Button Content=`"Go`" Margin=`"2`"/>`n  </StackPanel>`n  <Grid Tag=`"form`">`n    <Label Content=`"Name`"/>`n    <TextBox/>`n    <Label Content=`"Notes`"/>`n    <TextBox AcceptsReturn=`"True`"/>`n  </Grid>`n  <StackPanel Tag=`"actions`"><Button Content=`"Cancel`"/><Button Content=`"Save`"/></StackPanel>`n</DockPanel></Window>"
+        Add-Type -AssemblyName PresentationFramework   # parses the result below; never rely on another test loading it
+        $x ="$head`n<DockPanel>`n  <StackPanel Tag=`"row`">`n    <TextBox Width=`"240`"/>`n    <Button Content=`"Go`" Margin=`"2`"/>`n  </StackPanel>`n  <Grid Tag=`"form`">`n    <Label Content=`"Name`"/>`n    <TextBox/>`n    <Label Content=`"Notes`"/>`n    <TextBox AcceptsReturn=`"True`"/>`n  </Grid>`n  <StackPanel Tag=`"actions`"><Button Content=`"Cancel`"/><Button Content=`"Save`"/></StackPanel>`n</DockPanel></Window>"
         $r = Expand-XamlLayout $x -Heights
         @($r.changes).Count | Should Be 4
         $t = $r.text

@@ -586,41 +586,74 @@ function WorkStatusLines({ work, onStop, onShowCopilot, stopping }: { work: Work
         {v.sign}
       </div>
       {v.quiet && (
-        <div className="kit-notice kit-notice--warn mt-2 text-xs" role="status">
-          <div>
-            Nothing new for {formatDuration(v.quietMs)}. {v.quietText}
-          </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            {onShowCopilot && (
-              <button className="kit-btn kit-btn--sm" onClick={showCopilot} type="button">
-                Show Copilot
-              </button>
-            )}
-            {onStop && (
-              <button className="kit-btn kit-btn--sm kit-btn--ghost" disabled={stopping} onClick={onStop} type="button">
-                Stop
-              </button>
-            )}
-            {shown === "missing" && <span className="text-muted-foreground">Copilot's tab was not found in StreamHub's Edge.</span>}
-          </div>
-        </div>
+        <QuietWarning
+          missing={shown === "missing"}
+          onShowCopilot={onShowCopilot && showCopilot}
+          onStop={onStop}
+          quietMs={v.quietMs}
+          quietText={v.quietText}
+          stopping={stopping}
+        />
       )}
-      {v.steps.length > 0 && (
-        <details className="mt-1.5">
-          <summary className="cursor-pointer text-muted-foreground text-xs hover:text-foreground">Activity log ({v.steps.length})</summary>
-          <ol className="mt-1 space-y-0.5 text-xs">
-            {[...v.steps].reverse().map((s, i) => (
-              <li className="flex gap-2" key={`${s.at}-${i}`}>
-                <time className="shrink-0 text-muted-foreground tabular-nums" dateTime={s.at}>
-                  {s.at.slice(11, 19)}
-                </time>
-                <span className="min-w-0">{s.text}</span>
-              </li>
-            ))}
-          </ol>
-        </details>
-      )}
+      {v.steps.length > 0 && <ActivityLog steps={v.steps} />}
     </div>
+  );
+}
+
+/** Nothing happened for minutes: what StreamHub waits for, Show Copilot and Stop. */
+function QuietWarning({
+  quietMs,
+  quietText,
+  missing,
+  stopping,
+  onShowCopilot,
+  onStop,
+}: {
+  quietMs: number;
+  quietText: string;
+  missing: boolean;
+  stopping: boolean;
+  onShowCopilot?: () => void;
+  onStop?: () => void;
+}) {
+  return (
+    <div className="kit-notice kit-notice--warn mt-2 text-xs" role="status">
+      <div>
+        Nothing new for {formatDuration(quietMs)}. {quietText}
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        {onShowCopilot && (
+          <button className="kit-btn kit-btn--sm" onClick={onShowCopilot} type="button">
+            Show Copilot
+          </button>
+        )}
+        {onStop && (
+          <button className="kit-btn kit-btn--sm kit-btn--ghost" disabled={stopping} onClick={onStop} type="button">
+            Stop
+          </button>
+        )}
+        {missing && <span className="text-muted-foreground">Copilot's tab was not found in StreamHub's Edge.</span>}
+      </div>
+    </div>
+  );
+}
+
+/** The last steps of the task, newest first, folded away. */
+function ActivityLog({ steps }: { steps: { at: string; text: string }[] }) {
+  return (
+    <details className="mt-1.5">
+      <summary className="cursor-pointer text-muted-foreground text-xs hover:text-foreground">Activity log ({steps.length})</summary>
+      <ol className="mt-1 space-y-0.5 text-xs">
+        {[...steps].reverse().map((s, i) => (
+          <li className="flex gap-2" key={`${s.at}-${i}`}>
+            <time className="shrink-0 text-muted-foreground tabular-nums" dateTime={s.at}>
+              {s.at.slice(11, 19)}
+            </time>
+            <span className="min-w-0">{s.text}</span>
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 

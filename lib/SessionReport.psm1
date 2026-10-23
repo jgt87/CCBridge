@@ -195,7 +195,11 @@ function New-SessionReportFile {
     <# Writes the report of one run to %LOCALAPPDATA%\CCBridge\reports\session-<stamp>.md (and returns
        its path). $ProcessId 0 = the last run in the log; $LogFile defaults to today's log. #>
     param([string]$LogFile = '', [int]$ProcessId = 0, [string]$OutDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\reports'))
-    if (-not $LogFile) { $LogFile = Join-Path (Join-Path $env:LOCALAPPDATA 'CCBridge\logs') ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log') }
+    if (-not $LogFile) {
+        # The folder the log module writes to (a test run logs elsewhere: Log Get-DefaultLogDir).
+        $logDir = if (Get-Command Get-CCBLogDir -ErrorAction SilentlyContinue) { Get-CCBLogDir } else { Join-Path $env:LOCALAPPDATA 'CCBridge\logs' }
+        $LogFile = Join-Path $logDir ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
+    }
     if (-not (Test-Path -LiteralPath $LogFile)) { throw "No log file at $LogFile" }
     $lines = [IO.File]::ReadAllLines($LogFile)
     if (-not $ProcessId) { $ProcessId = Get-LatestRunId $lines }

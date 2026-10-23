@@ -27,6 +27,18 @@ Describe 'CCBridge log' {
         }
     }
 
+    It 'logs a test run outside the real log folder, and follows CCBRIDGE_LOG_DIR' {
+        # Pester is loaded here: the log goes to the test-log folder, never %LOCALAPPDATA%\CCBridge\logs.
+        Get-CCBLogDir | Should Not Be (Join-Path $env:LOCALAPPDATA 'CCBridge\logs')
+        $env:CCBRIDGE_LOG_DIR | Should Be (Get-CCBLogDir)
+        # A process started by a test inherits the folder through its environment.
+        $child = powershell -NoProfile -Command "Import-Module '$root\lib\Log.psm1'; Get-CCBLogDir"
+        "$child".Trim() | Should Be (Get-CCBLogDir)
+        # Outside a test run, with the variable unset, it is the real folder.
+        $real = powershell -NoProfile -Command "`$env:CCBRIDGE_LOG_DIR = ''; Import-Module '$root\lib\Log.psm1'; Get-CCBLogDir"
+        "$real".Trim() | Should Be (Join-Path $env:LOCALAPPDATA 'CCBridge\logs')
+    }
+
     It 'writes info, skips verbose at the default level' {
         Initialize-CCBLog -Level info
         Write-CCBLog info test "$marker info line"

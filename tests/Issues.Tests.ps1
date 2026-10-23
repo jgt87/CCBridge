@@ -19,7 +19,9 @@ function Set-TestFile([string]$Dir, [string]$Rel, [string]$Text) {
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $p)
     [IO.File]::WriteAllText($p, $Text)
     # A different time each write, so the incremental index sees the change even within a second.
-    (Get-Item -LiteralPath $p).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddSeconds(- (Get-Random -Maximum 100000))
+    # A counter, not a random time: two writes can never get the same stamp, and a run repeats exactly.
+    $script:TestFileStamp = 1 + $(if ($script:TestFileStamp) { $script:TestFileStamp } else { 0 })
+    (Get-Item -LiteralPath $p).LastWriteTimeUtc = [datetime]::new(2020, 1, 1, 0, 0, 0, [DateTimeKind]::Utc).AddSeconds($script:TestFileStamp)
 }
 function Get-BigPsFunction([string]$Name) {
     $body = (1..25 | ForEach-Object { "    if (`$x -eq $_) { if (`$y) { foreach (`$z in 1..2) { while (`$z) { if (`$z -gt $_) { `$z-- } else { break } } } } }" }) -join "`n"
@@ -256,9 +258,16 @@ Describe 'The fix cycle cannot loop' {
             $null = Invoke-IssueCycle $state @($fix.path, "new$n.js") $base $fix
             $entry.status = 'done'
         }
-        $runs | Should Be 4    # 2 files x 2 attempts, nothing more
-        @(Get-IssueReport $dir | Where-Object { $_.path -in 'a.js', 'b.js' -and $_.status -ne 'gave up' }).Count | Should Be 0
-        @(Get-IssueReport $dir | Where-Object { $_.path -like 'new*' -and $_.status -eq 'open' }).Count | Should Be 4
+        # On a failure, say what the queue and the issue list held (this test once failed in a full
+        # run and never on its own; the details show which step went another way).
+        $report = @(Get-IssueReport $dir)
+        $stuck = @($report | Where-Object { $_.path -in 'a.js', 'b.js' -and $_.status -ne 'gave up' }).Count
+        $openNew = @($report | Where-Object { $_.path -like 'new*' -and $_.status -eq 'open' }).Count
+        if ($runs -ne 4 -or $stuck -ne 0 -or $openNew -ne 4) {
+            $q = (@($state.Queue | Where-Object { $_.source -eq 'issues' }) | ForEach-Object { "$($_.task.issueFix.path)#$($_.task.issueFix.attempt)=$($_.status)" }) -join ', '
+            $r = ($report | ForEach-Object { "$($_.path):$($_.status):$($_.message)" }) -join '; '
+            throw "runs=$runs (want 4), a/b not given up=$stuck (want 0), new open=$openNew (want 4). Queue: $q. Issues: $r"
+        }
         Remove-Item -LiteralPath $dir -Recurse -Force
     }
 }

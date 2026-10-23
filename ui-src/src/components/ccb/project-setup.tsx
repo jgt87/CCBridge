@@ -1,8 +1,9 @@
 import { Hammer, Info } from "lucide-react";
 import { useEffect, useState } from "react";
 import HoldButton from "@/components/kokonutui/hold-button";
-import type { BuildForm, ChatOptions, ProjectSetup, SetupChoice } from "@/lib/api";
+import type { BuildForm, ChatOptions, ProjectSetup, SetupAnswer, SetupChoice } from "@/lib/api";
 import { BUILD_FORMS } from "@/lib/build-forms";
+import { asList, holdsRequest, initialAnswers, isChosen, type SetupOption, setupReply, toggleAnswer } from "@/lib/project-setup-view";
 import { cn } from "@/lib/utils";
 import { DatabasesSection } from "./databases-section";
 import { SharePointSection } from "./sharepoint-section";
@@ -15,8 +16,6 @@ const PATH_HINT = "C:\\Users\\NAME\\Company\\Site - Documents\\data.csv";
 
 // The API client is loaded when used: it reads the page's session token when loaded.
 const loadApi = () => import("@/lib/api").then((m) => m.api);
-
-const asList = <T,>(v: T[] | T | undefined): T[] => (Array.isArray(v) ? v : v ? [v] : []);
 
 const choiceClass = (on: boolean) =>
   cn(
@@ -37,6 +36,52 @@ export interface SetupChoiceItem {
   restored: boolean;
 }
 
+/** One option of a question: its label and what it means. */
+function OptionButton({ option, on, multi, onPick }: { option: SetupOption; on: boolean; multi?: boolean; onPick: () => void }) {
+  return (
+    <button aria-pressed={on} className={choiceClass(on)} onClick={onPick} role={multi ? "checkbox" : undefined} aria-checked={multi ? on : undefined} type="button">
+      <div className="font-medium">{option.label}</div>
+      <div className="text-muted-foreground">{option.help}</div>
+    </button>
+  );
+}
+
+/** The live data file: a tick box, and the path once ticked. */
+function LiveDataField({ live, setLive, path, setPath }: { live: boolean; setLive: (on: boolean) => void; path: string; setPath: (p: string) => void }) {
+  return (
+    <div className="space-y-1">
+      <label className="kit-check text-xs">
+        <input checked={live} onChange={(e) => setLive(e.target.checked)} type="checkbox" />
+        Keep the data live from a file outside the project
+      </label>
+      {live && (
+        <>
+          <input aria-label="Full path of the live data file" className={inputClass} onChange={(e) => setPath(e.target.value)} placeholder={PATH_HINT} value={path} />
+          <div className="text-muted-foreground text-xs">{LIVE_HELP}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** One of the other questions: its text, a note for optional or per-request ones, and its options. */
+function SetupQuestion({ q, value, onPick }: { q: SetupChoice; value: string; onPick: (option: string) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <div>
+        {q.question}
+        {q.multi && <span className="text-muted-foreground text-xs"> (optional: pick any, or none)</span>}
+        {q.scope === "request" && <span className="text-muted-foreground text-xs"> (for this request)</span>}
+      </div>
+      <div className="grid gap-1.5 sm:grid-cols-3">
+        {asList(q.options).map((o) => (
+          <OptionButton key={o.value} multi={q.multi} on={isChosen(q, value, o.value)} onPick={() => onPick(o.value)} option={o} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * A new project's first request builds a page without saying how: one file, separate files or
  * Copilot's choice, and (with data) whether the data stays live from a file outside the project.
@@ -50,8 +95,7 @@ export function SetupChoiceCard({ item, onSend }: { item: SetupChoiceItem; onSen
   const [build, setBuild] = useState<BuildForm>("single");
   const [live, setLive] = useState(Boolean(item.suggest));
   const [path, setPath] = useState(item.suggest);
-  // The first choice of every other question is the usual one; a multi-select starts empty.
-  const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(others.map((q) => [q.id, q.multi ? "" : (asList(q.options)[0]?.value ?? "")])));
+  const [answers, setAnswers] = useState<Record<string, string>>(() => initialAnswers(others));
   const [sent, setSent] = useState("");
   if (item.restored || sent) {
     return (
@@ -61,61 +105,11 @@ export function SetupChoiceCard({ item, onSend }: { item: SetupChoiceItem; onSen
       </div>
     );
   }
-  const labelOf = (q: SetupChoice, v: string) =>
-    v
-      .split(",")
-      .filter(Boolean)
-      .map((x) => asList(q.options).find((o) => o.value === x)?.label ?? x)
-      .join(", ") || "none";
-  const toggle = (q: SetupChoice, v: string) =>
-    setAnswers((a) => {
-      if (!q.multi) return { ...a, [q.id]: v };
-      const set = new Set((a[q.id] || "").split(",").filter(Boolean));
-      if (set.has(v)) set.delete(v);
-      else set.add(v);
-      return { ...a, [q.id]: [...set].join(",") };
-    });
+  const pick = (q: SetupChoice, option: string) => setAnswers((a) => ({ ...a, [q.id]: toggleAnswer(q, a[q.id] || "", option) }));
   const send = () => {
-    const parts: string[] = [];
-    if (buildQ) {
-      const label = options.find((o) => o.value === build)?.label ?? build;
-      parts.push(`Build form: ${label}${live && path.trim() ? `; live data from ${path.trim()}` : ""}`);
-    }
-    for (const q of others) parts.push(`${q.question.replace(/\?$/, "")}: ${labelOf(q, answers[q.id] || "")}`);
-    // Answers that mean "not now": nothing is sent, the note says what to do.
-    if (answers.addto === "project") {
-      setSent(`${parts.join("; ")}. Create the new project in the project list, open it, and send the request there.`);
-      return;
-    }
-    if (answers.sampledata === "wait") {
-      setSent(`${parts.join("; ")}. Add the data file to the project (Source/ or the project folder), then send the request again.`);
-      return;
-    }
-    setSent(`${parts.join("; ")}. Sent to Copilot.`);
-    const opts: ChatOptions = { setup: { ...(buildQ ? { build, liveSource: live ? path.trim() || undefined : undefined } : {}), answers } };
-    if (item.clarify || answers.bigtask === "clarify") opts.clarify = true;
-    if (answers.bigtask === "plan") {
-      opts.planFirst = true;
-      opts.request = item.request;
-    }
-    onSend?.(item.request, opts);
-  };
-  const choiceGrid = (q: SetupChoice) => {
-    const opts = asList(q.options);
-    const chosen = new Set((answers[q.id] || "").split(",").filter(Boolean));
-    return (
-      <div className="grid gap-1.5 sm:grid-cols-3" key={q.id}>
-        {opts.map((o) => {
-          const on = q.multi ? chosen.has(o.value) : answers[q.id] === o.value;
-          return (
-            <button aria-pressed={on} className={choiceClass(on)} key={o.value} onClick={() => toggle(q, o.value)} role={q.multi ? "checkbox" : undefined} aria-checked={q.multi ? on : undefined} type="button">
-              <div className="font-medium">{o.label}</div>
-              <div className="text-muted-foreground">{o.help}</div>
-            </button>
-          );
-        })}
-      </div>
-    );
+    const reply = setupReply({ request: item.request, clarify: item.clarify, buildOptions: buildQ ? options : null, build, live, path, others, answers });
+    setSent(reply.note);
+    if (reply.opts) onSend?.(item.request, reply.opts);
   };
   return (
     <div className="kit-panel space-y-3 px-3 py-2 text-sm">
@@ -124,37 +118,14 @@ export function SetupChoiceCard({ item, onSend }: { item: SetupChoiceItem; onSen
           <div>{buildQ.question} StreamHub remembers it for this project.</div>
           <div className="grid gap-1.5 sm:grid-cols-3">
             {options.map((o) => (
-              <button aria-pressed={build === o.value} className={choiceClass(build === o.value)} key={o.value} onClick={() => setBuild(o.value as BuildForm)} type="button">
-                <div className="font-medium">{o.label}</div>
-                <div className="text-muted-foreground">{o.help}</div>
-              </button>
+              <OptionButton key={o.value} on={build === o.value} onPick={() => setBuild(o.value as BuildForm)} option={o} />
             ))}
           </div>
-          {item.live && (
-            <div className="space-y-1">
-              <label className="kit-check text-xs">
-                <input checked={live} onChange={(e) => setLive(e.target.checked)} type="checkbox" />
-                Keep the data live from a file outside the project
-              </label>
-              {live && (
-                <>
-                  <input aria-label="Full path of the live data file" className={inputClass} onChange={(e) => setPath(e.target.value)} placeholder={PATH_HINT} value={path} />
-                  <div className="text-muted-foreground text-xs">{LIVE_HELP}</div>
-                </>
-              )}
-            </div>
-          )}
+          {item.live && <LiveDataField live={live} path={path} setLive={setLive} setPath={setPath} />}
         </div>
       )}
       {others.map((q) => (
-        <div className="space-y-1.5" key={q.id}>
-          <div>
-            {q.question}
-            {q.multi && <span className="text-muted-foreground text-xs"> (optional: pick any, or none)</span>}
-            {q.scope === "request" && <span className="text-muted-foreground text-xs"> (for this request)</span>}
-          </div>
-          {choiceGrid(q)}
-        </div>
+        <SetupQuestion key={q.id} onPick={(o) => pick(q, o)} q={q} value={answers[q.id] || ""} />
       ))}
       {/* Held like the run approval: the same button, size and fill, so nothing starts on a stray click. */}
       <div className="flex flex-wrap items-center gap-2">
@@ -164,7 +135,7 @@ export function SetupChoiceCard({ item, onSend }: { item: SetupChoiceItem; onSen
           holdDuration={1200}
           holdingLabel="Keep holding..."
           icon={<Hammer className="h-4 w-4" />}
-          label={answers.addto === "project" || answers.sampledata === "wait" ? "Hold to confirm" : "Hold to start building"}
+          label={holdsRequest(answers) ? "Hold to confirm" : "Hold to start building"}
           onHoldComplete={send}
           variant="grey"
         />
@@ -173,8 +144,11 @@ export function SetupChoiceCard({ item, onSend }: { item: SetupChoiceItem; onSen
   );
 }
 
-/** Files tab > Project setup: the build form and the live data file of the open project, to change later. */
-export function ProjectSetupPanel({ projectPath }: { projectPath: string }) {
+type SaveBody = { build?: BuildForm | ""; liveSource?: string; forget?: string };
+type Save = (b: SaveBody, done: string) => Promise<void>;
+
+/** The open project's setup, loaded per project, and a save that reports what it did. */
+function useProjectSetup(projectPath: string) {
   const [setup, setSetup] = useState<ProjectSetup | null>(null);
   const [path, setPath] = useState("");
   const [note, setNote] = useState("");
@@ -189,7 +163,7 @@ export function ProjectSetupPanel({ projectPath }: { projectPath: string }) {
       () => setSetup(null),
     );
   }, [projectPath]);
-  const save = async (b: { build?: BuildForm | ""; liveSource?: string; forget?: string }, done: string) => {
+  const save: Save = async (b, done) => {
     setBusy(true);
     setNote("");
     try {
@@ -203,57 +177,83 @@ export function ProjectSetupPanel({ projectPath }: { projectPath: string }) {
       setBusy(false);
     }
   };
+  return { setup, path, setPath, note, busy, save };
+}
+
+/** How pages are built: the three forms, the saved one marked. */
+function BuildFormSection({ build, busy, save }: { build: ProjectSetup["build"]; busy: boolean; save: Save }) {
+  return (
+    <div className="space-y-1">
+      <div className="text-muted-foreground">How pages are built (Copilot gets this with every task)</div>
+      <div className="grid gap-1">
+        {BUILD_FORMS.map((f) => (
+          <button aria-pressed={build === f.value} className={choiceClass(build === f.value)} disabled={busy} key={f.value} onClick={() => void save({ build: f.value }, `Saved: ${f.label}.`)} title={f.help} type="button">
+            {f.label}
+          </button>
+        ))}
+      </div>
+      {!build && <div className="text-muted-foreground">Not chosen yet: StreamHub asks at the first request that builds a page.</div>}
+    </div>
+  );
+}
+
+/** The live data file outside the project: its path, Use this file, Stop following, and where it is copied. */
+function LiveFileSection({ live, path, setPath, busy, save }: { live: ProjectSetup["live"]; path: string; setPath: (p: string) => void; busy: boolean; save: Save }) {
+  return (
+    <div className="space-y-1">
+      <div className="text-muted-foreground">Live data file outside the project</div>
+      <input aria-label="Full path of the live data file" className={inputClass} disabled={busy} onChange={(e) => setPath(e.target.value)} placeholder={PATH_HINT} value={path} />
+      <div className="flex gap-1.5">
+        <button className={cn(buttonClass, "bg-(--kit-surface-2)")} disabled={busy || !path.trim() || path.trim() === live?.path} onClick={() => void save({ liveSource: path.trim() }, "Saved: StreamHub copies the file in when it changes.")} type="button">
+          Use this file
+        </button>
+        {live && (
+          <button className={buttonClass} disabled={busy} onClick={() => void save({ liveSource: "" }, "The live data file is no longer followed; the last copy stays.")} type="button">
+            Stop following
+          </button>
+        )}
+      </div>
+      {live ? (
+        <div className="text-muted-foreground">
+          Copied to {live.copy}
+          {live.found ? "" : " (the file is not found right now: is its folder still synced?)"}.
+        </div>
+      ) : (
+        <div className="text-muted-foreground">{LIVE_HELP}</div>
+      )}
+    </div>
+  );
+}
+
+/** The other questions answered for the project, each with Forget. */
+function SavedAnswers({ answers, busy, save }: { answers: SetupAnswer[]; busy: boolean; save: Save }) {
+  if (answers.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <div className="text-muted-foreground">Choices made for this project (asked when a request needed them; Copilot gets them with every task)</div>
+      {answers.map((a) => (
+        <div className="flex items-center gap-2" key={a.id}>
+          <span className="truncate" title={a.question}>
+            {a.label}
+          </span>
+          <button className={cn(buttonClass, "ml-auto shrink-0")} disabled={busy} onClick={() => void save({ forget: a.id }, `Forgotten: ${a.question} StreamHub asks again when a request needs it.`)} type="button">
+            Forget
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Files tab > Project setup: the build form and the live data file of the open project, to change later. */
+export function ProjectSetupPanel({ projectPath }: { projectPath: string }) {
+  const { setup, path, setPath, note, busy, save } = useProjectSetup(projectPath);
   if (!setup) return <p className="text-muted-foreground text-xs">No project open.</p>;
   return (
     <div className="space-y-2 text-xs">
-      <div className="space-y-1">
-        <div className="text-muted-foreground">How pages are built (Copilot gets this with every task)</div>
-        <div className="grid gap-1">
-          {BUILD_FORMS.map((f) => (
-            <button aria-pressed={setup.build === f.value} className={choiceClass(setup.build === f.value)} disabled={busy} key={f.value} onClick={() => void save({ build: f.value }, `Saved: ${f.label}.`)} title={f.help} type="button">
-              {f.label}
-            </button>
-          ))}
-        </div>
-        {!setup.build && <div className="text-muted-foreground">Not chosen yet: StreamHub asks at the first request that builds a page.</div>}
-      </div>
-      <div className="space-y-1">
-        <div className="text-muted-foreground">Live data file outside the project</div>
-        <input aria-label="Full path of the live data file" className={inputClass} disabled={busy} onChange={(e) => setPath(e.target.value)} placeholder={PATH_HINT} value={path} />
-        <div className="flex gap-1.5">
-          <button className={cn(buttonClass, "bg-(--kit-surface-2)")} disabled={busy || !path.trim() || path.trim() === setup.live?.path} onClick={() => void save({ liveSource: path.trim() }, "Saved: StreamHub copies the file in when it changes.")} type="button">
-            Use this file
-          </button>
-          {setup.live && (
-            <button className={buttonClass} disabled={busy} onClick={() => void save({ liveSource: "" }, "The live data file is no longer followed; the last copy stays.")} type="button">
-              Stop following
-            </button>
-          )}
-        </div>
-        {setup.live ? (
-          <div className="text-muted-foreground">
-            Copied to {setup.live.copy}
-            {setup.live.found ? "" : " (the file is not found right now: is its folder still synced?)"}.
-          </div>
-        ) : (
-          <div className="text-muted-foreground">{LIVE_HELP}</div>
-        )}
-      </div>
-      {setup.answers && setup.answers.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-muted-foreground">Choices made for this project (asked when a request needed them; Copilot gets them with every task)</div>
-          {setup.answers.map((a) => (
-            <div className="flex items-center gap-2" key={a.id}>
-              <span className="truncate" title={a.question}>
-                {a.label}
-              </span>
-              <button className={cn(buttonClass, "ml-auto shrink-0")} disabled={busy} onClick={() => void save({ forget: a.id }, `Forgotten: ${a.question} StreamHub asks again when a request needs it.`)} type="button">
-                Forget
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <BuildFormSection build={setup.build} busy={busy} save={save} />
+      <LiveFileSection busy={busy} live={setup.live} path={path} save={save} setPath={setPath} />
+      <SavedAnswers answers={setup.answers ?? []} busy={busy} save={save} />
       {setup.answers?.some((a) => a.id === "audience" && a.value === "sharepoint") && <SharePointSection projectPath={projectPath} />}
       <DatabasesSection projectPath={projectPath} />
       <WebAllowSection projectPath={projectPath} />

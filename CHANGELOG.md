@@ -4,7 +4,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
-Nothing yet.
+## [v0.1.150] - 2026-10-24
+
+### Changed
+- Internal clean-up with no change in what you see: the project setup questions, the Issues panel, action cards and the waiting card are split into smaller named parts, with new tests for them.
+- The release tests run in parallel (about 2 minutes instead of 15), and the UI kit's React parts are now type-checked and tested.
+- Tools you installed yourself are respected: Python, Node.js and the .NET SDK have a minimum version (3.8, 18 and 6.0), and a copy you installed at or above it is used as it is. StreamHub no longer puts its own Node.js or .NET in front of a newer one of yours, offers updates only for its own copy or one below the minimum, and never installs over yours.
+- A dependency check for development: the third-party parts StreamHub ships (pdf.js, sql.js, Pyodide, the built-in builder, the icons, the app's packages) are compared with their newest release at every release and weekly, in one GitHub issue.
+- Updated third-party parts (minor and patch releases): sql.js 1.15.1 in the UI kit, Lucide icons 1.61.0, React 19.3.1 in the built-in builder and the app, and the app's Base UI, Lucide, mermaid and shadcn packages.
+
+### Fixed
+- StreamHub's own tests no longer write into your diagnostic log, so Session report and Export diagnostics show only real use (test runs showed up there as crashed tasks and unexpected errors).
 
 ## [v0.1.149] - 2026-10-23
 

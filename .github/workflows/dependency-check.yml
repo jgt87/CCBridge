@@ -1,0 +1,41 @@
+# Weekly: which third-party parts StreamHub ships have a newer release (tools/check-deps.ps1).
+# Keeps one open issue, "Dependency updates available", with the current list; closes it when
+# everything is current. Nothing is updated automatically: a person updates, tests and releases.
+name: Dependency check
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - name: Get the repository
+        shell: powershell
+        run: git clone --depth 1 "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git" repo
+
+      - name: Check the shipped versions against npm
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File repo\tools\check-deps.ps1 -Markdown deps.md
+
+      - name: Keep one issue up to date
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $title = 'Dependency updates available'
+          $open = @(gh issue list --repo $env:GITHUB_REPOSITORY --state open --limit 100 --json number,title | ConvertFrom-Json)
+          $issue = $open | ForEach-Object { $_ } | Where-Object { $_.title -eq $title } | Select-Object -First 1
+          $newer = Select-String -Path deps.md -Pattern '\| (major|minor|patch) \|' -Quiet
+          if (-not $newer) {
+              if ($issue) { gh issue close $issue.number --repo $env:GITHUB_REPOSITORY --comment 'Every shipped part is on its newest release.' }
+              exit 0
+          }
+          if ($issue) { gh issue edit $issue.number --repo $env:GITHUB_REPOSITORY --body-file deps.md }
+          else { gh issue create --repo $env:GITHUB_REPOSITORY --title $title --body-file deps.md }

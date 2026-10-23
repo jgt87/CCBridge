@@ -26,6 +26,9 @@ if (-not $SkipGate) {
     Write-Host 'Release gate: repository scan...'
     & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'scan-repo.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Release gate: the file checks report problems in this repository (a check that flags correct code, or broken code); nothing was built.' }
+    # Informational, never blocks: third-party parts StreamHub ships that have a newer release.
+    Write-Host 'Release gate: dependency check (informational)...'
+    try { & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'check-deps.ps1') -Quiet } catch { Write-Host "Dependency check skipped: $($_.Exception.Message)" }
 }
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 

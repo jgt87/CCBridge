@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { cardOpen, useCardView } from "@/lib/card-view";
+import { cardExpanded, useCardView } from "@/lib/card-view";
 import GradientButton from "@/components/kokonutui/gradient-button";
 import HoldButton from "@/components/kokonutui/hold-button";
 import { Input } from "@/components/ui/input";
@@ -146,6 +146,32 @@ function StatusBadge({ status }: { status: string }) {
 
 type TodoState = ReturnType<typeof todoChange>;
 
+/** The header's marks after the target: a list's progress or the change count, and who made or decided it. */
+function HeaderMarks({ item, todo, counts }: { item: ActionItem; todo: TodoState | null; counts: ReturnType<typeof countChanges> | null }) {
+  const via = decidedVia(item.decidedBy);
+  return (
+    <>
+      {todo ? (
+        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="Items done in this list">
+          {todo.done}/{todo.total} done
+        </span>
+      ) : (
+        counts && <ChangePill added={counts.add} removed={counts.del} />
+      )}
+      {item.by === "streamhub" && (
+        <span className="text-[11px] text-muted-foreground" title="StreamHub made this change itself, not Copilot">
+          by StreamHub
+        </span>
+      )}
+      {via && (
+        <span className="text-[11px] text-muted-foreground" title="This action was approved or rejected by another program, not in this window">
+          via {via}
+        </span>
+      )}
+    </>
+  );
+}
+
 /** The header line: icon, verb, target, change count, who made or decided it, status. */
 function CardHeader({
   item,
@@ -166,7 +192,6 @@ function CardHeader({
   onToggle: () => void;
   took?: string;
 }) {
-  const via = decidedVia(item.decidedBy);
   // A run card is titled by its program (and script): the whole command is in its console below.
   const title = item.action === "run" ? runTitle(item.target) || item.target : item.target;
   return (
@@ -180,23 +205,7 @@ function CardHeader({
       >
         {title}
       </span>
-      {todo ? (
-        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="Items done in this list">
-          {todo.done}/{todo.total} done
-        </span>
-      ) : (
-        counts && <ChangePill added={counts.add} removed={counts.del} />
-      )}
-      {item.by === "streamhub" && (
-        <span className="text-[11px] text-muted-foreground" title="StreamHub made this change itself, not Copilot">
-          by StreamHub
-        </span>
-      )}
-      {via && (
-        <span className="text-[11px] text-muted-foreground" title="This action was approved or rejected by another program, not in this window">
-          via {via}
-        </span>
-      )}
+      <HeaderMarks counts={counts} item={item} todo={todo} />
       <StatusBadge status={shownStatus(item.status, sent)} />
       {took && (
         <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="How long this step took">
@@ -474,7 +483,7 @@ export function ActionCard({ item, took }: { item: ActionItem; took?: string }) 
   // The command running now: its output as it comes (the card opens to show it).
   const { running, myLive, myWindow } = useMyRun(item);
   // Open by default; with auto-collapse a finished step folds up (the reader can still open or close any card).
-  const expanded = awaiting || (open ?? (Boolean(myLive) || cardOpen(shownStatus(item.status, sent), view)));
+  const expanded = cardExpanded(awaiting, open, Boolean(myLive), shownStatus(item.status, sent), view);
   const { counts, todo } = usePreviewSummary(item);
   const summary = doneSummary(item);
 

@@ -848,7 +848,7 @@ function Invoke-TestRunReport {
        (.streamhub/TestRun-report.md) and beside the test (TestRuns/NAME/report-STAMP.md). #>
     param($State, $Task)
     $tr = $Task.testRun
-    $log = Join-Path (Join-Path $env:LOCALAPPDATA 'CCBridge\logs') ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
+    $log = Join-Path (Get-CCBLogDir) ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
     $since = [datetime]::ParseExact("$($tr.started)", 's', [Globalization.CultureInfo]::InvariantCulture)
     $entries = @(if (Test-Path -LiteralPath $log) { Read-LogEntries ([IO.File]::ReadAllLines($log)) $PID | Where-Object { $_.time -ge $since } })
     $build = Format-CCBBuild (Get-CCBridgeBuild $State.AppRoot)

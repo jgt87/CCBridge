@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.kit-react.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    /* Icon.tsx loads ../kit-icons.js, which StreamHub writes into each project (not in templates/). */
+    "noUncheckedSideEffectImports": false,
+
+    /* The UI kit's React parts (templates/ui-kit/react) live outside ui-src and are copied into people's
+       projects as they are: they are checked here against ui-src's React types. */
+    "typeRoots": ["./node_modules/@types"],
+    "types": [],
+    "paths": {
+      "react": ["./node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"]
+    }
+  },
+  "include": ["../templates/ui-kit/react/**/*.ts", "../templates/ui-kit/react/**/*.tsx", "kit-react/**/*.tsx"]
+}

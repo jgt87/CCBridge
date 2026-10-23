@@ -7,7 +7,19 @@
 
 $script:Levels = @{ off = 0; info = 1; verbose = 2; trace = 3 }
 $script:Level = 1
-$script:Dir = Join-Path $env:LOCALAPPDATA 'CCBridge\logs'
+function Get-DefaultLogDir {
+    <# Where this process logs: $env:CCBRIDGE_LOG_DIR when set; under a test run (Pester loaded) a
+       test-log folder in TEMP, so tests never write into the person's real log (the session report
+       and Export diagnostics read it); else %LOCALAPPDATA%\CCBridge\logs. The choice goes into the
+       process environment, so worker runspaces and the processes a test starts log to the same place. #>
+    if ($env:CCBRIDGE_LOG_DIR) { return $env:CCBRIDGE_LOG_DIR }
+    if (Get-Module Pester) {
+        $env:CCBRIDGE_LOG_DIR = Join-Path ([IO.Path]::GetTempPath()) 'CCBridge-test-logs'
+        return $env:CCBRIDGE_LOG_DIR
+    }
+    Join-Path $env:LOCALAPPDATA 'CCBridge\logs'
+}
+$script:Dir = Get-DefaultLogDir
 $script:Masks = $null
 $script:Context = ''
 

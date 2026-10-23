@@ -26,7 +26,8 @@ const noOtherRepoLinks: Plugin = {
 export default defineConfig({
   plugins: [react(), tailwindcss(), noOtherRepoLinks],
   base: './',
-  resolve: { alias: { '@': path.resolve(import.meta.dirname, './src') } },
+  // dedupe: React from ui-src also for files outside it (the UI kit's React parts, tested in kit-react/).
+  resolve: { alias: { '@': path.resolve(import.meta.dirname, './src') }, dedupe: ['react', 'react-dom'] },
   build: { outDir: '../ui', emptyOutDir: true, chunkSizeWarningLimit: 1500 },
   server: { proxy: { '/api': 'http://localhost:8765' }, fs: { allow: ['..'] } },   // the kit's stylesheet lives in ../templates/ui-kit
 })

@@ -2,6 +2,7 @@
 # downloads and winget are replaced, and the tools folder is a temporary one.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\ToolInstall.psm1') -Force
+Import-Module (Join-Path $root 'lib\Prereq.psm1')
 
 Describe 'Install-OptionalTool' {
     $realLocal = $env:LOCALAPPDATA
@@ -53,6 +54,59 @@ Describe 'Install-OptionalTool' {
         } finally { $env:LOCALAPPDATA = $realLocal }
     }
     Remove-Item $fake, $src -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Describe 'Minimum versions: a copy the person installed is never overruled' {
+    It 'knows the minimum of each tool and what is below it' {
+        Test-BelowToolMinimum 'node' 'v16.20.2' | Should Be $true
+        Test-BelowToolMinimum 'node' 'v18.0.0' | Should Be $false
+        Test-BelowToolMinimum 'node' 'v25.1.0' | Should Be $false
+        Test-BelowToolMinimum 'python' 'Python 3.7.9' | Should Be $true
+        Test-BelowToolMinimum 'python' 'Python 3.13.1' | Should Be $false
+        Test-BelowToolMinimum 'dotnet' '5.0.408' | Should Be $true
+        Test-BelowToolMinimum 'git' 'git version 1.0.0' | Should Be $false      # no minimum: StreamHub does not use Git
+        Test-BelowToolMinimum 'node' '(installed; version unknown)' | Should Be $false
+    }
+
+    It 'puts its own copy in front only when no usable newer copy is there' {
+        Mock -ModuleName ToolInstall Get-ExeVersion { switch -Regex ($Path) { 'own' { [version]'22.0.0' } 'new' { [version]'25.1.0' } 'old' { [version]'20.5.0' } 'ancient' { [version]'16.0.0' } default { $null } } }
+        Test-OwnCopyFirst 'node' 'C:\own\node.exe' @() | Should Be $true                      # none other
+        Test-OwnCopyFirst 'node' 'C:\own\node.exe' @('C:\new\node.exe') | Should Be $false    # theirs is newer: theirs first
+        Test-OwnCopyFirst 'node' 'C:\own\node.exe' @('C:\old\node.exe') | Should Be $true     # theirs is older than StreamHub's
+        Test-OwnCopyFirst 'node' 'C:\own\node.exe' @('C:\ancient\node.exe') | Should Be $true # theirs is below the minimum
+        Test-OwnCopyFirst 'node' 'C:\own\node.exe' @('C:\unknown\node.exe') | Should Be $false # unknown version: theirs stays first
+        Test-OwnCopyFirst 'node' 'C:\own\node.exe' @('C:\new\node.exe', 'C:\ancient\node.exe') | Should Be $false   # the first one found counts
+    }
+
+    It 'does not install over a copy the person installed at or above the minimum' {
+        Mock -ModuleName ToolInstall Get-ToolVersion { if ($Exe -eq 'node') { 'v25.1.0' } }
+        Mock -ModuleName ToolInstall Test-OwnInstall { $false }
+        Mock -ModuleName ToolInstall Get-LatestToolVersions { [pscustomobject]@{ node = 'v24.0.0' } }
+        Mock -ModuleName ToolInstall Invoke-WebDownload { throw 'nothing may be downloaded' }
+        Mock -ModuleName ToolInstall Invoke-Winget { throw 'winget may not run' }
+        Install-OptionalTool 'node' | Should Match 'v25\.1\.0 is installed already .*uses it as it is'
+    }
+
+    It 'offers an update only for its own copy or one below the minimum' {
+        Mock -ModuleName ToolInstall Add-ToolPaths { }
+        Mock -ModuleName ToolInstall Get-PythonVenv { $null }
+        Mock -ModuleName ToolInstall Get-ToolInstallStatus { $null }
+        Mock -ModuleName ToolInstall Get-LatestToolVersions { [pscustomobject]@{ node = 'v24.0.0' } }
+        Mock -ModuleName ToolInstall Get-OptionalToolChecks { [pscustomobject]@{ name = 'Node.js'; status = 'OK'; detail = $global:ccbNode; hint = '' } }
+        $node = { @(Get-InstallableTools) | Where-Object name -eq 'node' }
+        # The person's own Node.js 22 (older than the newest, above the minimum): no update offered.
+        $global:ccbNode = 'v22.1.0, npm 10'
+        Mock -ModuleName ToolInstall Test-OwnInstall { $false }
+        (& $node).update | Should Be $false
+        (& $node).canInstall | Should Be $false
+        # StreamHub's own copy: the update is offered.
+        Mock -ModuleName ToolInstall Test-OwnInstall { $true }
+        (& $node).update | Should Be $true
+        # Below the minimum, whoever installed it: offered.
+        Mock -ModuleName ToolInstall Test-OwnInstall { $false }
+        $global:ccbNode = 'v16.20.2, npm 8'
+        (& $node).update | Should Be $true
+    }
 }
 
 Describe 'An update of a tool that is in use waits for the next start' {

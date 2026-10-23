@@ -30,6 +30,14 @@ export function cardOpen(status: string, view: CardView): boolean {
   return view === "expanded" || NEEDS_READER.has(status);
 }
 
+/** Whether an action card shows its body: always while it awaits approval; else what the reader chose
+ *  (`open`, null until they open or close it); else open while its command runs, or by the setting. */
+export function cardExpanded(awaiting: boolean, open: boolean | null, live: boolean, status: string, view: CardView): boolean {
+  if (awaiting) return true;
+  if (open !== null) return open;
+  return live || cardOpen(status, view);
+}
+
 /** The current choice, updated when it changes in Settings. */
 export function useCardView(): CardView {
   const [view, setView] = useState<CardView>(getCardView());

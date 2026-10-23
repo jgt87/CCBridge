@@ -1,4 +1,4 @@
-The UI kit's icons (icons/lucide-icons.json, and kit-icons.js in a project) are Lucide icons, version 1.52.0 (https://lucide.dev), turned into compact markup. Their licence:
+The UI kit's icons (icons/lucide-icons.json, and kit-icons.js in a project) are Lucide icons, version 1.61.0 (https://lucide.dev), turned into compact markup. Their licence:
 
 ISC License
 
