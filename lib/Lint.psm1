@@ -1902,6 +1902,66 @@ function Find-OwnDbAccess {
     @($out)
 }
 
+# The UI kit's helper scripts a window app dot-sources (KitWpf.ps1, the Windows Forms theme): file
+# under templates/ui-kit -> what a script that loads it is recognised by.
+$script:KitHelperFiles = @(
+    @{ template = 'wpf\KitWpf.ps1'; loads = '(?i)KitWpf\.ps1'; file = 'KitWpf.ps1' }
+    @{ template = 'winforms\KitTheme.template.ps1'; loads = '(?i)winforms[\\/]+KitTheme\.ps1'; file = 'KitTheme.ps1' }
+)
+$script:KitHelperNames = $null
+
+function Get-KitHelperNames {
+    <# The names each kit helper script brings into the app's script scope when it is dot-sourced: the
+       functions it defines and the variables it sets outside them (read from the templates, so the
+       list follows the helpers). One entry per helper: loads, file, functions, variables. #>
+    if ($script:KitHelperNames) { return $script:KitHelperNames }
+    $kit = Join-Path (Split-Path -Parent $PSScriptRoot) 'templates\ui-kit'
+    $script:KitHelperNames = @(foreach ($h in $script:KitHelperFiles) {
+        $f = Join-Path $kit $h.template
+        if (-not (Test-Path -LiteralPath $f)) { continue }
+        $ast = [Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText($f), [ref]$null, [ref]$null)
+        $fns = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })
+        $vars = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [Management.Automation.Language.VariableExpressionAst] }, $true) |
+            Where-Object { -not (Get-PsEnclosingFunction $_) -or $_.Left.VariablePath.IsScript -or $_.Left.VariablePath.IsGlobal } |
+            ForEach-Object { $_.Left.VariablePath.UserPath -replace '^(script|global):', '' })
+        @{ loads = $h.loads; file = $h.file; functions = @($fns | Sort-Object -Unique); variables = @($vars | Sort-Object -Unique) }
+    })
+    $script:KitHelperNames
+}
+
+function Get-PsEnclosingFunction($Node) {
+    $p = $Node.Parent
+    while ($p) { if ($p -is [Management.Automation.Language.FunctionDefinitionAst]) { return $p }; $p = $p.Parent }
+    $null
+}
+
+function Find-KitHelperClashes {
+    <# A PowerShell script that dot-sources one of the UI kit's helpers shares its script scope with it:
+       a function of the same name as one of the helper's replaces it, and a variable the helper sets
+       for itself changes what its functions read. Both break the helpers in ways that show up far
+       from the cause, so each is reported at its line. Not in the kit's own files. #>
+    param([string]$Path, [AllowEmptyString()][string]$Text)
+    if ($Path -notmatch '(?i)\.ps[md]?1$' -or $Path -match '(?i)^styles/kit/') { return @() }
+    $helpers = @(Get-KitHelperNames | Where-Object { $Text -match $_.loads })
+    if (-not $helpers.Count) { return @() }
+    $errs = $null
+    $ast = [Management.Automation.Language.Parser]::ParseInput($Text, [ref]$null, [ref]$errs)
+    if (@($errs).Count) { return @() }   # a script that does not parse gets the syntax error first
+    $out = New-Object System.Collections.Generic.List[string]
+    foreach ($fn in @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))) {
+        $h = @($helpers | Where-Object { $_.functions -contains $fn.Name }) | Select-Object -First 1
+        if ($h) { $out.Add("line $($fn.Extent.StartLineNumber): function $($fn.Name) has the name of one of the UI kit's helpers in $($h.file), which this script dot-sources: yours replaces the helper and breaks the others that use it. Use the helper as it is, or give your function another name") }
+    }
+    foreach ($as in @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [Management.Automation.Language.VariableExpressionAst] }, $true))) {
+        $vp = $as.Left.VariablePath
+        if ((Get-PsEnclosingFunction $as) -and -not ($vp.IsScript -or $vp.IsGlobal)) { continue }   # a function's own local
+        $name = $vp.UserPath -replace '^(script|global):', ''
+        $h = @($helpers | Where-Object { $_.variables -contains $name }) | Select-Object -First 1
+        if ($h) { $out.Add("line $($as.Extent.StartLineNumber): `$$name is a variable the UI kit's helpers in $($h.file) keep for themselves, and this script shares their scope: give yours another name (names starting with __kit are the helpers')") }
+    }
+    @($out)
+}
+
 function Find-PsGuiIssues {
     <# Mistakes that stop a PowerShell window app (WPF loaded with XamlReader) from opening: x:Class or an
        event attribute in its XAML (a .xaml file in a project without a C# project, or XAML in a script),
@@ -2061,6 +2121,7 @@ function Get-NewFileIssues {
             @(Find-DataGlobalIssues $ProjectRoot $Path $text.Replace("`r`n", "`n") $blockGlobals) +
             @(Find-PsGuiIssues $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
             @(Find-OwnDbAccess $Path $text.Replace("`r`n", "`n")) +
+            @(Find-KitHelperClashes $Path $text.Replace("`r`n", "`n")) +
             @(Find-ServerCode $ProjectRoot $Path $text.Replace("`r`n", "`n")) +
             @(Find-XamlLayoutIssues $Path $text.Replace("`r`n", "`n") $ProjectRoot) | Where-Object { $_ }
     }
@@ -2085,4 +2146,4 @@ function Get-NewFileIssues {
     }
 }
 
-Export-ModuleMember -Function Find-LeakedMarkup, Test-Delimiters, Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences, Find-ChartPlaceholder, Find-ChartsRemoved, Find-OwnDbAccess, Get-ServerCodeKind, Test-NodeServerProject, Find-ServerCode
+Export-ModuleMember -Function Find-LeakedMarkup, Test-Delimiters, Find-PsGuiIssues, Find-XamlLayoutIssues, Get-ProjectDataGlobals, Find-DataGlobalIssues, Find-PlaceholderMarkup, Find-BrokenEncoding, ConvertFrom-Mojibake, Test-TextEncoding, Find-EscapedScriptTags, Find-UndefinedCssVars, Get-OpenBlocks, Format-OpenBlocks, Test-Prisma, Test-PrismaEnv, Test-PrismaValidate, ConvertFrom-PrismaValidate, Find-PrismaCli, Get-CodeMask, Find-LanguagePitfalls, Find-GeneratedCodeIssues, Test-ToolSyntax, Test-FileContent, Get-NewFileIssues, Test-Brackets, Find-Secrets, Test-Duplicates, Test-PsCommands, Test-LocalReferences, Find-ChartPlaceholder, Find-ChartsRemoved, Find-OwnDbAccess, Find-KitHelperClashes, Get-ServerCodeKind, Test-NodeServerProject, Find-ServerCode

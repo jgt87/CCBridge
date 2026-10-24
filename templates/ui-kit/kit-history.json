@@ -291,7 +291,9 @@
                                          ],
                   "winforms/KitTheme.template.ps1":  [
                                                          "0a7e8ffb3ca17fe6741815c6366f334020800feef327ff7d97d307d1ce061085",
-                                                         "70cdf464de31732eb128b9d3328c46423739dfe0075500d3fcff3fa20843fc9d"
+                                                         "70cdf464de31732eb128b9d3328c46423739dfe0075500d3fcff3fa20843fc9d",
+                                                         "92da283f98d971e5d913df02fdde89697003398dc2eeb838ea3bb1df70b493d9",
+                                                         "ec5e02c9d20f88ce0cb9bca63b7f22d428510f564b22b4ce3c4c089975d64501"
                                                      ],
                   "wpf/KitTheme.template.xaml":  [
                                                      "46da232f92684ad54f3ef6150045f6e941e593429a7628c49f22561d43f2477a",
@@ -303,9 +305,11 @@
                                          "0133a921715f8adc88f3960bc582dcc6c00a06d747be4aea3486280716810df1",
                                          "30b6c2237d1556eff1458b5b723c20f44f1346bc37b62b314aff9736bf6ce965",
                                          "6df6d062ebcd3b62e4d12de74c65016cd5fb592da47a662b9281ca088f9f0663",
+                                         "76b14e60845b0050a2f5ea91a4238146f350bb0ab014402052d1a2ea581d7bf3",
                                          "7b7db20066e079fcf4be2432958e05393e8c6a75c4bd938f4f9d4de51ff65346",
                                          "a895f2efa2a9674810d0b0f83242bc9b05740bf9acc91b4cf8e6c540393f1769",
-                                         "c829c9a38c065392551f878a97376a1475eeaadf783193a0cb9d06c22fbed921"
+                                         "c829c9a38c065392551f878a97376a1475eeaadf783193a0cb9d06c22fbed921",
+                                         "df83e4449ec510940a081bd875d5bb43326cdb24dacc7e8da14561e9953161e8"
                                      ]
               }
 }

@@ -184,4 +184,60 @@ function Get-RobocopyFailures([string[]]$Lines) {
     @($Lines | ForEach-Object { $m = [regex]::Match("$_", 'ERROR \d+ \(0x[0-9A-Fa-f]+\) \w+(?: \w+)* (?:File|Directory) (.+)$'); if ($m.Success) { $m.Groups[1].Value.Trim() } } | Select-Object -Unique)
 }
 
-Export-ModuleMember -Function New-InstallManifest, Test-InstallIntegrity, Format-InstallProblem, Get-UpdateNewFiles, Save-UpdateBackup, Restore-UpdateBackup, Test-FileLocked, Get-FileHashShared, Get-UpdateTouchedFiles, Get-LockedUpdateFiles, Format-LockedUpdateFiles, Get-RobocopyFailures
+# --- Going back to an earlier release (update.cmd -To vX.Y.Z) ------------------------------------
+# The release gone back from (and every one up to it) is skipped by automatic updates, which take the
+# next newer release again; the skip list is the setting skipUpdates in config\harness.local.json.
+
+function ConvertTo-ReleaseVersion([string]$Tag) {
+    <# 'v0.1.150' or '0.1.150' as a [version]; $null for anything else. #>
+    $m = [regex]::Match("$Tag".Trim(), '^v?(\d+)\.(\d+)\.(\d+)$')
+    if (-not $m.Success) { return $null }
+    New-Object Version ([int]$m.Groups[1].Value), ([int]$m.Groups[2].Value), ([int]$m.Groups[3].Value)
+}
+
+function Test-ReleaseSkipped([string]$Release, [string[]]$Skip) {
+    <# True when automatic updates leave $Release alone: it is not newer than every release in $Skip
+       (entries that are not a version are ignored). #>
+    $v = ConvertTo-ReleaseVersion $Release
+    if (-not $v) { return $false }
+    foreach ($s in @($Skip)) { $sv = ConvertTo-ReleaseVersion $s; if ($sv -and $v -le $sv) { return $true } }
+    $false
+}
+
+function Get-RollbackSkip([string]$Target, [string]$Current, [string]$Latest) {
+    <# The release to skip through after going back to $Target: the newest of the installed and the
+       latest release, when it is newer than $Target; '' when there is nothing to skip. #>
+    $t = ConvertTo-ReleaseVersion $Target
+    if (-not $t) { return '' }
+    $best = ''; $bestV = $t
+    foreach ($r in $Current, $Latest) { $v = ConvertTo-ReleaseVersion $r; if ($v -and $v -gt $bestV) { $best = 'v' + $v; $bestV = $v } }
+    $best
+}
+
+function Test-UpdaterSkipsReleases([string]$UpdaterPath) {
+    <# Whether an updater script (tools\update.ps1 of a release) honours skipUpdates. A release from
+       before it would update straight back at its next start. #>
+    (Test-Path -LiteralPath $UpdaterPath -PathType Leaf) -and ([IO.File]::ReadAllText($UpdaterPath) -match 'Test-ReleaseSkipped')
+}
+
+function Get-LocalHarnessValue([string]$AppRoot, [string]$Key) {
+    <# One value from config\harness.local.json; $null when the file or the key is not there. #>
+    $file = Join-Path $AppRoot 'config\harness.local.json'
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    $obj = [IO.File]::ReadAllText($file) | ConvertFrom-Json
+    if ($obj -and $obj.PSObject.Properties[$Key]) { return $obj.$Key }
+    $null
+}
+
+function Set-LocalHarnessValue([string]$AppRoot, [string]$Key, $Value) {
+    <# Sets (or with $null removes) one top-level value in config\harness.local.json. Self-contained:
+       the updater uses it while the app folder may hold another release's Config.psm1. #>
+    $file = Join-Path $AppRoot 'config\harness.local.json'
+    $obj = if (Test-Path -LiteralPath $file) { [IO.File]::ReadAllText($file) | ConvertFrom-Json } else { $null }
+    if (-not $obj) { $obj = [pscustomobject]@{} }
+    if ($null -eq $Value) { $obj.PSObject.Properties.Remove($Key) }
+    else { $obj | Add-Member -Force -NotePropertyName $Key -NotePropertyValue $Value }
+    [IO.File]::WriteAllText($file, ($obj | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+}
+
+Export-ModuleMember -Function ConvertTo-ReleaseVersion, Test-ReleaseSkipped, Get-RollbackSkip, Test-UpdaterSkipsReleases, Get-LocalHarnessValue, Set-LocalHarnessValue, New-InstallManifest, Test-InstallIntegrity, Format-InstallProblem, Get-UpdateNewFiles, Save-UpdateBackup, Restore-UpdateBackup, Test-FileLocked, Get-FileHashShared, Get-UpdateTouchedFiles, Get-LockedUpdateFiles, Format-LockedUpdateFiles, Get-RobocopyFailures

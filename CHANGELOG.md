@@ -4,6 +4,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+## [v0.1.151] - 2026-10-24
+
+### Added
+- Going back to an earlier release: `update.cmd -To v0.1.149` installs that release in place (as safely as an update), and automatic updates then skip the release you went back from until a newer one is out (Settings > App > Skip releases up to). Going back to a release from before this feature turns automatic updates off instead, and says so. `start.cmd -NoUpdate` still runs the installed version once without updating. The README explains both.
+
+### Changed
+- Code health findings are fairer: a function is no longer counted with the functions nested inside it (its length now leaves their lines out, in JavaScript, PowerShell and Python), and helpers written as an object property, class field or assignment (`name: () => { }`) or as a PowerShell script block in a variable (`$check = { }`) are measured on their own. Long wrapper files and setup functions full of small helpers stop showing up as one huge function.
+- PowerShell window apps and the UI kit's helpers they load no longer share names by accident: the helpers' own variables now start with `__kit` (the Windows Forms theme's colour table was the very general `$Kit`), Copilot is told to keep its names apart, and the file check reports a script that defines a function with a helper's name or sets one of their variables. Projects get the updated helpers at their next step.
+- Commands, tests, hooks, window app checks and run windows no longer see StreamHub's own `CCBRIDGE_*` environment variables, so a project script can neither read them nor come to depend on them.
+- Internal clean-up with no change in what you see: the page check's contrast and layout part is split into named checks, the API's chat, jobs, project setup and code review routes into named handlers, and the agent's turn, which drives every task: every check Copilot's "done" goes through (from a change you said did not take effect to the page check, the screenshots, the consistency review and the Done when checks) and the file check after each round are now functions of their own, with new tests; the turn itself is about half its former size.
+
 ## [v0.1.150] - 2026-10-24
 
 ### Changed

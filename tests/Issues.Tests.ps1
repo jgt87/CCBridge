@@ -42,6 +42,26 @@ Describe 'Code health per language' {
         $py[0].name | Should Be 'g'
         $py[0].ccn | Should Be 2
     }
+    It 'measures named helpers on their own, and a function without the lines of its nested helpers' {
+        $row = { param($list, $name) $f = @($list | Where-Object { $_.name -eq $name })[0]; "$($f.ccn)/$($f.lines)" }
+        # JavaScript: a const arrow, an object property, a class field and an assignment are units; a
+        # callback passed as an argument stays with its function.
+        $js = "function setup(xs) {`n  const a = () => {`n    if (x) { y(); }`n  };`n  const api = {`n    b: (v) => {`n      if (v) { y(); }`n    },`n  };`n  this.c = () => {`n    if (z) { y(); }`n  };`n  xs.forEach((x) => {`n    if (x) { y(); }`n  });`n  return api;`n}`nclass K {`n  d = async () => {`n    if (w) { y(); }`n  };`n}`n"
+        $m = @(Get-FunctionMetrics 'a.js' $js)
+        foreach ($n in 'a', 'b', 'c', 'd') { (& $row $m $n) | Should Be '2/3' }
+        (& $row $m 'setup') | Should Be '2/8'   # its own lines and the forEach callback's if
+        # PowerShell: a nested function and a script block in a variable are units; Where-Object's is not.
+        $ps = "function Outer {`n    function Inner {`n        if (`$a) { 1 }`n    }`n    `$walk = {`n        param(`$n)`n        if (`$n) { 2 }`n    }`n    @(1) | Where-Object { `$_ -and `$b }`n}`n"
+        $m = @(Get-FunctionMetrics 'a.ps1' $ps)
+        (& $row $m 'Inner') | Should Be '2/3'
+        (& $row $m '$walk') | Should Be '2/4'
+        @($m | Where-Object { $_.name -eq '$walk' })[0].params | Should Be 1
+        (& $row $m 'Outer') | Should Be '2/3'
+        # Python: a nested def's lines belong to it.
+        $m = @(Get-FunctionMetrics 'a.py' "def outer():`n    def inner():`n        if a:`n            return 1`n    return inner`n")
+        (& $row $m 'inner') | Should Be '2/3'
+        (& $row $m 'outer') | Should Be '1/2'
+    }
     It 'reports only functions that are clearly too much, without scores' {
         @(Get-HealthIssues 'a.ps1' "function Small { 1 }").Count | Should Be 0
         $h = @(Get-HealthIssues 'a.ps1' (Get-BigPsFunction 'Huge'))

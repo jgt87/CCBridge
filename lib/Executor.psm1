@@ -2893,8 +2893,22 @@ function ConvertFrom-ConsoleBytes([AllowEmptyString()][string]$Raw) {
     $oem.GetString($bytes)
 }
 
+function Get-OwnEnvironmentNames {
+    <# StreamHub's own environment variables set in this process (CCBRIDGE_*: the log folder and its
+       header, the build, a state folder or switch in tests). Project code never gets them: commands,
+       the window app test and run windows start without them (Remove-OwnEnvironment, the run window's
+       batch), so a project script can neither read them nor come to depend on them. #>
+    @(Get-ChildItem Env: | Where-Object { $_.Name -match '(?i)^CCBRIDGE_' } | ForEach-Object { $_.Name })
+}
+
+function Remove-OwnEnvironment($StartInfo) {
+    <# A process about to start project code: without StreamHub's own variables (Get-OwnEnvironmentNames). #>
+    foreach ($n in Get-OwnEnvironmentNames) { $StartInfo.EnvironmentVariables.Remove($n) }
+}
+
 function Invoke-RunAction {
-    <# Runs a command with cmd.exe in the project folder. Output is trimmed to head + tail.
+    <# Runs a command with cmd.exe in the project folder, without StreamHub's own environment variables
+       (Remove-OwnEnvironment). Output is trimmed to head + tail.
        -OnProgress gets, about twice a second while it runs: @{ elapsed; lines (the last 20, secrets
        hidden); quietSec (since the last output); state (Get-RunWaitState) }. #>
     param([string]$ProjectRoot, [string]$Command, [int]$TimeoutSec = 120, [int]$MaxChars = 8000, [scriptblock]$CancelCheck, [scriptblock]$OnProgress)
@@ -2926,6 +2940,7 @@ function Invoke-RunAction {
     $psi.StandardErrorEncoding = [Text.Encoding]::GetEncoding(28591)
     $psi.RedirectStandardInput = $true
     $psi.CreateNoWindow = $true
+    Remove-OwnEnvironment $psi
     $p = [Diagnostics.Process]::Start($psi)
     $p.StandardInput.Close()
     # Output is read in pieces as it comes (not only at the end), so a person can watch it: also a
@@ -2987,4 +3002,4 @@ function Invoke-RunAction {
 }
 
 Export-ModuleMember -Function Find-AnchorTarget, Get-OutlineEntries, Get-EnclosingName, Test-OutsideContent, Get-WebDownloadCommand, Get-CmdQuoteBreak, Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Test-DeleteNeedsPerson, Get-RunScriptPreview, Get-RunScripts, Get-OutsideEffects, Get-RunEffects, ConvertTo-PathExpressions, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes, Get-LineHunks, Merge-LineHunks,
-    Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Invoke-RunAction, Get-FileViewText, Get-FolderListing, Get-ReadNotFoundNote
+    Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Get-OwnEnvironmentNames, Remove-OwnEnvironment, Invoke-RunAction, Get-FileViewText, Get-FolderListing, Get-ReadNotFoundNote

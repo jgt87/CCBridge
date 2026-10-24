@@ -21,6 +21,8 @@ function New-RunWindowBatch {
     [void]$sb.AppendLine('@echo off')
     [void]$sb.AppendLine('title StreamHub: ' + (& $esc ($lines[0].Substring(0, [Math]::Min(60, $lines[0].Length)))))
     [void]$sb.AppendLine('cd /d "' + $ProjectRoot + '"')
+    # The window inherits StreamHub's environment: its own variables are cleared, as for every command.
+    foreach ($n in Get-OwnEnvironmentNames) { [void]$sb.AppendLine('set "' + $n + '="') }
     [void]$sb.AppendLine('set "CCB_RC=0"')
     foreach ($l in $lines) {
         [void]$sb.AppendLine('echo ^> ' + (& $esc $l))

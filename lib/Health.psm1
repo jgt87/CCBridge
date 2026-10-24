@@ -21,7 +21,7 @@ function Blank([string]$Text, [string]$Pattern) {
 function LineOf([string]$Text, [int]$Index) { ([regex]::Matches($Text.Substring(0, [Math]::Min([Math]::Max(0, $Index), $Text.Length)), "`n")).Count + 1 }
 
 function New-Metric([string]$Name, [int]$Line, [int]$End, [int]$Ccn, [int]$Nesting, [int]$Params, [int]$OwnLines = 0) {
-    # $OwnLines: the lines of the function's own statements, for a wrapper whose body is other functions.
+    # $OwnLines: the function's own lines, without the functions nested in it (measured on their own).
     $len = if ($OwnLines -gt 0) { $OwnLines } else { $End - $Line + 1 }
     $l = $script:Limits
     $brain = ($len -gt $l.lines -and $Ccn -gt $l.ccn -and $Nesting -ge $l.nesting)
@@ -36,19 +36,36 @@ function New-Metric([string]$Name, [int]$Line, [int]$End, [int]$Ccn, [int]$Nesti
 }
 
 # --- PowerShell: from the syntax tree -------------------------------------------------------
+function Get-PsScriptBlockName($Node) {
+    # '$name' for a script block assigned to a variable ($check = { ... }), a function in all but
+    # name; '' for one passed to a command (Where-Object { ... }), which belongs to its function.
+    if ($Node -isnot [Management.Automation.Language.ScriptBlockExpressionAst]) { return '' }
+    $p = $Node.Parent
+    if ($p -isnot [Management.Automation.Language.CommandExpressionAst]) { return '' }
+    if ($p.Parent -is [Management.Automation.Language.PipelineAst] -and $p.Parent.PipelineElements.Count -eq 1) { $p = $p.Parent }
+    $a = $p.Parent
+    if ($a -isnot [Management.Automation.Language.AssignmentStatementAst] -or $a.Right -ne $p -or $a.Left -isnot [Management.Automation.Language.VariableExpressionAst]) { return '' }
+    '$' + $a.Left.VariablePath.UserPath
+}
+
 function Get-PsFunctionMetrics([string]$Text) {
     $tok = $null; $errs = $null
     $ast = [Management.Automation.Language.Parser]::ParseInput($Text, [ref]$tok, [ref]$errs)
-    $T = [Management.Automation.Language.Ast]
-    foreach ($fn in $ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+    # Units: functions and script blocks assigned to a variable; each is measured on its own.
+    $units = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -or (Get-PsScriptBlockName $n) }, $true))
+    $unitSet = New-Object 'System.Collections.Generic.HashSet[object]'
+    foreach ($u in $units) { [void]$unitSet.Add($u) }
+    foreach ($fn in $units) {
+        $isFunction = $fn -is [Management.Automation.Language.FunctionDefinitionAst]
+        $block = if ($isFunction) { $fn.Body } else { $fn.ScriptBlock }
         $own = {
-            # The node belongs to this function, not to a function nested inside it.
+            # The node belongs to this unit, not to a unit nested inside it.
             param($node)
             $p = $node.Parent
-            while ($p -and $p -ne $fn) { if ($p -is [Management.Automation.Language.FunctionDefinitionAst]) { return $false }; $p = $p.Parent }
+            while ($p -and $p -ne $fn) { if ($unitSet.Contains($p)) { return $false }; $p = $p.Parent }
             $true
         }
-        $nodes = @($fn.Body.FindAll({ param($n) $true }, $true) | Where-Object { & $own $_ })
+        $nodes = @($block.FindAll({ param($n) $true }, $true) | Where-Object { & $own $_ })
         $ccn = 1
         $maxNest = 0
         foreach ($n in $nodes) {
@@ -67,8 +84,15 @@ function Get-PsFunctionMetrics([string]$Text) {
                 if ($d -gt $maxNest) { $maxNest = $d }
             }
         }
-        $params = if ($fn.Parameters) { $fn.Parameters.Count } elseif ($fn.Body.ParamBlock) { $fn.Body.ParamBlock.Parameters.Count } else { 0 }
-        New-Metric $fn.Name $fn.Extent.StartLineNumber $fn.Extent.EndLineNumber $ccn $maxNest $params
+        $params = if ($isFunction -and $fn.Parameters) { $fn.Parameters.Count } elseif ($block.ParamBlock) { $block.ParamBlock.Parameters.Count } else { 0 }
+        $start = $fn.Extent.StartLineNumber; $end = $fn.Extent.EndLineNumber
+        $nested = @{}
+        foreach ($u in $units) {
+            if ($u -eq $fn -or $u.Extent.StartOffset -lt $fn.Extent.StartOffset -or $u.Extent.EndOffset -gt $fn.Extent.EndOffset) { continue }
+            for ($l = $u.Extent.StartLineNumber; $l -le $u.Extent.EndLineNumber; $l++) { if ($l -gt $start -and $l -lt $end) { $nested[$l] = $true } }
+        }
+        $ownLines = if ($nested.Count) { $end - $start + 1 - $nested.Count } else { 0 }
+        New-Metric $(if ($isFunction) { $fn.Name } else { Get-PsScriptBlockName $fn }) $start $end $ccn $maxNest $params $ownLines
     }
 }
 
@@ -88,6 +112,9 @@ function Get-BraceFunctionMetrics([string]$Text, [string]$Path) {
     $patterns = @(
         '\bfunction\s*\*?\s*([\w$]*)\s*\(([^)]*)\)[^{;]*\{',
         '\b(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s*)?(?:\(([^)]*)\)|([\w$]+))\s*(?::[^=;{]+)?=>\s*\{',
+        # An arrow with a block body bound to a name in another way: an object property, a class
+        # field, an assignment (this.x = ...). Arrows passed as arguments stay with their function.
+        '(?<![\w$])([\w$]+)\s*(?::|(?<![=!<>])=(?![=>]))\s*(?:async\s*)?(?:\(([^)]*)\)|([\w$]+))\s*(?::[^=;{]+)?=>\s*\{',
         '(?m)^[ \t]*(?:(?:public|private|protected|internal|static|async|override|virtual|abstract|readonly|final|sealed|export|get|set)\s+)*(?:[\w<>\[\],.?]+\s+)?([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*(?::\s*[^{;=]+)?(?:throws[^{;]*)?\{',
         '(?m)^[ \t]*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\(([^)]*)\)[^{]*\{'
     )
@@ -102,16 +129,18 @@ function Get-BraceFunctionMetrics([string]$Text, [string]$Path) {
             if ($close -lt 0) { continue }
             $taken[$open] = $true
             $paramCount = if ($x.Groups[2].Success -and $x.Groups[2].Value.Trim()) { @($x.Groups[2].Value.Split(',') | Where-Object { $_.Trim() }).Count } elseif ($x.Groups[3].Success -and $x.Groups[3].Value) { 1 } else { 0 }
-            $starts.Add(@{ name = $name; start = $x.Index; open = $open; close = $close; params = $paramCount })
+            $starts.Add(@{ name = $name; start = $x.Index; open = $open; close = $close; params = $paramCount; line = (LineOf $m $x.Index); end = (LineOf $m $close) })
         }
     }
     foreach ($f in $starts) {
         # Code of functions nested inside this one does not count for it.
         $body = $m.Substring($f.open + 1, [Math]::Max(0, $f.close - $f.open - 1))
+        $nested = @{}
         foreach ($g in $starts) {
             if ($g.open -gt $f.open -and $g.close -lt $f.close) {
                 $s = $g.start - $f.open - 1; $len = $g.close - $g.start + 1
                 if ($s -ge 0 -and $s + $len -le $body.Length) { $body = $body.Substring(0, $s) + [regex]::Replace($body.Substring($s, $len), '[^\n]', ' ') + $body.Substring($s + $len) }
+                for ($l = $g.line; $l -le $g.end; $l++) { if ($l -gt $f.line -and $l -lt $f.end) { $nested[$l] = $true } }
             }
         }
         $ccn = 1 + ([regex]::Matches($body, '\b(if|for|foreach|while|case|catch)\b')).Count + ([regex]::Matches($body, '&&|\|\||\?\?(?!=)')).Count + ([regex]::Matches($body, '\?(?![.?:\]>,)=])')).Count
@@ -126,11 +155,12 @@ function Get-BraceFunctionMetrics([string]$Text, [string]$Path) {
         }
         # A file-level wrapper, (function () { ... })() or ;(function () { ... }()), holds the file's
         # functions: it is measured by its own statements, not by everything inside it.
-        $ownLines = 0
+        # Any other function is measured without the lines of the functions nested in it.
+        $ownLines = if ($nested.Count) { $f.end - $f.line + 1 - $nested.Count } else { 0 }
         if (-not $f.name -and $m.Substring(0, $f.start) -match '^[\s(!;]*$' -and $m.Substring($f.close + 1) -match '^\s*\)?\s*(\((this|window|globalThis|self)?\)|\.call\([^)]*\))\s*\)?\s*;?\s*$') {
             $ownLines = [Math]::Max(1, @($body.Split("`n") | Where-Object { $_.Trim() }).Count)
         }
-        New-Metric $(if ($f.name) { $f.name } else { '(anonymous)' }) (LineOf $m $f.start) (LineOf $m $f.close) $ccn $max $f.params $ownLines
+        New-Metric $(if ($f.name) { $f.name } else { '(anonymous)' }) $f.line $f.end $ccn $max $f.params $ownLines
     }
 }
 
@@ -169,7 +199,9 @@ function Get-PyFunctionMetrics([string]$Text) {
             }
         }
         $params = @($d.sig.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notin 'self', 'cls', '*', '/' }).Count
-        New-Metric $d.name ($d.i + 1) ($end + 1) $ccn $max $params
+        # Without the lines of nested defs, which are measured on their own.
+        $ownLines = if ($skip.Count) { $end - $d.i + 1 - $skip.Count } else { 0 }
+        New-Metric $d.name ($d.i + 1) ($end + 1) $ccn $max $params $ownLines
     }
 }
 

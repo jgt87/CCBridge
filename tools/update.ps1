@@ -8,11 +8,14 @@
   Never fails the caller: any problem is reported and the current version keeps running.
   Writes only to stderr, so it is safe before the MCP server starts (stdout is its protocol).
   Set "autoUpdate": false in config\harness.local.json to turn automatic updates off.
+  -To vX.Y.Z goes back to an earlier release (update.cmd -To v0.1.149): the release gone back from
+  is added to "skipUpdates", so automatic updates leave it alone and take the next newer release.
 #>
 param(
     [switch]$Force,        # check even when automatic updates are turned off
     [switch]$Report,       # print the outcome (used by update.cmd)
     [switch]$Repair,       # install the installed version again (the start found files missing or different)
+    [string]$To = '',      # go back (or forward) to this release, e.g. v0.1.149, and skip the newer ones
     # Handing over (the updater of the installed version starts the new release's updater, so a fix
     # to the updater applies at once): the app folder, the unpacked release and its version.
     [string]$AppRoot = '',
@@ -79,18 +82,44 @@ function Install-Release([string]$From, [string]$NewVersion) {
     }
     [IO.File]::WriteAllText($verFile, $NewVersion)
     try { Remove-Item -LiteralPath $backup -Recurse -Force } catch { }
-    Say "updated $(if ($current) { $current } else { '(unknown)' }) -> $NewVersion"
+    $older = (ConvertTo-ReleaseVersion $current) -and (ConvertTo-ReleaseVersion $NewVersion) -and (ConvertTo-ReleaseVersion $NewVersion) -lt (ConvertTo-ReleaseVersion $current)
+    Say "$(if ($older) { 'went back' } else { 'updated' }) $(if ($current) { $current } else { '(unknown)' }) -> $NewVersion"
+}
+
+function Complete-Rollback([string]$Target, [string]$From, [string]$Latest, [string]$Updater) {
+    <# After going back to $Target: skip the release gone back from (and every one up to the latest),
+       so automatic updates wait for a newer one. An updater from before the skip list would update
+       straight back at its next start: then automatic updates are switched off, and said so. #>
+    $skip = Get-RollbackSkip $Target $From $Latest
+    if (-not $skip) { return }
+    $list = @(@(Get-LocalHarnessValue $root 'skipUpdates') | Where-Object { $_ } | ForEach-Object { "$_" })
+    if ($list -notcontains $skip) { $list += $skip }
+    Set-LocalHarnessValue $root 'skipUpdates' $list
+    if (Test-UpdaterSkipsReleases $Updater) {
+        Say "automatic updates skip releases up to $skip and update again at the next newer release (Settings > App > Skip releases up to)."
+    } else {
+        Set-LocalHarnessValue $root 'autoUpdate' $false
+        Say "$Target does not know how to skip a release, so automatic updates are now OFF (it would update straight back to $skip). Turn them on again in Settings > App once a release newer than $skip is out."
+    }
 }
 
 try {
     # Handed over by the installed version's updater: install the release it unpacked, nothing else.
     if ($FromFolder) { Install-Release $FromFolder $Version; return }
-    if (-not $Force) {
+    Import-Module (Join-Path $here 'lib\Update.psm1') -Force
+    if ($To) {
+        if (-not (ConvertTo-ReleaseVersion $To)) { Say "'$To' is not a release; give one like v0.1.149 (see the Releases page on GitHub)."; return }
+        $To = 'v' + (ConvertTo-ReleaseVersion $To)
+        if (Test-Path (Join-Path $root '.git')) { Say "This is a git clone: go back with git itself (git checkout $To); -To is for installed releases."; return }
+    }
+    $skipList = @()
+    if (-not $Force -and -not $To) {
         Import-Module (Join-Path $root 'lib\Config.psm1') -Force
         $cfg = Get-CCBridgeConfig harness $root
         Initialize-CCBLog -Config $cfg
         Remove-Module Config -ErrorAction SilentlyContinue
         if ($cfg.PSObject.Properties['autoUpdate'] -and -not $cfg.autoUpdate) { return }
+        if ($cfg.PSObject.Properties['skipUpdates']) { $skipList = @(@($cfg.skipUpdates) | Where-Object { $_ } | ForEach-Object { "$_" }) }
     }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     if ([Net.WebRequest]::DefaultWebProxy) { [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials }
@@ -123,16 +152,35 @@ try {
     $verFile = Join-Path $root 'version.txt'
     $current = if (Test-Path $verFile) { ([IO.File]::ReadAllText($verFile)).Trim() } else { '' }
     # -Repair: the release of the installed version (an incomplete install of the latest version
-    # would otherwise count as up to date).
-    $which = if ($Repair -and $current) { "tags/$current" } else { 'latest' }
-    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/$which" -TimeoutSec 15 -Headers @{ 'User-Agent' = 'CCBridge-updater' }
+    # would otherwise count as up to date). -To: the release asked for.
+    $which = if ($To) { "tags/$To" } elseif ($Repair -and $current) { "tags/$current" } else { 'latest' }
+    $headers = @{ 'User-Agent' = 'CCBridge-updater' }
+    if ($To) {
+        $newest = try { [string](Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -TimeoutSec 15 -Headers $headers).tag_name } catch { '' }
+        if ($To -eq $current) {
+            # Already on it (unpacked by hand from GitHub, say): only keep the newer releases away.
+            Say "$To is installed already."
+            Complete-Rollback $To $current $newest (Join-Path $root 'tools\update.ps1')
+            return
+        }
+        try { $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/$which" -TimeoutSec 15 -Headers $headers }
+        catch { Say "release $To was not found on GitHub ($($_.Exception.Message))."; return }
+    } else {
+        $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/$which" -TimeoutSec 15 -Headers $headers
+    }
     $latest = [string]$release.tag_name
-    if (-not $Repair -and $latest -and $latest -eq $current) {
+    # Automatic updates leave a release the person went back from alone (and every one before it).
+    if (-not $To -and -not $Repair -and $latest -ne $current -and (Test-ReleaseSkipped $latest $skipList)) {
+        Say "$latest is skipped (you went back from it); staying on $current until a newer release is out. Settings > App > Skip releases up to clears this."
+        return
+    }
+    if (-not $To -and -not $Repair -and $latest -and $latest -eq $current) {
         # Up to date by version: is the folder complete too (manifest.json)? If not, install it again.
         $problem = try { Import-Module (Join-Path $here 'lib\Update.psm1') -Force; Format-InstallProblem (Test-InstallIntegrity $root) } catch { '' }
         if ($problem) { Say $problem; $Repair = $true }
     }
     if ($Repair -and $latest) { Say "repairing ${latest}: installing its files again" }
+    elseif ($To) { Say "going from $(if ($current) { $current } else { '(unknown)' }) to $latest" }
     elseif (-not $latest -or $latest -eq $current) { Write-CCBLog verbose update "up to date ($current)"; if ($Report) { Say "Already up to date ($current)." }; return }
     $asset = @($release.assets | Where-Object { $_.name -like 'CCBridge-*.zip' }) | Select-Object -First 1
     if (-not $asset) { Say "release $latest has no StreamHub zip"; return }
@@ -147,8 +195,8 @@ try {
         # The new release's updater does the install when it differs from this one, so a fix to the
         # updater itself applies with this update (not one later).
         $newUpdater = Join-Path $src.FullName 'tools\update.ps1'
-        Import-Module (Join-Path $here 'lib\Update.psm1') -Force   # Get-FileHashShared
-        $handOver = (Test-Path -LiteralPath $newUpdater) -and ((Get-FileHashShared $newUpdater) -ne (Get-FileHashShared $MyInvocation.MyCommand.Path))
+        # Going back is done by this updater: an older one may lack what this one knows.
+        $handOver = -not $To -and (Test-Path -LiteralPath $newUpdater) -and ((Get-FileHashShared $newUpdater) -ne (Get-FileHashShared $MyInvocation.MyCommand.Path))
         if ($handOver) {
             Write-CCBLog info update "handing over to the updater of $latest"
             $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $newUpdater, '-AppRoot', $root, '-FromFolder', $src.FullName, '-Version', $latest)
@@ -159,6 +207,15 @@ try {
             if ($LASTEXITCODE -ne 0) { Say "the updater of $latest stopped (exit $LASTEXITCODE); installing with this one"; Install-Release $src.FullName $latest }
         } else {
             Install-Release $src.FullName $latest
+        }
+        $installed = if (Test-Path $verFile) { ([IO.File]::ReadAllText($verFile)).Trim() } else { '' }
+        if ($installed -eq $latest) {
+            if ($To) { Complete-Rollback $To $current $newest $newUpdater }
+            elseif (-not $Repair -and $null -ne (Get-LocalHarnessValue $root 'skipUpdates')) {
+                # A newer release is in: the skip list has done its job.
+                Set-LocalHarnessValue $root 'skipUpdates' $null
+                Write-CCBLog info update 'skip list cleared: a newer release is installed'
+            }
         }
     } finally {
         # A file still open (virus scan) must not turn a good update into "skipped"; the folder is

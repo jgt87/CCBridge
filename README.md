@@ -208,7 +208,7 @@ Command line, one prompt without the interface:
 powershell -NoProfile -ExecutionPolicy Bypass -File ccbridge.ps1 -Ping "say hi" -NewChat
 ```
 
-`start.cmd` / `ccbridge.ps1` options: `-Port <n>`, `-NoBrowser`, `-NoUpdate` (skip the update check once), `-LogLevel off|info|verbose|trace`. If StreamHub is already running, `start.cmd` stops that instance first (it would keep serving its old version after an update) and starts the current one; the open browser tab reconnects by itself. The MCP server and `-Ping` runs are left alone.
+`start.cmd` / `ccbridge.ps1` options: `-Port <n>`, `-NoBrowser`, `-NoUpdate` (skip the update check once and run the installed version as it is; to go back to an earlier release, see [Staying on a version](#staying-on-a-version-or-going-back-to-an-earlier-one)), `-LogLevel off|info|verbose|trace`. If StreamHub is already running, `start.cmd` stops that instance first (it would keep serving its old version after an update) and starts the current one; the open browser tab reconnects by itself. The MCP server and `-Ping` runs are left alone.
 
 ---
 
@@ -285,9 +285,20 @@ New versions are published as [GitHub Releases](https://github.com/jgt87/CCBridg
 
 Your settings in `config\harness.local.json` and `config\selectors.local.json` are kept by every update. The installed version is in `version.txt` (also shown in `environment.json` of a diagnostics export).
 
-- Turn automatic updates off with `"autoUpdate": false` in `config\harness.local.json` (`update.cmd` still works); for the MCP server alone set the environment variable `CCBRIDGE_NO_UPDATE=1`.
+- Turn automatic updates off with Settings > App > *Update automatically*, or `"autoUpdate": false` in `config\harness.local.json` (`update.cmd` still works); for the MCP server alone set the environment variable `CCBRIDGE_NO_UPDATE=1`.
 - A git clone updates with `git pull --ff-only` instead (skipped when it has local changes or is on another branch).
 - MCP clients start the MCP server when they launch, so restarting the MCP client (for example a new Claude Code session) also picks up a new version.
+
+### Staying on a version, or going back to an earlier one
+
+If a new release breaks something for you:
+
+- **Start without updating, once:** `start.cmd -NoUpdate` runs the version you have as it is, even when a newer one is out. The shortcut still updates at its next start.
+- **Go back to an earlier release:** in a Command Prompt in the StreamHub folder, run `update.cmd -To v0.1.149` (any version from the [Releases](https://github.com/jgt87/CCBridge/releases) page). It installs that release in place, the same safe way as an update (your settings are kept, and the old files are put back if anything fails), and then:
+  - automatic updates **skip** the release you went back from (and every one before it) and update again as soon as a **newer** release is out, which is normally the fix. Settings > App > *Skip releases up to* shows the skipped release; empty it to take the newest release again. It clears itself once a newer release is installed;
+  - a release from before this feature (v0.1.150 and older) does not know how to skip, and would update straight back at its next start. Going back to one of those turns **automatic updates off** instead, and says so: turn them on again in Settings > App once a fixed release is out.
+- **Unzipped an older release by hand?** Run `update.cmd -To` with that same version once: it installs nothing, only keeps the newer releases away.
+- `update.cmd` without `-To` always installs the newest release, skipped or not.
 
 ---
 
@@ -328,7 +339,8 @@ Settings live in `config\harness.json` and `config\selectors.json`. Put your own
 | `autoApproveCommands` | `[]` | Regular expressions of commands that run without approval (never applies to risky commands) |
 | `workIq` | `leave` | `on`, `off` or `leave` (do not touch the toggle) |
 | `saveReplyFrames` | `true` | Keep the raw data of the last 30 Copilot replies for diagnosis |
-| `autoUpdate` | on | Settings > Updates. Installs a new release only when a new instance of the app starts; the running app is never updated. `false` turns it off |
+| `autoUpdate` | on | Settings > App. Installs a new release only when a new instance of the app starts; the running app is never updated. `false` turns it off |
+| `skipUpdates` | empty | Settings > App > *Skip releases up to*. Automatic updates leave these releases (and older ones) alone; `update.cmd -To` adds the release you went back from, and it clears itself once a newer release is installed |
 | `logLevel` | `info` | `off`, `info`, `verbose`, `trace` |
 
 `selectors.json` holds the Copilot address, `chatUrl` (default `https://www.microsoft365.com/chat`, opened at start and when a new chat needs a page reload; it signs in without an extra prompt and may redirect to `m365.cloud.microsoft/chat`), `chatHosts` (the hosts on which StreamHub recognises the Copilot tab), and the CSS selectors for Copilot's message box, Send button and (via `test-tools\capture.cmd`) the Work IQ toggle. If Microsoft changes the Copilot page, a selector fix in `selectors.local.json` is usually all that is needed.

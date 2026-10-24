@@ -406,6 +406,7 @@ function Test-PsGuiApp {
     $psi.WorkingDirectory = Split-Path $full
     $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
     $psi.RedirectStandardError = $true; $psi.RedirectStandardOutput = $true
+    Remove-OwnEnvironment $psi   # the app gets STREAMHUB_GUI_TEST, never StreamHub's own CCBRIDGE_* variables
     $psi.EnvironmentVariables['STREAMHUB_GUI_TEST'] = '1'
     $p = [Diagnostics.Process]::Start($psi)
     $errTask = $p.StandardError.ReadToEndAsync(); $outTask = $p.StandardOutput.ReadToEndAsync()

@@ -99,6 +99,61 @@ Describe 'The updater of the new release' {
     }
 }
 
+Describe 'Going back to an earlier release (update.cmd -To)' {
+    It 'reads release versions and skips a release up to the newest one gone back from' {
+        ConvertTo-ReleaseVersion 'v0.1.150' | Should Be ([version]'0.1.150')
+        ConvertTo-ReleaseVersion '0.1.9' | Should Be ([version]'0.1.9')
+        ConvertTo-ReleaseVersion 'latest' | Should BeNullOrEmpty
+        Test-ReleaseSkipped 'v0.1.150' @('v0.1.150') | Should Be $true
+        Test-ReleaseSkipped 'v0.1.149' @('v0.1.150') | Should Be $true    # older than the skip: left alone too
+        Test-ReleaseSkipped 'v0.1.151' @('v0.1.150') | Should Be $false   # the fix: installed again
+        Test-ReleaseSkipped 'v0.1.151' @('v0.1.150', 'v0.1.152') | Should Be $true
+        Test-ReleaseSkipped 'v0.1.151' @() | Should Be $false
+        Test-ReleaseSkipped 'v0.1.151' @('junk') | Should Be $false
+        Test-ReleaseSkipped 'v0.1.100' @('v0.1.99') | Should Be $false    # numbers, not text
+    }
+    It 'skips the newest of the installed and the latest release, when it is newer than the target' {
+        Get-RollbackSkip 'v0.1.149' 'v0.1.150' 'v0.1.150' | Should Be 'v0.1.150'
+        Get-RollbackSkip 'v0.1.148' 'v0.1.149' 'v0.1.150' | Should Be 'v0.1.150'   # 149 and 150 both
+        Get-RollbackSkip 'v0.1.149' 'v0.1.150' '' | Should Be 'v0.1.150'           # GitHub not reached
+        Get-RollbackSkip 'v0.1.150' 'v0.1.149' 'v0.1.150' | Should Be ''           # forward: nothing to skip
+        Get-RollbackSkip 'nope' 'v0.1.150' 'v0.1.150' | Should Be ''
+    }
+    It 'knows which updaters honour the skip list: this one does' {
+        Test-UpdaterSkipsReleases (Join-Path $root 'tools\update.ps1') | Should Be $true
+        $old = Join-Path $env:TEMP ('ccb-oldupd-' + [guid]::NewGuid().ToString('N') + '.ps1')
+        [IO.File]::WriteAllText($old, "param([switch]`$Force)`n# an updater from before the skip list`n")
+        Test-UpdaterSkipsReleases $old | Should Be $false
+        Test-UpdaterSkipsReleases (Join-Path $env:TEMP 'not-there.ps1') | Should Be $false
+        Remove-Item $old
+    }
+    It 'sets and removes values in harness.local.json, keeping the others' {
+        $b = New-UpdateDirs
+        [IO.File]::WriteAllText("$b\app\config\harness.local.json", '{ "port": 8800 }')
+        Set-LocalHarnessValue "$b\app" 'skipUpdates' @('v0.1.150')
+        @(Get-LocalHarnessValue "$b\app" 'skipUpdates') | Should Be 'v0.1.150'
+        Get-LocalHarnessValue "$b\app" 'port' | Should Be 8800
+        Set-LocalHarnessValue "$b\app" 'skipUpdates' $null
+        Get-LocalHarnessValue "$b\app" 'skipUpdates' | Should BeNullOrEmpty
+        Get-LocalHarnessValue "$b\app" 'port' | Should Be 8800
+        Remove-Item "$b\app\config\harness.local.json"
+        Get-LocalHarnessValue "$b\app" 'skipUpdates' | Should BeNullOrEmpty   # no file yet
+        Set-LocalHarnessValue "$b\app" 'autoUpdate' $false
+        Get-LocalHarnessValue "$b\app" 'autoUpdate' | Should Be $false
+        Remove-Item $b -Recurse -Force
+    }
+    It 'refuses something that is not a release, and a git clone, before going online' {
+        $b = New-UpdateDirs
+        $ErrorActionPreference = 'Continue'
+        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tools\update.ps1') -AppRoot "$b\app" -To 'the-good-one' 2>&1 | ForEach-Object { "$_" }
+        ($out -join ' ') | Should Match "'the-good-one' is not a release"
+        New-Item -ItemType Directory "$b\app\.git" | Out-Null
+        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tools\update.ps1') -AppRoot "$b\app" -To '0.1.149' 2>&1 | ForEach-Object { "$_" }
+        ($out -join ' ') | Should Match 'This is a git clone: go back with git itself \(git checkout v0\.1\.149\)'
+        Remove-Item $b -Recurse -Force
+    }
+}
+
 Describe 'The install check' {
     It 'finds files missing or different from the release, and nothing in a complete folder' {
         $b = New-UpdateDirs

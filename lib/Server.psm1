@@ -216,6 +216,180 @@ function Get-ActivityView($State) {
     $view
 }
 
+function Invoke-ReviewApi($Ctx, $State, [string]$Op) {
+    <# POST /api/reviews/get|fix|ignore: one saved code review, ignoring findings, or queuing fixes. #>
+    $b = Read-JsonBody $Ctx
+    if ("$($b.id)" -notmatch '^review-[\d-]+$') { throw "Unknown review '$($b.id)'" }
+    $jsonPath = Resolve-ProjectPath $State.ProjectRoot (Get-LayoutPath Reviews "$($b.id).json")
+    if (-not (Test-Path -LiteralPath $jsonPath)) { throw "Unknown review '$($b.id)'" }
+    $rv = [IO.File]::ReadAllText($jsonPath) | ConvertFrom-Json
+    if ($Op -eq 'get') { return Send-Json $Ctx @{ review = $rv } }
+    $ids = @($b.ids | ForEach-Object { "$_" })
+    if ($Op -eq 'ignore') {
+        # Not a real problem: hidden here, and a later review leaves the same line out.
+        foreach ($f in @($rv.findings | Where-Object { $ids -contains $_.id })) {
+            Set-IgnoredFinding $State.ProjectRoot "$($f.file)" "$($f.title)" "$($f.quote)" -Undo:([bool]$b.undo)
+            $f | Add-Member -NotePropertyName ignored -NotePropertyValue (-not $b.undo) -Force
+        }
+        [IO.File]::WriteAllText($jsonPath, (ConvertTo-Json -InputObject $rv -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        return Send-Json $Ctx @{ ok = $true }
+    }
+    $picked = @($rv.findings | Where-Object { $ids -contains $_.id -and -not $_.ignored } | ForEach-Object { ConvertTo-PlainHashtable $_ })
+    if (-not $picked.Count) { throw 'Pick at least one finding to fix' }
+    $queued = 0
+    foreach ($t in @(New-ReviewFixTasks $picked)) {
+        $e = Submit-AgentTask $State @{ kind = 'chat'; text = $t.text } 'user' $t.title
+        foreach ($f in @($rv.findings | Where-Object { $t.ids -contains $_.id })) { $f | Add-Member -NotePropertyName fixQueueId -NotePropertyValue $e.id -Force }
+        $queued++
+    }
+    [IO.File]::WriteAllText($jsonPath, (ConvertTo-Json -InputObject $rv -Depth 6), (New-Object Text.UTF8Encoding($false)))
+    Write-CCBLog info server "Review $($b.id): $($picked.Count) finding(s) queued for fixing in $queued task(s)"
+    return Send-Json $Ctx @{ ok = $true; tasks = $queued }
+}
+
+function Invoke-JobsApi($Ctx, $State) {
+    <# POST /api/jobs: tasks from other programs (the MCP server), queued like everything else and
+       visible in the app. #>
+    $b = Read-JsonBody $Ctx
+    $source = if ($b.source) { [string]$b.source } else { 'api' }
+    $id = 'job-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $job = [hashtable]::Synchronized(@{ id = $id; kind = [string]$b.kind; status = 'queued'; created = (Get-Date).ToString('s'); queuedSeq = $State.Seq })
+    if ($null -ne $b.workIq) { $State.WorkIq = $(if ([bool]$b.workIq) { 'on' } else { 'off' }); $State.WorkIqWarned = $false }
+    $deep = [bool]$b.thinkDeeper
+    $task = switch ([string]$b.kind) {
+        'ask' {
+            if (-not "$($b.text)".Trim()) { throw 'text is required' }
+            @{ kind = 'ask'; jobId = $id; text = [string]$b.text; newChat = [bool]$b.newChat; source = $source; responseMode = $(if ($deep) { 'deep' } else { $null }) }
+        }
+        'task' {
+            $p = [string]$b.projectPath
+            if (-not $p -or -not [IO.Path]::IsPathRooted($p)) { throw 'projectPath must be an absolute folder path' }
+            if (-not "$($b.text)".Trim()) { throw 'text is required' }
+            $mode = if ($b.mode) { [string]$b.mode } else { 'auto' }
+            if (@('auto', 'plan', 'ask') -notcontains $mode) { throw 'mode must be auto, plan or ask' }
+            $full = [IO.Path]::GetFullPath($p).TrimEnd('\')
+            if (-not (Test-Path -LiteralPath $full)) { $null = New-Item -ItemType Directory -Path $full }
+            $job.project = $full; $job.mode = $mode; $job.allowCommands = [bool]$b.allowCommands; $job.task = [string]$b.text
+            @{ kind = 'chat'; jobId = $id; text = [string]$b.text; projectRoot = $full; newChat = [bool]$b.newChat; mode = $mode; noCommands = (-not [bool]$b.allowCommands); source = $source; reviewByCaller = (-not [bool]$b.copilotReview); responseMode = $(if ($deep) { 'deep' } else { $null }) }
+        }
+        'undo' {
+            $p = [string]$b.projectPath
+            if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Container)) { throw 'projectPath must be an existing folder' }
+            @{ kind = 'undo'; jobId = $id; projectRoot = [IO.Path]::GetFullPath($p).TrimEnd('\'); source = $source }
+        }
+        'newchat' { @{ kind = 'newchat'; jobId = $id; source = $source } }
+        'review' {
+            $p = [string]$b.projectPath
+            if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Container)) { throw 'projectPath must be an existing folder' }
+            $full = [IO.Path]::GetFullPath($p).TrimEnd('\')
+            $job.project = $full
+            @{ kind = 'review'; jobId = $id; projectRoot = $full; scope = $(if (@($b.paths | Where-Object { $_ }).Count) { 'paths' } else { 'all' }); paths = @($b.paths | Where-Object { $_ }); focus = @($b.focus | Where-Object { $_ }); reviewId = 'review-' + (Get-Date).ToString('yyyyMMdd-HHmmss'); source = $source }
+        }
+        default { throw "Unknown job kind '$($b.kind)'" }
+    }
+    $State.Jobs[$id] = $job
+    $entry = Submit-AgentTask $State $task $source
+    return Send-Json $Ctx @{ ok = $true; job = (Get-JobView $State $job); queueId = $entry.id }
+}
+
+function Invoke-ProjectSetupApi($Ctx, $State) {
+    <# POST /api/project-setup: the build form, a forgotten setup answer, or the live data file of
+       the open project; only from the StreamHub page itself. #>
+    if ($Ctx.Request.Headers['Origin'] -ne "http://localhost:$($State.Config.port)") { return Send-Json $Ctx @{ error = 'Only the StreamHub page can change the project setup.' } 403 }
+    if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ error = 'Open a project first.' } 400 }
+    $b = Read-JsonBody $Ctx
+    $changes = @{ chosenBy = 'user' }
+    if ($null -ne $b.build) {
+        if ("$($b.build)" -notin 'single', 'modular', 'copilot', '') { return Send-Json $Ctx @{ error = 'Unknown build form.' } 400 }
+        $changes.build = "$($b.build)"
+    }
+    # Forget one answered setup question: StreamHub asks it again when a request needs it.
+    if ($null -ne $b.forget -and "$($b.forget)" -match '^[a-z0-9]+$') { $changes.answers = @{ "$($b.forget)" = '' } }
+    if ($null -ne $b.liveSource) {
+        $p = "$($b.liveSource)".Trim().Trim('"')
+        if ($p) {
+            $why = Test-LiveSourcePath $p $State.ProjectRoot
+            if ($why) { return Send-Json $Ctx @{ error = "Not set: $why." } 400 }
+            $changes.liveSource = [IO.Path]::GetFullPath($p)
+        } else { $changes.liveSource = '' }
+        $changes.liveStamp = ''
+    }
+    $null = Save-ProjectSetup $State.ProjectRoot $changes
+    if ($changes.liveSource) {
+        try { $null = Write-RefreshScript $State.ProjectRoot $State.AppRoot } catch { Write-CCBLogError server 'refresh script' $_ }
+        $State.NextLiveCheck = $null   # the worker copies it in at its next idle moment
+    }
+    $s = Get-ProjectSetup $State.ProjectRoot
+    return Send-Json $Ctx @{ ok = $true; setup = @{ build = $s.build; live = $(if ($s.liveSource) { @{ path = $s.liveSource; copy = (Get-LiveCopyRel $s.liveSource); found = $true } } else { $null }) } }
+}
+
+function Invoke-ChatApi($Ctx, $State) {
+    <# POST /api/chat: a message from the message box (or an answer to a card under one), queued
+       as a task; while Copilot is busy it waits in the queue. #>
+    $b = Read-JsonBody $Ctx
+    if (-not $b.text -or -not $b.text.Trim()) { throw 'Empty message' }
+    $task = @{ kind = 'chat'; text = [string]$b.text }
+    # A message to one of Copilot's agents (picked in the message box), or an answer to its plan.
+    # Agent: Auto - a fixed rule on the words picks Researcher, Analyst or Copilot itself.
+    $autoWhy = ''
+    if ("$($b.agent)" -eq 'auto' -and -not $b.agentAnswer -and -not $b.planFirst -and -not $b.approve) {
+        $pick = Get-AutoAgent ([string]$b.text)
+        if ($pick.agent) { $b.agent = $pick.agent; $autoWhy = $pick.why }
+    }
+    if ("$($b.agent)" -in 'researcher', 'analyst') {
+        $t = @{ kind = 'agent'; agent = [string]$b.agent; text = [string]$b.text; followUp = [bool]$b.agentAnswer; autoWhy = $autoWhy }
+        $null = Submit-AgentTask $State $t 'user'
+        return Send-Json $Ctx @{ ok = $true }
+    }
+    $title = ''
+    # The request's section in PLAN.md, when this message belongs to a clarify-first flow.
+    $planId = if ($b.planId -and (Test-PlanId ([string]$b.planId))) { [string]$b.planId } else { $null }
+    if ($planId) { $task.planId = $planId }
+    $planNote = {
+        param($Heading, $Body, $Status)
+        if (-not $planId -or -not $State.ProjectRoot) { return }
+        try { Add-PlanSection $State.ProjectRoot $planId $Heading $Body $Status } catch { Write-CCBLogError server 'PLAN.md' $_ }
+    }
+    if ($b.asCoding) { $task.forceKind = 'coding' }
+    if ($b.noRunbook) { $task.noRunbook = $true }   # "Send to Copilot" on a runbook choice: no runbook check
+    # The answer to the project setup card. Only the StreamHub page itself (its Origin) sets it:
+    # a live data file outside the project is the person's choice, never another program's.
+    if ($b.setup -and $Ctx.Request.Headers['Origin'] -eq "http://localhost:$($State.Config.port)") {
+        $answers = @{}
+        if ($b.setup.answers) { foreach ($p in @($b.setup.answers.PSObject.Properties)) { $answers[$p.Name] = [string]$p.Value } }
+        $task.setup = @{ build = [string]$b.setup.build; liveSource = [string]$b.setup.liveSource; answers = $answers }
+    }
+    # An answer to a card under the message (setup, runbook choice): the message is in the chat already.
+    if ($task.setup -or $task.noRunbook) { $task.shown = $true }
+    if ($b.clarify) { $task.clarify = $true; $task.request = [string]$b.text }
+    elseif ($b.planFirst) {
+        # Plan first: read-only turn that ends with a plan to approve in the app.
+        $task.planFirst = $true; $task.mode = 'plan'; $task.forceKind = 'coding'
+        $task.request = if ($b.request) { [string]$b.request } else { [string]$b.text }
+        # A plan first that starts here (the setup card's plan-first answer) gets its PLAN.md
+        # section now, so the plan, its changes and the approval are recorded there.
+        if (-not $planId -and $State.ProjectRoot) {
+            try { $planId = New-PlanEntry $State.ProjectRoot $task.request; $task.planId = $planId } catch { Write-CCBLogError server 'PLAN.md' $_ }
+        }
+        $task.text = (Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + [string]$b.text
+        $title = "Plan: $($task.request)"
+        if (@($b.answers).Count) { & $planNote 'Your answers' (Format-PlanAnswers @($b.answers)) 'planning' }
+        elseif ($b.skipped) { & $planNote 'Your answers' 'Skipped: Copilot plans with its own assumptions.' 'planning' }
+        if ("$($b.feedback)".Trim()) { & $planNote 'Change requested' ([string]$b.feedback) 'planning' }
+    }
+    # Approve and build: the build itself, never a new big request to plan first (with or without
+    # a PLAN.md section for it).
+    if ($b.approve) { $task.planBuild = $true }
+    if ($b.approve -and $planId) {
+        & $planNote 'Approved' "Approved on $((Get-Date).ToString('yyyy-MM-dd HH:mm')); building started." 'building'
+        $task.text += "`n`nEvery decision for this task (questions, answers, plan versions) is in .streamhub/PLAN.md, in the section marked plan:$planId. Read it (read .streamhub/PLAN.md) if you need it."
+    }
+    if ($b.approve) { Set-PlanBuildTask $State $task }   # building an approved plan: out of Plan only mode, and Copilot told so
+    if ($b.thinkDeeper) { $task.responseMode = 'deep' }
+    $entry = Submit-AgentTask $State $task 'user' $title
+    return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+}
+
 function Invoke-ApiRequest($Ctx, $State) {
     $req = $Ctx.Request
     $path = $req.Url.AbsolutePath
@@ -343,36 +517,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             if ($State.ProjectRoot) { $list = @(Get-Reviews $State.ProjectRoot) }
             return Send-Json $Ctx @{ reviews = $list }
         }
-        '^POST /api/reviews/(get|fix|ignore)$' {
-            $op = $Matches[1]
-            $b = Read-JsonBody $Ctx
-            if ("$($b.id)" -notmatch '^review-[\d-]+$') { throw "Unknown review '$($b.id)'" }
-            $jsonPath = Resolve-ProjectPath $State.ProjectRoot (Get-LayoutPath Reviews "$($b.id).json")
-            if (-not (Test-Path -LiteralPath $jsonPath)) { throw "Unknown review '$($b.id)'" }
-            $rv = [IO.File]::ReadAllText($jsonPath) | ConvertFrom-Json
-            if ($op -eq 'get') { return Send-Json $Ctx @{ review = $rv } }
-            $ids = @($b.ids | ForEach-Object { "$_" })
-            if ($op -eq 'ignore') {
-                # Not a real problem: hidden here, and a later review leaves the same line out.
-                foreach ($f in @($rv.findings | Where-Object { $ids -contains $_.id })) {
-                    Set-IgnoredFinding $State.ProjectRoot "$($f.file)" "$($f.title)" "$($f.quote)" -Undo:([bool]$b.undo)
-                    $f | Add-Member -NotePropertyName ignored -NotePropertyValue (-not $b.undo) -Force
-                }
-                [IO.File]::WriteAllText($jsonPath, (ConvertTo-Json -InputObject $rv -Depth 6), (New-Object Text.UTF8Encoding($false)))
-                return Send-Json $Ctx @{ ok = $true }
-            }
-            $picked = @($rv.findings | Where-Object { $ids -contains $_.id -and -not $_.ignored } | ForEach-Object { ConvertTo-PlainHashtable $_ })
-            if (-not $picked.Count) { throw 'Pick at least one finding to fix' }
-            $queued = 0
-            foreach ($t in @(New-ReviewFixTasks $picked)) {
-                $e = Submit-AgentTask $State @{ kind = 'chat'; text = $t.text } 'user' $t.title
-                foreach ($f in @($rv.findings | Where-Object { $t.ids -contains $_.id })) { $f | Add-Member -NotePropertyName fixQueueId -NotePropertyValue $e.id -Force }
-                $queued++
-            }
-            [IO.File]::WriteAllText($jsonPath, (ConvertTo-Json -InputObject $rv -Depth 6), (New-Object Text.UTF8Encoding($false)))
-            Write-CCBLog info server "Review $($b.id): $($picked.Count) finding(s) queued for fixing in $queued task(s)"
-            return Send-Json $Ctx @{ ok = $true; tasks = $queued }
-        }
+        '^POST /api/reviews/(get|fix|ignore)$' { return Invoke-ReviewApi $Ctx $State $Matches[1] }
         '^GET /api/schedules$' { return Send-Json $Ctx @{ schedules = @(Get-ScheduleView $State) } }
         '^POST /api/schedules$' {
             $b = Read-JsonBody $Ctx
@@ -416,49 +561,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             Save-AgentQueue $State
             return Send-Json $Ctx @{ ok = $true; status = $e.status }
         }
-        '^POST /api/jobs$' {
-            # Tasks from other programs (the MCP server): queued like everything else, visible in the app.
-            $b = Read-JsonBody $Ctx
-            $source = if ($b.source) { [string]$b.source } else { 'api' }
-            $id = 'job-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-            $job = [hashtable]::Synchronized(@{ id = $id; kind = [string]$b.kind; status = 'queued'; created = (Get-Date).ToString('s'); queuedSeq = $State.Seq })
-            if ($null -ne $b.workIq) { $State.WorkIq = $(if ([bool]$b.workIq) { 'on' } else { 'off' }); $State.WorkIqWarned = $false }
-            $deep = [bool]$b.thinkDeeper
-            $task = switch ([string]$b.kind) {
-                'ask' {
-                    if (-not "$($b.text)".Trim()) { throw 'text is required' }
-                    @{ kind = 'ask'; jobId = $id; text = [string]$b.text; newChat = [bool]$b.newChat; source = $source; responseMode = $(if ($deep) { 'deep' } else { $null }) }
-                }
-                'task' {
-                    $p = [string]$b.projectPath
-                    if (-not $p -or -not [IO.Path]::IsPathRooted($p)) { throw 'projectPath must be an absolute folder path' }
-                    if (-not "$($b.text)".Trim()) { throw 'text is required' }
-                    $mode = if ($b.mode) { [string]$b.mode } else { 'auto' }
-                    if (@('auto', 'plan', 'ask') -notcontains $mode) { throw 'mode must be auto, plan or ask' }
-                    $full = [IO.Path]::GetFullPath($p).TrimEnd('\')
-                    if (-not (Test-Path -LiteralPath $full)) { $null = New-Item -ItemType Directory -Path $full }
-                    $job.project = $full; $job.mode = $mode; $job.allowCommands = [bool]$b.allowCommands; $job.task = [string]$b.text
-                    @{ kind = 'chat'; jobId = $id; text = [string]$b.text; projectRoot = $full; newChat = [bool]$b.newChat; mode = $mode; noCommands = (-not [bool]$b.allowCommands); source = $source; reviewByCaller = (-not [bool]$b.copilotReview); responseMode = $(if ($deep) { 'deep' } else { $null }) }
-                }
-                'undo' {
-                    $p = [string]$b.projectPath
-                    if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Container)) { throw 'projectPath must be an existing folder' }
-                    @{ kind = 'undo'; jobId = $id; projectRoot = [IO.Path]::GetFullPath($p).TrimEnd('\'); source = $source }
-                }
-                'newchat' { @{ kind = 'newchat'; jobId = $id; source = $source } }
-                'review' {
-                    $p = [string]$b.projectPath
-                    if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Container)) { throw 'projectPath must be an existing folder' }
-                    $full = [IO.Path]::GetFullPath($p).TrimEnd('\')
-                    $job.project = $full
-                    @{ kind = 'review'; jobId = $id; projectRoot = $full; scope = $(if (@($b.paths | Where-Object { $_ }).Count) { 'paths' } else { 'all' }); paths = @($b.paths | Where-Object { $_ }); focus = @($b.focus | Where-Object { $_ }); reviewId = 'review-' + (Get-Date).ToString('yyyyMMdd-HHmmss'); source = $source }
-                }
-                default { throw "Unknown job kind '$($b.kind)'" }
-            }
-            $State.Jobs[$id] = $job
-            $entry = Submit-AgentTask $State $task $source
-            return Send-Json $Ctx @{ ok = $true; job = (Get-JobView $State $job); queueId = $entry.id }
-        }
+        '^POST /api/jobs$' { return Invoke-JobsApi $Ctx $State }
         '^GET /api/jobs/(job-[0-9a-f]+)$' {
             $job = $State.Jobs[$Matches[1]]
             if (-not $job) { throw "Unknown job '$($Matches[1])'" }
@@ -553,34 +656,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $live = if ($s.liveSource) { @{ path = $s.liveSource; copy = (Get-LiveCopyRel $s.liveSource); found = (Test-Path -LiteralPath $s.liveSource -PathType Leaf) } } else { $null }
             return Send-Json $Ctx @{ setup = @{ build = $s.build; live = $live; chosenBy = $s.chosenBy; chosenAt = $s.chosenAt; answers = @(Get-SetupAnswerList $State.ProjectRoot) } }
         }
-        '^POST /api/project-setup$' {
-            if ($Ctx.Request.Headers['Origin'] -ne "http://localhost:$($State.Config.port)") { return Send-Json $Ctx @{ error = 'Only the StreamHub page can change the project setup.' } 403 }
-            if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ error = 'Open a project first.' } 400 }
-            $b = Read-JsonBody $Ctx
-            $changes = @{ chosenBy = 'user' }
-            if ($null -ne $b.build) {
-                if ("$($b.build)" -notin 'single', 'modular', 'copilot', '') { return Send-Json $Ctx @{ error = 'Unknown build form.' } 400 }
-                $changes.build = "$($b.build)"
-            }
-            # Forget one answered setup question: StreamHub asks it again when a request needs it.
-            if ($null -ne $b.forget -and "$($b.forget)" -match '^[a-z0-9]+$') { $changes.answers = @{ "$($b.forget)" = '' } }
-            if ($null -ne $b.liveSource) {
-                $p = "$($b.liveSource)".Trim().Trim('"')
-                if ($p) {
-                    $why = Test-LiveSourcePath $p $State.ProjectRoot
-                    if ($why) { return Send-Json $Ctx @{ error = "Not set: $why." } 400 }
-                    $changes.liveSource = [IO.Path]::GetFullPath($p)
-                } else { $changes.liveSource = '' }
-                $changes.liveStamp = ''
-            }
-            $null = Save-ProjectSetup $State.ProjectRoot $changes
-            if ($changes.liveSource) {
-                try { $null = Write-RefreshScript $State.ProjectRoot $State.AppRoot } catch { Write-CCBLogError server 'refresh script' $_ }
-                $State.NextLiveCheck = $null   # the worker copies it in at its next idle moment
-            }
-            $s = Get-ProjectSetup $State.ProjectRoot
-            return Send-Json $Ctx @{ ok = $true; setup = @{ build = $s.build; live = $(if ($s.liveSource) { @{ path = $s.liveSource; copy = (Get-LiveCopyRel $s.liveSource); found = $true } } else { $null }) } }
-        }
+        '^POST /api/project-setup$' { return Invoke-ProjectSetupApi $Ctx $State }
         '^GET /api/packages$' {
             # The project's package.json files and the packages node_modules does not have yet.
             if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ items = @(); npm = $false } }
@@ -640,71 +716,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $null = Submit-AgentTask $State @{ kind = 'fetch'; name = [string]$b.name } 'user'
             return Send-Json $Ctx @{ ok = $true }
         }
-        '^POST /api/chat$' {
-            $b = Read-JsonBody $Ctx
-            if (-not $b.text -or -not $b.text.Trim()) { throw 'Empty message' }
-            # While Copilot is busy the message waits in the queue.
-            $task = @{ kind = 'chat'; text = [string]$b.text }
-            # A message to one of Copilot's agents (picked in the message box), or an answer to its plan.
-            # Agent: Auto - a fixed rule on the words picks Researcher, Analyst or Copilot itself.
-            $autoWhy = ''
-            if ("$($b.agent)" -eq 'auto' -and -not $b.agentAnswer -and -not $b.planFirst -and -not $b.approve) {
-                $pick = Get-AutoAgent ([string]$b.text)
-                if ($pick.agent) { $b.agent = $pick.agent; $autoWhy = $pick.why }
-            }
-            if ("$($b.agent)" -in 'researcher', 'analyst') {
-                $t = @{ kind = 'agent'; agent = [string]$b.agent; text = [string]$b.text; followUp = [bool]$b.agentAnswer; autoWhy = $autoWhy }
-                $null = Submit-AgentTask $State $t 'user'
-                return Send-Json $Ctx @{ ok = $true }
-            }
-            $title = ''
-            # The request's section in PLAN.md, when this message belongs to a clarify-first flow.
-            $planId = if ($b.planId -and (Test-PlanId ([string]$b.planId))) { [string]$b.planId } else { $null }
-            if ($planId) { $task.planId = $planId }
-            $planNote = {
-                param($Heading, $Body, $Status)
-                if (-not $planId -or -not $State.ProjectRoot) { return }
-                try { Add-PlanSection $State.ProjectRoot $planId $Heading $Body $Status } catch { Write-CCBLogError server 'PLAN.md' $_ }
-            }
-            if ($b.asCoding) { $task.forceKind = 'coding' }
-            if ($b.noRunbook) { $task.noRunbook = $true }   # "Send to Copilot" on a runbook choice: no runbook check
-            # The answer to the project setup card. Only the StreamHub page itself (its Origin) sets it:
-            # a live data file outside the project is the person's choice, never another program's.
-            if ($b.setup -and $Ctx.Request.Headers['Origin'] -eq "http://localhost:$($State.Config.port)") {
-                $answers = @{}
-                if ($b.setup.answers) { foreach ($p in @($b.setup.answers.PSObject.Properties)) { $answers[$p.Name] = [string]$p.Value } }
-                $task.setup = @{ build = [string]$b.setup.build; liveSource = [string]$b.setup.liveSource; answers = $answers }
-            }
-            # An answer to a card under the message (setup, runbook choice): the message is in the chat already.
-            if ($task.setup -or $task.noRunbook) { $task.shown = $true }
-            if ($b.clarify) { $task.clarify = $true; $task.request = [string]$b.text }
-            elseif ($b.planFirst) {
-                # Plan first: read-only turn that ends with a plan to approve in the app.
-                $task.planFirst = $true; $task.mode = 'plan'; $task.forceKind = 'coding'
-                $task.request = if ($b.request) { [string]$b.request } else { [string]$b.text }
-                # A plan first that starts here (the setup card's plan-first answer) gets its PLAN.md
-                # section now, so the plan, its changes and the approval are recorded there.
-                if (-not $planId -and $State.ProjectRoot) {
-                    try { $planId = New-PlanEntry $State.ProjectRoot $task.request; $task.planId = $planId } catch { Write-CCBLogError server 'PLAN.md' $_ }
-                }
-                $task.text = (Get-PromptPart $State.AppRoot 'plan-first') + "`n`n" + [string]$b.text
-                $title = "Plan: $($task.request)"
-                if (@($b.answers).Count) { & $planNote 'Your answers' (Format-PlanAnswers @($b.answers)) 'planning' }
-                elseif ($b.skipped) { & $planNote 'Your answers' 'Skipped: Copilot plans with its own assumptions.' 'planning' }
-                if ("$($b.feedback)".Trim()) { & $planNote 'Change requested' ([string]$b.feedback) 'planning' }
-            }
-            # Approve and build: the build itself, never a new big request to plan first (with or without
-            # a PLAN.md section for it).
-            if ($b.approve) { $task.planBuild = $true }
-            if ($b.approve -and $planId) {
-                & $planNote 'Approved' "Approved on $((Get-Date).ToString('yyyy-MM-dd HH:mm')); building started." 'building'
-                $task.text += "`n`nEvery decision for this task (questions, answers, plan versions) is in .streamhub/PLAN.md, in the section marked plan:$planId. Read it (read .streamhub/PLAN.md) if you need it."
-            }
-            if ($b.approve) { Set-PlanBuildTask $State $task }   # building an approved plan: out of Plan only mode, and Copilot told so
-            if ($b.thinkDeeper) { $task.responseMode = 'deep' }
-            $entry = Submit-AgentTask $State $task 'user' $title
-            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
-        }
+        '^POST /api/chat$' { return Invoke-ChatApi $Ctx $State }
         '^POST /api/approve$' {
             $b = Read-JsonBody $Ctx
             # Who decided. "user" only for the StreamHub page itself: the browser adds its Origin header,

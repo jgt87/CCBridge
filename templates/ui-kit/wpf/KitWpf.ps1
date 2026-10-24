@@ -35,20 +35,22 @@
                Get-KitSettings NAME / Save-KitSettings NAME OBJECT (JSON in %APPDATA%\NAME)
                Use-KitSingleInstance NAME (returns $false when the app is already open)
                Test-KitGuiTest   $true while the helper program only checks that the window opens
+  Names        dot-sourced, these helpers share the app's script scope: the app never defines a function
+               with one of their names, and their own variables start with __kit (never use that start)
 #>
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 
-$script:KitHere = $PSScriptRoot
-$script:KitTheme = Join-Path $PSScriptRoot 'KitTheme.xaml'
+$script:__kitRoot = $PSScriptRoot
+$script:__kitThemePath = Join-Path $PSScriptRoot 'KitTheme.xaml'
 
 function Get-KitApp {
     # The WPF application of this PowerShell session, with the kit's theme in its resources when the
     # project has one (the window needs the theme while it is read).
     $app = [Windows.Application]::Current
     if (-not $app) { $app = New-Object Windows.Application; $app.ShutdownMode = 'OnExplicitShutdown' }
-    if ((Test-Path -LiteralPath $script:KitTheme) -and -not $app.Properties['KitTheme']) {
-        $app.Resources.MergedDictionaries.Add([Windows.Markup.XamlReader]::Parse([IO.File]::ReadAllText($script:KitTheme)))
+    if ((Test-Path -LiteralPath $script:__kitThemePath) -and -not $app.Properties['KitTheme']) {
+        $app.Resources.MergedDictionaries.Add([Windows.Markup.XamlReader]::Parse([IO.File]::ReadAllText($script:__kitThemePath)))
         $app.Properties['KitTheme'] = $true
     }
     $app
@@ -294,7 +296,7 @@ function Invoke-KitSql {
        no rows. Self-contained, so Start-KitSql can run it in the background. #>
     param([Parameter(Mandatory)][string]$Database, [Parameter(Mandatory)][string]$Query, [hashtable]$Parameters = @{}, [int]$MaxRows = 50000, [int]$TimeoutSec = 120, [string]$ProjectRoot = '')
     if ($env:STREAMHUB_GUI_TEST) { return @() }
-    if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $script:KitHere)) }
+    if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $script:__kitRoot)) }
     $cfg = Join-Path $ProjectRoot '.streamhub\databases.json'
     if (-not (Test-Path -LiteralPath $cfg)) { throw "No databases are set up for this project ($cfg). Add one in StreamHub: Files > Project setup > Databases." }
     $all = Get-Content -LiteralPath $cfg -Raw -Encoding UTF8 | ConvertFrom-Json   # assigned first: piped on, a JSON array is one object in 5.1
@@ -338,9 +340,9 @@ function Start-KitSql {
     <# Invoke-KitSql in the background (Start-KitWork), so the window stays responsive while the
        database answers: -OnDone gets the rows, or the error record when the query failed. #>
     param([Parameter(Mandatory)][string]$Database, [Parameter(Mandatory)][string]$Query, [hashtable]$Parameters = @{}, [scriptblock]$OnDone = {}, [int]$MaxRows = 50000, [string]$ProjectRoot = '')
-    if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $script:KitHere)) }
+    if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $script:__kitRoot)) }
     $def = ${function:Invoke-KitSql}.ToString()
-    $work = [scriptblock]::Create("param(`$Spec) `$script:KitHere = '' ; function Invoke-KitSql { $def }`nInvoke-KitSql @Spec")
+    $work = [scriptblock]::Create("param(`$Spec) `$script:__kitRoot = '' ; function Invoke-KitSql { $def }`nInvoke-KitSql @Spec")
     Start-KitWork $work -Arguments @{ Spec = @{ Database = $Database; Query = $Query; Parameters = $Parameters; MaxRows = $MaxRows; ProjectRoot = $ProjectRoot } } -OnDone $OnDone
 }
 
@@ -415,6 +417,6 @@ function Use-KitSingleInstance {
     # $true for the first copy of the app; $false when it is already open (then show a message and stop).
     param([Parameter(Mandatory)][string]$Name)
     $created = $false
-    $script:KitMutex = New-Object Threading.Mutex($true, "Local\$Name", [ref]$created)
+    $script:__kitMutex = New-Object Threading.Mutex($true, "Local\$Name", [ref]$created)
     $created
 }

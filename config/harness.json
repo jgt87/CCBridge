@@ -22,6 +22,7 @@
   "dataImport": true,
   "saveReplyFrames": true,
   "autoUpdate": true,
+  "skipUpdates": [],
   "webRead": "named-sites",
   "signIn": "single-sign-on",
   "fileChangeCounts": "last-change",
