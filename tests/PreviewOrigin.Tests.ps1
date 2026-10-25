@@ -78,7 +78,19 @@ Describe 'Settings, mode, tools, links, undo and history change only from the ap
         @{ path = '/api/response-mode'; body = @{ value = 'deep' } },
         @{ path = '/api/workiq'; body = @{ value = 'on' } },
         @{ path = '/api/project/show'; body = @{} },
-        @{ path = '/api/diagnostics/show'; body = @{ path = 'C:\Windows' } }
+        @{ path = '/api/diagnostics/show'; body = @{ path = 'C:\Windows' } },
+        # On-request features: each starts or changes something, so only the page itself may.
+        @{ path = '/api/page-report'; body = @{ page = 'index.html' } },
+        @{ path = '/api/page-compare'; body = @{ changeSet = '20261025-101500-000'; page = 'index.html' } },
+        @{ path = '/api/data-profile'; body = @{ source = 'data.csv' } },
+        @{ path = '/api/runbook-from-chat'; body = @{} },
+        @{ path = '/api/overview'; body = @{} },
+        @{ path = '/api/share-package'; body = @{ includeSource = $true } },
+        @{ path = '/api/kit-theme/card'; body = @{} },
+        @{ path = '/api/kit-theme/preview'; body = @{ accent = '#0055aa' } },
+        @{ path = '/api/kit-theme/apply'; body = @{ accent = '#0055aa' } },
+        @{ path = '/api/tidy/list'; body = @{} },
+        @{ path = '/api/tidy/apply'; body = @{ ids = @('file|old.js') } }
     )
     It 'refuses the call without the page''s Origin (another program with the token, a preview page)' {
         foreach ($call in $calls) {

@@ -28,6 +28,8 @@ import { openExternal } from "@/lib/links";
 import { readStored, readStoredJson, writeStored } from "@/lib/stored";
 import { useIssueReport } from "@/lib/use-issue-report";
 import { IndexBar } from "./index-bar";
+import { PageCompareButton } from "./page-compare-button";
+import { comparePage } from "./page-report";
 
 interface TreeNode {
   name: string;
@@ -417,6 +419,8 @@ type SidePanelProps = {
   onUndo: () => void;
   /** Undoes this change set and every newer one (History > Restore). */
   onUndoTo?: (changeSet: string) => void;
+  /** Shows a page before this change set next to now (History > Compare page). */
+  onComparePage?: (changeSet: string, page: string) => void;
   onUploaded: () => void;
   busy: boolean;
   fetchItems: FetchItem[];
@@ -529,8 +533,10 @@ function ChangeSetCard({
   lit,
   busy,
   confirming,
+  appEntry,
   onConfirm,
   onUndoTo,
+  onComparePage,
   onOpenFile,
   onOpenChangeFile,
 }: {
@@ -540,8 +546,11 @@ function ChangeSetCard({
   lit: boolean;
   busy: boolean;
   confirming: boolean;
+  /** The app's entry page, compared when the change set changed no page itself. */
+  appEntry: string | null;
   onConfirm: (seq: number | null) => void;
   onUndoTo?: (changeSet: string) => void;
+  onComparePage?: (changeSet: string, page: string) => void;
   onOpenFile: (path: string) => void;
   onOpenChangeFile?: (changeSet: string, path: string) => void;
 }) {
@@ -550,6 +559,9 @@ function ChangeSetCard({
   // With a change set id the file opens on the lines this change set changed.
   const changeSet = c.changeSet;
   const openChange = changeSet && onOpenChangeFile ? (f: string) => onOpenChangeFile(changeSet, f) : undefined;
+  // Compare page (on request only): a page this change set changed, else the app's entry page.
+  const deleted = (c.counts ?? []).filter((x) => x.deleted).map((x) => x.path);
+  const comparable = changeSet && onComparePage ? comparePage(c.files, appEntry, deleted) : null;
   return (
     <div
       className={cn("rounded-lg border p-2 transition-colors", lit ? "border-(--kit-border-strong) bg-(--kit-surface-2)" : "border-(--kit-border)")}
@@ -557,6 +569,7 @@ function ChangeSetCard({
     >
       <div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
         {c.time}
+        {comparable && <PageCompareButton busy={busy} onCompare={(page) => onComparePage?.(changeSet as string, page)} page={comparable} />}
         {newer === 0 && <span className="ml-auto shrink-0">latest: Undo takes this back</span>}
         {restore && (
           <RestoreControl
@@ -603,9 +616,12 @@ function ChangesPanel({
   onConfirmUndo,
   onUndo,
   onUndoTo,
+  onComparePage,
   onOpenFile,
   onOpenChangeFile,
-}: Pick<SidePanelProps, "changes" | "busy" | "onUndo" | "onUndoTo" | "onOpenFile" | "onOpenChangeFile"> & {
+  appEntry,
+}: Pick<SidePanelProps, "changes" | "busy" | "onUndo" | "onUndoTo" | "onComparePage" | "onOpenFile" | "onOpenChangeFile"> & {
+  appEntry: string | null;
   litChange: number | null;
   confirmUndo: number | null;
   onConfirmUndo: (seq: number | null) => void;
@@ -623,12 +639,14 @@ function ChangesPanel({
       {changes.length ? (
         [...changes].reverse().map((c, i) => (
           <ChangeSetCard
+            appEntry={appEntry}
             busy={busy}
             change={c}
             confirming={confirmUndo === c.seq}
             key={c.seq}
             lit={litChange === c.seq}
             newer={i}
+            onComparePage={onComparePage}
             onConfirm={onConfirmUndo}
             onOpenChangeFile={onOpenChangeFile}
             onOpenFile={onOpenFile}
@@ -803,6 +821,7 @@ export function SidePanel(props: SidePanelProps) {
   const report = useIssueReport(project, issueStamp, isIndexing(activity));
   const openIssues = project && report ? report.items.filter((i) => i.status !== "ignored").length : 0;
   const [confirmUndo, setConfirmUndo] = useState<number | null>(null);
+  const appEntry = useMemo(() => findAppEntry(files.map((f) => f.path)), [files]);
 
   return (
     <SmoothTab
@@ -828,10 +847,12 @@ export function SidePanel(props: SidePanelProps) {
           color: "bg-zinc-700 dark:bg-muted",
           content: (
             <ChangesPanel
+              appEntry={appEntry}
               busy={busy}
               changes={changes}
               confirmUndo={confirmUndo}
               litChange={litChange}
+              onComparePage={props.onComparePage}
               onConfirmUndo={setConfirmUndo}
               onOpenChangeFile={props.onOpenChangeFile}
               onOpenFile={onOpenFile}

@@ -128,7 +128,9 @@ function Get-ColorHue([string]$Css) {
     <# The hue (0-360) of a CSS colour, or $null for a grey (no hue) or a value that is not a colour. #>
     $c = ConvertFrom-CssColor $Css
     if ($null -eq $c) { return $null }
-    $r = $c.r / 255; $g = $c.g / 255; $b = $c.b / 255
+    # As doubles: 0/255 and 255/255 are whole numbers, and [Math]::Max/Min would then take the integer
+    # overload and round the other channels (#00bfb3 read as hue 195 instead of 176).
+    $r = [double]$c.r / 255; $g = [double]$c.g / 255; $b = [double]$c.b / 255
     $max = [Math]::Max($r, [Math]::Max($g, $b)); $min = [Math]::Min($r, [Math]::Min($g, $b)); $d = $max - $min
     if ($d -lt 0.08) { return $null }
     $h = if ($max -eq $r) { (($g - $b) / $d) % 6 } elseif ($max -eq $g) { ($b - $r) / $d + 2 } else { ($r - $g) / $d + 4 }

@@ -26,6 +26,7 @@ describe("action card view rules", () => {
     expect(verbFor("runbook")).toBe("Run runbook");
     expect(verbFor("glob")).toBe("List");
     expect(verbFor("todo")).toBe("Plan");
+    expect(verbFor("delete")).toBe("Remove");
     expect(verbFor("web")).toBe("web");
   });
 

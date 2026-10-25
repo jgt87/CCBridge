@@ -21,7 +21,7 @@ $script:Layout = [ordered]@{
     Src = 'src'; Scripts = 'Scripts'; Runbooks = 'Runbooks'; Exports = 'Runbooks/Exports'
     History = '.streamhub/History'; Logs = 'Logs'; Source = 'Source'; Work = 'Work'; State = '.streamhub'
     # StreamHub's own records, not part of the project's code: all inside .streamhub/.
-    Evidence = '.streamhub/Evidence'; Reviews = '.streamhub/Reviews'; Plan = '.streamhub/PLAN.md'
+    Evidence = '.streamhub/Evidence'; Reviews = '.streamhub/Reviews'; Reports = '.streamhub/Reports'; Plan = '.streamhub/PLAN.md'
 }
 
 function Get-ProjectLayout { $copy = [ordered]@{}; foreach ($k in $script:Layout.Keys) { $copy[$k] = $script:Layout[$k] }; $copy }

@@ -4,6 +4,8 @@
 #   .streamhub/reviews/ code review reports (NAME.md and NAME.json count as one)
 #   .streamhub/Screenshots/ page check screenshots (page-yyyyMMdd-HHmmss-NAME.png with its
 #                       .layout.json and -changes.png counting as one)
+#   .streamhub/Reports/ full page checks and page comparisons (NAME.md with its .png files as one),
+#                       with the screenshot numbers
 #   Runbooks/Exports/   charts saved from agent answers (NAME-chart-yyyyMMdd-HHmmss[-N].png), per
 #                       runbook, fetch prompt or agent; the exports themselves are never touched
 #   undo backups        change sets in %LOCALAPPDATA%\CCBridge\projects\...\backups (the newest
@@ -112,6 +114,18 @@ function Invoke-ProjectRetention {
             Group-Object Base | ForEach-Object {
                 [pscustomobject]@{ Time = ($_.Group.File | Measure-Object LastWriteTime -Maximum).Maximum; Paths = @($_.Group.File | ForEach-Object FullName) } })
         & $apply 'screenshots' (Select-Expired $shots $r.screenshotsCount $r.screenshotsDays -Now $Now)
+    }
+    # Reports/: full page checks and page comparisons (on request); a report and its screenshots
+    # are one item. Only files with those name patterns.
+    $rp = Join-Path $ProjectRoot '.streamhub\Reports'
+    if (Test-Path -LiteralPath $rp) {
+        $repName = [regex]'^((?:page-check|compare)-.+-\d{8}-\d{6})(-[a-z0-9]+\.png|\.md)$'
+        $reports = @(Get-ChildItem -LiteralPath $rp -File | ForEach-Object {
+            $rm = $repName.Match($_.Name)
+            if ($rm.Success) { [pscustomobject]@{ Base = $rm.Groups[1].Value; File = $_ } } } |
+            Group-Object Base | ForEach-Object {
+                [pscustomobject]@{ Time = ($_.Group.File | Measure-Object LastWriteTime -Maximum).Maximum; Paths = @($_.Group.File | ForEach-Object FullName) } })
+        & $apply 'screenshots' (Select-Expired $reports $r.screenshotsCount $r.screenshotsDays -Now $Now)
     }
     # Undo backups: change sets by their id (yyyyMMdd-HHmmss-fff); the newest one always stays.
     $bk = Join-Path (Get-ProjectStateDir $ProjectRoot) 'backups'

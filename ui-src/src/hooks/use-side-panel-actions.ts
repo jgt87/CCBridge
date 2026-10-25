@@ -12,6 +12,7 @@ export function useSidePanelActions(fail: (e: unknown) => void, refreshFiles: ()
     onSaveFetch: thenRefresh(api.saveFetch),
     onUndo: () => api.undo(),
     onUndoTo: orFail(api.undo),
+    onComparePage: orFail(api.comparePage),
     onUploaded: refreshFiles,
     onCreateRunbook: thenRefresh(api.createRunbook),
     onRunRunbook: orFail(api.runRunbook),

@@ -20,7 +20,8 @@ param(
     [string]$Markdown,        # also write the report as Markdown to this file
     [switch]$FailOnNewer,     # exit 1 when anything has a newer release (for a scheduled job)
     [switch]$Quiet,           # only the summary line and the parts with a newer release
-    [switch]$Offline          # no registry requests: only reads the shipped versions (for tests)
+    [switch]$Offline,         # no registry requests: only reads the shipped versions (for tests)
+    [hashtable]$NewestFor     # package -> newest version, used instead of the registry (for tests)
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -55,6 +56,7 @@ function Get-UpdateStep([string]$Shipped, [string]$Newest) {
 $registryCache = @{}
 function Get-NpmLatest([string]$Package) {
     # The "latest" release npm's registry lists for a package, or '' when it cannot be reached.
+    if ($NewestFor) { return "$($NewestFor[$Package])" }
     if ($Offline) { return '' }
     if ($registryCache.ContainsKey($Package)) { return $registryCache[$Package] }
     $url = 'https://registry.npmjs.org/' + $Package.Replace('/', '%2F') + '/latest'
@@ -96,21 +98,34 @@ if (Test-Path -LiteralPath $pj) {
     }
 }
 
+# Major steps held on purpose: that major version of the package is not taken, for the reason given.
+# A later major version shows as a major step again, so the reason gets looked at once more.
+$held = @(
+    @{ package = 'typescript'; major = 7; reason = 'TypeScript 7 is a native program with no browser build, and the built-in builder runs TypeScript in Edge; the app build stays on the same version (one TypeScript to keep)' }
+)
+
 $rows = foreach ($p in $parts) {
     $newest = Get-NpmLatest $p.package
     $step = if (-not $p.shipped) { 'unknown' } elseif (-not $newest) { 'unreachable' } else { Get-UpdateStep $p.shipped $newest }
-    [pscustomobject]@{ Part = $p.name; Where = $p.where; Shipped = $(if ($p.shipped) { $p.shipped } else { '?' }); Newest = $(if ($newest) { $newest } else { '?' }); Step = $step; Update = $p.update }
+    $update = $p.update
+    if ($step -eq 'major') {
+        $hold = @($held | Where-Object { $_.package -eq $p.package -and $_.major -eq @(ConvertTo-Parts $newest)[0] }) | Select-Object -First 1
+        if ($hold) { $step = 'held'; $update = 'held: ' + $hold.reason }
+    }
+    [pscustomobject]@{ Part = $p.name; Where = $p.where; Shipped = $(if ($p.shipped) { $p.shipped } else { '?' }); Newest = $(if ($newest) { $newest } else { '?' }); Step = $step; Update = $update }
 }
 $rows = @($rows)
 $newer = @($rows | Where-Object { $_.Step -in 'major', 'minor', 'patch' })
+$heldRows = @($rows | Where-Object { $_.Step -eq 'held' })
 $unread = @($rows | Where-Object { $_.Step -in 'unknown', 'unreachable' })
 
-$order = @{ major = 0; minor = 1; patch = 2; unknown = 3; unreachable = 4; current = 5 }
+$order = @{ major = 0; minor = 1; patch = 2; held = 3; unknown = 4; unreachable = 5; current = 6 }
 $sorted = @($rows | Sort-Object { $order[$_.Step] }, Part)
 $shown = if ($Quiet) { @($sorted | Where-Object { $_.Step -ne 'current' }) } else { $sorted }
 if ($shown.Count) { $shown | Format-Table Part, Where, Shipped, Newest, Step -AutoSize | Out-String -Width 160 | Write-Host }
-$summary = "Dependencies: $($newer.Count) of $($rows.Count) have a newer release ($(@($newer | Where-Object Step -eq 'major').Count) major, $(@($newer | Where-Object Step -eq 'minor').Count) minor, $(@($newer | Where-Object Step -eq 'patch').Count) patch)$(if ($unread.Count) { "; $($unread.Count) could not be checked" })."
+$summary = "Dependencies: $($newer.Count) of $($rows.Count) have a newer release ($(@($newer | Where-Object Step -eq 'major').Count) major, $(@($newer | Where-Object Step -eq 'minor').Count) minor, $(@($newer | Where-Object Step -eq 'patch').Count) patch)$(if ($heldRows.Count) { "; $($heldRows.Count) held on purpose" })$(if ($unread.Count) { "; $($unread.Count) could not be checked" })."
 Write-Host $summary
+foreach ($r in @($heldRows | Sort-Object Part, Where)) { Write-Host "Held: $($r.Part) $($r.Newest) ($($r.Where)): $($r.Update.Substring(6))" }
 
 if ($Markdown) {
     $md = New-Object System.Text.StringBuilder
@@ -118,7 +133,7 @@ if ($Markdown) {
     [void]$md.AppendLine()
     [void]$md.AppendLine("$summary Checked $((Get-Date).ToString('yyyy-MM-dd')) against npm's registry.")
     [void]$md.AppendLine()
-    [void]$md.AppendLine('A newer release is not shipped automatically: update it with the tool named, run the tests, and check the part in a project before the next release. A major step can change behaviour.')
+    [void]$md.AppendLine('A newer release is not shipped automatically: update it with the tool named, run the tests, and check the part in a project before the next release. A major step can change behaviour. A held step is one the repository does not take on purpose, for the reason in its last column (tools/check-deps.ps1 `$held`).')
     [void]$md.AppendLine()
     [void]$md.AppendLine('| Part | Where | Shipped | Newest | Step | How to update |')
     [void]$md.AppendLine('|---|---|---|---|---|---|')

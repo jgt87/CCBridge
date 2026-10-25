@@ -13,6 +13,7 @@ import {
   Camera,
   RotateCcw,
   TerminalSquare,
+  Trash2,
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -138,6 +139,7 @@ const ICONS: Record<string, React.ReactNode> = {
   todo: <ListTodo className="h-4 w-4 text-muted-foreground" />,
   move: <FolderInput className="h-4 w-4 text-muted-foreground" />,
   restore: <RotateCcw className="h-4 w-4 text-muted-foreground" />,
+  delete: <Trash2 className="h-4 w-4 text-muted-foreground" />,
 };
 
 function StatusBadge({ status }: { status: string }) {

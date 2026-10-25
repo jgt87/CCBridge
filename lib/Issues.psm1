@@ -55,7 +55,7 @@ function Write-JsonFile([string]$Path, $Value) {
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $Path)
     $tmp = "$Path.tmp"
     [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject $Value -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
-    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($tmp, $Path, [NullString]::Value) } else { [IO.File]::Move($tmp, $Path) }
+    Move-TempFile $tmp $Path
 }
 
 function Save-IssueIndex([string]$ProjectRoot, $Index) {

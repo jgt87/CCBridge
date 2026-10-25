@@ -1,3 +1,4 @@
+import type { PptxApplyRequest } from "@/components/ccb/pptx-retheme-view";
 import type { ProjectOpenAnswer } from "./project-open";
 import type { RunLive, RunWindowState } from "./run-live";
 import type { ResponseOption } from "./response-modes";
@@ -183,7 +184,19 @@ export interface AgentEvent {
     /** A new project's first request builds a page without saying how: StreamHub asks first. */
     | "setup-choice"
     /** A new project already holds files of the person's: what are they for (by type)? */
-    | "files-intake";
+    | "files-intake"
+    /** Check this page in full: the summary, the report, and the fix list to send to Copilot. */
+    | "page-report"
+    /** Theme from your colours (command menu): the card with the colours to start from. */
+    | "theme-card"
+    /** The tidy-up list (command menu): what the project likely no longer uses, to tick. */
+    | "tidy-list"
+    /** Apply a PowerPoint template: the decks to choose from, or the layout per slide and the element choices (pptx-retheme-card.tsx). */
+    | "pptx-plan"
+    /** Build a deck from an outline: the outlines and templates to choose from (pptx-outline-card.tsx). */
+    | "pptx-outline"
+    /** After asking Copilot to save a file of its own workspace: its OneDrive links to fetch (sandbox-card.tsx). */
+    | "sandbox-fetch";
   time: string;
   /** When it happened, as an ISO stamp (the time column next to each chat item). */
   at?: string;
@@ -239,6 +252,23 @@ export interface AgentEvent {
   choices?: SetupChoice[] | SetupChoice;
   /** files-intake: the person's files by type, with the uses for each type. */
   groups?: IntakeGroup[] | IntakeGroup;
+  /** page-report: the findings as one request for Copilot ('' when nothing was found), and the page. */
+  fixRequest?: string;
+  page?: string;
+  /** theme-card: the colours to start from, whether the project has the kit's tokens, and dark blocks. */
+  colours?: ThemeColours;
+  hasKit?: boolean;
+  dark?: boolean;
+  /** tidy-list: the items (a single one may arrive as an object). */
+  tidyItems?: TidyItem[] | TidyItem;
+  /** pptx-plan / pptx-outline: the card's data (normalised by pptx-retheme-view.ts / pptx-outline-view.ts). */
+  pptx?: Record<string, unknown>;
+  /** assistant: files the reply names in Copilot's own workspace (sandbox:/mnt/data/NAME). */
+  sandboxFiles?: string[] | string;
+  /** sandbox-fetch: the file asked for, the links in Copilot's answer, and whether Copilot asked for a confirmation. */
+  file?: string;
+  links?: string[] | string;
+  human?: boolean;
   live?: boolean;
   suggest?: string;
   clarify?: boolean;
@@ -774,12 +804,42 @@ export const api = {
   dbOp: (b: { op: "add" | "remove" | "test"; name: string; server?: string; database?: string; trustCertificate?: boolean }) =>
     call<{ ok: boolean; items?: DbConnection[] | DbConnection; error?: string }>("POST", "/api/databases", b).then((r) => ({ ok: r.ok, error: r.error ?? "", items: asList(r.items) })),
   exportPage: (page: string, format: "pdf" | "pptx") => call<{ ok: boolean; queued: string }>("POST", "/api/export", { page, format }),
+  pptxDecks: () =>
+    call<{ templates: string[] | string; contents: string[] | string; template: string; content: string }>("GET", "/api/pptx/decks").then((r) => ({ ...r, templates: asList(r.templates), contents: asList(r.contents) })),
+  pptxPlan: (template: string, content: string) => call<{ ok: boolean; queued: string }>("POST", "/api/pptx/plan", { template, content }),
+  pptxAsk: (template: string, content: string) => call<{ ok: boolean; queued: string }>("POST", "/api/pptx/ask", { template, content }),
+  pptxAskElement: (template: string, content: string, element: string) => call<{ ok: boolean; queued: string }>("POST", "/api/pptx/ask-element", { template, content, element }),
+  pptxApply: (request: PptxApplyRequest) => call<{ ok: boolean; queued: string; path: string }>("POST", "/api/pptx/apply", request),
+  pptxOutline: () => call<{ ok: boolean }>("POST", "/api/pptx/outline"),
+  pptxBuild: (outline: string, template: string) => call<{ ok: boolean; queued: string; path: string }>("POST", "/api/pptx/build", { outline, template }),
+  sandboxSave: (name: string) => call<{ ok: boolean; queued: string }>("POST", "/api/sandbox/save", { name }),
+  sandboxFetch: (url: string, file: string) => call<{ ok: boolean; queued: string }>("POST", "/api/sandbox/fetch", { url, file }),
+  checkPage: (page: string) => call<{ ok: boolean; queued: string }>("POST", "/api/page-report", { page }),
+  comparePage: (changeSet: string, page: string) => call<{ ok: boolean; queued: string }>("POST", "/api/page-compare", { changeSet, page }),
+  writeOverview: () => call<{ ok: boolean; queued: string }>("POST", "/api/overview"),
+  packageProject: (includeSource: boolean) => call<{ ok: boolean; queued: string }>("POST", "/api/share-package", { includeSource }),
   intake: (choices: Record<string, string>) =>
     call<{ ok: boolean; moved: string[] | string; queued: string | null }>("POST", "/api/intake", { choices }).then((r) => ({ moved: asList(r.moved), queued: r.queued })),
+  themeOpen: () => call<{ ok: boolean }>("POST", "/api/kit-theme/card"),
+  themePreview: (c: ThemeColours) =>
+    call<ThemePreview>("POST", "/api/kit-theme/preview", c).then((p) => ({
+      ...p,
+      light: p.light ?? {},
+      dark: p.dark ?? {},
+      // A list of one string can arrive as a plain string (api.ts asList only wraps objects).
+      adjusted: Array.isArray(p.adjusted) ? p.adjusted : p.adjusted ? [String(p.adjusted)] : [],
+      notes: Array.isArray(p.notes) ? p.notes : p.notes ? [String(p.notes)] : [],
+    })),
+  themeApply: (c: ThemeColours) => call<{ ok: boolean; queued: string | null }>("POST", "/api/kit-theme/apply", c),
+  tidyList: () => call<{ ok: boolean; queued: string }>("POST", "/api/tidy/list"),
+  tidyApply: (ids: string[]) => call<{ ok: boolean; queued: string | null }>("POST", "/api/tidy/apply", { ids }),
   testRuns: () => call<{ items: TestRunItem[] | TestRunItem; dir: string }>("GET", "/api/testruns").then((r) => ({ dir: r.dir, items: asList(r.items) })),
   saveTestRun: (name: string) => call<{ ok: boolean; path: string; fullPath: string; steps: number }>("POST", "/api/testruns/save", { name }),
   runTestRun: (name: string) => call<{ ok: boolean; project: string; steps: number }>("POST", "/api/testruns/run", { name }),
   sessionReport: () => call<{ ok: boolean; path: string; fullPath: string }>("POST", "/api/session-report"),
+  dataProfileSources: () => call<{ ok: boolean; items: DataProfileSource[] | DataProfileSource }>("GET", "/api/data-profile/sources").then((r) => ({ items: asList(r.items) })),
+  dataProfile: (source: string) => call<{ ok: boolean; queued: string }>("POST", "/api/data-profile", { source }),
+  runbookFromChat: () => call<{ ok: boolean; queued?: string; name?: string; reason?: string; error?: string }>("POST", "/api/runbook-from-chat"),
   fetchList: () => call<{ items: FetchItem[] }>("GET", "/api/fetch").then((r) => (Array.isArray(r.items) ? r.items : [])),
   saveFetch: (name: string, prompt: string, web?: FetchWeb) => call<{ ok: boolean; item: FetchItem }>("POST", "/api/fetch", { name, prompt, ...(web ?? {}) }),
   runFetch: (name: string) => call<{ ok: boolean }>("POST", "/api/fetch/run", { name }),
@@ -926,6 +986,26 @@ export type IntakeGroup = {
   files: string[];
   options: { value: string; label: string; help: string }[];
 };
+
+/** A data file the project converted, as the data profile lists it (DataProfile Get-DataProfileSources). */
+export type DataProfileSource = { source: string; output: string; rows: number; columns: number; sheets: number; size: number };
+
+/** Theme from your colours: what the person gives (accent required, the others may be ""). */
+export type ThemeColours = { accent: string; accent2: string; neutral: string };
+
+/** The tokens StreamHub derived from them (lib/KitTheme.psm1), before anything is written. */
+export type ThemePreview = {
+  ok: boolean;
+  error: string;
+  light: Record<string, string>;
+  dark: Record<string, string>;
+  adjusted: string[];
+  notes: string[];
+  summary: string;
+};
+
+/** One thing the tidy-up list says the project likely no longer uses (lib/TidyUp.psm1). */
+export type TidyItem = { id: string; kind: "file" | "css-rule" | "data" | "work"; path: string; selector: string; reason: string; size: number };
 
 /** A SQL Server database a project may query (Windows sign-in, read-only). */
 export type DbConnection = { name: string; server: string; database: string; trustCertificate?: boolean };

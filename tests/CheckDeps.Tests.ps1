@@ -17,4 +17,15 @@ Describe 'Dependency check' {
             @($rows | Where-Object { ($_ -split '\|')[3].Trim() -eq '?' }) | Should BeNullOrEmpty
         } finally { Remove-Item -LiteralPath $md -ErrorAction SilentlyContinue }
     }
+    It 'shows a held major step as held with its reason, and a later major version as a major step again' {
+        $md = Join-Path $env:TEMP ('ccb-deps-' + [guid]::NewGuid().ToString('N') + '.md')
+        try {
+            & (Join-Path $root 'tools\check-deps.ps1') -NewestFor @{ typescript = '7.0.2' } -Markdown $md *> $null
+            $ts = @(Get-Content -LiteralPath $md | Where-Object { $_ -match '^\| typescript \|' })
+            $ts.Count | Should Be 2   # the built-in builder's and the app build's
+            foreach ($r in $ts) { ($r -split '\|')[5].Trim() | Should Be 'held'; ($r -split '\|')[6] | Should Match 'held: TypeScript 7 is a native program' }
+            & (Join-Path $root 'tools\check-deps.ps1') -NewestFor @{ typescript = '8.0.0' } -Markdown $md *> $null
+            foreach ($r in @(Get-Content -LiteralPath $md | Where-Object { $_ -match '^\| typescript \|' })) { ($r -split '\|')[5].Trim() | Should Be 'major' }
+        } finally { Remove-Item -LiteralPath $md -ErrorAction SilentlyContinue }
+    }
 }

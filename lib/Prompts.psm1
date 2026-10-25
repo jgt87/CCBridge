@@ -29,6 +29,8 @@ $script:FixPattern = '(?i)\b(fix|fixes|fixing|repair|solve|debug|repareer|herste
 $script:TestPattern = '(?i)\b(tests?|testing|unit ?tests?|pester|pytest|jest|vitest|spec|specs)\b'
 $script:SecurityPattern = '(?i)\b(login|log ?in|sign ?in|auth|authentication|passwords?|tokens?|api ?keys?|secrets?|sql|query|queries|database|user input|forms?|uploads?|cookies?|sessions?|permissions?|encrypt|xss|injection|sanitize|wachtwoord)\b'
 $script:JsPattern = '(?i)\b(javascript|typescript|node(\.?js)?|npm|react|vue|svelte|angular)\b|\.(m?js|cjs|jsx?|tsx?)\b'
+# Presentations, English and Dutch: the deck outline rules (rules/deck.md). Not "slide" alone (a slide-in menu).
+$script:DeckPattern = '(?i)\b(presentations?(?!\s+(layer|logic|components?|models?))|presentaties?|slide ?decks?|decks?|slides|powerpoints?|pptx|dia''s|diapresentaties?)\b'
 $script:OfficePattern = '(?i)\b(word|powerpoint|excel)[ -]?(document|doc|file|bestand|presentation|presentatie|deck|workbook|sheet)s?\b|\b(docx?|pptx?|xlsx?|slide ?decks?|slides)\b|\.(docx?|pptx?|xlsx?|pdf)\b|\b(pdfs?|pdf[ -]?(file|document|bestand)s?)\b'
 $script:DataPattern = '(?i)\b(csv|tsv|excel|xlsx|xls|spreadsheets?|data ?files?|import (the )?data|export (the )?data|parse|parsing|columns?|rows?)\b|\.(csv|tsv|xlsx?)\b'
 $script:BigTaskPattern = '(?i)\b(build|create|make|develop)\s+(an?|the|my|me an?|me the)?\s*(new\s+)?(app|application|website|web ?site|tool|dashboard|portal|system|game)\b|\b(multiple|several|all the) (pages|screens|features|parts)\b|\bfrom scratch\b'
@@ -276,6 +278,8 @@ function Get-PromptModules {
     if ($Text -match $script:CodeQuestionPattern -and $Text -notmatch $script:ChangePattern -and $Text -notmatch $script:FixPattern) { $ids.Add('rules:questions') }
     if (($traits -contains 'data') -or ($traits -contains 'source') -or ($Text -match $script:DataPattern)) { $ids.Add('rules:data') }
     if (($traits -contains 'office') -or ($Text -match $script:OfficePattern)) { $ids.Add('rules:office') }
+    # A presentation asked for: the deck outline the helper program builds on the user's template (PptxDeck).
+    if ($Text -match $script:DeckPattern) { $ids.Add('rules:deck') }
     if (($Text -match $script:BigTaskPattern) -or $Text.Length -gt 600) { $ids.Add('rules:bigtask') }
     if ($Text -match $script:ScriptPattern) { $ids.Add('rules:scripts') }
     if ($Text -match $script:PsGuiPattern -or @($paths | Where-Object { "$_" -match '(?i)\.xaml$' -and "$_" -notmatch '(?i)^styles/kit/' }).Count) { $ids.Add('rules:psgui') }

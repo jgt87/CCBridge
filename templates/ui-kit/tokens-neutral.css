@@ -34,11 +34,11 @@
   --kit-error-soft: #fbe9e7;
 
   --kit-chart-1: #0072b2;
-  --kit-chart-2: #007a5a;
-  --kit-chart-3: #b85000;
+  --kit-chart-2: #b85000;
+  --kit-chart-3: #007a5a;
   --kit-chart-4: #a8578a;
-  --kit-chart-5: #5a5f66;
-  --kit-chart-6: #8a6a00;
+  --kit-chart-5: #8a6a00;
+  --kit-chart-6: #5a5f66;
 
   /* Type: Arial first (on every computer, nothing to download). Headings and labels in sentence
      case ("Totals", not "TOTALS"). */

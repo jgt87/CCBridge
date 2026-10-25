@@ -2,8 +2,8 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
-$script:ProjectTaskKinds = @('chat', 'agent', 'fetch', 'runbook', 'chain', 'script', 'review', 'packages', 'undo', 'export', 'testrun-report')
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'WorkStatus', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance', 'Progress') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+$script:ProjectTaskKinds = @('chat', 'agent', 'fetch', 'runbook', 'chain', 'script', 'review', 'packages', 'undo', 'export', 'testrun-report', 'page-report', 'page-compare', 'data-profile', 'overview', 'share-package', 'theme', 'tidy-list', 'tidy', 'pptx-plan', 'pptx-ask', 'pptx-ask-element', 'pptx-apply', 'pptx-build', 'sandbox-fetch')
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'WorkStatus', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'PptxLayoutMatch', 'PptxRetheme', 'PptxChoices', 'PptxDeck', 'PageReport', 'PageCompare', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance', 'Progress', 'DataProfile', 'ProjectOverview', 'ProjectPackage', 'KitTheme', 'TidyUp') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -95,6 +95,8 @@ function Add-AgentEvent {
                 $Data[$k] = if ($Data[$k] -is [ValueType]) { [string]$Data[$k] } else { ConvertTo-Json -InputObject $Data[$k] -Depth 5 -Compress }
             }
         }
+        # A file Copilot made in its own workspace (sandbox:/mnt/data/NAME): the app offers to ask for it on OneDrive.
+        if ($Type -eq 'assistant' -and -not $Data.ContainsKey('sandboxFiles') -and "$($Data.text)" -match '(?i)sandbox:/') { $Data.sandboxFiles = @(Get-SandboxFiles "$($Data.text)") }
         if ($Data.ContainsKey('references')) {
             $Data.references = @(@($Data.references) | Where-Object { $_ } | ForEach-Object {
                 @{ title = $(if ($null -ne $_.title) { [string]$_.title }); url = $(if ($null -ne $_.url) { [string]$_.url }); kind = $(if ($null -ne $_.kind) { [string]$_.kind }) }
@@ -466,7 +468,7 @@ function Save-AgentQueue {
         $tmp = "$($State.QueueFile).tmp"
         $null = New-Item -ItemType Directory -Force -Path (Split-Path $State.QueueFile)
         [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
-        if (Test-Path -LiteralPath $State.QueueFile) { [IO.File]::Replace($tmp, $State.QueueFile, [NullString]::Value) } else { [IO.File]::Move($tmp, $State.QueueFile) }
+        Move-TempFile $tmp $State.QueueFile
     } catch {
         Write-CCBLogError agent 'Could not save the queue' $_
     } finally { [Threading.Monitor]::Exit($State.Queue.SyncRoot) }
@@ -602,7 +604,7 @@ function Save-Schedules {
                 $null = New-Item -ItemType Directory -Force -Path (Split-Path $file)
                 $tmp = "$file.tmp"
                 [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject @($byRoot[$k].list) -Depth 5), (New-Object Text.UTF8Encoding($false)))
-                if (Test-Path -LiteralPath $file) { [IO.File]::Replace($tmp, $file, [NullString]::Value) } else { [IO.File]::Move($tmp, $file) }
+                Move-TempFile $tmp $file
                 # Our own write is not an outside change.
                 $State.ScheduleRoots[$k] = @{ root = $root; ticks = (Get-Item -LiteralPath $file).LastWriteTimeUtc.Ticks }
             } catch { Write-CCBLogError agent "Could not save the schedules of $root" $_ }
@@ -782,7 +784,7 @@ function Complete-QueueEntry($State, $Entry, [int]$FromSeq, [int]$MessagesBefore
     <# Status and result of a finished task, from the events it produced. #>
     $events = @(Get-AgentEvents $State $FromSeq)
     $err = @($events | Where-Object { $_.type -eq 'error' } | Select-Object -Last 1)
-    $done = @($events | Where-Object { $_.type -in 'done', 'fetch', 'runbook', 'chain', 'script', 'review', 'undo', 'newchat' } | Select-Object -Last 1)
+    $done = @($events | Where-Object { $_.type -in 'done', 'fetch', 'runbook', 'chain', 'script', 'review', 'undo', 'newchat', 'page-report' } | Select-Object -Last 1)
     $last = @($events | Where-Object { $_.type -eq 'assistant' } | Select-Object -Last 1)
     $Entry.messages = [int]$State.MessagesSent - $MessagesBefore
     $Entry.finished = (Get-Date).ToString('s')
@@ -840,6 +842,453 @@ function Invoke-ExportJob {
         Exit-Activity $State $prev
         if ($own) { Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" -ErrorAction SilentlyContinue | Where-Object { "$($_.CommandLine)" -like "*$prof*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }
     }
+}
+
+function Resolve-PptxTaskPaths {
+    <# The two decks of a PowerPoint template task, inside the project: @{ template; content;
+       templatePath; contentPath }, or $null when the task names none (the card's pick step). #>
+    param($State, $Task)
+    $t = "$($Task.template)".Replace('\', '/').Trim(); $c = "$($Task.content)".Replace('\', '/').Trim()
+    if (-not $t -and -not $c) { return $null }
+    if ($t -notmatch '(?i)\.(pptx|potx)$') { throw "The template must be a .pptx or .potx file, not '$t'." }
+    if ($c -notmatch '(?i)\.pptx$') { throw "The content deck must be a .pptx file, not '$c'." }
+    if ($t -eq $c) { throw 'The template and the content deck must be different files.' }
+    $tf = Resolve-ProjectPath $State.ProjectRoot $t
+    $cf = Resolve-ProjectPath $State.ProjectRoot $c
+    foreach ($f in @(@($t, $tf), @($c, $cf))) { if (-not (Test-Path -LiteralPath $f[1] -PathType Leaf)) { throw "The project has no file $($f[0])." } }
+    @{ template = $t; content = $c; templatePath = $tf; contentPath = $cf }
+}
+
+function Get-PptxKitTokens($State) {
+    # The UI kit's look for the template choices: the project's own tokens when it has the kit, else the kit's template.
+    $own = Join-Path $State.ProjectRoot ((Get-UiKitFolder).Replace('/', '\') + '\tokens.css')
+    $f = if (Test-Path -LiteralPath $own -PathType Leaf) { $own } else { Join-Path "$($State.AppRoot)" 'templates\ui-kit\tokens.css' }
+    if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { return @{} }
+    Get-TokenValues ([IO.File]::ReadAllText($f))
+}
+
+function Get-PptxPlanWithChoices($State, $Paths) {
+    # The proposal for the card: the layout per slide, and per slide the elements without brand
+    # formatting with their ranked options (PptxChoices), so the card shows them before Apply.
+    $plan = Get-PptxRethemePlan $Paths.templatePath $Paths.contentPath $Paths.template $Paths.content
+    try { $null = Add-PptxElementChoices $plan $Paths.templatePath $Paths.contentPath -KitTokens (Get-PptxKitTokens $State) }
+    catch { Write-CCBLogError agent 'PowerPoint element choices' $_; $plan.kinds = @() }
+    $plan.step = 'plan'
+    $plan
+}
+
+function Invoke-PptxPlanJob {
+    <# Apply a PowerPoint template, step one or two (on request only): without decks the card lists
+       the project's PowerPoint files to choose from; with both, StreamHub proposes the template layout
+       per content slide (PptxLayoutMatch rules), the template's start and end slides, and the choices
+       for elements without brand formatting (PptxChoices). Reads only. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $prev = Enter-Activity $State 'busy' 'Reading the PowerPoint decks'
+    try {
+        $p = Resolve-PptxTaskPaths $State $Task
+        if (-not $p) {
+            $d = Get-PptxDecks $State.ProjectRoot
+            Add-AgentEvent $State 'pptx-plan' @{ pptx = @{ step = 'pick'; templates = @($d.templates); contents = @($d.contents); template = $d.template; content = $d.content } }
+            return
+        }
+        $plan = Get-PptxPlanWithChoices $State $p
+        Write-CCBLog info agent 'PowerPoint template plan' @{ slides = @($plan.slides).Count; check = @($plan.slides | Where-Object { -not $_.sure }).Count; kinds = @($plan.kinds).Count }
+        Add-AgentEvent $State 'pptx-plan' @{ pptx = $plan }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Reading the PowerPoint decks failed: $($_.Exception.Message)"; record = $_ }
+    } finally { Exit-Activity $State $prev }
+}
+
+function Invoke-PptxAskJob {
+    <# On request only (the card's Ask Copilot button): Copilot proposes the layout per slide. It gets
+       the structure of both decks (New-PptxMappingAsk: shape kinds, places, sizes, the first 60
+       characters of text; the template's layouts with their placeholders), never the files. Its JSON
+       is checked (Read-PptxMappingAnswer: unknown layouts, slides and shape ids are refused) and a new
+       card shows the merged plan. Read-only, in a fresh chat like a runbook. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $State.Busy = $true; $State.Cancel = $false
+    try {
+        $p = Resolve-PptxTaskPaths $State $Task
+        if (-not $p) { Add-AgentEvent $State 'error' @{ text = 'Choose a template and a content deck first.' }; return }
+        $content = Read-PptxDeck $p.contentPath
+        $template = Read-PptxDeck $p.templatePath
+        Add-AgentEvent $State 'status' @{ text = "Asking Copilot which template layout each slide of $($p.content) should get (the slides' structure only) ..." }
+        Start-NewChat $State   # never mixes with the conversation
+        $r = Send-ToCopilot $State (New-PptxMappingAsk $content $template)
+        if ($r.Cancelled) { return }
+        if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) { Add-AgentEvent $State 'error' @{ text = "Copilot gave no usable answer ($($r.Result): $($r.ResultMessage)); the proposal stays as it was." }; return }
+        $answer = Read-PptxMappingAnswer $r.Text $content $template
+        Write-CCBLog info agent 'PowerPoint mapping from Copilot' @{ slides = $answer.map.Count; refused = @($answer.errors).Count }
+        if (-not $answer.ok) { Add-AgentEvent $State 'error' @{ text = "Copilot's answer could not be used ($(@($answer.errors) -join '; ')); the proposal stays as it was." }; return }
+        $plan = Merge-PptxMapping (Get-PptxPlanWithChoices $State $p) $answer
+        Add-AgentEvent $State 'pptx-plan' @{ pptx = $plan }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Asking Copilot for the layouts failed: $($_.Exception.Message)"; record = $_ }
+    } finally { $State.Busy = $false }
+}
+
+function Invoke-PptxAskElementJob {
+    <# On request only (an element's Ask Copilot on the card): which of the offered options suits one
+       element without brand formatting. Copilot gets the element's structure only (New-PptxElementAsk:
+       kind, size, fill, the options' colours, fonts and sizes; no slide text), in a fresh chat; its pick
+       is checked against the options and shown as a status line. Nothing is changed. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $State.Busy = $true; $State.Cancel = $false
+    try {
+        $p = Resolve-PptxTaskPaths $State $Task
+        if (-not $p) { Add-AgentEvent $State 'error' @{ text = 'Choose a template and a content deck first.' }; return }
+        $look = Read-PptxTemplateLook $p.templatePath -KitTokens (Get-PptxKitTokens $State)
+        $found = Get-PptxElementChoices $p.contentPath $look (Get-PptxRethemePlan $p.templatePath $p.contentPath)
+        $el = @($found.elements | Where-Object { $_.key -eq "$($Task.element)" })[0]
+        if (-not $el) { Add-AgentEvent $State 'error' @{ text = "The deck has no element $($Task.element) without brand formatting any more; open the card again." }; return }
+        Add-AgentEvent $State 'status' @{ text = "Asking Copilot which look suits the $($el.kind) on slide $($el.slide) (its structure only, no slide text) ..." }
+        Start-NewChat $State
+        $r = Send-ToCopilot $State (New-PptxElementAsk $el $look)
+        if ($r.Cancelled) { return }
+        if (($r.Result -and $r.Result -ne 'Success') -or -not "$($r.Text)".Trim()) { Add-AgentEvent $State 'error' @{ text = "Copilot gave no usable answer ($($r.Result): $($r.ResultMessage))." }; return }
+        $a = Read-PptxElementAnswer $r.Text $el
+        if (-not $a.ok) { Add-AgentEvent $State 'error' @{ text = "Copilot's answer could not be used: $($a.error)." }; return }
+        Add-AgentEvent $State 'status' @{ text = "Copilot suggests ""$($a.label)"" for the $($el.kind) on slide $($el.slide)$(if ($a.why) { ": $($a.why)" }). Pick it on the card if you agree; nothing was changed." }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Asking Copilot about the element failed: $($_.Exception.Message)"; record = $_ }
+    } finally { $State.Busy = $false }
+}
+
+function Invoke-PptxApplyJob {
+    <# Apply a PowerPoint template: the content deck's slides copied whole onto the template's
+       layouts, between the chosen start and end slides, with the looks chosen for elements without
+       brand formatting (PptxChoices), into Runbooks/Exports/ (Task.out, chosen by the server so the
+       card can name it). The template and the content deck are never changed. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $p = $null
+    try { $p = Resolve-PptxTaskPaths $State $Task } catch { Add-AgentEvent $State 'error' @{ text = $_.Exception.Message }; return }
+    if (-not $p) { Add-AgentEvent $State 'error' @{ text = 'Choose a template and a content deck first.' }; return }
+    $rel = "$($Task.out)"
+    if (-not $rel) { $rel = Get-PptxBrandedName $p.content -ProjectRoot $State.ProjectRoot }
+    $prev = Enter-Activity $State 'busy' "Applying $($p.template) to $($p.content)"
+    try {
+        $full = Resolve-ProjectPath $State.ProjectRoot $rel
+        $r = Invoke-PptxRethemeChoices -TemplatePath $p.templatePath -ContentPath $p.contentPath -OutPath $full -Choices (ConvertTo-PptxChoices $Task.choices) -KitTokens (Get-PptxKitTokens $State)
+        Write-CCBLog info agent 'PowerPoint template applied' @{ slides = $r.slides; notes = $r.notes; out = $rel }
+        foreach ($w in @($r.warnings)) { Add-AgentEvent $State 'status' @{ text = $w } }
+        Add-AgentEvent $State 'status' @{ text = "$($p.content) on the template $($p.template): $($r.slides) slide(s) saved as $rel"; path = $rel }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Applying the template failed: $($_.Exception.Message)"; record = $_ }
+    } finally { Exit-Activity $State $prev }
+}
+
+function Publish-DeckOutlineCard {
+    <# The "Build a deck from an outline" card: the project's deck outlines and PowerPoint files (a
+       template is a .pptx or .potx), with one outline chosen when given. Nothing is built until the
+       person presses Build on the card. #>
+    param($State, [string]$Outline = '', [string]$Text = '')
+    $d = Get-PptxDecks $State.ProjectRoot
+    $outlines = @(Get-DeckOutlines $State.ProjectRoot)
+    $pick = if ($Outline) { $Outline } elseif ($outlines.Count) { $outlines[0] } else { '' }
+    Add-AgentEvent $State 'pptx-outline' @{ text = $Text; pptx = @{ outlines = $outlines; templates = @($d.templates); outline = $pick; template = $d.template } }
+}
+
+function Publish-DeckOutlineOffer {
+    # After a task that wrote a deck outline (Work/NAME.deck.json): the build card with that outline, a button only.
+    param($State)
+    $changed = @($State.TaskRecord.changed | Where-Object { "$_" -match '(?i)\.deck\.json$' })
+    if (-not $changed.Count -or -not $State.ProjectRoot) { return }
+    $o = "$($changed[-1])"
+    if (-not (Test-Path -LiteralPath (Join-Path $State.ProjectRoot $o.Replace('/', '\')) -PathType Leaf)) { return }
+    Publish-DeckOutlineCard $State $o "Copilot wrote the deck outline $o. Choose a template and press Build to make the PowerPoint deck."
+}
+
+function Invoke-PptxBuildJob {
+    <# Build a deck from an outline (on the person's request: the card's Build button): the outline's
+       slides on the template's layouts (PptxDeck New-PptxFromOutline), into Runbooks/Exports/; the
+       template and the outline are never changed. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $o = "$($Task.outline)".Replace('\', '/').Trim(); $t = "$($Task.template)".Replace('\', '/').Trim()
+    $prev = Enter-Activity $State 'busy' "Building $o on $t"
+    try {
+        if ($o -notmatch '(?i)\.deck\.json$') { throw "Choose a deck outline (a .deck.json file), not '$o'." }
+        if ($t -notmatch '(?i)\.(pptx|potx)$') { throw "The template must be a .pptx or .potx file, not '$t'." }
+        $of = Resolve-ProjectPath $State.ProjectRoot $o; $tf = Resolve-ProjectPath $State.ProjectRoot $t
+        foreach ($f in @(@($o, $of), @($t, $tf))) { if (-not (Test-Path -LiteralPath $f[1] -PathType Leaf)) { throw "The project has no file $($f[0])." } }
+        $rel = "$($Task.out)"; if (-not $rel) { $rel = Get-PptxDeckName $o -ProjectRoot $State.ProjectRoot }
+        $r = New-PptxFromOutline -TemplatePath $tf -OutlinePath $of -OutPath (Resolve-ProjectPath $State.ProjectRoot $rel) -ProjectRoot $State.ProjectRoot
+        Write-CCBLog info agent 'Deck built from an outline' @{ slides = $r.slides; warnings = @($r.warnings).Count; out = $rel }
+        foreach ($w in @($r.warnings)) { Add-AgentEvent $State 'status' @{ text = $w } }
+        Add-AgentEvent $State 'status' @{ text = "$o built on the template $($t): $($r.slides) slide(s) saved as $rel"; path = $rel }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Building the deck failed: $($_.Exception.Message)"; record = $_ }
+    } finally { Exit-Activity $State $prev }
+}
+
+function Publish-SandboxReply {
+    <# After "Ask Copilot to save it to OneDrive": the answer's OneDrive or SharePoint links as a card
+       with a button to fetch each (Invoke-SandboxFetchJob, approved by the person); without a link the
+       card says so and points to the deck outline route. Copilot asking for confirmation is left to the
+       person (human-required), as always. #>
+    param($State, $Task, [int]$FromSeq)
+    $events = @(Get-AgentEvents $State $FromSeq)
+    $text = (@($events | Where-Object { $_.type -eq 'assistant' } | ForEach-Object { "$($_.text)" })) -join "`n"
+    $links = @(Get-ReplyLinks $text | Where-Object { -not (Test-DownloadAddress $_) })
+    $human = [bool]@($events | Where-Object { $_.type -eq 'human-required' }).Count
+    Add-AgentEvent $State 'sandbox-fetch' @{ file = "$($Task.sandboxFile)"; links = $links; human = $human }
+}
+
+function Save-EdgeDownload {
+    <# One Microsoft 365 file into the project through StreamHub's Edge (signed in): downloaded to a
+       temporary folder, checked (Test-DownloadContent), then copied to Target.full with its earlier
+       version in Box.checkpoint (made with Box.label when there is none yet). The action card Id gets
+       the result. Returns @{ ok; why }. #>
+    param($State, [string]$Url, $Target, [string]$Id, [hashtable]$Box)
+    $root = $State.ProjectRoot
+    $tmp = Join-Path $env:TEMP ('ccb-dl-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Force -Path $tmp
+    try {
+        $null = Get-Bridge $State   # StreamHub's Edge is running (and signed in)
+        $State.Activity.kind = 'download'; $State.Activity.label = "Downloading $(Split-Path $Target.rel -Leaf)"
+        $r = Invoke-EdgeDownload -Port $State.Config.cdpPort -Url (Add-DownloadParam $Url) -Folder $tmp -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
+        if (-not $r.error) { $r.error = Test-DownloadContent $r.path $Target.rel }
+        if ($r.error) {
+            Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $false; status = 'failed'; summary = "download failed: $($r.error)"; output = $r.error }
+            return @{ ok = $false; why = $r.error }
+        }
+        if (-not $Box.checkpoint) { $Box.checkpoint = New-Checkpoint $root $Box.label }
+        Save-CheckpointFile $Box.checkpoint $root $Target.full
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path $Target.full)
+        Copy-Item -LiteralPath $r.path -Destination $Target.full -Force
+        $kb = [Math]::Max(1, [int]((Get-Item -LiteralPath $Target.full).Length / 1KB))
+        Write-CCBLog info agent 'Download' @{ to = $Target.rel; kb = $kb }
+        Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $true; status = 'ok'; summary = "downloaded $($Target.rel) ($kb KB)"; output = "Saved $($Target.rel) ($kb KB) from $Url."; changed = $true }
+        @{ ok = $true; why = '' }
+    } catch {
+        Write-CCBLogError agent 'Download' $_
+        Add-AgentEvent $State 'action-result' @{ id = $Id; ok = $false; status = 'failed'; summary = "download failed: $($_.Exception.Message)"; output = $_.Exception.Message }
+        @{ ok = $false; why = $_.Exception.Message }
+    } finally {
+        $State.Activity.label = ''
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-SandboxFetchJob {
+    <# The file Copilot saved to OneDrive, fetched into Downloads/ (on the person's request from the
+       card): approved by a person each time (refused without one, as in MCP), downloaded by StreamHub's
+       Edge with the person's sign-in. A .pptx then gets the template card with it as the content deck. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $url = "$($Task.url)"; $file = "$($Task.file)"
+    $bad = Test-DownloadAddress $url
+    if ($bad) { Add-AgentEvent $State 'error' @{ text = "This link cannot be fetched: $bad." }; return }
+    $t = Get-DownloadTarget $State.ProjectRoot $url $(if ($file -and (Test-SandboxFileName $file)) { "Downloads/$file" } else { '' })
+    if ($t.error) { Add-AgentEvent $State 'error' @{ text = "This file cannot be fetched: $($t.error)." }; return }
+    $id = 'fetch-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    if ($State.Headless) { Add-AgentEvent $State 'error' @{ text = 'Fetching a file from Microsoft 365 needs a person to approve it in the StreamHub window.' }; return }
+    Add-AgentEvent $State 'action' @{ id = $id; action = 'web'; target = "$url -> $($t.rel)"; status = 'awaiting'; warning = "StreamHub downloads this file from Microsoft 365 into $($t.rel), with your sign-in in StreamHub's Edge." }
+    $d = Wait-Approval $State $id $true
+    if ($d.decision -ne 'approve') { Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'rejected'; output = $d.note; decidedBy = $d.by }; return }
+    Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'running'; decidedBy = $d.by }
+    $box = @{ checkpoint = $null; label = "Fetch $($t.rel)" }
+    $r = Save-EdgeDownload $State $url $t $id $box
+    if ($box.checkpoint) { Add-ChangeSetEvent $State $box.checkpoint "Fetch $($t.rel)" }
+    if (-not $r.ok) { return }
+    if ($t.rel -match '(?i)\.pptx$') {
+        $decks = Get-PptxDecks $State.ProjectRoot
+        $tpl = @(@($decks.templates) | Where-Object { $_ -ne $t.rel })
+        Add-AgentEvent $State 'pptx-plan' @{ pptx = @{ step = 'pick'; templates = @($decks.templates); contents = @($decks.contents); template = $(if ($decks.template -and $decks.template -ne $t.rel) { $decks.template } elseif ($tpl.Count) { $tpl[0] } else { '' }); content = $t.rel } }
+    }
+}
+
+function Invoke-PageReportJob {
+    <# Check this page in full (PageReport.psm1), only on request from the command menu: every
+       page-side check in light, dark and at 375 px, one report in .streamhub/Reports/, and a
+       page-report event whose fix list the person can send to Copilot (nothing sends it by itself).
+       The page opens from the page check's address in StreamHub's Edge (a headless Edge of its own
+       when that is not running), as Invoke-ExportJob does. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $page = "$($Task.page)".Replace('\', '/').TrimStart('/')
+    if (-not $page) { $page = Get-ReportEntryPage $State.ProjectRoot }
+    if (-not $page -or -not (Test-Path -LiteralPath (Join-Path $State.ProjectRoot $page.Replace('/', '\')) -PathType Leaf)) { Add-AgentEvent $State 'error' @{ text = "The project has no page $page to check." }; return }
+    $url = if ($State.PreviewPort) { "http://localhost:$($State.PreviewPort)/preview/$($State.PreviewToken)/" + (($page.Split('/') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/') } else { 'file:///' + (Join-Path $State.ProjectRoot $page.Replace('/', '\')).Replace('\', '/') }
+    $prev = Enter-Activity $State 'page' "Checking $page in full: light, dark and at phone width"
+    $edge = $null
+    try {
+        $edge = Open-ReportEdge -Port ([int]$State.Config.cdpPort) -ProfileDir (Join-Path $env:LOCALAPPDATA 'CCBridge\export-edge')
+        $r = Invoke-PageReport -ProjectRoot $State.ProjectRoot -Page $page -Url $url -Port $edge.Port
+        Write-CCBLog info agent "Full page check of $page" @{ findings = @($r.findings).Count; report = $r.path }
+        # One event: the card shows the summary, opens the report and offers the fix list.
+        Add-AgentEvent $State 'page-report' @{ text = "$($r.summary)."; path = $r.path; page = $page; fixRequest = $r.fixRequest }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Checking $page failed: $($_.Exception.Message)" }
+    } finally {
+        Exit-Activity $State $prev
+        if ($edge) { try { & $edge.Stop } catch { } }
+    }
+}
+
+function Invoke-PageCompareJob {
+    <# Compare a page with an earlier version (PageCompare.psm1), only on request from a change set's
+       card in History: the page before that change set (a temporary copy of the project under
+       %TEMP%, removed afterwards) next to now, changed areas marked, in .streamhub/Reports/. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $cs = "$($Task.changeSet)"
+    if ($cs -notmatch '^\d{8}-\d{6}-\d{3}$') { Add-AgentEvent $State 'error' @{ text = "Not a change set: $cs" }; return }
+    $page = "$($Task.page)".Replace('\', '/').TrimStart('/')
+    if (-not $page) { $page = Get-ReportEntryPage $State.ProjectRoot }
+    if (-not $page) { Add-AgentEvent $State 'error' @{ text = 'The project has no page to compare.' }; return }
+    $prev = Enter-Activity $State 'page' "Comparing $page with how it looked before change set $cs"
+    $edge = $null
+    try {
+        $edge = Open-ReportEdge -Port ([int]$State.Config.cdpPort) -ProfileDir (Join-Path $env:LOCALAPPDATA 'CCBridge\export-edge')
+        $r = Invoke-PageCompare -ProjectRoot $State.ProjectRoot -ChangeSet $cs -Page $page -Port $edge.Port
+        Write-CCBLog info agent "Page comparison of $page" @{ changeSet = $cs; same = [bool]$r.same; report = $r.path }
+        Add-AgentEvent $State 'status' @{ text = "$($r.summary.TrimEnd('.')). Report: $($r.path)"; path = $r.path }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Comparing $page failed: $($_.Exception.Message)" }
+    } finally {
+        Exit-Activity $State $prev
+        if ($edge) { try { & $edge.Stop } catch { } }
+    }
+}
+
+function Invoke-DataProfileJob {
+    <# The data profile report of one converted data file (DataProfile.psm1), only on the person's
+       request from the command menu: Runbooks/Exports/NAME-profile-STAMP.md and the same as an Excel
+       workbook. Nothing goes to Copilot. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $src = "$($Task.source)"
+    $prev = Enter-Activity $State 'convert' "Making the data profile of $src"
+    try {
+        $r = Save-DataProfile $State.ProjectRoot $src
+        $notable = if ($r.notable) { "$($r.notable) notable point(s)" } else { 'nothing notable' }
+        Add-AgentEvent $State 'status' @{ text = "Data profile of $($r.source) saved ($($r.rows) rows, $notable): $($r.markdown) and $($r.xlsx)"; path = $r.markdown }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "The data profile of $src could not be made: $($_.Exception.Message)" }
+    } finally {
+        Exit-Activity $State $prev
+    }
+}
+
+function Invoke-OverviewJob {
+    <# The project overview for a colleague (ProjectOverview.psm1), on the person's request only: the
+       facts the helper program gathers itself are written to Runbooks/Exports/project-overview.md (a
+       person's own version stays: the new one goes next to it) as a StreamHub change card, then an
+       ordinary chat task asks Copilot to write its three sections with an edit. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $prev = Enter-Activity $State 'busy' 'Writing the project overview'
+    try {
+        $r = Write-ProjectOverview $State.ProjectRoot $State.AppRoot (Get-ProjectStateDir $State.ProjectRoot)
+        $summary = if ($r.kept) { "StreamHub wrote a new project overview to $($r.rel) with the facts it gathered; your own $($r.kept) stays as it is. Copilot writes the explanation next." }
+                   else { "StreamHub wrote the project overview to $($r.rel) with the facts it gathered. Copilot writes the explanation next." }
+        Add-OwnChangeEvent $State 'write' $r.rel $summary @{ path = $r.rel; exists = $r.exists; old = $r.old; new = $r.new }
+        # forceKind work: project work (never plain chat), and no setup questions before it.
+        # noRunbook: the words never start a runbook whose name they happen to contain.
+        $next = @{ kind = 'chat'; text = (Get-ProjectOverviewRequest $r.rel); forceKind = 'work'; noRunbook = $true; projectRoot = $State.ProjectRoot }
+        $null = Submit-AgentTask $State $next 'user' 'Explain the project overview'
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Writing the project overview failed: $($_.Exception.Message)" }
+    } finally { Exit-Activity $State $prev }
+}
+
+function Invoke-SharePackageJob {
+    <# The project as one zip for a colleague (ProjectPackage.psm1), on the person's request only:
+       Runbooks/Exports/PROJECT-STAMP.zip with README-SHARING.md; Source/ only when the task says so.
+       The status line says what went in and what was left out, by reason. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $withSource = [bool]$Task.includeSource
+    $prev = Enter-Activity $State 'busy' "Packaging the project for sharing$(if ($withSource) { ', with its Source data' })"
+    try {
+        $r = New-ProjectPackage $State.ProjectRoot -IncludeSource:$withSource
+        Add-AgentEvent $State 'status' @{ text = (Format-PackageSummary $r); path = $r.rel }
+    } catch {
+        Add-AgentEvent $State 'error' @{ text = "Packaging the project failed: $($_.Exception.Message)" }
+    } finally { Exit-Activity $State $prev }
+}
+
+function Invoke-ThemeJob {
+    <# Theme from your colours (KitTheme.psm1), only on request from the command menu: the UI kit's
+       colour tokens derived from the person's colours and written into styles/kit/tokens.css, then
+       what carries a copy of the tokens (a window app's theme, one-file pages' kit blocks) brought
+       along, all in one change set. kit.css needs nothing: its rules only use var(--kit-*). #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $root = $State.ProjectRoot
+    $kitDir = Join-Path $root (Get-UiKitFolder).Replace('/', '\')
+    $tokens = Join-Path $kitDir 'tokens.css'
+    if (-not (Test-Path -LiteralPath $tokens -PathType Leaf)) { Add-AgentEvent $State 'error' @{ text = 'This project has no UI kit yet (styles/kit/tokens.css), so there are no colours to set. It comes in with the first page Copilot builds.' }; return }
+    $theme = ConvertTo-ThemeTokens -Accent "$($Task.accent)" -Accent2 "$($Task.accent2)" -Neutral "$($Task.neutral)" -Css ([IO.File]::ReadAllText($tokens))
+    if (-not $theme.ok) { Add-AgentEvent $State 'error' @{ text = "The theme was not applied. $($theme.error)" }; return }
+    $prev = Enter-Activity $State 'busy' 'Setting the UI kit''s colours'
+    try {
+        $r = Set-ProjectThemeTokens -ProjectRoot $root -Theme $theme
+        if (-not $r.changed) { Add-AgentEvent $State 'status' @{ text = 'The project already has these colours: nothing changed.' }; return }
+        $cp = $r.checkpoint
+        Add-OwnChangeEvent $State 'edit' "$($r.path) (theme from your colours)" (Format-ThemeSummary $theme) @{ path = $r.path; exists = $true; old = $r.old; new = $r.new }
+        # A window app's theme is built from tokens.css: written again, its earlier version in the same change set.
+        if (Test-PsGuiProject $root) {
+            foreach ($rel in 'wpf\KitTheme.xaml', 'wpf\KitWpf.ps1', 'winforms\KitTheme.ps1') {
+                $f = Join-Path $kitDir $rel
+                if (Test-Path -LiteralPath $f -PathType Leaf) { Save-CheckpointFile $cp $root $f }
+            }
+            foreach ($w in @(Update-KitWpf $root $State.AppRoot -NoTheme:(-not (Test-UiKitOn $State.AppRoot)))) { Add-OwnChangeEvent $State 'write' $w 'StreamHub wrote the window app''s theme again with the new colours.' }
+        }
+        # One-file pages carry their own copy of the tokens in their kit block.
+        $one = Update-OneFilePages $root $State.AppRoot -Checkpoint $cp
+        foreach ($it in @($one.items)) { Add-OwnChangeEvent $State 'edit' "$($it.path) (UI kit block)" 'StreamHub filled the one-file page''s UI kit block with the new colours.' @{ path = $it.path; exists = $true; old = $it.old; new = $it.new } }
+        Add-ChangeSetEvent $State $cp 'Theme from your colours'
+    } catch {
+        Write-CCBLogError agent 'theme from your colours' $_
+        Add-AgentEvent $State 'error' @{ text = "The theme was not applied: $($_.Exception.Message)" }
+    } finally { Exit-Activity $State $prev }
+}
+
+function Invoke-TidyListJob {
+    <# The tidy-up list (TidyUp.psm1), only on request from the command menu: what the project likely
+       no longer uses, as a tidy-list card for the person to tick. Nothing is removed here. #>
+    param($State)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $prev = Enter-Activity $State 'busy' 'Looking for what the project no longer uses'
+    try {
+        $items = @(Get-TidyCandidates $State.ProjectRoot)
+        $text = if ($items.Count) { "$($items.Count) thing(s) the project likely no longer uses. Tick what to remove: each is checked again before it goes, and Undo brings it back." } else { 'Nothing to tidy up: every file and style rule StreamHub can check is in use.' }
+        Add-AgentEvent $State 'tidy-list' @{ text = $text; tidyItems = @($items | ForEach-Object { @{ id = $_.id; kind = $_.kind; path = $_.path; selector = $_.selector; reason = $_.reason; size = [int64]$_.size } }) }
+    } catch {
+        Write-CCBLogError agent 'tidy-up list' $_
+        Add-AgentEvent $State 'error' @{ text = "The tidy-up list could not be made: $($_.Exception.Message)" }
+    } finally { Exit-Activity $State $prev }
+}
+
+function Invoke-TidyJob {
+    <# Removes what the person ticked on the tidy-up card (TidyUp Invoke-TidyRemove: each item checked
+       again first), as change cards and one change set that Undo brings back. #>
+    param($State, $Task)
+    if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open a project first.' }; return }
+    $ids = @(@($Task.ids) | ForEach-Object { "$_" } | Where-Object { $_ })
+    if (-not $ids.Count) { Add-AgentEvent $State 'status' @{ text = 'Nothing was ticked, so nothing was removed.' }; return }
+    $prev = Enter-Activity $State 'busy' 'Tidying up'
+    try {
+        $r = Invoke-TidyRemove -ProjectRoot $State.ProjectRoot -Ids $ids
+        $files = @($r.removed | Where-Object { $_.kind -ne 'css-rule' })
+        if ($files.Count) { Add-OwnChangeEvent $State 'delete' "$($files.Count) file(s) (tidy up)" "StreamHub removed $($files.Count) file(s) the project no longer used." -Output ((@($files | ForEach-Object { "$($_.path) ($(Format-TidySize $_.size))" })) -join "`n") }
+        foreach ($e in @($r.edited)) {
+            $sel = @($r.removed | Where-Object { $_.kind -eq 'css-rule' -and $_.path -eq $e.path } | ForEach-Object { $_.selector })
+            Add-OwnChangeEvent $State 'edit' "$($e.path) (unused style rules)" "StreamHub removed $($sel.Count) style rule(s) nothing used: $($sel -join ', ')." @{ path = $e.path; exists = $true; old = $e.old; new = $e.new }
+        }
+        if (@($r.skipped).Count) { Add-AgentEvent $State 'status' @{ text = 'Left in place: ' + ((@($r.skipped) | ForEach-Object { "$($_.path) ($($_.reason))" }) -join '; ') + '.' } }
+        if ($r.checkpoint -and $r.checkpoint.Files.Count) { Add-ChangeSetEvent $State $r.checkpoint 'Tidy up' }
+        elseif (-not @($r.removed).Count) { Add-AgentEvent $State 'status' @{ text = 'Nothing was removed.' } }
+    } catch {
+        Write-CCBLogError agent 'tidy up' $_
+        Add-AgentEvent $State 'error' @{ text = "Tidying up stopped: $($_.Exception.Message)" }
+    } finally { Exit-Activity $State $prev }
 }
 
 function Invoke-TestRunReport {
@@ -2028,33 +2477,10 @@ function Invoke-ChainDownload {
     } else {
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'running' })
     }
-    $tmp = Join-Path $env:TEMP ('ccb-dl-' + [guid]::NewGuid().ToString('N'))
-    $null = New-Item -ItemType Directory -Force -Path $tmp
-    try {
-        $null = Get-Bridge $State   # StreamHub's Edge is running (and signed in)
-        $State.Activity.kind = 'download'; $State.Activity.label = "Downloading $(Split-Path $t.rel -Leaf)"
-        $r = Invoke-EdgeDownload -Port $State.Config.cdpPort -Url (Add-DownloadParam $Step.target) -Folder $tmp -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure())
-        if (-not $r.error) { $r.error = Test-DownloadContent $r.path $t.rel }
-        if ($r.error) {
-            Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'failed'; summary = "download failed: $($r.error)"; output = $r.error }
-            return @{ ok = $false; why = $r.error }
-        }
-        if (-not $CheckpointBox.Value) { $CheckpointBox.Value = New-Checkpoint $root "Chain: $($Chain.title)" }
-        Save-CheckpointFile $CheckpointBox.Value $root $t.full
-        $null = New-Item -ItemType Directory -Force -Path (Split-Path $t.full)
-        Copy-Item -LiteralPath $r.path -Destination $t.full -Force
-        $kb = [Math]::Max(1, [int]((Get-Item -LiteralPath $t.full).Length / 1KB))
-        Write-CCBLog info agent "Chain download" @{ to = $t.rel; kb = $kb }
-        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $true; status = 'ok'; summary = "downloaded $($t.rel) ($kb KB)"; output = "Saved $($t.rel) ($kb KB) from $($Step.target)."; changed = $true }
-        @{ ok = $true; why = '' }
-    } catch {
-        Write-CCBLogError agent 'Chain download' $_
-        Add-AgentEvent $State 'action-result' @{ id = $id; ok = $false; status = 'failed'; summary = "download failed: $($_.Exception.Message)"; output = $_.Exception.Message }
-        @{ ok = $false; why = $_.Exception.Message }
-    } finally {
-        $State.Activity.label = ''
-        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    $box = @{ checkpoint = $CheckpointBox.Value; label = "Chain: $($Chain.title)" }
+    $r = Save-EdgeDownload $State $Step.target $t $id $box
+    $CheckpointBox.Value = $box.checkpoint
+    $r
 }
 
 $script:AgentGoAhead = 'Proceed with your plan. Where the instructions above do not decide something, use your best assumptions and list them at the start. Then give the result in exactly the form the instructions ask for.'
@@ -2308,6 +2734,8 @@ function Get-TurnKind {
          (Copilot drifted into explaining) or after every 5 follow-ups;
        - other follow-ups get the short recap (prompts/reminder.md, added by New-PromptMessage). #>
     param($State, [string]$Text, $Context = @{ Traits = @(); Paths = @() }, [string]$Force = '')
+    # Forced plain chat: a fixed request StreamHub sends as it is (Ask Copilot to save a file of its own workspace).
+    if ($Force -eq 'chat') { return 'chat' }
     $kind = Get-TaskKind $Text -Traits @($Context.Traits) -Paths @($Context.Paths)
     # Forced: "Send again as a coding task" (coding), or a task from another program (work: never plain chat).
     if ($Force -eq 'coding') { $kind = $(if ($kind -eq 'mixed' -or $kind -eq 'assistant') { 'mixed' } else { 'coding' }) }
@@ -3640,6 +4068,14 @@ function Invoke-AgentActionCore {
             Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "runbook: $why" })
             return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (runbook rules)"; output = "error: not written: $why. A runbook is one file Runbooks/NAME.runbook.md that starts with the template's header block; send the complete file again with a write block." }
         }
+        # A deck outline (Work/NAME.deck.json, PptxDeck) must be one the helper program can build: refused with its problems word for word.
+        $deckProblems = @(Test-DeckOutlineFile $Action.arg $newText $State.ProjectRoot)
+        if ($deckProblems.Count) {
+            $why = $deckProblems -join '; '
+            Write-CCBLog info agent "Deck outline refused: $($Action.arg)" @{ problems = $deckProblems }
+            Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed'; error = "deck outline: $why" })
+            return @{ ok = $false; summary = "$($Action.type) $($Action.arg) refused (deck outline rules)"; output = "error: not written: $why. A deck outline is one JSON file Work/NAME.deck.json in the form the deck rules give; send the complete file again with a write block." }
+        }
         $needsApproval = ($mode -ne 'auto') -or ($Uncertain -gt 0) -or [bool]$riskWarning
         # A to-do or plan list (TODO.md, PLAN.md...): applied without asking, in every mode but Plan only.
         if (Test-TaskListFile $Action.arg) { $needsApproval = $false }
@@ -4853,7 +5289,10 @@ function Publish-DoneResults($State, $AcceptResults) {
 
 function Invoke-AgentTurn {
     # -Shown: the message is in the chat already (sent again by a card's answer), so it is not posted twice.
-    param($State, [string]$Text, [string]$ForceKind = '', [switch]$Shown)
+    # -Intent: the task's own intent ('change'), used instead of Get-TaskIntent on the text: a fixed
+    # request that quotes an earlier one ("save it as a runbook") must not take that one's
+    # "do not change anything" as its own.
+    param($State, [string]$Text, [string]$ForceKind = '', [switch]$Shown, [string]$Intent = '')
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; $State.Busy = $false; return }
     $State.Busy = $true; $State.Cancel = $false
     $State.UserLook = Test-LookRequest $Text   # a look the person asks for wins over the kit's (Prompts)
@@ -4866,7 +5305,8 @@ function Invoke-AgentTurn {
     Write-CCBLog trace agent 'User message' @{ text = $Text }
     if (-not $Shown) { Add-AgentEvent $State 'user' @{ text = $Text } }
     $State.TurnText = $Text
-    $State.TaskIntent = Get-TaskIntent $Text $State.Mode "$($State.TaskIntent)"
+    # Plan only stays investigate whatever the task says; otherwise a task's own 'change' wins.
+    $State.TaskIntent = if ($Intent -eq 'change' -and $State.Mode -ne 'plan') { 'change' } else { Get-TaskIntent $Text $State.Mode "$($State.TaskIntent)" }
     $State.PendingGuidance = New-Object 'Collections.Generic.List[string]'
     $State.TaskGuidance = New-Object 'Collections.Generic.List[string]'
     # Busy is already set: a checkpoint that cannot be made must not leave it set.
@@ -5668,7 +6108,7 @@ function Start-AgentWorker {
                         $State.IssueFix = $task.issueFix; $State.IssueFixHandled = $false; $State.IssueFixFromSeq = $fromSeq
                         if ($task.freshChat) { $State.NeedNewChat = $true }
                         $State.ScopeUpgrade = ''
-                        try { Invoke-AgentTurn $State $task.text $force -Shown:([bool]$task.shown) }
+                        try { Invoke-AgentTurn $State $task.text $force -Shown:([bool]$task.shown) -Intent ([string]$task.intent) }
                         finally {
                             $State.ScopeAsk = ''
                             $State.TurnAnswers = @{}
@@ -5677,6 +6117,10 @@ function Start-AgentWorker {
                             if ($task.issueFix -and -not $State.IssueFixHandled) { try { $null = Reset-StaleIssueFixes $State $State.ProjectRoot } catch { Write-CCBLogError agent 'issue fix reset' $_ } }
                         }
                         if (-not $State.ScopeUpgrade -and -not $State.Stop) { $null = Write-TurnPlan $State $task $fromSeq }
+                        # Copilot's own-workspace file asked to be saved: its links as a fetch card. A deck
+                        # outline the task wrote: the build card (a button; nothing builds by itself).
+                        if ($task.sandboxFile) { try { Publish-SandboxReply $State $task $fromSeq } catch { Write-CCBLogError agent 'sandbox reply' $_ } }
+                        elseif (-not $State.Stop) { try { Publish-DeckOutlineOffer $State } catch { Write-CCBLogError agent 'deck outline offer' $_ } }
                         if ($State.ScopeUpgrade) {
                             # Copilot judged it a big request: the same request again as Clarify first or Plan first.
                             $State.ScopeUpgrade = ''
@@ -5696,6 +6140,20 @@ function Start-AgentWorker {
                 'script' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ScriptJob $State $task.name }
                 'testrun-report' { Invoke-TestRunReport $State $task }
                 'export' { Invoke-ExportJob $State $task }
+                'page-report' { Invoke-PageReportJob $State $task }
+                'page-compare' { Invoke-PageCompareJob $State $task }
+                'data-profile' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-DataProfileJob $State $task }
+                'overview' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-OverviewJob $State $task }
+                'share-package' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-SharePackageJob $State $task }
+                'theme' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ThemeJob $State $task }
+                'tidy-list' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-TidyListJob $State }
+                'tidy' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-TidyJob $State $task }
+                'pptx-plan' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-PptxPlanJob $State $task }
+                'pptx-ask' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-PptxAskJob $State $task }
+                'pptx-ask-element' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-PptxAskElementJob $State $task }
+                'pptx-apply' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-PptxApplyJob $State $task }
+                'pptx-build' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-PptxBuildJob $State $task }
+                'sandbox-fetch' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-SandboxFetchJob $State $task }
                 'packages' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-PackagesJob $State $task.folder }
                 'review' { if ($task.missingProject) { throw "The project folder $($task.projectRoot) no longer exists" }; Invoke-ReviewJob $State $task }
                 'ask' {
@@ -5778,4 +6236,4 @@ function Start-AgentWorker {
     Reset-Bridge $State
 }
 
-Export-ModuleMember -Function Get-TurnTestBaseline, Get-AcceptanceStep, Invoke-FreshReview, Set-TaskSwitchesOff, Restore-TaskSwitches, Get-FolderNotes, Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask, Invoke-TestRunReport, Invoke-ExportJob
+Export-ModuleMember -Function Get-TurnTestBaseline, Get-AcceptanceStep, Invoke-FreshReview, Set-TaskSwitchesOff, Restore-TaskSwitches, Get-FolderNotes, Test-RoundsLeft, Test-ExploreRound, Get-ExploreNudge, Use-BigTaskPreference, Register-ReadStamp, Test-RangeEditAllowed, Get-StaleReadNote, Get-WholeFileFallback, Get-LeakReport, Find-TextInFiles, Sync-LiveData, Sync-OneFilePages, Publish-SetupQuestions, Save-SetupAnswer, Read-ResponseOptionsFile, Test-ResponseOptionsDue, Update-ResponseOptions, Reset-AfterWorkerStop, Get-FixEvidence, New-FixAttemptMessage, Publish-PackagesNeeded, Invoke-PackagesJob, Sync-DataImports, Publish-ProposalPlan, Test-NoAnswerError, Get-ChainRetryWaits, Get-CopilotThemeWanted, Update-CopilotTheme, Invoke-ProjectHooks, Invoke-UndoTask, Invoke-ScriptJob, Add-OwnChangeEvent, Sync-DataMirrors, Add-AgentOutputFormat, Add-ChangeSetEvent, Invoke-RunbookJob, Invoke-FetchJob, Resolve-AgentFiles, Get-AgentAttachments, Get-AgentSpec, Save-AgentCharts, Send-AgentJobMessage, Invoke-AgentRun, Invoke-ChainJob, Get-ChangeCountStart, Reset-ChatHistoryCount, Get-ChatHistoryPath, Save-ChatEvent, Read-ChatHistory, Restore-ChatHistory, Update-AgentSchedule, Get-ProjectScheduleFile, Import-ProjectSchedules, Sync-ProjectSchedules, Get-IssueSettings, Get-IssueBaseline, Submit-IssueFix, Reset-StaleIssueFixes, Get-QueuedIssueFix, Invoke-IssueCycle, Start-IssueIndexer, Get-ProjectVerify, Save-TaskEvidence, Publish-PlanReady, Invoke-ClarifyStep, Get-ReviewScope, Get-ReviewPlan, Invoke-ReviewJob, Submit-AgentTask, Get-QueueEntry, Save-AgentQueue, Restore-AgentQueue, Set-QueuePause, Resume-AgentQueue, Save-QueuePause, Restore-QueuePause, Save-Schedules, Restore-Schedules, New-AgentSchedule, Start-ScheduledItem, Invoke-DueSchedules, New-AgentState, Add-AgentEvent, Get-AgentEvents, Start-AgentWorker, Invoke-AgentTurn, Write-TurnPlan, Set-PlanBuildTask, Invoke-TestRunReport, Invoke-ExportJob, Invoke-PageReportJob, Invoke-PageCompareJob, Invoke-DataProfileJob, Invoke-OverviewJob, Invoke-SharePackageJob, Invoke-ThemeJob, Invoke-TidyListJob, Invoke-TidyJob, Resolve-PptxTaskPaths, Get-PptxKitTokens, Invoke-PptxPlanJob, Invoke-PptxAskJob, Invoke-PptxAskElementJob, Invoke-PptxApplyJob, Publish-DeckOutlineCard, Publish-DeckOutlineOffer, Invoke-PptxBuildJob, Publish-SandboxReply, Save-EdgeDownload, Invoke-SandboxFetchJob

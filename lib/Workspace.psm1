@@ -318,6 +318,21 @@ function Get-FileFingerprint([string]$Path) {
     try { [BitConverter]::ToString($sha.ComputeHash($fs)) } finally { $fs.Dispose() }
 }
 
+function Move-TempFile([string]$Tmp, [string]$Path) {
+    <# Puts a fully written temporary file in place of Path (File.Replace, or Move when Path is new).
+       OneDrive, the search indexer or a virus scanner may hold Path for a moment: a few tries, then the
+       temporary file is removed and the error thrown to the caller. #>
+    for ($try = 1; $try -le 5; $try++) {
+        try {
+            if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($Tmp, $Path, [NullString]::Value) } else { [IO.File]::Move($Tmp, $Path) }
+            return
+        } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+            if ($try -eq 5) { try { [IO.File]::Delete($Tmp) } catch { }; throw }
+            Start-Sleep -Milliseconds (100 * $try)
+        }
+    }
+}
+
 function Test-LinkPath([string]$Path) {
     <# True for a junction or symbolic link, which a walk must not follow. OneDrive marks its files and
        folders as reparse points too (Files On-Demand: a cloud tag, no link type), so the attribute
@@ -515,6 +530,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Move-TempFile, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile, Get-FileFingerprint, Get-SharedRoot, Get-SharedPrefix, Initialize-SharedRoot, Get-SharedNotes

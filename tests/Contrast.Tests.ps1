@@ -22,6 +22,13 @@ Describe 'Get-ContrastRatio' {
         (ConvertFrom-CssColor '#10069f80').a | Should BeGreaterThan 0.49
         ConvertFrom-CssColor 'var(--x)' | Should BeNullOrEmpty
     }
+    It 'gives the hue of colours with a 00 or ff channel exactly (0/255 is a whole number in PowerShell)' {
+        $hue = { param($c) & (Get-Module Contrast) { Get-ColorHue $args[0] } $c }
+        [math]::Round((& $hue '#00bfb3'), 1) | Should Be 176.2
+        [math]::Round((& $hue '#007a5a'), 1) | Should Be 164.3
+        [math]::Round((& $hue '#ff8000'), 1) | Should Be 30.1
+        & $hue '#808080' | Should BeNullOrEmpty
+    }
 }
 
 Describe 'The UI kit tokens' {

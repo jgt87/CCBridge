@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer', 'Progress', 'WorkStatus') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer', 'Progress', 'WorkStatus', 'DataProfile', 'RunbookFromChat', 'KitTheme', 'Download', 'PptxLayoutMatch', 'PptxRetheme', 'PptxDeck') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -911,6 +911,188 @@ function Invoke-ApiRequest($Ctx, $State) {
             $b = Read-JsonBody $Ctx
             $fmt = if ("$($b.format)" -eq 'pptx') { 'pptx' } else { 'pdf' }
             $entry = Submit-AgentTask $State @{ kind = 'export'; format = $fmt; page = [string]$b.page } 'user' "Export $([string]$b.page) as $fmt"
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^GET /api/pptx/decks$' {
+            # The project's PowerPoint files for the template card (names only).
+            if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ templates = @(); contents = @(); template = ''; content = '' } }
+            $d = Get-PptxDecks $State.ProjectRoot
+            return Send-Json $Ctx @{ templates = @($d.templates); contents = @($d.contents); template = $d.template; content = $d.content }
+        }
+        '^POST /api/pptx/(plan|ask|ask-element|apply)$' {
+            # Apply a PowerPoint template (on request only): propose layouts and choices, ask Copilot for
+            # the layouts or one element's look, or write the new deck. Only from the StreamHub page
+            # itself; the decks must be in the project.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $step = ([regex]::Match($Ctx.Request.Url.AbsolutePath, '[^/]+$')).Value
+            $task = @{ kind = "pptx-$step"; template = [string]$b.template; content = [string]$b.content }
+            $title = switch ($step) { 'plan' { 'Apply a PowerPoint template: propose layouts' } 'ask' { 'Apply a PowerPoint template: ask Copilot' } 'ask-element' { 'Apply a PowerPoint template: ask Copilot about one element' } default { "Apply a PowerPoint template to $([string]$b.content)" } }
+            $path = ''
+            if ($step -eq 'ask-element') {
+                if ([string]$b.element -notmatch '^\d+:\d+$') { return Send-Json $Ctx @{ error = 'Not an element of the deck.' } 400 }
+                $task.element = [string]$b.element
+            }
+            if ($step -eq 'apply') {
+                $path = Get-PptxBrandedName ([string]$b.content) -ProjectRoot $State.ProjectRoot
+                $task.out = $path; $task.choices = $b.choices
+            }
+            $entry = Submit-AgentTask $State $task 'user' $title
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id; path = $path }
+        }
+        '^POST /api/pptx/outline$' {
+            # Build a deck from an outline (command menu): the card with the project's outlines and templates.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            Publish-DeckOutlineCard $State
+            return Send-Json $Ctx @{ ok = $true }
+        }
+        '^POST /api/pptx/build$' {
+            # The card's Build button: a queued task (the deck goes to Runbooks/Exports, named here so the card can say where).
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $outline = ([string]$b.outline).Replace('\', '/').Trim()
+            if ($outline -notmatch '(?i)\.deck\.json$') { return Send-Json $Ctx @{ error = 'Choose a deck outline (a .deck.json file).' } 400 }
+            $path = Get-PptxDeckName $outline -ProjectRoot $State.ProjectRoot
+            $entry = Submit-AgentTask $State @{ kind = 'pptx-build'; outline = $outline; template = [string]$b.template; out = $path } 'user' "Build $outline as a deck"
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id; path = $path }
+        }
+        '^POST /api/sandbox/save$' {
+            # A reply named a file in Copilot's own workspace: ask Copilot (in the same chat, as typed) to
+            # save it to the person's OneDrive and give the link. Copilot asking for a confirmation stays
+            # with the person (human-required); StreamHub never confirms it.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $name = ([string]$b.name).Trim()
+            if (-not (Test-SandboxFileName $name)) { return Send-Json $Ctx @{ error = 'Not a file name.' } 400 }
+            $entry = Submit-AgentTask $State @{ kind = 'chat'; text = (Get-SandboxSaveRequest $name); forceKind = 'chat'; noRunbook = $true; sandboxFile = $name } 'user' "Ask Copilot to save $name to OneDrive"
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^POST /api/sandbox/fetch$' {
+            # Fetch the file Copilot saved (a OneDrive or SharePoint link) into Downloads/: a queued task
+            # whose download a person approves in the app every time.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $url = ([string]$b.url).Trim()
+            $bad = Test-DownloadAddress $url
+            if ($bad) { return Send-Json $Ctx @{ error = "This link cannot be fetched: $bad." } 400 }
+            $entry = Submit-AgentTask $State @{ kind = 'sandbox-fetch'; url = $url; file = ([string]$b.file).Trim() } 'user' 'Fetch a file from OneDrive'
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^POST /api/page-report$' {
+            # Check this page in full (PageReport.psm1): a queued task, only on the person's request.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $page = [string]$b.page
+            $entry = Submit-AgentTask $State @{ kind = 'page-report'; page = $page } 'user' "Check $(if ($page) { $page } else { 'the app page' }) in full"
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^POST /api/page-compare$' {
+            # A page before a change set next to now (PageCompare.psm1): a queued task from History.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $cs = [string]$b.changeSet
+            if ($cs -notmatch '^\d{8}-\d{6}-\d{3}$') { return Send-Json $Ctx @{ error = 'Not a change set.' } 400 }
+            $page = [string]$b.page
+            $entry = Submit-AgentTask $State @{ kind = 'page-compare'; changeSet = $cs; page = $page } 'user' "Compare $(if ($page) { $page } else { 'the app page' }) with before change set $cs"
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^GET /api/data-profile/sources$' {
+            # The data files a profile can be made of: the sources DataImport converted (DataProfile.psm1).
+            $items = if ($State.ProjectRoot) { @(Get-DataProfileSources $State.ProjectRoot) } else { @() }
+            return Send-Json $Ctx @{ ok = $true; items = $items }
+        }
+        '^POST /api/data-profile$' {
+            # The data profile report of one data file: a queued task (a large file takes several seconds).
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $src = ([string]$b.source).Trim().Replace('\', '/')
+            if (-not @(Get-DataProfileSources $State.ProjectRoot | Where-Object { $_.source -ieq $src }).Count) { throw "$src is not one of the project's converted data files." }
+            $entry = Submit-AgentTask $State @{ kind = 'data-profile'; source = $src } 'user' "Data profile of $src"
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^POST /api/runbook-from-chat$' {
+            # The chat's last request as a runbook (RunbookFromChat.psm1): a fixed request that asks
+            # Copilot to write Runbooks/NAME.runbook.md, sent as a coding task so the runbook rules go
+            # with it and it is never taken as running a runbook. intent change: the quoted request's
+            # own "do not change" must not keep Copilot from writing the runbook. Refused with the reason otherwise.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $events = if ($State.SaveHistory) { @(Read-ChatHistory $State.ProjectRoot) } else { @(Get-AgentEvents $State 0) }
+            $req = Get-LastChatRequest $events
+            $paths = @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object { $_.path })
+            $check = Test-RunbookFromChatAllowed $req @(Get-ProjectTraits $paths) $paths
+            if (-not $check.ok) { return Send-Json $Ctx @{ ok = $false; reason = $check.reason; error = $check.message } }
+            $name = Get-RunbookFromChatName $req.text @(Get-Runbooks $State.ProjectRoot | ForEach-Object { $_.name })
+            $text = Get-RunbookFromChatRequest $req.text -Name $name
+            $entry = Submit-AgentTask $State @{ kind = 'chat'; text = $text; forceKind = 'coding'; intent = 'change' } 'user' 'Save as a runbook'
+            Write-CCBLog info server 'Last request queued to be saved as a runbook' @{ name = $name }
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id; name = $name }
+        }
+        '^POST /api/overview$' {
+            # The project overview for a colleague (ProjectOverview.psm1): a queued task that writes the
+            # facts and then asks Copilot for the explanation. Only from the StreamHub page itself.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $entry = Submit-AgentTask $State @{ kind = 'overview' } 'user' 'Write a project overview'
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^POST /api/share-package$' {
+            # The project as a zip for a colleague (ProjectPackage.psm1), with Source/ only when asked:
+            # a queued task, so it shows under Runs. Only from the StreamHub page itself.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $withSource = [bool]$b.includeSource
+            $entry = Submit-AgentTask $State @{ kind = 'share-package'; includeSource = $withSource } 'user' $(if ($withSource) { 'Package for sharing, with Source data' } else { 'Package for sharing' })
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^POST /api/kit-theme/card$' {
+            # Theme from your colours (KitTheme.psm1), opened from the command menu: a card in the chat
+            # with the colours to start from (the last ones applied, else the project's own accent).
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $in = Get-ProjectThemeInputs $State.ProjectRoot
+            Add-AgentEvent $State 'theme-card' @{ text = 'Theme from your colours'; colours = @{ accent = "$($in.accent)"; accent2 = "$($in.accent2)"; neutral = "$($in.neutral)" }; hasKit = [bool]$in.hasKit; dark = [bool]$in.dark }
+            return Send-Json $Ctx @{ ok = $true }
+        }
+        '^POST /api/kit-theme/preview$' {
+            # The tokens derived from the colours on the card, with what was adjusted to read; nothing is written.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            return Send-Json $Ctx (Get-ThemePreview -ProjectRoot $State.ProjectRoot -Accent "$($b.accent)" -Accent2 "$($b.accent2)" -Neutral "$($b.neutral)")
+        }
+        '^POST /api/kit-theme/apply$' {
+            # Apply: a queued task (one change set, a change card in the chat; Undo brings the old colours back).
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $entry = Submit-AgentTask $State @{ kind = 'theme'; accent = "$($b.accent)"; accent2 = "$($b.accent2)"; neutral = "$($b.neutral)" } 'user' 'Theme from your colours'
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^POST /api/tidy/list$' {
+            # The tidy-up list (TidyUp.psm1): a queued task, since looking through a project takes a moment; the card comes as a tidy-list event.
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $entry = Submit-AgentTask $State @{ kind = 'tidy-list' } 'user' 'Tidy-up list'
+            return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
+        }
+        '^POST /api/tidy/apply$' {
+            # Remove the ticked items (each checked again by the task before it goes).
+            if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
+            if (-not $State.ProjectRoot) { throw 'Open a project first.' }
+            $b = Read-JsonBody $Ctx
+            $ids = @(@($b.ids) | ForEach-Object { "$_" } | Where-Object { $_ })
+            if (-not $ids.Count) { return Send-Json $Ctx @{ ok = $true; queued = $null } }
+            $entry = Submit-AgentTask $State @{ kind = 'tidy'; ids = $ids } 'user' "Tidy up: remove $($ids.Count) item(s)"
             return Send-Json $Ctx @{ ok = $true; queued = $entry.id }
         }
         '^POST /api/intake$' {

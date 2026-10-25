@@ -286,7 +286,9 @@
                   "tokens-neutral.css":  [
                                              "44e79d9fa9516afa72cbd957a520a3611323d1430029c6bc6b8755dde3be415b",
                                              "709fd77942c5f26ef16808be5a41ee7f29efb65f30027378f08b0913f4272cff",
+                                             "76952bd63685cabe8d2fd144179b42e0f1d7436238ab74d2bd51565c5c42a918",
                                              "85eff12cdaa4fbd66fc581d056363594f598bf2299e39311af32c21f83973dbc",
+                                             "9c5bd9a989389457856c2a5c0def5ea6f4ade75e2c8e024947a4acb121a25de3",
                                              "ae34d76315f0b6639760aaee525f866eb11c23524e3328a27f2ee2ebb600114c"
                                          ],
                   "winforms/KitTheme.template.ps1":  [

@@ -1,6 +1,15 @@
 import { openExternal } from "@/lib/links";
 import { IntakeCard } from "./intake-card";
-import type { IntakeGroup } from "@/lib/api";
+import type { IntakeGroup, ThemeColours, TidyItem } from "@/lib/api";
+import { PageReportCard } from "./page-report-card";
+import { pageReportItem, type PageReportItem } from "./page-report";
+import { ThemeCard } from "./theme-card";
+import { TidyCard } from "./tidy-card";
+import { PptxRethemeCard } from "./pptx-retheme-card";
+import { pptxRethemeItem, type PptxRethemeItem } from "./pptx-retheme-view";
+import { PptxOutlineCard } from "./pptx-outline-card";
+import { pptxOutlineItem, type PptxOutlineItem, sandboxFetchItem, type SandboxFetchItem, sandboxFiles } from "./pptx-outline-view";
+import { SandboxButtons, SandboxFetchCard } from "./sandbox-card";
 import { AlertCircle, CheckCircle2, Hand, Info, Link2, RotateCcw, User } from "lucide-react";
 import { AgentPlanCard, ClarifyCard, type ClarifyQuestion, PlanCard, type PlanVariant } from "./plan-cards";
 import type { ChatOptions } from "@/lib/api";
@@ -31,12 +40,18 @@ type Stamp = { time?: string; at?: string; endAt?: string };
 export type TranscriptItem = Stamp &
   (
   | { kind: "user"; seq: number; text: string; taskKind?: string; agent?: string }
-  | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[]; agent?: string }
+  | { kind: "assistant"; seq: number; text: string; uncertain: number; references: Reference[]; agent?: string; sandboxFiles?: string[] }
   | { kind: "agentPlan"; seq: number; agent: string }
   | { kind: "runbookChoice"; seq: number; name: string; title: string; request: string; restored: boolean }
   | SetupChoiceItem
   | { kind: "packages"; seq: number; folder: string; text: string; npm: boolean; restored: boolean }
   | { kind: "intake"; seq: number; text: string; groups: IntakeGroup[]; restored: boolean }
+  | PageReportItem
+  | PptxRethemeItem
+  | PptxOutlineItem
+  | SandboxFetchItem
+  | { kind: "theme"; seq: number; colours: ThemeColours; hasKit: boolean; dark: boolean; restored: boolean }
+  | { kind: "tidy"; seq: number; text: string; items: TidyItem[]; restored: boolean }
   | { kind: "unfinished"; seq: number; text: string; findings: string[]; continueText: string; restored: boolean }
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string; path?: string }
@@ -146,6 +161,23 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
     const groups = list(e.groups).map((g: IntakeGroup) => ({ ...g, files: list(g.files) as string[], options: list(g.options) as IntakeGroup["options"] }));
     ctx.items.push({ kind: "intake", seq: e.seq, text: e.text ?? "", groups, restored: Boolean(e.restored) });
   },
+  "page-report": (e, ctx) => ctx.items.push(pageReportItem(e)),
+  "pptx-plan": (e, ctx) => ctx.items.push(pptxRethemeItem(e)),
+  "pptx-outline": (e, ctx) => ctx.items.push(pptxOutlineItem(e)),
+  "sandbox-fetch": (e, ctx) => ctx.items.push(sandboxFetchItem(e)),
+  "theme-card": (e, ctx) =>
+    ctx.items.push({
+      kind: "theme",
+      seq: e.seq,
+      colours: { accent: e.colours?.accent ?? "", accent2: e.colours?.accent2 ?? "", neutral: e.colours?.neutral ?? "" },
+      hasKit: Boolean(e.hasKit),
+      dark: Boolean(e.dark),
+      restored: Boolean(e.restored),
+    }),
+  "tidy-list": (e, ctx) => {
+    const list = Array.isArray(e.tidyItems) ? e.tidyItems : e.tidyItems ? [e.tidyItems] : [];
+    ctx.items.push({ kind: "tidy", seq: e.seq, text: e.text ?? "", items: list.map((i) => ({ ...i, selector: i.selector ?? "", size: Number(i.size) || 0 })), restored: Boolean(e.restored) });
+  },
   "packages-needed": (e, ctx) =>
     ctx.items.push({ kind: "packages", seq: e.seq, folder: e.folder ?? "", text: e.text ?? "", npm: e.npm !== false, restored: Boolean(e.restored) }),
   "setup-choice": (e, ctx) =>
@@ -187,7 +219,16 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
     if (e.steps?.length) ctx.items.push({ kind: "next", seq: e.seq, steps: e.steps });
   },
   assistant: (e, ctx) =>
-    ctx.items.push({ kind: "assistant", seq: e.seq, text: e.text ?? "", uncertain: e.uncertain ?? 0, references: e.references ?? [], ...(e.agent ? { agent: e.agent } : {}) }),
+    ctx.items.push({
+      kind: "assistant",
+      seq: e.seq,
+      text: e.text ?? "",
+      uncertain: e.uncertain ?? 0,
+      references: e.references ?? [],
+      ...(e.agent ? { agent: e.agent } : {}),
+      // A file in Copilot's own workspace: offered to fetch, not for a reply from an earlier session.
+      ...(e.sandboxFiles && !e.restored ? { sandboxFiles: sandboxFiles(e.sandboxFiles) } : {}),
+    }),
   action: mergeAction,
   "action-result": mergeActionResult,
   checks: (e, ctx) => {
@@ -273,7 +314,7 @@ function UserMessage({ text, taskKind, agent, onResendAsCoding }: { text: string
   );
 }
 
-function AssistantMessage({ text, references, agent }: { text: string; references: Reference[]; agent?: string }) {
+function AssistantMessage({ text, references, agent, sandboxFiles: files }: { text: string; references: Reference[]; agent?: string; sandboxFiles?: string[] }) {
   const visible = stripActionBlocks(text);
   if (!visible && !references.length) return null;
   return (
@@ -285,6 +326,7 @@ function AssistantMessage({ text, references, agent }: { text: string; reference
       )}
       {visible && <Markdown text={visible} />}
       {references.length > 0 && <Sources refs={references} />}
+      {files && files.length > 0 && <SandboxButtons files={files} />}
     </div>
   );
 }
@@ -508,7 +550,7 @@ function TranscriptRow({
     case "user":
       return <UserMessage agent={item.agent} onResendAsCoding={onResendAsCoding} taskKind={item.taskKind} text={item.text} />;
     case "assistant":
-      return <AssistantMessage agent={item.agent} references={item.references} text={item.text} />;
+      return <AssistantMessage agent={item.agent} references={item.references} sandboxFiles={item.sandboxFiles} text={item.text} />;
     case "agentPlan":
       return onSend ? <AgentPlanCard agent={item.agent} onSend={onSend} /> : null;
     case "runbookChoice":
@@ -519,6 +561,18 @@ function TranscriptRow({
       return <PackagesCard item={item} />;
     case "intake":
       return <IntakeCard groups={item.groups} restored={item.restored} text={item.text} />;
+    case "pptxRetheme":
+      return <PptxRethemeCard plan={item.plan} restored={item.restored} />;
+    case "pptxOutline":
+      return <PptxOutlineCard item={item} />;
+    case "sandboxFetch":
+      return <SandboxFetchCard item={item} />;
+    case "pageReport":
+      return <PageReportCard item={item} onOpenFile={onOpenFile} onSend={onSend} />;
+    case "theme":
+      return <ThemeCard colours={item.colours} dark={item.dark} hasKit={item.hasKit} restored={item.restored} />;
+    case "tidy":
+      return <TidyCard items={item.items} restored={item.restored} text={item.text} />;
     case "unfinished":
       return <UnfinishedCard item={item} onSend={onSend} />;
     case "action":

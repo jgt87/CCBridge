@@ -4,6 +4,27 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+## [v0.1.152] - 2026-10-25
+
+### Added
+- Check this page in full (command menu): every page check on the app's page in the light and the dark colour scheme and at phone width, in one report with screenshots, and a button that sends what it found to Copilot as a fix list.
+- Compare page (History): how a page looked before a change set next to how it looks now, with the changed areas marked, in a report with the screenshots.
+- Data profile report (command menu): pick one of the project's data files and StreamHub writes a report of it to Runbooks/Exports, as a page and an Excel workbook: rows, columns and their types, empty cells, lowest and highest or most common values, values far outside the rest, numbers mixed with text and duplicate rows, with the notable points first.
+- Save the last request as a runbook (command menu): StreamHub asks Copilot to write a runbook that does your last request in this chat again, so you can run it later, in a chain or on a schedule. Plain chat and requests about runbooks themselves are refused with the reason.
+- Write a project overview (command menu): StreamHub writes Runbooks/Exports/project-overview.md for a colleague with the facts it knows (what the project is built from, how to open it, its data and how to refresh it, runbooks, chains and schedules, earlier work, open to-do items; names only, nothing personal), and Copilot then fills in what it is for, how to use it and things to know. An overview you edited yourself is kept: remove its first line and the next one is written next to it.
+- Package for sharing (command menu): the project as one zip in Runbooks/Exports for a colleague who may not have StreamHub, with a README-SHARING.md on how to open it, what was left out and why, and how to refresh the data. Secrets, installed packages, StreamHub's own records, links to other folders and very large files stay out; your Source data only goes in with "Package for sharing, with Source data".
+- Theme from your colours (command menu): give an accent colour, and if you like a second colour and a neutral tint, and StreamHub sets the project's UI kit colours from them: buttons, links, the header band and six chart colours, adjusted where needed so text stays readable in light and dark. You see the colours before anything changes, and Undo brings the old ones back.
+- Tidy-up list (command menu): StreamHub lists what the project likely no longer uses (script and style files nothing loads, style rules nothing uses, data files nothing reads, old files in Work/), each with a reason and a size. You tick what goes; each item is checked again before it is removed, and Undo brings it all back. Your source data, protected files and anything a schedule, chain or hook uses are never listed.
+- Apply a PowerPoint template (command menu): pick a template (.pptx or .potx) and a deck in the project, and StreamHub puts every slide on the template's layouts, copied whole with its pictures, charts, tables, SmartArt, links and speaker notes, in the template's colours and fonts. You see the proposed layout per slide first (slides it is unsure of are marked to check), and Copilot can propose the layouts instead if you ask. Tables, text boxes, shapes, charts and headings without formatting get a choice of looks from the template and the UI kit, each with a small preview, and only looks that stay readable are offered. The new deck goes to Runbooks/Exports; your template and deck stay as they are.
+- Decks from Copilot: when you ask for a presentation, Copilot writes a slide outline and StreamHub builds the PowerPoint deck from it on your own template with one button (also in the command menu: Build a deck from an outline). When Copilot made a file in its own workspace, the reply offers to ask Copilot to save it to your OneDrive and to fetch it into the project, which you approve each time.
+- Development only: test-tools\ondemand-test.cmd tests the on-demand features end to end against the running app, including how Copilot follows the instructions, and writes a pass/fail report.
+
+### Fixed
+- Saving the issue list, the queue and the schedules no longer fails when OneDrive, the search indexer or a virus scanner holds the file for a moment: StreamHub tries again for a second or so, as it already did for the import index.
+
+### Changed
+- Development only: the dependency check shows TypeScript 7 as held on purpose, with the reason (it has no browser build, which the built-in builder needs), instead of as an update still to do.
+
 ## [v0.1.151] - 2026-10-24
 
 ### Added

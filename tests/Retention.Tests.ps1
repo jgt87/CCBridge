@@ -121,6 +121,26 @@ Describe 'Invoke-ProjectRetention' {
             Test-Path (Join-Path $sh 'my-mockup.png') | Should Be $true
         } finally { Remove-Item $p -Recurse -Force }
     }
+    It 'keeps page reports with their screenshots as one, by the screenshot numbers, and leaves other files alone' {
+        $p = New-RetentionProject
+        $rp = Join-Path $p '.streamhub\Reports'; New-Item -ItemType Directory $rp -Force | Out-Null
+        try {
+            foreach ($i in 1..3) {
+                $b = "page-check-index-2026100$i-080000"
+                Add-Aged (Join-Path $rp "$b.md") (3 - $i)
+                foreach ($v in 'light', 'dark', '375px') { Add-Aged (Join-Path $rp "$b-$v.png") (3 - $i) }
+            }
+            foreach ($v in '.md', '-before.png', '-after.png', '-changes.png') { Add-Aged (Join-Path $rp "compare-index-20260101-080000$v") 200 }
+            Add-Aged (Join-Path $rp 'notes.md') 400   # not StreamHub's name pattern
+            $cfg = @{ retention = @{ screenshotsCount = 2; screenshotsDays = 30; historyCount = 0; historyDays = 0; evidenceCount = 0; evidenceDays = 0; reviewsCount = 0; reviewsDays = 0; chartsCount = 0; chartsDays = 0; backupsCount = 0; backupsDays = 0 } }
+            $r = Invoke-ProjectRetention $p $cfg
+            $r.screenshots | Should Be 2          # the oldest page check and the comparison, each with its pictures
+            @(Get-ChildItem $rp -Filter 'page-check-index-20261001-080000*').Count | Should Be 0
+            @(Get-ChildItem $rp -Filter 'page-check-index-20261003-080000*').Count | Should Be 4
+            @(Get-ChildItem $rp -Filter 'compare-*').Count | Should Be 0
+            Test-Path (Join-Path $rp 'notes.md') | Should Be $true
+        } finally { Remove-Item $p -Recurse -Force }
+    }
     It 'uses the defaults when the settings have none' {
         (Get-RetentionSettings $null).historyCount | Should Be 20
         (Get-RetentionSettings @{ retention = @{ historyCount = 5 } }).historyCount | Should Be 5

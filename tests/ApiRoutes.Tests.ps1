@@ -100,4 +100,40 @@ Describe 'POST /api/reviews/get|ignore|fix' {
     Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+Describe 'POST /api/runbook-from-chat and the other on-request features' {
+    $p = Join-Path $env:TEMP ('ccb-onrequest-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory $p -Force | Out-Null
+    It 'queues the runbook request as a coding task whose intent is change, also when the quoted request says not to change anything' {
+        $s = New-TestState; $s.ProjectRoot = $p; $s.SaveHistory = $false
+        Add-AgentEvent $s 'user' @{ text = 'List my meetings for next week with their organisers, do not change anything' }
+        Add-AgentEvent $s 'kind' @{ taskKind = 'assistant' }
+        $c = New-FakeCtx 'POST' '/api/runbook-from-chat' @{}
+        Invoke-FakeApi $c $s
+        $r = Get-FakeJson $c
+        $r.ok | Should Be $true
+        $t = Get-QueuedTask $s
+        $t.kind | Should Be 'chat'
+        $t.forceKind | Should Be 'coding'
+        $t.intent | Should Be 'change'
+        $t.text | Should Match 'do not change anything'
+        (& (Get-Module Agent) { param($x) Get-TaskIntent $x } $t.text) | Should Be 'investigate'   # why the task carries its own intent
+    }
+    It 'queues the share package under its own kind, apart from the npm packages' {
+        $s = New-TestState; $s.ProjectRoot = $p
+        Invoke-FakeApi (New-FakeCtx 'POST' '/api/share-package' @{ includeSource = $true }) $s
+        $t = Get-QueuedTask $s
+        $t.kind | Should Be 'share-package'
+        $t.includeSource | Should Be $true
+        $t.projectRoot | Should Be $p
+    }
+    It 'queues nothing for a tidy-up with nothing ticked' {
+        $s = New-TestState; $s.ProjectRoot = $p
+        $c = New-FakeCtx 'POST' '/api/tidy/apply' @{ ids = @() }
+        Invoke-FakeApi $c $s
+        (Get-FakeJson $c).ok | Should Be $true
+        Get-QueuedTask $s | Should BeNullOrEmpty
+    }
+    Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Remove-Item -LiteralPath $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

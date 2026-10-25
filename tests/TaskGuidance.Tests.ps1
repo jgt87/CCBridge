@@ -96,6 +96,20 @@ Describe 'Instructions before mutations in the real turn loop' {
         $global:guidanceSent.Count | Should Be 1
         $global:guidanceSent[0] | Should Match 'Task intent: answer'
     }
+    It 'takes the task''s own intent over the words it quotes, but never in Plan only' {
+        # Save as a runbook quotes an earlier request; its "do not change anything" is not this task's.
+        $text = "Write a runbook for this request:`n---`nList the files, do not change anything`n---"
+        Get-TaskIntent $text | Should Be 'investigate'
+        $global:guidanceReplies = @('Noted.'); $global:guidanceSent = @()
+        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = Join-Path $base 'project'; $s.Mode = 'auto'
+        Invoke-AgentTurn $s $text -Intent 'change'
+        $global:guidanceSent[0] | Should Match 'Task intent: change'
+        $s.TaskIntent | Should Be 'change'
+        $global:guidanceReplies = @('Noted.'); $global:guidanceSent = @()
+        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = Join-Path $base 'project'; $s.Mode = 'plan'
+        Invoke-AgentTurn $s $text -Intent 'change'
+        $s.TaskIntent | Should Be 'investigate'
+    }
 }
 
 $resolved = [IO.Path]::GetFullPath($base)

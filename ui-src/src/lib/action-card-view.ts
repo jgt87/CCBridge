@@ -28,6 +28,7 @@ export const VERBS: Record<string, string> = {
   todo: "Plan",
   move: "Move",
   restore: "Restore",
+  delete: "Remove",
 };
 
 export const verbFor = (action: string): string => VERBS[action] ?? action;
