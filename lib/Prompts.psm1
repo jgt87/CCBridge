@@ -55,6 +55,8 @@ $script:WebLookupPattern = '(?i)\b(online|on the (web|internet)|internet|website
 # (English and Dutch): asking for a change, naming a part of an app, reporting an error, or asking
 # how or why the code does something.
 $script:ChangePattern = '(?i)\b(add|apply|upgrade|change|make|fix|update|remove|delete|rename|move|create|build|improve|implement|replace|refactor|rewrite|convert|split|extract|clean ?up|tidy|restyle|style|center|centre|align|resize|hide|show|enable|disable|translate|optimi[sz]e|speed up|set up|configure|connect|integrate|support|allow|prevent|validate|sort|filter|redesign|polish|voeg|maak|verander|wijzig|pas .{0,20} aan|verwijder|hernoem|verplaats|bouw|verbeter|vervang|zet|toon|verberg|repareer|herstel)\b'
+# A short go-ahead for what Copilot proposed (Get-TaskIntent): at most six more words after it, no question.
+$script:GoAheadPattern = '(?i)^\s*(?:(?:ok(?:ay)?|yes|yep|sure|ja|oke|prima|top)[,.!\s]+)?(?:please[,\s]+)?(?:go ahead|do it|do that|do so|please do|proceed|go for it|make it so|apply (?:it|that|this|them)|implement (?:it|that|this|them)|build (?:it|that|this)|ga je gang|ga maar|doe (?:het|dat|maar)|voer (?:het |dat |maar )?uit|pas (?:het|dat) (?:maar )?toe)\b(?:[\s,]+[^\s?]+){0,6}[.!\s]*$'
 $script:AppPartPattern = '(?i)\b(ui kit|uikit|kit|button|buttons|page|pages|header|footer|menu|navbar|nav ?bar|sidebar|side ?panel|layout|styles?|styling|colou?rs?|fonts?|forms?|input|inputs|fields?|table|tables|chart|charts|graph|modal|popup|dialog|toggle|dark mode|light mode|theme|icons?|images?|logo|links?|scroll|responsive|mobile|screen|view|tabs?|cards?|grid|columns?|rows?|animation|hover|click|clicks|clicking|clicked|login|search bar|dropdown|knop|knoppen|kleur|lettertype|pagina|scherm|tabel|grafiek|formulier|menu)\b'
 $script:ProblemPattern = '(?i)\b(error|errors|exception|crash|crashes|crashing|broken|bug|doesn.?t work|does not work|not working|isn.?t working|fails|failing|stack ?trace|undefined|null|NaN|404|500|wrong|incorrect|slow|freezes|does nothing|nothing happens|doet niets|gebeurt niets|werkt niet|kapot|foutmelding|fout)\b'
 $script:CodeQuestionPattern = '(?i)\b(why|how does|how do|how is|what does|where is|where are|which file|explain|waarom|hoe werkt|wat doet|waar staat|leg uit)\b'
@@ -324,11 +326,28 @@ function Get-PromptModules {
     $ids.ToArray()
 }
 
+function Test-AgreeingReply {
+    <# A short reply that is not a question, a refusal or a thank-you: after a proposal it agrees
+       ("sounds good", "yes", "ok", "perfect", a thumbs-up). Eight words at most. #>
+    param([string]$Text)
+    $t = "$Text".Trim()
+    if (-not $t -or $t.Contains('?')) { return $false }
+    if (@($t -split '\s+').Count -gt 8) { return $false }
+    if ($t -match '(?i)^\s*(how|why|what|where|which|who|when|hoe|waarom|wat|waar|welke|wie|wanneer)\b') { return $false }
+    -not ($t -match '(?i)\b(no|nope|not now|later|wait|stop|cancel|never ?mind|thanks|thank you|thx|nee|niet nu|wacht|laat maar|bedankt|dank je|dank u|dankjewel)\b')
+}
+
 function Get-TaskIntent {
     <# Intent is independent of subject. Fixed cues; questions do not authorize changes. #>
-    param([string]$Text, [string]$Mode = '', [string]$Previous = '')
+    # -Proposal: the last answer-only turn ended with a change Copilot proposed or wrote (Agent
+    # $State.PendingProposal), so a short agreeing reply ("sounds good", "yes", "ok") approves it.
+    param([string]$Text, [string]$Mode = '', [string]$Previous = '', [switch]$Proposal)
     if ($Mode -eq 'plan' -or $Text -match '(?i)\b(do not|don.t|without|no|geen|niet)\s+(make\s+)?(changes?|edit\w*|modif\w*|chang\w*|wijzig\w*|aanpass\w*)\b|\b(review|plan|explain|analyse|analyze) only\b') { return 'investigate' }
-    if ($Text -match '(?i)^\s*(continue|go ahead|do it|proceed|ga door)[.!\s]*$' -and $Previous -in 'answer', 'investigate', 'change') { return $Previous }
+    # A go-ahead ("go ahead as suggested", "yes please, do it", "doe maar") approves what Copilot proposed:
+    # a change, also after an answer-only turn. A bare "continue" goes on with the same intent.
+    if ($Text -match $script:GoAheadPattern) { return 'change' }
+    if ($Proposal -and (Test-AgreeingReply $Text)) { return 'change' }
+    if ($Text -match '(?i)^\s*(continue|ga door)[.!\s]*$' -and $Previous -in 'answer', 'investigate', 'change') { return $Previous }
     # "Nothing changed", "it is still blue", "try again": the last change did not take effect, so this
     # asks for a working change, also when worded as a question ("why is it still blue?").
     if (Test-NotAppliedReport $Text) { return 'change' }
@@ -578,4 +597,4 @@ function Get-AutoAgent {
     @{ agent = ''; why = '' }
 }
 
-Export-ModuleMember -Function Test-NotAppliedReport, Get-NotAppliedBrief, Get-NotAppliedRefusal, Test-ChangeAsk, Get-UserFirstMessage, Get-TaskIntent, Test-LeakReport, Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage, Test-BuildRequest, Test-LookUnclear
+Export-ModuleMember -Function Test-AgreeingReply, Test-NotAppliedReport, Get-NotAppliedBrief, Get-NotAppliedRefusal, Test-ChangeAsk, Get-UserFirstMessage, Get-TaskIntent, Test-LeakReport, Test-LookRequest, Test-ToolInstalled, Get-AutoAgent, Get-EnvironmentText, Test-NamesProjectFile, Get-TaskKind, Get-PromptParts, Get-PromptPart, Get-PromptModules, Get-ProjectTraits, New-PromptMessage, Test-BuildRequest, Test-LookUnclear

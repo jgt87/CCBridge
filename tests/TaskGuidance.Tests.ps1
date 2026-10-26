@@ -38,6 +38,15 @@ Describe 'Task intent is separate from the code subject' {
         Get-TaskIntent 'Continue' '' 'investigate' | Should Be 'investigate'
         Get-TaskIntent 'Implement the plan' 'plan' | Should Be 'investigate'
     }
+    It 'takes a go-ahead after an answer-only turn as a change' {
+        foreach ($t in 'go ahead as suggested', 'Go ahead', 'Yes, please do it.', 'ok do it like you proposed', 'Proceed with the ring chart', 'please do', 'implement it', 'ja, doe maar', 'Ga je gang', 'voer het uit zoals voorgesteld') {
+            Get-TaskIntent $t '' 'answer' | Should Be 'change'
+        }
+        Get-TaskIntent 'Continue' '' 'answer' | Should Be 'answer'
+        Get-TaskIntent 'go ahead and tell me why this happens?' '' 'answer' | Should Be 'answer'
+        Get-TaskIntent 'go ahead, but do not change files' '' 'answer' | Should Be 'investigate'
+        Get-TaskIntent 'go ahead as suggested' 'plan' 'answer' | Should Be 'investigate'
+    }
     It 'does not retry a legitimate answer with bullets or sample code as a change request' {
         & (Get-Module Agent) {
             foreach ($intent in 'answer', 'investigate') {

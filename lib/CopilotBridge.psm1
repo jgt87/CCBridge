@@ -93,7 +93,10 @@ function Connect-Copilot {
         [string]$SelectorsPath,
         [int]$SignInTimeoutSec = 300,
         [bool]$SaveReplyFrames = $true,
-        [ValidateSet('single-sign-on', 'private')][string]$SignIn = 'single-sign-on'
+        [ValidateSet('single-sign-on', 'private')][string]$SignIn = 'single-sign-on',
+        # Return at once when the person still has to sign in: the bridge comes back with SignInPending,
+        # and the caller looks for the message box itself (Agent Update-PendingSignIn), so its thread is free.
+        [switch]$NoSignInWait
     )
     $sel = if ($SelectorsPath) { Get-Content $SelectorsPath -Raw | ConvertFrom-Json } else { Get-CCBridgeConfig selectors (Split-Path -Parent $script:ModuleDir) }
     # The Copilot tab is recognised by its host (chatUrl and chatHosts in selectors.json).
@@ -112,16 +115,22 @@ function Connect-Copilot {
             }
             $session = Connect-Cdp $target.webSocketDebuggerUrl
             $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; AttachErrors = @(); SaveFrames = $SaveReplyFrames
-        Pacing = (Get-CopilotPacing); LastReplyAt = $null }
+        Pacing = (Get-CopilotPacing); LastReplyAt = $null; SignInPending = $false }
             if (-not (Test-CopilotUrl $target.url $sel)) { $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl } }
             $null = Invoke-Cdp $session 'Network.enable'
             # Edge throttles a page in a background or minimised window so hard that Copilot's reply
             # stream stalls halfway. Keep the Copilot tab "visible, focused and active" while attached.
             Set-CopilotTabActive $session
             Write-CCBLog verbose bridge "Attached to page target (attempt $attempt)" @{ url = ($target.url -replace '\?.*', ''); port = $Port }
-            $wait = if ($signInAnnounced) { [int][Math]::Max(1, ($deadline - (Get-Date)).TotalSeconds) } else { 20 }
+            $wait = if ($signInAnnounced) { [int][Math]::Max(1, ($deadline - (Get-Date)).TotalSeconds) } elseif ($NoSignInWait) { 5 } else { 20 }
             if (Wait-CopilotEditor $bridge -TimeoutSec $wait) {
                 Write-CCBLog info bridge "Connected to Copilot Chat$(if ($attempt -gt 1) { " (after $attempt attempts)" })"
+                return $bridge
+            }
+            if ($NoSignInWait) {
+                Write-Host 'Sign in to Copilot in the Edge window that just opened; StreamHub gets the project ready meanwhile.'
+                Write-CCBLog info bridge 'Message box not there yet; the sign-in is awaited while the worker goes on'
+                $bridge.SignInPending = $true
                 return $bridge
             }
             if ($signInAnnounced) { throw 'Copilot message box never appeared; not signed in?' }
@@ -1998,4 +2007,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Get-CopilotResponseOptions, Get-ResponseModeClassic, Close-CopilotMenu, Test-DamagedTagText, Get-AlnumHead, Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames, Get-TypedLength
+Export-ModuleMember -Function Get-CopilotResponseOptions, Get-ResponseModeClassic, Close-CopilotMenu, Test-DamagedTagText, Get-AlnumHead, Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Wait-CopilotEditor, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames, Get-TypedLength

@@ -179,6 +179,8 @@ export interface AgentEvent {
     | "packages-needed"
     /** Copilot ended a task that changed files without reporting it done; StreamHub checked the files anyway. */
     | "task-unfinished"
+    /** An answer-only task refused Copilot's file edits: apply them, or send the request again as a change. */
+    | "edits-refused"
     /** Settings > Privacy > Clear chat history: the chat shows nothing from before it. */
     | "history-cleared"
     /** A new project's first request builds a page without saying how: StreamHub asks first. */
@@ -224,6 +226,9 @@ export interface AgentEvent {
   window?: boolean;
   items?: TodoItem[];
   files?: string[];
+  /** edits-refused: the id of the refused edits (for replay) and how many there were. */
+  replayId?: string;
+  count?: number;
   /** Failed step: possible reasons and what happens next. */
   reasons?: string[];
   next?: string;
@@ -429,6 +434,10 @@ export interface ChatOptions {
   asCoding?: boolean;
   /** Send to Copilot without checking whether the message asks to run a runbook. */
   noRunbook?: boolean;
+  /** Send as a request to change files, whatever its words (the edits-refused card). */
+  asChange?: boolean;
+  /** Apply the edits an answer-only turn refused, by their id (edits-refused), then let Copilot finish. */
+  replay?: string;
   /** The answer to the setup card: how the project is built, a live data file, and the other questions by id. */
   setup?: { build?: BuildForm; liveSource?: string; answers?: Record<string, string> };
   clarify?: boolean;

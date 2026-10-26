@@ -1,6 +1,5 @@
-import { AlertTriangle, ClipboardList, FolderOpen, Menu as MenuIcon, MessageSquarePlus, PanelLeftOpen, Settings, X } from "lucide-react";
+import { AlertTriangle, ClipboardList, FolderOpen, Loader2, Menu as MenuIcon, MessageSquarePlus, PanelLeftOpen, Settings, X } from "lucide-react";
 import CommandButton from "@/components/kokonutui/command-button";
-import Loader from "@/components/kokonutui/loader";
 import { CopilotStatus } from "@/components/ccb/copilot-status";
 import { LimitationsNote } from "@/components/ccb/limitations-note";
 import type { Notice } from "@/components/ccb/command-palette";
@@ -136,25 +135,25 @@ export function InstallProblem({ problem }: { problem: string }) {
   );
 }
 
-/** The chat before its first message: connecting, or what to do. */
+/** The chat before its first message: what to do, with the project usable while Copilot still connects. */
 export function ChatEmpty({ state }: { state: AppState }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 px-6 py-16 text-center">
-      {state.copilot === "connecting" ? (
-        <Loader size="sm" subtitle={state.copilotMessage || "Opening Copilot in Edge"} title="Connecting to Copilot" />
-      ) : (
-        <>
-          <ClipboardList className="h-10 w-10 text-muted-foreground/50" />
-          <div className="max-w-md space-y-1">
-            <p className="font-medium">What should we build in {state.project?.name}?</p>
-            <p className="text-muted-foreground text-sm">
-              Describe the change. Copilot reads the project, proposes edits and commands, and StreamHub applies them after your approval.
-              Type <span className="font-mono">@</span> or use the @ button to attach files.
-            </p>
-          </div>
-          {state.copilot === "ready" && <LimitationsNote />}
-        </>
+      <ClipboardList className="h-10 w-10 text-muted-foreground/50" />
+      <div className="max-w-md space-y-1">
+        <p className="font-medium">What should we build in {state.project?.name}?</p>
+        <p className="text-muted-foreground text-sm">
+          Describe the change. Copilot reads the project, proposes edits and commands, and StreamHub applies them after your approval.
+          Type <span className="font-mono">@</span> or use the @ button to attach files.
+        </p>
+      </div>
+      {state.copilot === "connecting" && (
+        <p className="flex max-w-md items-center gap-2 text-muted-foreground text-xs" role="status">
+          <Loader2 aria-hidden className="h-3.5 w-3.5 shrink-0 animate-spin" />
+          {state.copilotMessage || "Opening Copilot in Edge. Sign in there if asked."}
+        </p>
       )}
+      {state.copilot === "ready" && <LimitationsNote />}
     </div>
   );
 }

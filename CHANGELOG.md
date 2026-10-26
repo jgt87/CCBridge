@@ -4,6 +4,18 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [v0.1.153] - 2026-10-26
+
+### Added
+- When Copilot writes file changes but StreamHub handled your message as a question, a card now says so and offers two buttons: Apply these edits (applies what Copilot wrote, with the usual approval and checks, and Copilot then finishes the task) or Send again as a change.
+- After Copilot proposed a change in a question-only task, a short agreeing reply such as "sounds good", "yes", "ok" or "continue" now approves it.
+
+### Fixed
+- "Go ahead as suggested", "yes, please do it", "proceed with ...", "doe maar" and similar go-aheads are now taken as a request to make the change. Before, they could stay answer-only, so StreamHub refused Copilot's edits and nothing changed.
+- Signing in to Copilot no longer holds everything up: the project opens and gets ready while you sign in in Edge, tasks that do not need Copilot run meanwhile, and the chat shows a small connecting line instead of a full-screen loader.
+
 ## [v0.1.152] - 2026-10-25
 
 ### Added

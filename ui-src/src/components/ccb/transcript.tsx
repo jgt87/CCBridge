@@ -5,6 +5,8 @@ import { PageReportCard } from "./page-report-card";
 import { pageReportItem, type PageReportItem } from "./page-report";
 import { ThemeCard } from "./theme-card";
 import { TidyCard } from "./tidy-card";
+import { EditsRefusedCard } from "./edits-refused-card";
+import type { EditsRefusedItem } from "./edits-refused-view";
 import { PptxRethemeCard } from "./pptx-retheme-card";
 import { pptxRethemeItem, type PptxRethemeItem } from "./pptx-retheme-view";
 import { PptxOutlineCard } from "./pptx-outline-card";
@@ -53,6 +55,7 @@ export type TranscriptItem = Stamp &
   | { kind: "theme"; seq: number; colours: ThemeColours; hasKit: boolean; dark: boolean; restored: boolean }
   | { kind: "tidy"; seq: number; text: string; items: TidyItem[]; restored: boolean }
   | { kind: "unfinished"; seq: number; text: string; findings: string[]; continueText: string; restored: boolean }
+  | EditsRefusedItem
   | { kind: "action"; seq: number; item: ActionItem }
   | { kind: "note"; seq: number; tone: NoteTone; text: string; path?: string }
   | { kind: "undo"; seq: number; text: string; changes: UndoChange[] }
@@ -154,6 +157,16 @@ const HANDLERS: Partial<Record<AgentEvent["type"], (e: AgentEvent, ctx: BuildCon
       text: e.text ?? "",
       findings: Array.isArray((e as { findings?: unknown }).findings) ? ((e as { findings?: string[] }).findings ?? []) : [],
       continueText: e.continueText ?? "",
+      restored: Boolean(e.restored),
+    }),
+  "edits-refused": (e, ctx) =>
+    ctx.items.push({
+      kind: "editsRefused",
+      seq: e.seq,
+      replayId: e.replayId ?? "",
+      count: Number(e.count) || 0,
+      files: Array.isArray(e.files) ? e.files : e.files ? [e.files as unknown as string] : [],
+      request: e.request ?? "",
       restored: Boolean(e.restored),
     }),
   "files-intake": (e, ctx) => {
@@ -575,6 +588,8 @@ function TranscriptRow({
       return <TidyCard items={item.items} restored={item.restored} text={item.text} />;
     case "unfinished":
       return <UnfinishedCard item={item} onSend={onSend} />;
+    case "editsRefused":
+      return <EditsRefusedCard item={item} onSend={onSend} />;
     case "action":
       return <ActionCard item={item.item} took={rowTime(item.time, item.at, item.endAt)?.took} />;
     case "note":

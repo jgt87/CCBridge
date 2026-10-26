@@ -351,6 +351,13 @@ function Invoke-ChatApi($Ctx, $State) {
         try { Add-PlanSection $State.ProjectRoot $planId $Heading $Body $Status } catch { Write-CCBLogError server 'PLAN.md' $_ }
     }
     if ($b.asCoding) { $task.forceKind = 'coding' }
+    # The card after an answer-only turn that refused Copilot's edits (event 'edits-refused'): send the
+    # request again as a change, or apply the refused edits as written (the StreamHub page only).
+    if ($b.asChange) { $task.forceKind = 'coding'; $task.intent = 'change'; $title = "As a change: $([string]$b.text)" }
+    if ($b.replay -and $Ctx.Request.Headers['Origin'] -eq "http://localhost:$($State.Config.port)") {
+        $task.forceKind = 'coding'; $task.intent = 'change'; $task.replay = [string]$b.replay; $task.shown = $true
+        $title = "Apply Copilot's edits: $([string]$b.text)"
+    }
     if ($b.noRunbook) { $task.noRunbook = $true }   # "Send to Copilot" on a runbook choice: no runbook check
     # The answer to the project setup card. Only the StreamHub page itself (its Origin) sets it:
     # a live data file outside the project is the person's choice, never another program's.

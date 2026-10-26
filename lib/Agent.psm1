@@ -254,11 +254,27 @@ function Get-AgentEvents {
 # --- Copilot connection --------------------------------------------------------------
 
 $script:Bridge = $null
+# Attached to the Copilot tab while the person still signs in there ($State.SignInDeadline): the
+# worker stays free meanwhile (project preparation, tasks without Copilot), Update-PendingSignIn looks.
+$script:PendingBridge = $null
+$script:SignInSec = 330   # as long as Connect-Copilot waits for a sign-in itself
+
+$script:NotSignedIn = 'Copilot message box never appeared; not signed in?'
+
+function Test-BridgeOpen($Bridge) {
+    $ws = $Bridge.Session.Ws
+    -not $Bridge.Session.Lost -and $ws -and $ws.State -eq [System.Net.WebSockets.WebSocketState]::Open
+}
+
+function Get-ConnectParams($State) {
+    $save = if ($null -ne $State.Config.saveReplyFrames) { [bool]$State.Config.saveReplyFrames } else { $true }
+    $signIn = if ("$($State.Config.signIn)" -eq 'private') { 'private' } else { 'single-sign-on' }
+    @{ Port = $State.Config.cdpPort; SaveReplyFrames = $save; SignIn = $signIn }
+}
 
 function Get-Bridge($State) {
     if ($script:Bridge) {
-        $ws = $script:Bridge.Session.Ws
-        if (-not $script:Bridge.Session.Lost -and $ws -and $ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+        if (Test-BridgeOpen $script:Bridge) {
             # Pacing changed in the settings applies to the next prompt.
             if ($State.Config.pacing -and $script:Bridge.PSObject.Properties['Pacing']) {
                 foreach ($k in 'newChatSettleSec', 'beforeSendSec', 'betweenPromptsSec') { if ($null -ne $State.Config.pacing.$k) { $script:Bridge.Pacing[$k] = [double]$State.Config.pacing.$k } }
@@ -268,41 +284,120 @@ function Get-Bridge($State) {
         Write-CCBLog info agent 'The connection to the Copilot tab was lost; reconnecting'
         Reset-Bridge $State
     }
+    # A task that needs Copilot while the sign-in is still awaited waits for the rest of that time.
+    if ($script:PendingBridge) {
+        $pending = $script:PendingBridge
+        $left = [int][Math]::Max(1, ([datetime]$State.SignInDeadline - (Get-Date)).TotalSeconds)
+        $ok = $false
+        try { $ok = Wait-CopilotEditor $pending -TimeoutSec $left } catch { Write-CCBLog info agent "The Copilot tab changed during the sign-in; connecting again: $($_.Exception.Message)" }
+        $expired = (Get-Date) -ge [datetime]$State.SignInDeadline
+        Clear-PendingBridge $State -KeepSession:$ok
+        if ($ok) {
+            try { return Complete-CopilotConnect $State $pending } catch { Set-ConnectFailure $State $_.Exception.Message; throw }
+        }
+        if ($expired) { Set-ConnectFailure $State $script:NotSignedIn; throw $script:NotSignedIn }
+    }
     $State.Copilot = 'connecting'
     $State.CopilotMessage = 'Opening Copilot in Edge. Sign in there if asked.'
     try {
-        $save = if ($null -ne $State.Config.saveReplyFrames) { [bool]$State.Config.saveReplyFrames } else { $true }
-        $signIn = if ("$($State.Config.signIn)" -eq 'private') { 'private' } else { 'single-sign-on' }
-            $script:Bridge = Connect-Copilot -Port $State.Config.cdpPort -SaveReplyFrames $save -SignIn $signIn
-        $State.Copilot = 'ready'; $State.CopilotMessage = ''; $State.ConnectFailures = 0
-        $State.CopilotThemeApplied = $null; Update-CopilotTheme $State   # a new connection: the tab gets StreamHub's theme again
-        # What the response picker offers on this tenant (Advanced reasoning, models...), for the app's picker.
-        if (Test-ResponseOptionsDue $State) { Update-ResponseOptions $State $script:Bridge }
-        # Page health check: the parts CCBridge relies on are where selectors.json says.
-        try {
-            $health = @(Test-CopilotPage $script:Bridge)
-            $bad = @($health | Where-Object { $_.ok -eq $false })
-            Write-CCBLog $(if ($bad.Count) { 'info' } else { 'verbose' }) agent "Copilot page check: $(if ($bad.Count) { "$($bad.Count) problem(s)" } else { 'all parts found' })" @{ parts = @($health | ForEach-Object { "$($_.part)=$(if ($null -eq $_.ok) { 'unchecked' } elseif ($_.ok) { 'ok' } else { 'missing' })" }) }
-            if ($bad.Count) {
-                $what = ($bad | ForEach-Object { "$($_.part) (selectors.$($_.setting): $($_.note))" }) -join '; '
-                $State.CopilotMessage = "Page check: $what"
-                Add-AgentEvent $State 'status' @{ text = "Copilot page check: $what. Copilot's page may have changed; StreamHub may not be able to $(if (@($bad | Where-Object needed).Count) { 'type or send prompts' } else { 'start new chats or read replies reliably' }). Run test-tools\capture.cmd and send the report to update the selectors." }
-            }
-        } catch { Write-CCBLogError agent 'Copilot page check failed' $_ }
-        $script:Bridge
-    } catch {
-        $State.Copilot = 'error'; $State.CopilotMessage = $_.Exception.Message
-        # The idle worker retries, so Copilot is ready before the first prompt: waiting longer each
-        # time, and stopping by itself after a while (Edge closed, signed out, no network).
-        $State.ConnectFailures = [int]$State.ConnectFailures + 1
-        $wait = Get-ConnectRetryDelay $State.ConnectFailures
-        if ($null -ne $wait) { $State.NextConnectAttempt = (Get-Date).AddSeconds($wait) }
-        else {
-            $State.NextConnectAttempt = $null
-            $State.CopilotMessage = "$($_.Exception.Message) StreamHub stopped trying by itself after $($State.ConnectFailures) attempts: press Check connection, or send a message to try again."
-            Write-CCBLog info agent "Copilot connection: no more automatic retries after $($State.ConnectFailures) attempts"
+        $p = Get-ConnectParams $State
+        $b = Connect-Copilot @p
+        Complete-CopilotConnect $State $b
+    } catch { Set-ConnectFailure $State $_.Exception.Message; throw }
+}
+
+function Start-CopilotConnect($State, [switch]$KeepDeadline) {
+    <# The connect task (start, Check connection, retries): opens Copilot in Edge and returns at once
+       when the person still has to sign in there. The idle worker then looks for the message box
+       (Update-PendingSignIn), so the project is got ready and tasks without Copilot run meanwhile. #>
+    if ($script:PendingBridge) { return }
+    if ($script:Bridge) {
+        if (Test-BridgeOpen $script:Bridge) { return }
+        Write-CCBLog info agent 'The connection to the Copilot tab was lost; reconnecting'
+        Reset-Bridge $State
+    }
+    # A new connect gets the whole time; attaching again to a tab a sign-in redirect replaced keeps what is left.
+    if (-not $KeepDeadline -or -not $State.SignInDeadline) { $State.SignInDeadline = (Get-Date).AddSeconds($script:SignInSec) }
+    $State.Copilot = 'connecting'
+    $State.CopilotMessage = 'Opening Copilot in Edge. Sign in there if asked.'
+    try {
+        $p = Get-ConnectParams $State
+        $b = Connect-Copilot @p -NoSignInWait
+        if ($b.SignInPending) {
+            $script:PendingBridge = $b
+            $State.CopilotMessage = 'Sign in to Copilot in its tab in Edge. The project is ready to use meanwhile.'
+            return
         }
-        throw
+        $State.SignInDeadline = $null
+        $null = Complete-CopilotConnect $State $b
+    } catch { $State.SignInDeadline = $null; Set-ConnectFailure $State $_.Exception.Message; throw }
+}
+
+function Update-PendingSignIn($State) {
+    <# Idle worker: has the person signed in to Copilot yet? One short look at the tab per pass. #>
+    if (-not $script:PendingBridge) { return }
+    $pending = $script:PendingBridge
+    $ok = $false
+    try { $ok = Wait-CopilotEditor $pending -TimeoutSec 1 }
+    catch {
+        # Sign-in redirects can replace the tab: attach to the new one, within the same time.
+        Write-CCBLog info agent "The Copilot tab changed during the sign-in; attaching again: $($_.Exception.Message)"
+        Clear-PendingBridge $State -KeepDeadline
+        if ((Get-Date) -ge [datetime]$State.SignInDeadline) { $State.SignInDeadline = $null; Set-ConnectFailure $State $script:NotSignedIn; return }
+        try { Start-CopilotConnect $State -KeepDeadline } catch { Write-CCBLogError agent 'Copilot connection' $_ }
+        return
+    }
+    if ($ok) {
+        Clear-PendingBridge $State -KeepSession
+        Write-CCBLog info agent 'Signed in: Copilot is ready'
+        try { $null = Complete-CopilotConnect $State $pending } catch { Set-ConnectFailure $State $_.Exception.Message; Write-CCBLogError agent 'Copilot connection' $_ }
+        return
+    }
+    if ((Get-Date) -ge [datetime]$State.SignInDeadline) {
+        Write-CCBLog info bridge 'Message box never appeared (not signed in, or the page changed: check selectors.editor)'
+        Clear-PendingBridge $State
+        Set-ConnectFailure $State $script:NotSignedIn
+    }
+}
+
+function Clear-PendingBridge($State, [switch]$KeepSession, [switch]$KeepDeadline) {
+    if ($script:PendingBridge -and -not $KeepSession) { try { Disconnect-Copilot $script:PendingBridge } catch { } }
+    $script:PendingBridge = $null
+    if (-not $KeepDeadline) { $State.SignInDeadline = $null }
+}
+
+function Complete-CopilotConnect($State, $Bridge) {
+    <# A connection whose message box is there: the state, the tab's theme, the response picker and the page check. #>
+    $script:Bridge = $Bridge
+    $State.Copilot = 'ready'; $State.CopilotMessage = ''; $State.ConnectFailures = 0
+    $State.CopilotThemeApplied = $null; Update-CopilotTheme $State   # a new connection: the tab gets StreamHub's theme again
+    # What the response picker offers on this tenant (Advanced reasoning, models...), for the app's picker.
+    if (Test-ResponseOptionsDue $State) { Update-ResponseOptions $State $script:Bridge }
+    # Page health check: the parts CCBridge relies on are where selectors.json says.
+    try {
+        $health = @(Test-CopilotPage $script:Bridge)
+        $bad = @($health | Where-Object { $_.ok -eq $false })
+        Write-CCBLog $(if ($bad.Count) { 'info' } else { 'verbose' }) agent "Copilot page check: $(if ($bad.Count) { "$($bad.Count) problem(s)" } else { 'all parts found' })" @{ parts = @($health | ForEach-Object { "$($_.part)=$(if ($null -eq $_.ok) { 'unchecked' } elseif ($_.ok) { 'ok' } else { 'missing' })" }) }
+        if ($bad.Count) {
+            $what = ($bad | ForEach-Object { "$($_.part) (selectors.$($_.setting): $($_.note))" }) -join '; '
+            $State.CopilotMessage = "Page check: $what"
+            Add-AgentEvent $State 'status' @{ text = "Copilot page check: $what. Copilot's page may have changed; StreamHub may not be able to $(if (@($bad | Where-Object needed).Count) { 'type or send prompts' } else { 'start new chats or read replies reliably' }). Run test-tools\capture.cmd and send the report to update the selectors." }
+        }
+    } catch { Write-CCBLogError agent 'Copilot page check failed' $_ }
+    $script:Bridge
+}
+
+function Set-ConnectFailure($State, [string]$Message) {
+    $State.Copilot = 'error'; $State.CopilotMessage = $Message
+    # The idle worker retries, so Copilot is ready before the first prompt: waiting longer each
+    # time, and stopping by itself after a while (Edge closed, signed out, no network).
+    $State.ConnectFailures = [int]$State.ConnectFailures + 1
+    $wait = Get-ConnectRetryDelay $State.ConnectFailures
+    if ($null -ne $wait) { $State.NextConnectAttempt = (Get-Date).AddSeconds($wait) }
+    else {
+        $State.NextConnectAttempt = $null
+        $State.CopilotMessage = "$Message StreamHub stopped trying by itself after $($State.ConnectFailures) attempts: press Check connection, or send a message to try again."
+        Write-CCBLog info agent "Copilot connection: no more automatic retries after $($State.ConnectFailures) attempts"
     }
 }
 
@@ -338,6 +433,7 @@ function Update-CopilotTheme($State) {
 
 function Reset-Bridge($State) {
     if ($script:Bridge) { try { Disconnect-Copilot $script:Bridge } catch { } }
+    Clear-PendingBridge $State
     $script:Bridge = $null
     $State.Copilot = 'idle'
     $State.CopilotThemeApplied = $null   # the override ends with the connection
@@ -3678,6 +3774,8 @@ function Invoke-AgentActionCore {
     $mode = $State.Mode
     $evt = @{ id = $Id; action = $Action.type; target = $Action.arg; status = 'running' }
     if ($State.TaskIntent -in 'answer', 'investigate' -and $Action.type -in 'write', 'edit', 'remember', 'runbook') {
+        # Kept for the card after the turn: the person can apply these edits as they are (Invoke-AgentTurn -Replay).
+        if ($Action.type -in 'write', 'edit' -and $null -ne $State.RefusedEdits) { $State.RefusedEdits.Add($Action) }
         return @{ ok = $false; summary = 'This task asks for an answer or investigation, not changes.'; output = 'Not applied: the current task does not authorize file changes. Continue reading or investigating, then answer with a done block.' }
     }
 
@@ -5292,8 +5390,22 @@ function Invoke-AgentTurn {
     # -Intent: the task's own intent ('change'), used instead of Get-TaskIntent on the text: a fixed
     # request that quotes an earlier one ("save it as a runbook") must not take that one's
     # "do not change anything" as its own.
-    param($State, [string]$Text, [string]$ForceKind = '', [switch]$Shown, [string]$Intent = '')
+    # -Replay: the id of the edits an answer-only turn refused (event 'edits-refused'); the person chose
+    # to apply them, so the first round applies them as Copilot wrote them instead of asking again.
+    param($State, [string]$Text, [string]$ForceKind = '', [switch]$Shown, [string]$Intent = '', [string]$Replay = '')
     if (-not $State.ProjectRoot) { Add-AgentEvent $State 'error' @{ text = 'Open or create a project first.' }; $State.Busy = $false; return }
+    $replayEdits = @()
+    if ($Replay) {
+        $stored = $State.RefusedReplay
+        if ($stored -and "$($stored.id)" -eq $Replay -and "$($stored.project)" -eq "$($State.ProjectRoot)") { $replayEdits = @($stored.actions); $Intent = 'change' }
+        $State.RefusedReplay = $null
+        if (-not $replayEdits.Count) { Add-AgentEvent $State 'status' @{ text = 'Those edits are no longer available (a newer message, a restart or another project). Use "Send again as a change" instead.' }; $State.Busy = $false; return }
+    }
+    # A change Copilot proposed or wrote in the last answer-only turn: a short agreeing reply approves it.
+    $proposalPending = [bool]$State.PendingProposal
+    $State.PendingProposal = $false
+    $State.RefusedEdits = New-Object 'Collections.Generic.List[object]'
+    $State.EditsRefusedShown = $false
     $State.Busy = $true; $State.Cancel = $false
     $State.UserLook = Test-LookRequest $Text   # a look the person asks for wins over the kit's (Prompts)
     $State.VisualTurn = [bool]($State.UserLook -or (Test-LookUnclear $Text))   # only for the waiting indicator's light lines
@@ -5306,7 +5418,8 @@ function Invoke-AgentTurn {
     if (-not $Shown) { Add-AgentEvent $State 'user' @{ text = $Text } }
     $State.TurnText = $Text
     # Plan only stays investigate whatever the task says; otherwise a task's own 'change' wins.
-    $State.TaskIntent = if ($Intent -eq 'change' -and $State.Mode -ne 'plan') { 'change' } else { Get-TaskIntent $Text $State.Mode "$($State.TaskIntent)" }
+    $State.TaskIntent = if ($Intent -eq 'change' -and $State.Mode -ne 'plan') { 'change' } else { Get-TaskIntent $Text $State.Mode "$($State.TaskIntent)" -Proposal:$proposalPending }
+    if ($proposalPending -and $State.TaskIntent -eq 'change') { Write-CCBLog info agent 'Reply to a proposal taken as its approval: intent change' }
     $State.PendingGuidance = New-Object 'Collections.Generic.List[string]'
     $State.TaskGuidance = New-Object 'Collections.Generic.List[string]'
     # Busy is already set: a checkpoint that cannot be made must not leave it set.
@@ -5502,8 +5615,17 @@ function Invoke-AgentTurn {
             $taskRecord.acceptance = @($acceptResults); $taskRecord.verification = $ev
             $null = Save-TaskRecord $State.TaskRecordDir $taskRecord
 
-            Write-CCBLog verbose agent "Round ${round}: sending" @{ chars = $message.Length }
-            $r = Send-ToCopilot $State $message -Files @(@($turn.attach) + @($fileAttach)) -OptionalFiles
+            $replaying = $round -eq 1 -and $replayEdits.Count -gt 0
+            if ($replaying) {
+                # The edits the person chose to apply: no message to Copilot this round; the results go in the next.
+                Write-CCBLog info agent 'Applying the edits an answer-only turn refused' @{ edits = $replayEdits.Count }
+                Add-AgentEvent $State 'status' @{ text = "Applying the $($replayEdits.Count) edit(s) Copilot wrote earlier, with the usual approval and checks." }
+                # Every field the loop reads: @($null).Count is 1 in 5.1, so a missing ProposedActions would stop the task.
+                $r = [pscustomobject]@{ Text = 'replay'; Uncertain = 0; Result = 'Success'; References = @(); ProposedActions = @(); ActionClaims = @(); Cancelled = $false }
+            } else {
+                Write-CCBLog verbose agent "Round ${round}: sending" @{ chars = $message.Length }
+                $r = Send-ToCopilot $State $message -Files @(@($turn.attach) + @($fileAttach)) -OptionalFiles
+            }
             $State.PendingGuidance.Clear()
             if (@($turn.attach).Count -or $fileAttach.Count) {
                 foreach ($why in @((Get-Bridge $State).AttachErrors)) { Add-AgentEvent $State 'status' @{ text = "A file was not shown to Copilot: $why" } }
@@ -5518,10 +5640,10 @@ function Invoke-AgentTurn {
                 }
                 break
             }
-            $actions = @(Get-ActionBlocks $r.Text)
-            $lastReply = "$($r.Text)"
+            $actions = @(if ($replaying) { $replayEdits } else { Get-ActionBlocks $r.Text })
+            $lastReply = if ($replaying) { '' } else { "$($r.Text)" }
             Write-CCBLog verbose agent "Round ${round}: reply parsed" @{ actions = @($actions | ForEach-Object { "$($_.type) $($_.arg)".Trim() }) }
-            Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @($r.References) }
+            if (-not $replaying) { Add-AgentEvent $State 'assistant' @{ text = $r.Text; uncertain = $r.Uncertain; round = $round; used = $State.Throttle.used; max = $State.Throttle.max; references = @($r.References) } }
             $notesOnly = $false   # this reply answered one of the helper program's asks (checks, type, scope, data notes, build form)
             if ($typeAsk) {
                 $rt = Read-RequestType "$($r.Text)"
@@ -5810,6 +5932,22 @@ function Invoke-AgentTurn {
             if (-not $left.go) { $endReason = $left.reason; Add-AgentEvent $State 'status' @{ text = "Stopped after $round rounds: $($left.reason). Send a message to continue." }; break }
 
             $message = "Results:`n`n" + (Format-ActionResults $State $results) + "`n`nContinue. Use done when the task is finished."
+            if ($replaying) { $message = "The person approved the file changes you wrote earlier that were not applied then, because that task was answer-only. The helper program applied them now; the results are below. Check them, finish the change the request above asks for, and use done.`n`n" + $message }
+        }
+        # An answer-only turn that refused Copilot's edits or ended with a change it proposed: the next
+        # short agreeing reply approves it (Get-TaskIntent -Proposal), and refused edits get a card to
+        # apply them as written or to send the request again as a change.
+        if ($State.TaskIntent -in 'answer', 'investigate' -and $State.Mode -ne 'plan' -and -not $State.Cancel) {
+            $refused = @($State.RefusedEdits.ToArray())
+            if ($refused.Count -or (Test-ProposalText $doneText) -or (Test-ProposalText $lastReply) -or (Test-UnfinishedText $lastReply)) { $State.PendingProposal = $true }
+            if ($refused.Count -and -not $State.Headless) {
+                $files = @($refused | ForEach-Object { "$($_.arg)" -replace ':\d+-\d+$', '' } | Where-Object { $_ } | Select-Object -Unique)
+                $rid = [guid]::NewGuid().ToString('N').Substring(0, 12)
+                $State.RefusedReplay = @{ id = $rid; project = "$($State.ProjectRoot)"; request = $Text; actions = $refused }
+                $State.EditsRefusedShown = $true
+                Add-AgentEvent $State 'edits-refused' @{ replayId = $rid; count = $refused.Count; files = $files; request = $Text }
+                Write-CCBLog info agent 'Answer-only turn refused edits; offered to apply them' @{ edits = $refused.Count; files = $files }
+            }
         }
         # "Next steps" in Copilot's last reply become one-click prompts (sent only when the user picks one).
         if (-not $State.Cancel) {
@@ -5985,6 +6123,8 @@ function Start-AgentWorker {
                 $State.Tasks.Enqueue(@{ kind = 'connect'; auto = $true })
             }
             Update-CopilotTheme $State   # idle: a theme just chosen in the app reaches the Copilot tab at once
+            # Signing in to Copilot happens in its tab while the worker gets the project ready (below).
+            try { Update-PendingSignIn $State } catch { Write-CCBLogError agent 'Copilot sign-in' $_ }
             [Threading.Monitor]::Enter($State.ProjectGate)
             try {
             # A project just opened (Set-Project): data copies follow their JSON. Data files are not
@@ -6077,7 +6217,7 @@ function Start-AgentWorker {
                 'connect' {
                     # Retry in the app (not the idle worker's own retry): the count of failures starts over.
                     if (-not $task.auto) { $State.ConnectFailures = 0 }
-                    $null = Get-Bridge $State
+                    Start-CopilotConnect $State
                 }
                 'chat'    {
                     if ($task.newChat) { $State.NeedNewChat = $true }
@@ -6108,7 +6248,7 @@ function Start-AgentWorker {
                         $State.IssueFix = $task.issueFix; $State.IssueFixHandled = $false; $State.IssueFixFromSeq = $fromSeq
                         if ($task.freshChat) { $State.NeedNewChat = $true }
                         $State.ScopeUpgrade = ''
-                        try { Invoke-AgentTurn $State $task.text $force -Shown:([bool]$task.shown) -Intent ([string]$task.intent) }
+                        try { Invoke-AgentTurn $State $task.text $force -Shown:([bool]$task.shown) -Intent ([string]$task.intent) -Replay ([string]$task.replay) }
                         finally {
                             $State.ScopeAsk = ''
                             $State.TurnAnswers = @{}
@@ -6129,7 +6269,7 @@ function Start-AgentWorker {
                             $null = Submit-AgentTask $State $next 'user'
                         }
                         elseif ($task.planFirst) { Publish-PlanReady $State $task $fromSeq }
-                        elseif (-not $task.planBuild -and -not $task.issueFix -and -not $State.Stop) { try { $null = Publish-ProposalPlan $State $task $fromSeq } catch { Write-CCBLogError agent 'proposal plan' $_ } }
+                        elseif (-not $task.planBuild -and -not $task.issueFix -and -not $State.Stop -and -not $State.EditsRefusedShown) { try { $null = Publish-ProposalPlan $State $task $fromSeq } catch { Write-CCBLogError agent 'proposal plan' $_ } }
                         if ($task.planBuild -and $task.planId) { Write-PlanResult $State "$($task.planId)" $fromSeq }
                     }
                 }
