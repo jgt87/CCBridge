@@ -752,7 +752,7 @@ function ThinkingIndicator({
       <AITextLoading
         className="font-semibold text-base"
         containerClassName="justify-start p-0"
-        interval={1800}
+        interval={4000}
         texts={indicatorTexts({ progress, stopping, activity, seed, look })}
       />
       {work && <WorkStatusLines onShowCopilot={onShowCopilot} onStop={onStop} stopping={stopping} work={work} />}

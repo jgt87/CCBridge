@@ -112,6 +112,18 @@ Describe 'What reaches beyond the project (Get-RunEffects)' {
         Set-Script 'Scripts\ok.js' "const re = /a/; re.exec('a');`nconsole.log(JSON.stringify({}));`n"
         @(Get-RunEffects $proj 'node Scripts/ok.js').Count | Should Be 0
     }
+    It 'reads quoted markup in a page build script without failing on characters a path cannot hold' {
+        # [IO.Path]::IsPathRooted throws on " < > | in 5.1: the quoted strings are not paths.
+        Set-Script 'Scripts\page.ps1' ("param([string]`$OutputPath = (Join-Path `$PSScriptRoot '..\dist\index.html'))`n" +
+            "`$parts = @('<html lang=""en"">', 'src=""js/app.js""', 'a|b')`n[IO.File]::WriteAllText(`$OutputPath, '<html lang=""en"">')`n" +
+            "Set-Content -Path `$OutputPath -Value '<script src=""x"">' -Encoding UTF8`nRemove-Item (Join-Path `$PSScriptRoot '..\dist\old.html'); `$t = '<b>|</b>'`n")
+        @(Get-RunEffects $proj 'powershell -File Scripts/page.ps1').Count | Should Be 0
+        Test-DeleteScope $proj 'powershell -File Scripts/page.ps1' | Should BeNullOrEmpty
+        Test-RootedPath '<html lang="en">' | Should Be $false
+        Test-RootedPath 'C:\x' | Should Be $true
+        Test-RootedPath '\\server\share' | Should Be $true
+        Test-RootedPath 'dist\x' | Should Be $false
+    }
     It 'finds code that starts programs or evaluates code in JavaScript and Python' {
         Set-Script 'Scripts\p.py' "import subprocess`nsubprocess.run(['x'])`n"
         (@(Get-RunEffects $proj 'python Scripts/p.py') -join ';') | Should Match 'starts other programs'

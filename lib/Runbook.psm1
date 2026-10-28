@@ -69,7 +69,7 @@ function Test-RunbookFile {
         $out = "$($rb.meta.output)".Trim()
         if (-not $out) { $problems.Add("the header needs an output: line, for example output: $ed/$stem.json") }
         elseif ($out -notmatch '(?i)\.json$') { $problems.Add("output must be a .json file, for example $ed/$stem.json") }
-        elseif ([IO.Path]::IsPathRooted($out) -or $out -match '(^|[\\/])\.\.([\\/]|$)') { $problems.Add("output must be a path inside the project, for example $ed/$stem.json") }
+        elseif ((Test-RootedPath $out) -or $out -match '(^|[\\/])\.\.([\\/]|$)') { $problems.Add("output must be a path inside the project, for example $ed/$stem.json") }
         elseif ($out -notmatch "(?i)^$([regex]::Escape($ed))/") { $problems.Add("the data goes in $ed/: write output: $ed/$stem.json") }
     }
     if (-not $rb.body) { $problems.Add('the runbook has no instructions below the header') }

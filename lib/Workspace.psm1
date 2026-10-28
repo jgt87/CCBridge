@@ -159,11 +159,18 @@ function Get-ProjectStateDir([string]$ProjectRoot) {
     $dir
 }
 
+function Test-RootedPath([string]$Path) {
+    <# [IO.Path]::IsPathRooted without the throw: in Windows PowerShell 5.1 (.NET Framework) it throws
+       "Illegal characters in path" on " < > | and control characters, which quoted strings from
+       script text and pasted paths hold. Same answer otherwise: \x, /x and C: are rooted. #>
+    [bool]($Path -match '^(?:[\\/]|[A-Za-z]:)')
+}
+
 function Resolve-ProjectPath {
     <# Resolves a project-relative path and refuses anything that escapes the project root. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$RelativePath)
     $rel = $RelativePath.Trim().Trim('"', "'", '`').Replace('/', '\').TrimStart('\')
-    if (-not $rel -or [IO.Path]::IsPathRooted($rel)) { throw "Path must be relative to the project: '$RelativePath'" }
+    if (-not $rel -or (Test-RootedPath $rel)) { throw "Path must be relative to the project: '$RelativePath'" }
     $root = $ProjectRoot.TrimEnd('\')
     # shared/... (library/ when the project has a shared folder of its own: Get-SharedPrefix) is the
     # library beside the projects (Get-SharedRoot).
@@ -215,7 +222,7 @@ function Resolve-ProjectLinkPath {
             $targets = @($item.Target | Where-Object { $_ })
             if ($targets.Count -ne 1) { throw "Cannot resolve link in path: '$Shown'" }
             $target = [string]$targets[0]
-            $resolved = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($target)) { $target } else { Join-Path (Split-Path -Parent $p) $target }))
+            $resolved = [IO.Path]::GetFullPath($(if (Test-RootedPath $target) { $target } else { Join-Path (Split-Path -Parent $p) $target }))
             if ($i + 1 -lt $parts.Count) { $resolved = Join-Path $resolved ($parts[($i + 1)..($parts.Count - 1)] -join '\') }
             $resolved = [IO.Path]::GetFullPath($resolved).TrimEnd('\')
             $linked = $true
@@ -530,6 +537,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Move-TempFile, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Test-RootedPath, Move-TempFile, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile, Get-FileFingerprint, Get-SharedRoot, Get-SharedPrefix, Initialize-SharedRoot, Get-SharedNotes

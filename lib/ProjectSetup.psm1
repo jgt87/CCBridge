@@ -152,7 +152,7 @@ function Test-LiveSourcePath {
     param([AllowEmptyString()][string]$Path, [string]$ProjectRoot)
     $p = "$Path".Trim().Trim('"')
     if (-not $p) { return 'no path given' }
-    if (-not [IO.Path]::IsPathRooted($p) -or $p -notmatch '^(?i)([a-z]:\\|\\\\)') { return "'$p' is not a full path (for example C:\Users\NAME\Company\Site - Documents\data.csv)" }
+    if (-not (Test-RootedPath $p) -or $p -notmatch '^(?i)([a-z]:\\|\\\\)') { return "'$p' is not a full path (for example C:\Users\NAME\Company\Site - Documents\data.csv)" }
     if ($p -notmatch $script:LiveExt) { return "'$p' is not a CSV, TSV, Excel or JSON file" }
     if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return "'$p' was not found (is the folder synced by OneDrive on this computer?)" }
     $full = [IO.Path]::GetFullPath($p)

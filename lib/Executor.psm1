@@ -2485,9 +2485,9 @@ function Resolve-CommandPath([string]$ProjectRoot, [string]$Token, [hashtable]$M
     $t = Expand-KnownPathVars $t $Map
     if ($t -match '[$%!`]' -or $t.StartsWith('~')) { return @{ text = $t; full = $null; why = "'$t' uses a variable, so the target cannot be checked" } }
     $p = $t.Replace('/', '\') -replace '[*?]', 'x'
-    if (-not [IO.Path]::IsPathRooted($p) -and $Cwd -eq '?') { return @{ text = $t; full = $null; why = "'$t' is relative to a folder the script changed to, which cannot be checked" } }
+    if (-not (Test-RootedPath $p) -and $Cwd -eq '?') { return @{ text = $t; full = $null; why = "'$t' is relative to a folder the script changed to, which cannot be checked" } }
     $base = if ($Cwd) { $Cwd } else { $ProjectRoot }   # '' = the project folder, '?' = unknown (above)
-    $full = try { [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $base.TrimEnd('\') $p })).TrimEnd('\') } catch { $null }
+    $full = try { [IO.Path]::GetFullPath($(if (Test-RootedPath $p) { $p } else { Join-Path $base.TrimEnd('\') $p })).TrimEnd('\') } catch { $null }
     @{ text = $t; full = $full; path = $p }
 }
 
@@ -2619,7 +2619,7 @@ function Test-CodeDeletePaths {
     foreach ($s in $strings) {
         if ($s -match '["'';]') { continue }
         $x = Expand-KnownPathVars $s $Map
-        if ($x -notmatch '[\\/]|^\.\.?$' -and -not [IO.Path]::IsPathRooted($x)) { continue }   # only path-like strings
+        if ($x -notmatch '[\\/]|^\.\.?$' -and -not (Test-RootedPath $x)) { continue }   # only path-like strings
         if ($x -match '^\w+://') { continue }
         # A string with spaces may be a command line of its own ("Remove-Item ..\x -Recurse"):
         # checked as one first, then as the path it may also be.
@@ -2778,7 +2778,7 @@ function Get-OutsideEffects {
         foreach ($m in [regex]::Matches($line, '"([^"\r\n]*)"|''([^''\r\n]*)''')) {
             $s = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
             $x = Expand-KnownPathVars $s $map
-            if ($x -match '^\w+://' -or ($x -notmatch '[\\/]' -and -not [IO.Path]::IsPathRooted($x))) { continue }
+            if ($x -match '^\w+://' -or ($x -notmatch '[\\/]' -and -not (Test-RootedPath $x))) { continue }
             $w = & $outsideWhy $s; if ($w) { & $add $w }
         }
     }

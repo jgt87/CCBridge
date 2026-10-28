@@ -332,7 +332,7 @@ function Invoke-RemoteTool([string]$Name, $ToolArgs, $App) {
         'copilot_start_task' {
             $path = [string](Get-Arg $ToolArgs 'project_path' '')
             $task = [string](Get-Arg $ToolArgs 'task' '')
-            if (-not $path -or -not [IO.Path]::IsPathRooted($path)) { throw 'project_path must be an absolute folder path' }
+            if (-not $path -or -not (Test-RootedPath $path)) { throw 'project_path must be an absolute folder path' }
             if (-not $task.Trim()) { throw 'task is required' }
             $mode = [string](Get-Arg $ToolArgs 'mode' 'auto')
             $allow = [bool](Get-Arg $ToolArgs 'allow_commands' $false)
@@ -429,7 +429,7 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
         'copilot_start_task' {
             $path = [string](Get-Arg $ToolArgs 'project_path' '')
             $task = [string](Get-Arg $ToolArgs 'task' '')
-            if (-not $path -or -not [IO.Path]::IsPathRooted($path)) { throw 'project_path must be an absolute folder path' }
+            if (-not $path -or -not (Test-RootedPath $path)) { throw 'project_path must be an absolute folder path' }
             if (-not $task.Trim()) { throw 'task is required' }
             $mode = [string](Get-Arg $ToolArgs 'mode' 'auto')
             if (@('auto', 'plan', 'ask') -notcontains $mode) { throw "mode must be auto, plan or ask" }

@@ -6,6 +6,14 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.154] - 2026-10-28
+
+### Changed
+- The status line and the light-hearted texts under the waiting indicator now change every 4 seconds instead of every 1.8, so they are easier to read.
+
+### Fixed
+- A script that holds markup in quoted text (such as `'<html lang="en">'` or `'src="js/app.js"'`) no longer ends the task with "Illegal characters in path". StreamHub's own safety check crashed while reading such strings; it now treats them as text, not paths. The same fix covers pasted paths with quotes in the live data file, the project path and the runbook output check.
+
 ## [v0.1.153] - 2026-10-26
 
 ### Added

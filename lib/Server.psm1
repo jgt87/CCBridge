@@ -263,7 +263,7 @@ function Invoke-JobsApi($Ctx, $State) {
         }
         'task' {
             $p = [string]$b.projectPath
-            if (-not $p -or -not [IO.Path]::IsPathRooted($p)) { throw 'projectPath must be an absolute folder path' }
+            if (-not $p -or -not (Test-RootedPath $p)) { throw 'projectPath must be an absolute folder path' }
             if (-not "$($b.text)".Trim()) { throw 'text is required' }
             $mode = if ($b.mode) { [string]$b.mode } else { 'auto' }
             if (@('auto', 'plan', 'ask') -notcontains $mode) { throw 'mode must be auto, plan or ask' }
