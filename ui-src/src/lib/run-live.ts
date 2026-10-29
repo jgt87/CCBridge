@@ -60,10 +60,12 @@ export function liveLines(lines: unknown): string[] {
 /**
  * A finished run's output as the server writes it ("exit code 0", then the output between ~~~~
  * lines, then notes): the status, the console lines and the notes. Other text is all console.
+ * The closing ~~~~ is the last line that is only ~~~~: PowerShell's error records underline the
+ * failing code with ~~~~ themselves ("+     ~~~~~~"), and those stay in the console.
  */
 export function parseRunOutput(output: string): { status: string; lines: string[]; notes: string } {
-  const m = /^([^\n]*)\n~~~~\n([\s\S]*?)\n?~~~~(?:\n([\s\S]*))?$/.exec(output ?? "");
+  const m = /^([^\n]*)\n~~~~\n(?:([\s\S]*)\n)?~~~~[ \t]*(?:\n([\s\S]*))?$/.exec(output ?? "");
   if (!m) return { status: "", lines: (output ?? "").replace(/\s+$/, "").split("\n"), notes: "" };
-  const body = m[2].replace(/\s+$/, "");
+  const body = (m[2] ?? "").replace(/\s+$/, "");
   return { status: m[1].trim(), lines: body ? body.split("\n") : [], notes: (m[3] ?? "").trim() };
 }

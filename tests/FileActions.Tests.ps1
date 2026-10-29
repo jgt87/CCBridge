@@ -222,7 +222,16 @@ Describe 'The actions in the agent' {
     It 'runs the project''s tests by the helper''s own command, and says when there are none or commands are off' {
         $p = New-Proj 'a5'
         $s = New-TestState $p
-        (Invoke-Act $s (New-Act 'test' '' '') 't1' (New-Checkpoint $p)).output | Should Match 'no tests the helper program can run'
+        $none = (Invoke-Act $s (New-Act 'test' '' '') 't1' (New-Checkpoint $p)).output
+        $none | Should Match 'no tests the helper program can run'
+        (& (Get-Module Agent) { param($o) Get-StepFailureInfo 'test' $o } $none).code | Should Be 'TEST-NONE'
+        # A plain check script named as a test: told how to run it as a command instead.
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $p 'Work')
+        [IO.File]::WriteAllText((Join-Path $p 'Work\Check-Page.ps1'), "'ok'`n")
+        $hint = (Invoke-Act $s (New-Act 'test' 'Work/Check-Page.ps1' '') 't1b' (New-Checkpoint $p)).output
+        $hint | Should Match ([regex]::Escape('ACTION run with the line powershell -NoProfile -ExecutionPolicy Bypass -File Work/Check-Page.ps1'))
+        @(& (Get-Module Agent) { Get-TestScriptRunHints @('tests/A.Tests.ps1', 'test_a.py', 'README.md') }).Count | Should Be 0
+        @(& (Get-Module Agent) { Get-TestScriptRunHints @('Work/check.py', 'Work/check.js', 'Work/run.cmd') }) -join "`n" | Should Match 'python Work/check\.py[\s\S]*node Work/check\.js[\s\S]*Work\\run\.cmd'
         $null = New-Item -ItemType Directory -Force -Path (Join-Path $p 'tests')
         [IO.File]::WriteAllText((Join-Path $p 'Calc.ps1'), "function Add-One([int]`$n) { `$n + 1 }`n")
         [IO.File]::WriteAllText((Join-Path $p 'tests\Calc.Tests.ps1'), ". (Join-Path (Split-Path -Parent `$PSScriptRoot) 'Calc.ps1')`nDescribe 'Calc' { It 'adds one' { Add-One 1 | Should Be 2 } }`n")

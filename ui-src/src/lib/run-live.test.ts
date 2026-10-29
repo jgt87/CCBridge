@@ -25,5 +25,21 @@ describe("run-live", () => {
     expect(r.notes).toMatch(/interactive terminal/);
     expect(parseRunOutput("exit code 0\n~~~~\n\n~~~~").lines).toEqual([]);
     expect(parseRunOutput("plain text").lines).toEqual(["plain text"]);
+    expect(parseRunOutput("exit code 0\n~~~~\n~~~~").lines).toEqual([]);
+  });
+  it("keeps PowerShell's error underlines in the console, up to the last fence line", () => {
+    const ps = [
+      "Build failed.",
+      "At C:\\p\\Build.ps1:69 char:9",
+      "+         throw 'Build failed.'",
+      "+         ~~~~~~~~~~~~~~~~~~~~~",
+      "    + CategoryInfo          : OperationStopped: (Build failed.:String) [], RuntimeException",
+      "~~~~~~",
+      "    + FullyQualifiedErrorId : Build failed.",
+    ].join("\n");
+    const r = parseRunOutput(`exit code 1\n~~~~\n${ps}\n~~~~\nFiles this command changed: dist/index.html`);
+    expect(r.status).toBe("exit code 1");
+    expect(r.lines).toEqual(ps.split("\n"));
+    expect(r.notes).toBe("Files this command changed: dist/index.html");
   });
 });

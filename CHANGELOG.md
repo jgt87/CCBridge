@@ -6,6 +6,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.156] - 2026-10-29
+
+### Changed
+- The activity log is a card of its own inside the waiting card (like the script on a run card) and lists the newest step at the bottom, like the chat.
+- While one of Copilot's steps is checked and carried out, the waiting card names it ("Copilot's step: edit PATH").
+
+### Fixed
+- The waiting card no longer shows "Running the project's beforeAction hooks" for minutes in a project without hooks: hooks only show while one really runs, and a finished step (hooks, tests) puts the card's status back.
+- A run card keeps all of a PowerShell error inside the black console: the `~~~~` underlines in PowerShell's error records were taken as the end of the output, so the rest showed a second time below the console.
+- `ACTION test` on a plain script (a check script Copilot wrote, such as `Work/NAME.ps1`) now tells Copilot to run it as a command, with the exact line, and the card explains the case (TEST-NONE) instead of "no specific explanation yet".
+
 ## [v0.1.155] - 2026-10-29
 
 ### Added

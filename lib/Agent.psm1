@@ -1775,6 +1775,25 @@ function Get-TestActionCommand([string]$ProjectRoot, [string[]]$Named, $Checkpoi
     @{ command = $tc.command; label = "$($tc.kind), $(@($tc.tests).Count) test file(s)$(if ($tc.scope -eq 'related') { ' for those files' })" }
 }
 
+function Get-TestScriptRunHints([string[]]$Named) {
+    <# For ACTION test on a plain script (a check script, not a test file in a known form): how to
+       run it as a command instead, one line per script. Other files give nothing. #>
+    foreach ($n in @($Named)) {
+        $p = "$n".Replace('\', '/')
+        $leaf = ($p -split '/')[-1]
+        $cmd = switch -Regex ($leaf) {
+            '\.Tests\.ps1$' { $null; break }
+            '\.ps1$' { "powershell -NoProfile -ExecutionPolicy Bypass -File $p"; break }
+            '^test_.*\.py$|_test\.py$' { $null; break }
+            '\.py$' { "python $p"; break }
+            '\.(js|mjs|cjs)$' { "node $p"; break }
+            '\.(cmd|bat)$' { $p.Replace('/', '\'); break }
+            default { $null }
+        }
+        if ($cmd) { "$p is a script, not a test file in one of those forms. To run it as a check, send it as a command: ACTION run with the line $cmd." }
+    }
+}
+
 function Get-TestActionPick($State, [string[]]$Named, $Checkpoint) {
     <# Whether ACTION test may run, and what: refused in plan mode, with commands off, for a file that
        is not there, without tests, and for a command that deletes or works with Microsoft 365 (that
@@ -1786,7 +1805,12 @@ function Get-TestActionPick($State, [string[]]$Named, $Checkpoint) {
     $missing = @($Named | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_.Replace('/', '\'))) })
     if ($missing.Count) { return (& $no 'test: no such file' "error: $($missing -join ', ') is not a file of the project. Name the files whose tests to run (or a test file), or nothing for all.") }
     $pick = Get-TestActionCommand $root $Named $Checkpoint
-    if (-not $pick) { return (& $no 'test: no tests found' 'The project has no tests the helper program can run here (Pester *.Tests.ps1; pytest or unittest test_*.py with Python installed; an npm test script with npm and node_modules), and AGENTS.md has no verify: line. Write tests in one of those forms first, or finish without them.') }
+    if (-not $pick) {
+        $text = 'The project has no tests the helper program can run here (Pester *.Tests.ps1; pytest or unittest test_*.py with Python installed; an npm test script with npm and node_modules), and AGENTS.md has no verify: line. Write tests in one of those forms first, or finish without them.'
+        $runs = @(Get-TestScriptRunHints $Named)
+        if ($runs.Count) { $text += "`n" + ($runs -join "`n") }
+        return (& $no 'test: no tests found' $text)
+    }
     $risk = Get-CommandRisk $pick.command
     if ((Test-DeleteScope $root $pick.command) -or $risk.m365 -or $risk.destructive) { return (& $no 'test: only by hand' "not run: the test command ($($pick.command)) deletes files or works with Microsoft 365, so it only runs by hand. Tell the user to run it.") }
     $pick
@@ -2324,7 +2348,7 @@ function Enter-Activity($State, [string]$Kind, [string]$Label) {
     <# What StreamHub is busy with now, for the chat's waiting indicator: a kind (newchat, page,
        syntax, tests, index, wait, agent, busy; the app adds light lines per kind) and a plain label.
        Returns what was there before, for Exit-Activity. #>
-    $prev = @{ kind = "$($State.Activity.kind)"; label = "$($State.Activity.label)" }
+    $prev = @{ kind = "$($State.Activity.kind)"; label = "$($State.Activity.label)"; phase = "$(if ($State.Work) { $State.Work.phase })"; phaseAt = "$(if ($State.Work) { $State.Work.phaseAt })"; set = $Label }
     $State.Activity.kind = $Kind; $State.Activity.label = $Label
     Set-WorkPhase $State $Label -Step   # the waiting card's status line and activity log
     $prev
@@ -2345,6 +2369,10 @@ function Stop-RunWatch($State, [string]$Id) {
 
 function Exit-Activity($State, $Prev) {
     $State.Activity.kind = "$($Prev.kind)"; $State.Activity.label = "$($Prev.label)"
+    # The waiting card's phase goes back to what it was, unless something set a newer one meanwhile:
+    # otherwise a finished step (hooks, tests) stays on the card as if it were still running.
+    $w = $State.Work
+    if ($w -and $Prev.phase -and "$($w.phase)" -eq "$($Prev.set)") { $w.phase = "$($Prev.phase)"; $w.phaseAt = "$($Prev.phaseAt)" }
 }
 
 function Wait-ChainPause($State, [double]$Seconds, [string]$Label = 'Pausing before the next step') {
@@ -3057,6 +3085,7 @@ function Get-StepFailureInfo {
         'timed out after' { @{ code = 'RUN-TIMEOUT'; reasons = @('The command ran longer than commandTimeoutSec (it may wait for input, or just be slow).'); next = 'Copilot sees the output so far. Raise commandTimeoutSec in config\harness.local.json for slow builds.' }; break }
         'needs an interactive terminal to ask questions' { @{ code = 'RUN-INTERACTIVE'; reasons = @('The command wants to ask questions in a terminal (it is interactive). StreamHub runs commands without a terminal, so nobody can answer them.'); next = "Copilot is told to use the command's form for scripts (flags that answer the questions, or the tool's command for scripts and CI), or to give you the exact command to run in your own terminal. $copilotRetries" }; break }
         'exit code [1-9]|exit code -' { @{ code = 'RUN-FAILED'; reasons = @('The command reported an error (see its output on this card).', 'A tool or module the command needs is not installed on this computer.', 'The command ran in the project folder with cmd.exe; it may have expected another folder or shell.'); next = $copilotRetries }; break }
+        'no tests the helper program can run' { @{ code = 'TEST-NONE'; reasons = @('The project has no tests in a form the helper program runs by itself (Pester *.Tests.ps1, pytest or unittest test_*.py, an npm test script), and AGENTS.md has no verify: line.', 'Copilot named a plain script (a check script it wrote); that runs as a command, not as a test.'); next = 'Copilot is told how to run such a script as a command, or to finish without tests. To have tests run every time, add a verify: line with the command to AGENTS.md.' }; break }
         'is not valid|invalid' { @{ code = 'STEP-INVALID'; reasons = @('The step''s input was not valid (see the reason above).'); next = $copilotRetries }; break }
         default { @{ code = "$($Type.ToUpperInvariant())-FAILED"; reasons = @('See the reason above; this case has no specific explanation yet.'); next = 'Copilot gets the reason in the next message. If it keeps failing, use Copy details and send them.' }; break }
     }
@@ -3398,9 +3427,11 @@ function Invoke-ProjectHooks {
         Write-CCBLog verbose agent "Skipping $HookEvent hooks during hook execution" @{ reason = 're-entry' }
         return @()
     }
-    $prev = Enter-Activity $State 'tests' "Running the project's $HookEvent hooks"
+    # The waiting indicator says "Running hooks" only once a hook is about to run (Core sets it), so a
+    # project without hooks never shows it around every action.
+    $act = @{ prev = $null }
     $State.HookRunning = $true
-    try { Invoke-ProjectHooksCore $State $HookEvent $Paths $ActionContext } finally { $State.HookRunning = $false; Exit-Activity $State $prev }
+    try { Invoke-ProjectHooksCore $State $HookEvent $Paths $ActionContext $act } finally { $State.HookRunning = $false; if ($act.prev) { Exit-Activity $State $act.prev } }
 }
 
 function Invoke-ProjectHooksCore {
@@ -3408,7 +3439,7 @@ function Invoke-ProjectHooksCore {
        matches, beforeDone and afterTask once. The hooks file is approved by a person once per version
        (it can run any command); commands that delete outside the project, delete data or use
        Microsoft 365 never run. Each run is a card in the chat. Returns the failures as lines. #>
-    param($State, [string]$HookEvent, [string[]]$Paths = @(), $ActionContext = $null)
+    param($State, [string]$HookEvent, [string[]]$Paths = @(), $ActionContext = $null, [hashtable]$Activity = $null)
     $root = $State.ProjectRoot
     if (-not $root -or $State.NoCommands -or $State.Mode -eq 'plan') { return @() }
     if ("$($State.Config.hooks)" -in 'False', 'off') { return @() }   # setting: hooks paused
@@ -3427,6 +3458,7 @@ function Invoke-ProjectHooksCore {
         else { $runs.Add(@{ hook = $k; path = '' }) }
     }
     if (-not $runs.Count) { return @() }
+    if ($Activity) { $Activity.prev = Enter-Activity $State 'tests' "Running the project's $HookEvent hooks" }
     # The hooks file as a whole is approved once per version, by a person.
     $file = Get-HooksPath $root
     $hash = Get-ScriptHash $file
@@ -4581,6 +4613,17 @@ function Invoke-AgentAction {
        afterAction is reported with the action result so a failed check is visible to Copilot. #>
     param($State, $Action, [string]$Id, $Checkpoint, [int]$Uncertain)
     $context = @{ action = "$($Action.type)"; target = "$($Action.arg)"; id = $Id }
+    # The waiting card names the step while it is checked and carried out (a large edit can take a
+    # while before its card appears), and goes back to the earlier phase afterwards.
+    $stepLabel = "Copilot's step: $($Action.type) $(Limit-Text "$($Action.arg)" 80)".Trim()
+    $w = $State.Work
+    $stepPrev = if ($w) { @{ phase = "$($w.phase)"; phaseAt = "$($w.phaseAt)" } } else { $null }
+    Set-WorkPhase $State $stepLabel
+    try { Invoke-AgentActionHooked $State $Action $Id $Checkpoint $Uncertain $context }
+    finally { if ($stepPrev -and $State.Work -and "$($State.Work.phase)" -eq $stepLabel) { $State.Work.phase = $stepPrev.phase; $State.Work.phaseAt = $stepPrev.phaseAt } }
+}
+
+function Invoke-AgentActionHooked($State, $Action, [string]$Id, $Checkpoint, [int]$Uncertain, [hashtable]$context) {
     $before = @()
     try { $before = @(Invoke-ProjectHooks $State 'beforeAction' @() $context) }
     catch { Write-CCBLogError agent 'beforeAction hooks' $_ }

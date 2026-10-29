@@ -707,13 +707,16 @@ function QuietWarning({
   );
 }
 
-/** The last steps of the task, newest first, folded away. */
+/** The last steps of the task in the order they happened (newest at the bottom, like the chat), folded
+ *  away in a card of its own inside the waiting card, like the script on a run card. */
 function ActivityLog({ steps }: { steps: { at: string; text: string }[] }) {
   return (
-    <details className="mt-1.5">
-      <summary className="cursor-pointer text-muted-foreground text-xs hover:text-foreground">Activity log ({steps.length})</summary>
-      <ol className="mt-1 space-y-0.5 text-xs">
-        {[...steps].reverse().map((s, i) => (
+    <details className="group kit-panel mt-2 overflow-hidden p-0">
+      <summary className="cursor-pointer px-3 py-1.5 text-muted-foreground text-xs hover:text-foreground group-open:border-(--kit-border) group-open:border-b">
+        Activity log ({steps.length})
+      </summary>
+      <ol className="space-y-0.5 px-3 py-2 text-xs">
+        {steps.map((s, i) => (
           <li className="flex gap-2" key={`${s.at}-${i}`}>
             <time className="shrink-0 text-muted-foreground tabular-nums" dateTime={s.at}>
               {s.at.slice(11, 19)}

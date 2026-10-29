@@ -27,6 +27,29 @@ Describe 'Work status' {
         Start-WorkStatus $s 'chat'
         (Get-WorkView $s).phase | Should Be 'Checking index.html in a browser tab'
     }
+    It 'puts the phase back when StreamHub''s own step ends, unless a newer phase came meanwhile' {
+        $s = @{ Activity = @{ kind = ''; label = '' } }
+        Start-WorkStatus $s 'chat'
+        Set-WorkPhase $s "Working on Copilot's reply"
+        $prev = & (Get-Module Agent) { param($x) Enter-Activity $x 'tests' 'Running the tests Copilot asked for' } $s
+        & (Get-Module Agent) { param($x, $y) Exit-Activity $x $y } $s $prev
+        (Get-WorkView $s).phase | Should Be "Working on Copilot's reply"
+        $prev = & (Get-Module Agent) { param($x) Enter-Activity $x 'tests' 'Running the tests Copilot asked for' } $s
+        Set-WorkPhase $s 'Waiting for your approval: Run npm test'
+        & (Get-Module Agent) { param($x, $y) Exit-Activity $x $y } $s $prev
+        (Get-WorkView $s).phase | Should Be 'Waiting for your approval: Run npm test'
+    }
+    It 'never shows hooks as running in a project without hooks' {
+        $p = Join-Path $env:CCBRIDGE_STATE_ROOT 'nohooks'
+        $null = New-Item -ItemType Directory -Force -Path $p
+        $s = @{ Activity = @{ kind = ''; label = '' }; ProjectRoot = $p; Config = @{}; Mode = 'auto' }
+        Start-WorkStatus $s 'chat'
+        Set-WorkPhase $s "Working on Copilot's reply"
+        @(Invoke-ProjectHooks $s 'beforeAction' @() @{ action = 'edit'; target = 'a.js'; id = 'x' }).Count | Should Be 0
+        $v = Get-WorkView $s
+        $v.phase | Should Be "Working on Copilot's reply"
+        @($v.steps | Where-Object { $_.text -match 'hooks' }).Count | Should Be 0
+    }
     It 'counts actions and changed files from the events, and logs failures and approvals' {
         $s = @{ Activity = @{ kind = ''; label = '' } }
         Start-WorkStatus $s 'chat'
