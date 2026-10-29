@@ -61,7 +61,7 @@ ${fence3}
         $a[5].body | Should Be 'Added the notes.'
     }
     It 'never takes an ordinary text block, or ACTION in another kind of block, for an action' {
-        $reply = "${fence3}text`nThe ACTION read line is shown here.`n${fence3}`n`n${fence3}json`nACTION write x.txt`n${fence3}`n`n${fence3}text`nACTION delete everything`n${fence3}"
+        $reply = "${fence3}text`nThe ACTION read line is shown here.`n${fence3}`n`n${fence3}json`nACTION write x.txt`n${fence3}`n`n${fence3}text`nACTION destroy everything`n${fence3}"
         @(Get-ActionBlocks $reply).Count | Should Be 0
     }
     It 'still reads the older form (the action name as the label)' {
@@ -177,6 +177,15 @@ Describe 'Executor' {
         { Resolve-ProjectPath $proj '..\evil.txt' } | Should Throw
         { Resolve-ProjectPath $proj 'C:\Windows\x.txt' } | Should Throw
         Resolve-ProjectPath $proj 'src/ok.txt' | Should Be (Join-Path $proj 'src\ok.txt')
+    }
+    It 'refuses a path with a character a file name cannot have in plain words, not with .NET''s error' {
+        { Resolve-ProjectPath $proj 'src/a<b>.html' } | Should Throw 'character a file name cannot have'
+        { Resolve-ProjectPath $proj 'x|y.txt' } | Should Throw 'character a file name cannot have'
+        $note = & (Get-Module Executor) { param($p) Get-ReadNotFoundNote $p 'src/<%= page %>.html' } $proj
+        $note | Should Not BeNullOrEmpty
+        Get-PathLeaf 'a/b\<c|d>.js' | Should Be '<c|d>.js'
+        Test-PathChars 'src/ok.txt' | Should Be $true
+        Test-PathChars 'a"b' | Should Be $false
     }
 
     It 'writes a new file and records it in a checkpoint' {

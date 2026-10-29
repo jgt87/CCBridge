@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = 'Stop'
 $script:ProjectTaskKinds = @('chat', 'agent', 'fetch', 'runbook', 'chain', 'script', 'review', 'packages', 'undo', 'export', 'testrun-report', 'page-report', 'page-compare', 'data-profile', 'overview', 'share-package', 'theme', 'tidy-list', 'tidy', 'pptx-plan', 'pptx-ask', 'pptx-ask-element', 'pptx-apply', 'pptx-build', 'sandbox-fetch')
-foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'WorkStatus', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'PptxLayoutMatch', 'PptxRetheme', 'PptxChoices', 'PptxDeck', 'PageReport', 'PageCompare', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance', 'Progress', 'DataProfile', 'ProjectOverview', 'ProjectPackage', 'KitTheme', 'TidyUp') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'WorkStatus', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'PptxLayoutMatch', 'PptxRetheme', 'PptxChoices', 'PptxDeck', 'PageReport', 'PageCompare', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance', 'Progress', 'DataProfile', 'ProjectOverview', 'ProjectPackage', 'KitTheme', 'TidyUp', 'FileActions') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 function New-AgentState {
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$AppRoot)
@@ -1554,11 +1554,11 @@ function Test-RoundsLeft([int]$Limit, [int]$Round, [int]$LastProgress) {
 }
 
 function Test-ExploreRound($Actions, $Results) {
-    <# Whether a round only looked around: reads, searches, finds and folder listings (dir, ls,
-       Get-ChildItem, tree, type, cat), and nothing changed. #>
+    <# Whether a round only looked around: reads, searches, finds, uses, the changes so far, test runs
+       and folder listings (dir, ls, Get-ChildItem, tree, type, cat), and nothing changed. #>
     if (-not @($Actions).Count) { return $false }
     foreach ($a in @($Actions)) {
-        if ($a.type -in 'read', 'glob', 'grep', 'find') { continue }
+        if ($a.type -in 'read', 'glob', 'grep', 'find', 'refs', 'changes', 'test') { continue }
         if ($a.type -eq 'run') {
             $cmd = $(if ($a.arg) { "$($a.arg)" } else { ("$($a.body)" -split "`n")[0] }).Trim()
             if ($cmd -match '(?i)^(dir|ls|tree|Get-ChildItem|gci|type|cat|Get-Content|gc|where|findstr|Select-String|sls)\b') { continue }
@@ -1759,6 +1759,78 @@ function Get-TurnTestBaseline($State) {
     Save-TestBaseline $dir $entry
     if (-not $entry.passed) { Add-AgentEvent $State 'status' @{ text = "Tests before the change: already failing ($(@($entry.failures).Count) failure line(s)). Those are not sent to Copilot as its own." } }
     $entry
+}
+
+function Get-TestActionCommand([string]$ProjectRoot, [string[]]$Named, $Checkpoint) {
+    <# The command ACTION test runs: the verify: line in AGENTS.md when no file is named, else
+       TestRunner Find-TestCommand for the files named, for the files this message changed, or for
+       all (when the narrower set has none). @{ command; label }, or $null. #>
+    if (-not @($Named).Count) { $v = Get-ProjectVerify $ProjectRoot; if ($v) { return @{ command = $v; label = 'the verify: command in AGENTS.md' } } }
+    $all = @(Get-ProjectFiles $ProjectRoot | ForEach-Object { $_.path })
+    $changed = @(if ($Checkpoint) { $Checkpoint.Files.Keys })
+    $for = @(if (@($Named).Count) { $Named } elseif ($changed.Count) { $changed } else { $all })
+    $tc = try { Find-TestCommand $ProjectRoot $for } catch { Write-CCBLogError agent 'test detection' $_; $null }
+    if (-not $tc -and $for.Count -ne $all.Count) { $tc = try { Find-TestCommand $ProjectRoot $all } catch { $null } }
+    if (-not $tc) { return $null }
+    @{ command = $tc.command; label = "$($tc.kind), $(@($tc.tests).Count) test file(s)$(if ($tc.scope -eq 'related') { ' for those files' })" }
+}
+
+function Get-TestActionPick($State, [string[]]$Named, $Checkpoint) {
+    <# Whether ACTION test may run, and what: refused in plan mode, with commands off, for a file that
+       is not there, without tests, and for a command that deletes or works with Microsoft 365 (that
+       one only runs by hand, as at done). @{ refused } or @{ command; label }. #>
+    $root = $State.ProjectRoot
+    $no = { param($summary, $text) @{ refused = @{ ok = $false; summary = $summary; output = $text } } }
+    if ($State.Mode -eq 'plan') { return (& $no 'test skipped (plan mode)' 'not run: plan mode is on (read-only), so no tests run. Describe in the plan which tests to run.') }
+    if ($State.NoCommands -or ($State.Headless -and -not $State.AllowCommands)) { return (& $no 'test skipped (commands not allowed)' 'not run: commands are not allowed for this task, and tests are commands. Finish without them, and say which tests the user should run.') }
+    $missing = @($Named | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_.Replace('/', '\'))) })
+    if ($missing.Count) { return (& $no 'test: no such file' "error: $($missing -join ', ') is not a file of the project. Name the files whose tests to run (or a test file), or nothing for all.") }
+    $pick = Get-TestActionCommand $root $Named $Checkpoint
+    if (-not $pick) { return (& $no 'test: no tests found' 'The project has no tests the helper program can run here (Pester *.Tests.ps1; pytest or unittest test_*.py with Python installed; an npm test script with npm and node_modules), and AGENTS.md has no verify: line. Write tests in one of those forms first, or finish without them.') }
+    $risk = Get-CommandRisk $pick.command
+    if ((Test-DeleteScope $root $pick.command) -or $risk.m365 -or $risk.destructive) { return (& $no 'test: only by hand' "not run: the test command ($($pick.command)) deletes files or works with Microsoft 365, so it only runs by hand. Tell the user to run it.") }
+    $pick
+}
+
+function Get-TestBaselineNote([string]$ProjectRoot, [string]$Command, [string]$Output) {
+    # Failing tests compared with the saved run of the same command before this task: '' or a note
+    # that names how many were already failing and which are new.
+    $base = try { Read-TestBaseline (Get-ProjectStateDir $ProjectRoot) } catch { $null }
+    if (-not $base -or "$($base.command)" -ne $Command -or $base.passed) { return '' }
+    $cmp = Compare-TestFailures @($base.failures) @(Get-TestFailureLines $Output)
+    if (-not @($cmp.old).Count) { return '' }
+    $new = if (@($cmp.new).Count) { "`n" + ((@($cmp.new) | Select-Object -First 10 | ForEach-Object { "- $_" }) -join "`n") } else { 'none' }
+    "`nAlready failing before this task (leave them unless the request is about them): $(@($cmp.old).Count) line(s). New since: $new"
+}
+
+function Invoke-TestAction($State, $Action, [string]$Id, $Checkpoint, $Evt) {
+    <# ACTION test [PATH ...]: the project's tests now, in the middle of a task, by the command the
+       helper program would run at done (the verify: line in AGENTS.md, else TestRunner Find-TestCommand
+       for the files named, else for the files this message changed, else all), so Copilot never
+       guesses a test command. What the tests write goes into the change set like a run's; failures
+       that were there before this task (the saved baseline of the same command) are named apart. #>
+    $root = $State.ProjectRoot
+    $named = @(@("$($Action.arg)") + @("$($Action.body)".Split("`n")) | ForEach-Object { $_.Trim().Trim('`', '"', "'") } | Where-Object { $_ })
+    $Evt.target = if ($named.Count) { $named -join ', ' } else { "the project's tests" }
+    $null = Add-AgentEvent $State 'action' $Evt
+    $pick = Get-TestActionPick $State $named $Checkpoint
+    if ($pick.refused) { return $pick.refused }
+    $cmd = $pick.command; $label = $pick.label
+    $snap = if ($Checkpoint) { try { Start-RunSnapshot $Checkpoint $root } catch { Write-CCBLogError agent 'run snapshot' $_; $null } }
+    $prev = Enter-Activity $State 'tests' 'Running the tests Copilot asked for'
+    # Its own live id: the app shows the output under the waiting indicator (the test card is no run card).
+    $watch = New-RunWatch $State "$Id-tests" 'Tests' $cmd
+    try { $r = Invoke-RunAction $root $cmd -TimeoutSec ([int]$State.Config.commandTimeoutSec) -CancelCheck ({ [bool]$State.Cancel }.GetNewClosure()) -OnProgress $watch } finally { $null = Stop-RunWatch $State "$Id-tests"; $null = Exit-Activity $State $prev }
+    $note = ''
+    if ($snap) { try { $done = Complete-RunSnapshot $Checkpoint $root $snap; if (@($done.changed).Count) { $note += "`nFiles the tests changed: $(@($done.changed) -join ', ')" } } catch { Write-CCBLogError agent 'run snapshot' $_ } }
+    $fixed = @(Restore-SourceData $root)
+    if ($fixed.Count) { $note += "`nThe tests changed read-only files (Source/ or protected), which were put back: $($fixed -join '; ')." }
+    $passed = $r.exitCode -eq 0 -and -not $r.timedOut -and -not $r.cancelled
+    $status = if ($r.cancelled) { 'stopped by the user' } elseif ($r.timedOut) { "timed out after $($State.Config.commandTimeoutSec)s" } elseif ($passed) { 'passed' } else { "failed (exit code $($r.exitCode))" }
+    $compare = if ($passed) { '' } else { Get-TestBaselineNote $root $cmd "$($r.output)" }
+    $tail = ("$($r.output)".Replace("`r`n", "`n").Split("`n") | Select-Object -Last 60) -join "`n"
+    Write-CCBLog info agent 'Tests run by Copilot' @{ command = $cmd; passed = $passed; exit = $r.exitCode }
+    @{ ok = $passed; summary = "tests $status"; output = "Tests ($label): $cmd`n$status$compare`n~~~~`n$tail`n~~~~$note"; changed = $false }
 }
 
 function Get-AcceptanceStep($State, [string[]]$DoneWhen) {
@@ -3767,13 +3839,93 @@ function Get-DisputeCandidates($State, [string]$Path) {
     @(@($State.LastFindings) | Where-Object { $_ -and "$($_.path)".Replace('\', '/').TrimStart('.', '/').ToLowerInvariant() -eq $want } | ForEach-Object { "$($_.text)" } | Select-Object -Unique)
 }
 
+function Invoke-LookAction($State, $Action, [string]$Id, $Checkpoint, $Evt) {
+    <# The steps that change nothing in the project's code: refs (every place a name is used, or what
+       loads a file: before a rename or a changed signature), changes (what this message changed so
+       far, from its change set: after many rounds or a new chat) and test (Invoke-TestAction). #>
+    if ($Action.type -eq 'test') { return (Invoke-TestAction $State $Action $Id $Checkpoint $Evt) }
+    $what = if ($Action.arg) { "$($Action.arg)".Trim() } else { "$($Action.body)".Split("`n")[0].Trim() }
+    if ($Action.type -eq 'refs') {
+        $Evt.target = $what; $null = Add-AgentEvent $State 'action' $Evt
+        return @{ ok = $true; summary = "uses of $what"; output = (Find-SymbolUses $State.ProjectRoot $what) }
+    }
+    $Evt.target = if ($what) { $what } else { 'this message' }; $null = Add-AgentEvent $State 'action' $Evt
+    $budget = [Math]::Max(4000, [int]([int]$State.Config.resultCharBudget / 2))
+    @{ ok = $true; summary = 'changes so far'; output = (Format-TaskChanges $State.ProjectRoot $Checkpoint $what $budget) }
+}
+
+function Get-FileActionStep($State, $Action, $Evt) {
+    <# Before a move or delete (FileActions): the plan, checked before anything happens, kept on the
+       action; and how it is approved. A move asks as a write does (not in auto mode); deleting stays
+       with a person every time, also in auto mode, and never without one (human in the loop), as for
+       a command that deletes. @{ refused (the result when it does not go ahead); needsApproval;
+       personOnly; warning; preview }. #>
+    $root = $State.ProjectRoot
+    if ($Action.type -eq 'move') {
+        $pairs = @(Get-MovePairs $Action.arg $Action.body)
+        $Evt.target = (@($pairs | ForEach-Object { "$($_.from) -> $($_.to)" }) -join '; ')
+        $plan = Get-MovePlan $root $pairs
+        if ($plan.error) {
+            $null = Add-AgentEvent $State 'action' (Join-Hash $Evt @{ status = 'failed'; error = $plan.error })
+            return @{ refused = @{ ok = $false; summary = 'move refused'; output = "error: nothing was moved: $($plan.error)." } }
+        }
+        $Action | Add-Member -NotePropertyName movePlan -NotePropertyValue $plan -Force
+        return @{ needsApproval = ($State.Mode -ne 'auto'); personOnly = $false; warning = $null; preview = $null }
+    }
+    $paths = @(Get-DeletePaths $Action.arg $Action.body)
+    $Evt.target = $paths -join ', '
+    $plan = Get-DeletePlan $root $paths
+    if ($plan.error) {
+        $null = Add-AgentEvent $State 'action' (Join-Hash $Evt @{ status = 'failed'; error = $plan.error })
+        return @{ refused = @{ ok = $false; summary = 'delete refused'; output = "error: nothing was deleted: $($plan.error)." } }
+    }
+    if ($State.Headless) {
+        $null = Add-AgentEvent $State 'action' (Join-Hash $Evt @{ status = 'skipped'; error = 'deleting needs a person to approve it' })
+        $null = Add-AgentEvent $State 'human-required' @{ text = "Copilot wanted to delete $($Evt.target). StreamHub does not delete files without a person approving it." }
+        return @{ refused = @{ ok = $false; summary = 'delete refused (needs a person)'; output = 'not deleted: deleting files needs a person, who is not here. Do not try a workaround; leave the files, and say in the done summary which ones the user may delete.' } }
+    }
+    $Action | Add-Member -NotePropertyName deletePlan -NotePropertyValue $plan -Force
+    $listed = @($plan.items | ForEach-Object { "$($_.rel)$(if ($_.folder) { "/ ($(@($_.files).Count) file(s))" })" })
+    $more = if ($listed.Count -gt 12) { ", and $($listed.Count - 12) more" } else { '' }
+    $warning = "Human in the loop: Copilot wants to delete $($plan.files) file(s), $([Math]::Max(1, [Math]::Round($plan.bytes / 1KB))) KB: $(($listed | Select-Object -First 12) -join ', ')$more. They are kept in this change set, so Undo brings them back."
+    @{ needsApproval = $true; personOnly = $true; warning = $warning; preview = (Get-DeletePreview $plan) }
+}
+
+function Get-DeletePreview($Plan) {
+    # One text file to delete: the card shows what goes (its whole text as removed lines).
+    if ($Plan.files -ne 1 -or $Plan.items[0].folder) { return $null }
+    $f = @($Plan.items[0].files)[0]
+    if (-not (Test-TextReadable $f) -or (New-Object IO.FileInfo $f).Length -gt 200000) { return $null }
+    @{ path = $Plan.items[0].rel; exists = $true; old = (Get-PreviewText (Read-TextFile $f).Text); new = '' }
+}
+
+function Complete-FileAction($State, $Action, $Checkpoint) {
+    <# Carries out an approved move or delete and says what happened: a moved file's new path, the
+       files whose paths the helper program rewrote (each a change card with its diff) and what still
+       points at an old place; for a delete, what still uses a deleted file. #>
+    $root = $State.ProjectRoot
+    $listBroken = { param($b, $head) if (@($b).Count) { "`n${head}:`n" + ((@($b) | Select-Object -First 20 | ForEach-Object { "- $_" }) -join "`n") } else { '' } }
+    if ($Action.type -eq 'delete') {
+        $r = Invoke-DeletePlan $root $Action.deletePlan $Checkpoint
+        $out = ($r.lines -join "`n") + "`n(kept in this change set: Undo brings them back)" + (& $listBroken $r.broken 'Still used by (fix these, or the page or script breaks)')
+        return @{ ok = $true; summary = "deleted $(@($r.oldPaths).Count) file(s)"; output = $out; changed = $true; path = @() }
+    }
+    $r = Invoke-MovePlan $root $Action.movePlan $Checkpoint
+    foreach ($f in @($r.relinked)) { $null = Add-OwnChangeEvent $State 'edit' $f.path "$($f.count) path(s) now lead to the moved file(s)." @{ path = $f.path; exists = $true; old = (Get-PreviewText $f.old); new = (Get-PreviewText $f.new) } }
+    $out = ($r.lines -join "`n")
+    if (@($r.relinked).Count) { $out += "`nThe helper program rewrote the paths that lead there in: " + (@($r.relinked | ForEach-Object { "$($_.path) ($($_.count))" }) -join ', ') + '. Read a file again before you edit it.' }
+    $out += (& $listBroken $r.broken 'Still pointing at an old place (fix these)')
+    $out += "`nA path built in code (from variables or joined strings) is not rewritten: grep for the old names if the code builds paths."
+    @{ ok = $true; summary = "moved $(@($r.newPaths).Count) file(s)"; output = $out; changed = $true; path = @(@($r.newPaths) + @($r.relinked | ForEach-Object { $_.path }) | Select-Object -Unique) }
+}
+
 function Invoke-AgentActionCore {
     <# Executes one action. Returns @{ ok; summary; output } where output goes back to Copilot. #>
     param($State, $Action, [string]$Id, $Checkpoint, [int]$Uncertain)
     $root = $State.ProjectRoot
     $mode = $State.Mode
     $evt = @{ id = $Id; action = $Action.type; target = $Action.arg; status = 'running' }
-    if ($State.TaskIntent -in 'answer', 'investigate' -and $Action.type -in 'write', 'edit', 'remember', 'runbook') {
+    if ($State.TaskIntent -in 'answer', 'investigate' -and $Action.type -in 'write', 'edit', 'move', 'delete', 'remember', 'runbook') {
         # Kept for the card after the turn: the person can apply these edits as they are (Invoke-AgentTurn -Replay).
         if ($Action.type -in 'write', 'edit' -and $null -ne $State.RefusedEdits) { $State.RefusedEdits.Add($Action) }
         return @{ ok = $false; summary = 'This task asks for an answer or investigation, not changes.'; output = 'Not applied: the current task does not authorize file changes. Continue reading or investigating, then answer with a done block.' }
@@ -3927,6 +4079,7 @@ function Invoke-AgentActionCore {
             $evt.target = $name; Add-AgentEvent $State 'action' $evt
             return @{ ok = $true; summary = "found $name"; output = (Find-SymbolDefinition $root $name) }
         }
+        { $_ -in 'refs', 'changes', 'test' } { return (Invoke-LookAction $State $Action $Id $Checkpoint $evt) }
         'web' {
             # Reads public web pages for Copilot. Sites named in the request are read at once;
             # others need a person's approval (setting webRead), so no project data can leave
@@ -4034,6 +4187,13 @@ function Invoke-AgentActionCore {
         $preview = @{ path = 'AGENTS.md'; exists = [bool]$oldNotes; old = (Get-PreviewText $oldNotes); new = (Get-PreviewText $Action.newNotes) }
         $needsApproval = $true
         $riskWarning = 'Copilot wants to add this to the project notes (AGENTS.md), which go with every new chat. Approve only if it is right and lasting.'
+    }
+    elseif ($Action.type -in 'move', 'delete') {
+        # Files and folders moved or deleted inside the project (FileActions), checked before the card.
+        $step = Get-FileActionStep $State $Action $evt
+        if ($step.refused) { return $step.refused }
+        $needsApproval = $step.needsApproval -or ($Uncertain -gt 0)
+        $personOnly = $step.personOnly; $riskWarning = $step.warning; $preview = $step.preview
     }
     elseif ($Action.type -eq 'write' -or $Action.type -eq 'edit') {
         if (-not $Action.arg) { Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'failed' }); return @{ ok = $false; summary = "$($Action.type) without a path"; output = 'error: the block needs a path after the action name' } }
@@ -4308,7 +4468,7 @@ function Invoke-AgentActionCore {
 
     if ($mode -eq 'plan') {
         Add-AgentEvent $State 'action' (Join-Hash $evt @{ status = 'skipped'; preview = $preview })
-        return @{ ok = $false; summary = "$($Action.type) skipped (plan mode)"; output = $(if ($Action.type -eq 'run') { 'not executed: plan mode is on (read-only), so no commands run. To look at something for the plan, use the read-only actions: read, glob, grep and find for project files, web for a public web page (not a command that downloads it). Then describe the plan.' } else { 'not executed: plan mode is on (read-only). Describe the plan instead of changing files or running commands.' }) }
+        return @{ ok = $false; summary = "$($Action.type) skipped (plan mode)"; output = $(if ($Action.type -eq 'run') { 'not executed: plan mode is on (read-only), so no commands run. To look at something for the plan, use the read-only actions: read, glob, grep, find and refs for project files, web for a public web page (not a command that downloads it). Then describe the plan.' } else { 'not executed: plan mode is on (read-only). Describe the plan instead of changing files or running commands.' }) }
     }
 
     if ($needsApproval) {
@@ -4366,6 +4526,7 @@ function Invoke-AgentActionCore {
                 return @{ ok = $true; summary = "runbook $($rb.name) queued"; output = "Runbook '$($rb.title)' ($($rb.name)) is queued: it runs right after this reply, read-only, and saves its result to $($rb.output). Do not run it again; finish with done." }
             }
             'remember' { $null = Invoke-WriteAction $root 'AGENTS.md' $Action.newNotes $Checkpoint; return @{ ok = $true; summary = 'added to the project notes (AGENTS.md)'; output = 'saved to the project notes (AGENTS.md, ## Learned)'; changed = $true; path = 'AGENTS.md' } }
+            { $_ -in 'move', 'delete' } { return (Complete-FileAction $State $Action $Checkpoint) }
             'edit'  {
                 $before = try { (Read-TextFile (Resolve-ProjectPath $root $Action.arg)).Text } catch { '' }
                 $out = Invoke-EditAction $root $Action.arg $Action.edits $Checkpoint
@@ -5117,7 +5278,9 @@ function Get-RoundFindings($State, $Turn, $Checkpoint, $Ev, $Changed, $HookIssue
             $rel = $p.Replace('\', '/')
             if ($rel -match '(?i)\.html?$' -and (Get-GeneratedPage $State.ProjectRoot $rel $now.Text)) { continue }   # a page a project script built: its template is checked
             $before = ''
-            if ($Checkpoint.Files[$rel] -eq 'existed') { $bk = Join-Path $Checkpoint.Dir ($rel.Replace('/', '\')); if (Test-Path -LiteralPath $bk) { $before = (Read-TextFile $bk).Text } }
+            # A file Copilot moved in this change set (FileActions Invoke-MovePlan) is compared with its old text.
+            $origin = if ($Checkpoint.Files[$rel] -ne 'existed' -and $Checkpoint.PSObject.Properties['MovedFrom'] -and $Checkpoint.MovedFrom[$rel]) { "$($Checkpoint.MovedFrom[$rel])" } else { $rel }
+            if ($Checkpoint.Files[$origin] -eq 'existed') { $bk = Join-Path $Checkpoint.Dir ($origin.Replace('/', '\')); if (Test-Path -LiteralPath $bk) { $before = (Read-TextFile $bk).Text } }
             # Shown while it runs: the checks can start a tool (node --check, python, prisma validate).
             $prevAct = Enter-Activity $State 'syntax' "Checking $rel$(if ($rel -match '(?i)\.prisma$') { ' (prisma validate)' })"
             try { $issuesNow = @(Get-NewFileIssues $rel $before $now.Text $now.Crlf $State.ProjectRoot) } finally { $null = Exit-Activity $State $prevAct }
@@ -5784,7 +5947,7 @@ function Invoke-AgentTurn {
                     $isDone = $true; $doneText = $a.body.Trim(); continue   # the done card comes after the steps, when none failed
                 }
                 $id = "$($State.Seq)-$k"
-                if ($a.type -in 'write', 'edit', 'run' -and -not $a.closed -and $k -eq $actions.Count - 1) {
+                if ($a.type -in 'write', 'edit', 'run', 'move', 'delete' -and -not $a.closed -and $k -eq $actions.Count - 1) {
                     # The reply ended inside this block (no closing fence): it may be cut off. Applying
                     # half a file or half a command could do damage, so it waits for the full block.
                     Write-CCBLog info agent "Unclosed last block not applied: $($a.type) $($a.arg)"
@@ -5804,7 +5967,7 @@ function Invoke-AgentTurn {
                     Add-AgentEvent $State 'action-result' $result
                 }
                 $out = "$($res.output)"
-                if (-not $res.ok -and $a.type -in 'edit', 'write', 'run') {
+                if (-not $res.ok -and $a.type -in 'edit', 'write', 'run', 'move', 'delete') {
                     $stepFailed = $true
                     if ($isDone) {
                         # Done came earlier in this reply: taken back, the failure goes to Copilot.

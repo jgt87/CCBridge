@@ -17,6 +17,9 @@ $script:SkipDir = '(?i)^(\.streamhub|\.git|node_modules|dist|build|out|coverage|
 # A path with at least one folder separator, not preceded by a character that would make it part of
 # a URL, a longer name or a property (://host/scripts/x, my-scripts/x, obj.scripts/x).
 $script:PathToken = '(?<![\w.:@%$/\\-])((?:\.{1,2}[/\\])*[/\\]?(?:[\w.@-]*[\w@-][/\\])+[\w.@-]*)'
+# A file name without a folder as the whole value of a src or href attribute (src="app.js"): a
+# sibling of the page, which the folder rule above does not see.
+$script:AttrToken = '(?i)(?<=\b(?:src|href)\s*=\s*["''])([\w@-][\w.@-]*\.\w{1,8})(?=["''])'
 
 function ConvertTo-NormalPath([string]$Rel) {
     # 'a/./b/../c' -> 'a/c'; $null when it climbs out of the project.
@@ -58,7 +61,7 @@ function Update-TextReferences {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Text, [Parameter(Mandatory)][AllowEmptyString()][string]$FileRel, $Moves, [string]$ProjectRoot)
     $dir = $(if ($FileRel.Contains('/')) { $FileRel.Substring(0, $FileRel.LastIndexOf('/')) } else { '' })
     $script:RelinkCount = 0
-    $new = [regex]::Replace($Text, $script:PathToken, {
+    $eval = {
         param($m)
         $tok = $m.Groups[1].Value
         $back = $tok.Contains('\') -and -not $tok.Contains('/')
@@ -86,15 +89,63 @@ function Update-TextReferences {
             return $tok
         }
         $tok
-    })
+    }
+    $new = [regex]::Replace($Text, $script:PathToken, $eval)
+    $new = [regex]::Replace($new, $script:AttrToken, $eval)
     [pscustomobject]@{ text = $new; count = $script:RelinkCount }
+}
+
+function Update-MovedFileOwnRefs {
+    <# The paths inside files that moved to another folder: a path written relative to the file's
+       folder (./x, ../x, sub/x) that found a file from the old folder is rewritten to find it from the
+       new one (where that file is now, when it moved too). A path that resolves from the project root
+       instead, a leading /, and anything that does not lead to a file stay. $Files: @(@{ from; to })
+       project-relative, already moved. Returns @(@{ path; count; old; new }). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, $Moves, $Files)
+    $root = $ProjectRoot.TrimEnd('\')
+    foreach ($f in @($Files)) {
+        $oldDir = $(if ($f.from.Contains('/')) { $f.from.Substring(0, $f.from.LastIndexOf('/')) } else { '' })
+        $newDir = $(if ($f.to.Contains('/')) { $f.to.Substring(0, $f.to.LastIndexOf('/')) } else { '' })
+        if ($oldDir -ieq $newDir -or $f.to -notmatch $script:TextExt) { continue }
+        $full = Join-Path $root $f.to.Replace('/', '\')
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf) -or (New-Object IO.FileInfo $full).Length -gt 1MB) { continue }
+        try {
+            $info = Read-TextFile $full
+            $script:RelinkCount = 0
+            $eval = {
+                param($m)
+                $tok = $m.Groups[1].Value
+                $t = $tok.Replace('\', '/')
+                if ($t.StartsWith('/')) { return $tok }
+                $rel = ConvertTo-NormalPath $(if ($oldDir) { "$oldDir/$t" } else { $t })
+                if (-not $rel) { return $tok }
+                $rel = $rel.TrimEnd('/')
+                $target = Get-MovedTarget $rel $Moves
+                if (-not $target) { $target = $rel }
+                if (-not (Test-Path -LiteralPath (Join-Path $root $target.Replace('/', '\')))) { return $tok }
+                $out = Get-RelativeRef $newDir $target
+                if ($t.StartsWith('./') -and -not $out.StartsWith('.')) { $out = "./$out" }
+                if ($t.EndsWith('/')) { $out += '/' }
+                if ($tok.Contains('\') -and -not $tok.Contains('/')) { $out = $out.Replace('/', '\') }
+                if ($out -cne $tok) { $script:RelinkCount++; return $out }
+                $tok
+            }
+            $text = [regex]::Replace([regex]::Replace($info.Text, $script:PathToken, $eval), $script:AttrToken, $eval)
+            if (-not $script:RelinkCount -or $text -ceq $info.Text) { continue }
+            Write-TextFile $full $text $info.Bom $info.Crlf $info.Encoding
+            [pscustomobject]@{ path = $f.to; count = $script:RelinkCount; old = $info.Text; new = $text }
+        } catch { Write-CCBLogError relink "Could not update the paths inside $($f.to)" $_ }
+    }
 }
 
 function Update-MovedReferences {
     <# Rewrites references to moved files and folders in the project's text files (code, pages,
        styles, scripts, docs). Each file's earlier version is copied to relink-<time>\ in the
-       project's local state folder first. Returns @{ files = @(@{ path; count }); backup }. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, $Moves)
+       project's local state folder first. Returns @{ files = @(@{ path; count }); backup }.
+       With -Checkpoint (a move Copilot asked for: FileActions), each file goes into that change set
+       instead, so Undo takes the links back with the move; files Copilot may not write (Assert-Writable)
+       are left alone, and each item also carries old and new text for the change card. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, $Moves, $Checkpoint)
     $result = [pscustomobject]@{ files = @(); backup = $null }
     if (-not @($Moves).Count) { return $result }
     $root = $ProjectRoot.TrimEnd('\')
@@ -107,6 +158,13 @@ function Update-MovedReferences {
             $info = Read-TextFile $f.FullName
             $r = Update-TextReferences $info.Text $rel $Moves $root
             if (-not $r.count -or $r.text -ceq $info.Text) { continue }
+            if ($Checkpoint) {
+                try { $null = Assert-Writable $root $rel } catch { continue }
+                Save-CheckpointFile $Checkpoint $root $f.FullName
+                Write-TextFile $f.FullName $r.text $info.Bom $info.Crlf $info.Encoding
+                $changed.Add([pscustomobject]@{ path = $rel; count = $r.count; old = $info.Text; new = $r.text })
+                continue
+            }
             $copy = Join-Path $backup $rel.Replace('/', '\')
             $null = New-Item -ItemType Directory -Force -Path (Split-Path $copy)
             [IO.File]::Copy($f.FullName, $copy, $true)
@@ -115,8 +173,8 @@ function Update-MovedReferences {
         } catch { Write-CCBLogError relink "Could not update references in $rel" $_ }
     }
     if ($changed.Count) { Write-CCBLog info relink 'References to moved folders updated' @{ files = $changed.Count; refs = ($changed | Measure-Object count -Sum).Sum } }
-    $result.files = $changed.ToArray(); $result.backup = $(if ($changed.Count) { $backup } else { $null })
+    $result.files = $changed.ToArray(); $result.backup = $(if ($changed.Count -and -not $Checkpoint) { $backup } else { $null })
     $result
 }
 
-Export-ModuleMember -Function ConvertTo-NormalPath, Get-RelativeRef, Get-MovedTarget, Update-TextReferences, Update-MovedReferences
+Export-ModuleMember -Function ConvertTo-NormalPath, Get-RelativeRef, Get-MovedTarget, Update-TextReferences, Update-MovedFileOwnRefs, Update-MovedReferences

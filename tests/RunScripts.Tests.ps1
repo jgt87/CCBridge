@@ -124,6 +124,12 @@ Describe 'What reaches beyond the project (Get-RunEffects)' {
         Test-RootedPath '\\server\share' | Should Be $true
         Test-RootedPath 'dist\x' | Should Be $false
     }
+    It 'finds the pages that load a script past a script src a template writes' {
+        Set-Script 'page.html' "<script src=""{{ a|b }}""></script>`n<script src=""js/app.js""></script>`n"
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $proj 'js')
+        Set-Script 'js\app.js' "console.log(1);`n"
+        @(& (Get-Module Executor) { param($p) Get-PagesLoading $p 'js/app.js' } $proj) | Should Be @('page.html')
+    }
     It 'finds code that starts programs or evaluates code in JavaScript and Python' {
         Set-Script 'Scripts\p.py' "import subprocess`nsubprocess.run(['x'])`n"
         (@(Get-RunEffects $proj 'python Scripts/p.py') -join ';') | Should Match 'starts other programs'

@@ -34,10 +34,11 @@ function Test-RoundProgress {
     try {
         for ($i = 0; $i -lt @($Results).Count; $i++) {
             $r = @($Results)[$i]
-            if ($r.changedPath) { $progress = $true }
             $action = if ($r.action) { $r.action } elseif ($i -lt @($Actions).Count) { @($Actions)[$i] } else { $null }
-            if ((-not $r.ok -and $action.type -ne 'run') -or -not "$($r.output)".Trim()) { continue }
-            if ($action -and $action.type -notin 'read', 'glob', 'grep', 'find', 'run', 'web', 'sql') { continue }
+            # A delete leaves no changed path to check, but it is a change.
+            if ($r.changedPath -or ($r.ok -and $action.type -eq 'delete')) { $progress = $true }
+            if ((-not $r.ok -and $action.type -notin 'run', 'test') -or -not "$($r.output)".Trim()) { continue }
+            if ($action -and $action.type -notin 'read', 'glob', 'grep', 'find', 'refs', 'changes', 'run', 'test', 'web', 'sql') { continue }
             $observed = if ($r.ContainsKey('observation')) { "$($r.observation)" } else { "$($r.output)" }
             $key = "$($action.type)`n$($action.arg)`n$($action.body)`n$($observed.TrimEnd())"
             $hash = [Convert]::ToBase64String($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($key)))

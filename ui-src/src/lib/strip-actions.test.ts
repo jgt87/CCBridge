@@ -24,4 +24,21 @@ describe("stripActionBlocks", () => {
     expect(out).toContain("print(1)");
     expect(out).toContain("Done for now.");
   });
+
+  it("hides move, delete, refs, changes and test only in the ACTION form (lib/Protocol.psm1 does the same)", () => {
+    const reply = [
+      `${F3}text`, "ACTION move", "app.js -> js/app.js", F3,
+      `${F3}text`, "ACTION delete", "old.css", F3,
+      `${F3}text`, "ACTION refs", "greet", F3,
+      `${F3}text`, "ACTION changes", F3,
+      `${F3}text`, "ACTION test", F3,
+      `${F3}test`, "expect(sum(1, 2)).toBe(3)", F3,
+      `${F3}delete`, "a sample block", F3,
+    ].join("\n");
+    const out = stripActionBlocks(reply);
+    expect(out).not.toContain("ACTION");
+    expect(out).not.toContain("js/app.js");
+    expect(out).toContain("expect(sum(1, 2)).toBe(3)");
+    expect(out).toContain("a sample block");
+  });
 });

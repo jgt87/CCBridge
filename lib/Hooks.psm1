@@ -48,9 +48,9 @@ function Test-HookMatch($Hook, [string]$Path) {
 }
 
 $script:ActionGroups = @{
-    'read' = @('read', 'glob', 'grep', 'find')
-    'file-change' = @('write', 'edit')
-    'command' = @('run')
+    'read' = @('read', 'glob', 'grep', 'find', 'refs', 'changes')
+    'file-change' = @('write', 'edit', 'move', 'delete')
+    'command' = @('run', 'test')
     'network' = @('web', 'download')
     'automation' = @('runbook', 'fetch', 'chain', 'script')
 }

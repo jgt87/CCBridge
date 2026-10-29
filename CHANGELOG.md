@@ -6,6 +6,22 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.155] - 2026-10-29
+
+### Added
+- Copilot can move and rename files and folders in the project (`move`). Nothing is overwritten, and `Source/`, StreamHub's own folders and protected files are refused. Paths in other files that point at a moved file are rewritten, as are relative paths inside the moved file and bare names such as `src="app.js"`; anything that still points at the old place goes back to Copilot. A move needs approval like an edit (no card in Auto mode).
+- Copilot can delete files and folders in the project (`delete`), with the same refusals. A person in the StreamHub window approves every delete, also in Auto mode; tasks without a person present are refused. Files are removed one by one, never by a recursive delete.
+- Copilot can look up every use of a name (`refs`), with definitions marked and comment lines left out; for a file it shows what loads or names that file.
+- Copilot can ask what the current message has changed so far (`changes`), per file with line counts.
+- Copilot can run the project's tests (`test`) with the same command StreamHub runs at done; failures that were already there before the task are named separately. Refused in Plan only and when commands are off.
+- Moves, deletes and rewritten paths are all part of the change set, so Undo brings everything back.
+
+### Changed
+- The folder tidy-up at project open also rewrites bare file names in `src` and `href` after a move.
+
+### Fixed
+- More places no longer fail with "Illegal characters in path" on text that holds a quote, `<`, `>` or `|`: the file name in a "file not found" note and pages loaded by a template script. A path Copilot names with such a character is refused with a clear message.
+
 ## [v0.1.154] - 2026-10-28
 
 ### Changed

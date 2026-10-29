@@ -2,8 +2,11 @@
 
 $ErrorActionPreference = 'Stop'
 
-$script:ActionTypes = @('read', 'glob', 'grep', 'find', 'web', 'sql', 'screenshot', 'write', 'edit', 'run', 'runbook', 'remember', 'todo', 'dispute', 'done')
+$script:ActionTypes = @('read', 'glob', 'grep', 'find', 'refs', 'changes', 'web', 'sql', 'screenshot', 'write', 'edit', 'move', 'delete', 'run', 'test', 'runbook', 'remember', 'todo', 'dispute', 'done')
 $script:PlainInfo = @('', 'text', 'txt', 'plaintext', 'plain', 'none')
+# Actions added after the label form (```read) was replaced: only as ACTION NAME, so an ordinary code
+# block labelled test or delete in a reply is never taken for one.
+$script:ActionLineOnly = @('refs', 'changes', 'move', 'delete', 'test')
 
 function Get-ActionBlocks {
     <#
@@ -29,10 +32,11 @@ function Get-ActionBlocks {
         # (the form Copilot is taught: a label other than text draws as a chart on some tenants).
         # Older form, still accepted: the action name as the label (```read). Copilot also sometimes
         # leaves the label empty (or "text") and writes the bare action name as the first line.
+        $byLine = $false
         if ($script:PlainInfo -contains $type -and -not $arg -and $j -lt $lines.Length) {
-            $first = [regex]::Match($lines[$j], '^\s*ACTION\s+(read|glob|grep|find|web|sql|screenshot|write|edit|run|runbook|remember|todo|dispute|done)\b[:\s]*(.*)$', 'IgnoreCase')
+            $first = [regex]::Match($lines[$j], ('^\s*ACTION\s+(' + ($script:ActionTypes -join '|') + ')\b[:\s]*(.*)$'), 'IgnoreCase')
             if (-not $first.Success) { $first = [regex]::Match($lines[$j], '^\s*(read|glob|grep|web|write|edit|run|todo|done)\b[:\s]*(.*)$') }
-            if ($first.Success) { $type = $first.Groups[1].Value.ToLowerInvariant(); $arg = $first.Groups[2].Value.Trim(); $j++ }
+            if ($first.Success) { $type = $first.Groups[1].Value.ToLowerInvariant(); $arg = $first.Groups[2].Value.Trim(); $j++; $byLine = $true }
         }
         # In an edit block, code fences inside a SEARCH/REPLACE section are file content
         # (e.g. a markdown example), not the end of the block.
@@ -60,7 +64,7 @@ function Get-ActionBlocks {
         }
         $closed = $j -lt $lines.Length
         $i = $j + 1
-        if ($script:ActionTypes -notcontains $type) { continue }
+        if ($script:ActionTypes -notcontains $type -or (-not $byLine -and $script:ActionLineOnly -contains $type)) { continue }
 
         # Several actions in one block (Copilot left out the fence between them): a line that starts
         # a new ACTION ends the one before, so a run never takes the next step into its command.

@@ -65,7 +65,7 @@ function Set-WorkRound($State, [int]$Round) {
     if ($Round -gt 1) { Add-WorkStep $State "Round $Round" }
 }
 
-$script:ActionVerbs = @{ read = 'Read'; write = 'Write'; edit = 'Edit'; run = 'Run'; glob = 'Find files'; grep = 'Search'; find = 'Find'; web = 'Web'; sql = 'Query'; remember = 'Remember'; screenshot = 'Screenshot'; runbook = 'Runbook'; dispute = 'Dispute'; todo = 'To-do'; done = 'Done' }
+$script:ActionVerbs = @{ read = 'Read'; write = 'Write'; edit = 'Edit'; run = 'Run'; glob = 'Find files'; grep = 'Search'; find = 'Find'; refs = 'Uses of'; changes = 'Changes in'; test = 'Test'; move = 'Move'; delete = 'Delete'; web = 'Web'; sql = 'Query'; remember = 'Remember'; screenshot = 'Screenshot'; runbook = 'Runbook'; dispute = 'Dispute'; todo = 'To-do'; done = 'Done' }
 
 function Update-WorkFromEvent {
     <# The activity log and counts from the chat's events (Agent Add-AgentEvent): a new action, its
@@ -90,7 +90,7 @@ function Update-WorkFromEvent {
             $a = $w.ids["$($Data.id)"]
             if (-not $a) { return }
             $ok = $Data.ok -ne $false -and "$($Data.status)" -notin 'failed', 'rejected', 'skipped', 'error'
-            if ($ok -and $a.action -in 'write', 'edit' -and $a.target -and @($w.changed) -notcontains $a.target) { $w.changed = @(@($w.changed) + $a.target) }
+            if ($ok -and $a.action -in 'write', 'edit', 'move', 'delete' -and $a.target -and @($w.changed) -notcontains $a.target) { $w.changed = @(@($w.changed) + $a.target) }
             if (-not $ok) { Add-WorkStep $State "$(if ("$($Data.status)" -eq 'rejected') { 'Rejected' } else { 'Failed' }): $($script:ActionVerbs[$a.action]) $($a.target)".Trim() }
             elseif ($a.action -eq 'run') { Add-WorkStep $State "Finished $($a.target)" }
         }

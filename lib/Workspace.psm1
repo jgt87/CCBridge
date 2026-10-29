@@ -166,11 +166,24 @@ function Test-RootedPath([string]$Path) {
     [bool]($Path -match '^(?:[\\/]|[A-Za-z]:)')
 }
 
+function Get-PathLeaf([string]$Path) {
+    <# [IO.Path]::GetFileName without the throw on " < > | (see Test-RootedPath): the last part after
+       a / or \, for text that may not be a path (a script src from a template, a path Copilot names). #>
+    @("$Path" -split '[\\/]')[-1]
+}
+
+function Test-PathChars([string]$Path) {
+    <# True when the text holds no character Windows refuses in a path (" < > | and control
+       characters): the [IO.Path] methods throw "Illegal characters in path" on those in 5.1. #>
+    "$Path" -notmatch '["<>|\x00-\x1f]'
+}
+
 function Resolve-ProjectPath {
     <# Resolves a project-relative path and refuses anything that escapes the project root. #>
     param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$RelativePath)
     $rel = $RelativePath.Trim().Trim('"', "'", '`').Replace('/', '\').TrimStart('\')
     if (-not $rel -or (Test-RootedPath $rel)) { throw "Path must be relative to the project: '$RelativePath'" }
+    if (-not (Test-PathChars $rel)) { throw "Path holds a character a file name cannot have (a quote, <, >, | or a control character): '$RelativePath'" }
     $root = $ProjectRoot.TrimEnd('\')
     # shared/... (library/ when the project has a shared folder of its own: Get-SharedPrefix) is the
     # library beside the projects (Get-SharedRoot).
@@ -537,6 +550,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Test-RootedPath, Move-TempFile, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Test-RootedPath, Get-PathLeaf, Test-PathChars,Move-TempFile, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile, Get-FileFingerprint, Get-SharedRoot, Get-SharedPrefix, Initialize-SharedRoot, Get-SharedNotes

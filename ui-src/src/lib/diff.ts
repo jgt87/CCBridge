@@ -94,11 +94,13 @@ export function countChanges(lines: DiffLine[]) {
   return { add, del };
 }
 
-const ACTION_TYPES = new Set(["read", "glob", "grep", "find", "web", "sql", "screenshot", "write", "edit", "run", "runbook", "remember", "todo", "dispute", "done"]);
+const ACTION_TYPES = new Set(["read", "glob", "grep", "find", "refs", "changes", "web", "sql", "screenshot", "write", "edit", "move", "delete", "run", "test", "runbook", "remember", "todo", "dispute", "done"]);
 const PLAIN_LABELS = new Set(["", "text", "txt", "plaintext", "plain", "none"]);
 /** First line of an action in a plain block: "ACTION read" (any action), or, in older replies, the bare
  *  name of one of the actions the helper also takes that way (lib/Protocol.psm1 keeps the same lists). */
-const ACTION_LINE = /^\s*action\s+(read|glob|grep|find|web|sql|screenshot|write|edit|run|runbook|remember|todo|dispute|done)\b/i;
+const ACTION_LINE = new RegExp(`^\\s*action\\s+(${[...ACTION_TYPES].join("|")})\\b`, "i");
+/** Actions added after the label form (```read): only as "ACTION name", so a code block labelled test stays. */
+const ACTION_LINE_ONLY = new Set(["refs", "changes", "move", "delete", "test"]);
 const BARE_ACTION_LINE = /^\s*(read|glob|grep|web|write|edit|run|todo|done)\b/;
 
 /** Removes CCBridge action blocks from a reply; they are shown as cards instead. */
@@ -119,7 +121,7 @@ export function stripActionBlocks(text: string): string {
     // "ACTION NAME" (the form Copilot is taught) or the bare action name.
     const label = m[2].toLowerCase();
     const plainAction = PLAIN_LABELS.has(label) && /^\s{0,3}(`{3,}|~{3,})\s*[A-Za-z]*\s*$/.test(lines[i]) && i + 1 < lines.length && (ACTION_LINE.test(lines[i + 1]) || BARE_ACTION_LINE.test(lines[i + 1]));
-    if (ACTION_TYPES.has(label) || plainAction) {
+    if ((ACTION_TYPES.has(label) && !ACTION_LINE_ONLY.has(label)) || plainAction) {
       i = j;
     } else {
       for (let k = i; k <= Math.min(j, lines.length - 1); k++) out.push(lines[k]);

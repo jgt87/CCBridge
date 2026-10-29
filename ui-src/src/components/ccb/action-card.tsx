@@ -5,6 +5,7 @@ import {
   FilePen,
   FilePlus2,
   FileSearch,
+  FlaskConical,
   FolderInput,
   FolderSearch,
   ListTodo,
@@ -140,6 +141,9 @@ const ICONS: Record<string, React.ReactNode> = {
   move: <FolderInput className="h-4 w-4 text-muted-foreground" />,
   restore: <RotateCcw className="h-4 w-4 text-muted-foreground" />,
   delete: <Trash2 className="h-4 w-4 text-muted-foreground" />,
+  refs: <FileSearch className="h-4 w-4 text-muted-foreground" />,
+  changes: <FilePen className="h-4 w-4 text-muted-foreground" />,
+  test: <FlaskConical className="h-4 w-4 text-muted-foreground" />,
 };
 
 function StatusBadge({ status }: { status: string }) {

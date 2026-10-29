@@ -675,14 +675,14 @@ function Get-PagesLoading([string]$ProjectRoot, [string]$Rel) {
     # The project's HTML pages that load $Rel with a script tag (the page itself for an HTML file).
     if ($Rel -match '(?i)\.html?$') { return @($Rel) }
     if (-not $ProjectRoot) { return @() }
-    $leaf = [IO.Path]::GetFileName($Rel)
+    $leaf = Get-PathLeaf $Rel
     $pages = New-Object System.Collections.Generic.List[string]
     foreach ($f in Get-ChildItem -LiteralPath $ProjectRoot -Recurse -File -Include '*.html', '*.htm' -ErrorAction SilentlyContinue) {
         $pr = ConvertTo-RelativePath $ProjectRoot $f.FullName
         if ($pr -match '(?i)(^|/)(node_modules|dist|build|source|\.streamhub|History)/') { continue }
         $t = [IO.File]::ReadAllText($f.FullName)
         foreach ($m in [regex]::Matches($t, '(?i)<script\b[^>]*\bsrc\s*=\s*["'']([^"''?#]+)')) {
-            if ([IO.Path]::GetFileName($m.Groups[1].Value) -ne $leaf) { continue }
+            if ((Get-PathLeaf $m.Groups[1].Value) -ne $leaf) { continue }
             if ((Resolve-RelRef $ProjectRoot (Split-Path -Parent $pr) $m.Groups[1].Value) -eq $Rel) { $pages.Add($pr); break }
         }
     }
@@ -1171,8 +1171,8 @@ function Get-ReadNotFoundNote([string]$ProjectRoot, [string]$Rel) {
     <# A read of a file that is not there: says so, with the file of that name elsewhere, or the
        project's files when there are few, so the next step is a write, not another guess. #>
     $files = @(Get-ProjectFiles $ProjectRoot | ForEach-Object { $_.path })
-    $leaf = [IO.Path]::GetFileName("$Rel".Replace('\', '/'))
-    $same = @($files | Where-Object { $leaf -and [IO.Path]::GetFileName($_) -ieq $leaf -and $_ -ne $Rel })
+    $leaf = Get-PathLeaf $Rel
+    $same = @($files | Where-Object { $leaf -and (Get-PathLeaf $_) -ieq $leaf -and $_ -ne $Rel })
     $hint = if ($same.Count) { " A file with that name is at: $($same -join ', ')." }
         elseif ($files.Count -le 40) { " The project's files: $(if ($files.Count) { $files -join ', ' } else { 'none yet' })." }
         else { " The project has $($files.Count) files (listed in the project context); none is $Rel." }
@@ -2039,14 +2039,10 @@ function Get-ChangedView {
     "Lines $from-$to of $Shown now$cut (line numbers are not part of the file):`n$fence`n" + ($n[($from - 1)..($to - 1)] -join "`n") + "`n$fence" + $(if ($scope) { "`n$scope" } else { '' })
 }
 
-function Find-SymbolDefinition {
-    <# Where a function, class, method, CSS class/id or HTML id is defined in the project:
-       "PATH:LINE  line" plus the block's lines to read. At most $Max hits. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [int]$Max = 20)
-    $n = $Name.Trim().TrimStart('.', '#').Trim('`', '"', "'")
-    if ($n -notmatch '^[\w$-]{2,80}$') { return "find: give one name (letters, digits, _ - $), for example a function or class name" }
-    $e = [regex]::Escape($n)
-    $byExt = @(
+function Get-DefinitionRules([string]$Escaped) {
+    # Per file type, the pattern of a line that defines the (regex-escaped) name: find and refs use it.
+    $e = $Escaped
+    @(
         @{ ext = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte)$'; re = "(?i)\bfunction\s*\*?\s*$e\b|\bclass\s+$e\b|\b(const|let|var)\s+$e\s*=|^\s*(export\s+)?(default\s+)?(interface|type|enum)\s+$e\b|^\s*(public\s+|private\s+|protected\s+|static\s+|async\s+)*$e\s*\([^)]*\)\s*\{|\b$e\s*:\s*(async\s*)?(function\b|\()" }
         @{ ext = '(?i)\.(ps1|psm1)$'; re = "(?i)^\s*(function|filter|class|enum)\s+$e\b" }
         @{ ext = '(?i)\.pyw?$'; re = "^\s*(async\s+)?def\s+$e\b|^\s*class\s+$e\b|^$e\s*=" }
@@ -2054,6 +2050,15 @@ function Find-SymbolDefinition {
         @{ ext = '(?i)\.(html?|xhtml)$'; re = "(?i)\bid\s*=\s*[""']$e[""']|\bclass\s*=\s*[""'][^""']*\b$e\b" }
         @{ ext = '(?i)\.(cs|java|kt|go|rs|php|swift|dart|c|cpp|h|hpp)$'; re = "\b(class|interface|enum|struct|record|trait|fn|func|def)\s+$e\b|\b\w[\w<>\[\],]*\s+$e\s*\([^;]*\)\s*(\{|$)" }
     )
+}
+
+function Find-SymbolDefinition {
+    <# Where a function, class, method, CSS class/id or HTML id is defined in the project:
+       "PATH:LINE  line" plus the block's lines to read. At most $Max hits. #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [Parameter(Mandatory)][string]$Name, [int]$Max = 20)
+    $n = $Name.Trim().TrimStart('.', '#').Trim('`', '"', "'")
+    if ($n -notmatch '^[\w$-]{2,80}$') { return "find: give one name (letters, digits, _ - $), for example a function or class name" }
+    $byExt = Get-DefinitionRules ([regex]::Escape($n))
     $hits = New-Object System.Collections.Generic.List[string]
     foreach ($f in @(Get-ProjectFiles $ProjectRoot)) {
         if ($hits.Count -ge $Max) { break }
@@ -3001,5 +3006,5 @@ function Invoke-RunAction {
     [pscustomobject]@{ exitCode = $(if ($timedOut -or $cancelled) { $null } else { $p.ExitCode }); timedOut = $timedOut; cancelled = $cancelled; output = $text }
 }
 
-Export-ModuleMember -Function Find-AnchorTarget, Get-OutlineEntries, Get-EnclosingName, Test-OutsideContent, Get-WebDownloadCommand, Get-CmdQuoteBreak, Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Test-DeleteNeedsPerson, Get-RunScriptPreview, Get-RunScripts, Get-OutsideEffects, Get-RunEffects, ConvertTo-PathExpressions, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes, Get-LineHunks, Merge-LineHunks,
+Export-ModuleMember -Function Get-DefinitionRules, Remove-EmptyFolders, Test-TextReadable, Measure-LineChanges,Find-AnchorTarget,Get-OutlineEntries, Get-EnclosingName, Test-OutsideContent, Get-WebDownloadCommand, Get-CmdQuoteBreak, Get-HiddenErrorNote, Get-RunTail, Get-RunWaitState, Get-ProcessTreeCpu, Get-PsScopeNote, Get-PsParamNames, Format-LineChange, Get-InteractiveNote, Get-InlineScripts, Get-UselessCheckCommand, Close-LoneScriptTag, Repair-StrippedScriptTag, Find-RemovedTypeName, Format-RemovedTypeName, Format-DamagedHtml, Find-DamagedHtmlLine, Repair-EscapedTypeName, Repair-RunCommand, Test-LongPowerShellCommand, Get-ChangeSetFileDiff, Save-CheckpointFile, Add-CheckpointCount, Get-LastChangeStats, Get-LastChangeSetId, Get-LastChangeStart, Resolve-RelRef, Test-ServedProject, Find-FileUrlBlocks, Start-RunSnapshot, Complete-RunSnapshot, Clear-RunSnapshot, Test-BinaryFile, Repair-CodeText, Get-TextEncodingName, Get-NewFileFormat, Find-CodeArtifacts, Test-EncodingFit, Write-TextFile, Find-SymbolDefinition, Get-LearnedNotes, Find-PlaceholderLine, Get-ChangedView, Get-BlockSpans, Expand-ToWholeBlocks, Get-BraceText, Get-BlockBalance, Find-UnbalancedBrace, Test-HalfBlock, Test-DeleteScope, Test-DeleteNeedsPerson, Get-RunScriptPreview, Get-RunScripts, Get-OutsideEffects, Get-RunEffects, ConvertTo-PathExpressions, Split-CommandGroups, Get-FileOutline, Get-CheckpointChanges, Get-ChangeSetContents, Set-EditIndent, Resolve-ModuleImport, ConvertTo-CheckableScript, Test-ProjectConsistency, Format-AlreadyApplied, Get-SessionChangeStats, Get-CommandRisk, Assert-Writable, Read-TextFile, New-Checkpoint, Undo-LastCheckpoint, Invoke-ReadAction, Invoke-GlobAction, Invoke-GrepAction, Get-FileLineCount, Get-ConvertedDataFile, ConvertFrom-ConsoleBytes, Get-LineHunks, Merge-LineHunks,
     Get-WritePreview, Invoke-WriteAction, Get-EditResult, Invoke-EditAction, Get-OwnEnvironmentNames, Remove-OwnEnvironment, Invoke-RunAction, Get-FileViewText, Get-FolderListing, Get-ReadNotFoundNote
