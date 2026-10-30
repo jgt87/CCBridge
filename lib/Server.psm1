@@ -442,7 +442,8 @@ function Invoke-ApiRequest($Ctx, $State) {
                 $since = Get-LastChangeStart $State.ProjectRoot ([string]$State.OpenedAt)
                 $stats = Get-LastChangeStats $State.ProjectRoot $since   # every change of the last instruction added up
             } else { $stats = Get-SessionChangeStats $State.ProjectRoot $since }
-            $files = @(Get-ProjectFiles $State.ProjectRoot | ForEach-Object {
+            # The built app (dist/, build/, out/ at the top) shows in the tree, though Copilot's list leaves it out.
+            $files = @(Get-ProjectFiles $State.ProjectRoot -BuiltApp | ForEach-Object {
                 $s = $stats[$_.path]
                 if ($s) { [pscustomobject]@{ path = $_.path; size = $_.size; added = $s.added; removed = $s.removed; created = [bool]$s.created } } else { $_ }
             })

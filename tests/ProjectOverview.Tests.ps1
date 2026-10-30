@@ -25,3 +25,19 @@ Describe 'Get-ProjectOverview' {
         try { (Get-ProjectOverview $p).files | Should Be 0; @((Get-ProjectOverview $p).languages).Count | Should Be 0 } finally { Remove-Item $p -Recurse -Force }
     }
 }
+
+Describe 'Get-ProjectFiles -BuiltApp' {
+    It 'lists the built app at the top of the project for the Files tree, never for Copilot or deeper down' {
+        $p = Join-Path $env:TEMP ('ccb-built-' + [guid]::NewGuid().ToString('N'))
+        foreach ($f in 'index.html', 'dist\index.html', 'dist\assets\app.js', 'build\x.js', 'out\y.js', 'node_modules\lib\i.js', 'bin\a.dll', 'src\dist\z.js') {
+            $full = Join-Path $p $f
+            New-Item -ItemType Directory -Force -Path (Split-Path $full) | Out-Null
+            [IO.File]::WriteAllText($full, 'x')
+        }
+        [IO.File]::WriteAllText((Join-Path $p '.gitignore'), "dist/`n")
+        try {
+            @(Get-ProjectFiles $p | ForEach-Object { $_.path }) -join ',' | Should BeExactly '.gitignore,index.html'
+            @(Get-ProjectFiles $p -BuiltApp | ForEach-Object { $_.path }) -join ',' | Should BeExactly '.gitignore,build/x.js,dist/assets/app.js,dist/index.html,index.html,out/y.js'
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+}

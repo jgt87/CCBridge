@@ -70,6 +70,19 @@ export function accountText(a: SsoStatus["profileAccount"]): string {
   return "unknown";
 }
 
+/** The note after the switch was turned on or off; `edge`: what Edge's own switch did, when it was changed. */
+export function switchNote(on: boolean, edge: string): string {
+  return on
+    ? `Single sign-on on${edge ? ` (Edge's switch: ${edge})` : ""}. Applies at the next StreamHub start.`
+    : "Single sign-on off: from the next StreamHub start, Copilot opens in a private session where you sign in yourself.";
+}
+
+/** The status after Run setup: the setup's own status, with the switch on when setup turned it on or found it on. */
+export function afterSetupStatus(cur: SsoStatus | null, r: { result: string; status: SsoStatus }): SsoStatus {
+  const turnedOn = r.result === "turned on" || r.result === "already on";
+  return { ...(cur ?? r.status), ...r.status, profileSso: turnedOn ? "on" : (cur?.profileSso ?? r.status.profileSso) };
+}
+
 /** Settings > Sign-in: the status as label/value rows. */
 export function ssoStatusRows(s: SsoStatus): { label: string; value: string }[] {
   return [

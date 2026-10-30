@@ -6,6 +6,14 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.157] - 2026-10-30
+
+### Changed
+- Settings > Sign-in: the section's code is split into a status hook and a notes part, with the switch note and the status after setup as tested functions (no change in what it does).
+
+### Fixed
+- The Files tree shows the built app (`dist/`, `build/`, `out/` at the top of the project) as soon as it is written: those folders were left out like other build output, so a `dist/` folder Copilot built never appeared. Copilot's own file list still leaves them out.
+
 ## [v0.1.156] - 2026-10-29
 
 ### Changed

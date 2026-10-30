@@ -1,15 +1,11 @@
 import { useEffect, useState } from "react";
 import { api, type SsoStatus } from "@/lib/api";
 import { cachedSso, loadSso, rememberSso } from "@/lib/settings-cache";
-import { ssoStateText, ssoStatusRows } from "@/lib/sso-text";
+import { afterSetupStatus, ssoStateText, ssoStatusRows, switchNote } from "@/lib/sso-text";
 import { Segmented, SettingLine, smallButtonClass } from "./settings-ui";
 
-/**
- * Settings > Sign-in: single sign-on with the Windows work account in StreamHub's own Edge profile,
- * so Copilot signs in by itself after a restart. No password is stored; Edge policies and the
- * normal Edge profile are not touched.
- */
-export function SsoSection() {
+/** The sign-in status, kept in the settings cache, and the steps that change it (one at a time, with a busy label). */
+function useSso() {
   // Shown at once from the background load; checked again quietly when Settings opens.
   const [status, setStatusState] = useState<SsoStatus | null>(cachedSso());
   const setStatus = (next: SsoStatus | null | ((s: SsoStatus | null) => SsoStatus | null)) =>
@@ -45,25 +41,55 @@ export function SsoSection() {
   const switchTo = (on: boolean) =>
     run(on ? "Turning on..." : "Turning off...", async () => {
       await api.setSetting("signIn", on ? "single-sign-on" : "private");
-      let edge = "";
-      if (on && status?.profileSso === "off") edge = (await api.setSso(true)).result;
+      const edge = on && status?.profileSso === "off" ? (await api.setSso(true)).result : "";
       setStatus(await api.ssoStatus());
-      setNote(
-        on
-          ? `Single sign-on on${edge ? ` (Edge's switch: ${edge})` : ""}. Applies at the next StreamHub start.`
-          : "Single sign-on off: from the next StreamHub start, Copilot opens in a private session where you sign in yourself."
-      );
-    });  const setup = () =>
+      setNote(switchNote(on, edge));
+    });
+  const setup = () =>
     run("Running setup...", async () => {
       const r = await api.ssoSetup();
-      setStatus((s) => ({ ...(s ?? r.status), ...r.status, profileSso: r.result === "turned on" || r.result === "already on" ? "on" : (s?.profileSso ?? r.status.profileSso) }));
+      setStatus((s) => afterSetupStatus(s, r));
       setNote(`Setup: ${r.result}. Log: ${r.logFile}`);
       if (r.result === "already on") setStatus(await api.ssoStatus());
     });
-  const open = () => run("Opening...", async () => {
-    await api.openSsoSettings();
-    setNote("Edge's profile settings are open in StreamHub's Edge window.");
-  });
+  const open = () =>
+    run("Opening...", async () => {
+      await api.openSsoSettings();
+      setNote("Edge's profile settings are open in StreamHub's Edge window.");
+    });
+
+  return { status, busy, note, error, check, switchTo, setup, open };
+}
+
+/** The status list, what the switch state means (or the step running now), the last note and error. */
+function SsoNotes({ status, busy, note, error }: { status: SsoStatus | null; busy: string; note: string; error: string }) {
+  return (
+    <>
+      {status && !busy && (
+        <ul className="mt-1.5 space-y-0.5 text-xs">
+          {ssoStatusRows(status).map((r) => (
+            <li className="flex gap-1.5" key={r.label}>
+              <span className="text-muted-foreground">&bull;</span>
+              <span className="text-muted-foreground">{r.label}:</span>
+              <span>{r.value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-1 text-muted-foreground text-xs">{busy || ssoStateText(status)}</div>
+      {note && <div className="text-muted-foreground text-xs">{note}</div>}
+      {error && <div className="kit-error-text">{error}</div>}
+    </>
+  );
+}
+
+/**
+ * Settings > Sign-in: single sign-on with the Windows work account in StreamHub's own Edge profile,
+ * so Copilot signs in by itself after a restart. No password is stored; Edge policies and the
+ * normal Edge profile are not touched.
+ */
+export function SsoSection() {
+  const { status, busy, note, error, check, switchTo, setup, open } = useSso();
 
   // The switch works whenever there is something to sign in with, and always to come back from a private session.
   const canSwitch = !busy && status !== null && (status.workAccount || status.signIn === "private");
@@ -98,24 +124,7 @@ export function SsoSection() {
         />
       }
       help="Copilot signs in by itself after a restart, with the work account Windows already holds. No password is stored, and only StreamHub's own Edge profile is changed."
-      notes={
-        <>
-          {status && !busy && (
-            <ul className="mt-1.5 space-y-0.5 text-xs">
-              {ssoStatusRows(status).map((r) => (
-                <li className="flex gap-1.5" key={r.label}>
-                  <span className="text-muted-foreground">&bull;</span>
-                  <span className="text-muted-foreground">{r.label}:</span>
-                  <span>{r.value}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="mt-1 text-muted-foreground text-xs">{busy || ssoStateText(status)}</div>
-          {note && <div className="text-muted-foreground text-xs">{note}</div>}
-          {error && <div className="kit-error-text">{error}</div>}
-        </>
-      }
+      notes={<SsoNotes busy={busy} error={error} note={note} status={status} />}
       title="Sign in with your Windows account (single sign-on)"
     />
   );

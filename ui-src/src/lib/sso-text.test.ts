@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SsoStatus } from "./api";
-import { copilotText, ssoStateText, ssoStatusRows } from "./sso-text";
+import { afterSetupStatus, copilotText, ssoStateText, ssoStatusRows, switchNote } from "./sso-text";
 
 const base: SsoStatus = { workAccount: true, profileSso: "on", copilot: "chat" };
 
@@ -44,5 +44,25 @@ describe("single sign-on off (private session)", () => {
     expect(ssoStatusRows(s)[0].value).toBe("Off (private session)");
     expect(ssoStatusRows(s)[4].value).toBe("private, you sign in yourself");
     expect(ssoStateText(s)).toMatch(/^Off: Copilot opens in a private session/);
+  });
+});
+
+describe("sign-in switch and setup", () => {
+  it("says what turning the switch did", () => {
+    expect(switchNote(true, "")).toBe("Single sign-on on. Applies at the next StreamHub start.");
+    expect(switchNote(true, "turned on")).toBe("Single sign-on on (Edge's switch: turned on). Applies at the next StreamHub start.");
+    expect(switchNote(false, "")).toMatch(/^Single sign-on off: .*private session/);
+  });
+  it("shows the switch on after a setup that turned it on or found it on", () => {
+    const off: SsoStatus = { ...base, profileSso: "off" };
+    expect(afterSetupStatus(off, { result: "turned on", status: off }).profileSso).toBe("on");
+    expect(afterSetupStatus(null, { result: "already on", status: off }).profileSso).toBe("on");
+  });
+  it("keeps the known switch state after a setup that changed nothing", () => {
+    const unknown: SsoStatus = { ...base, profileSso: "unknown", copilot: "no tab" };
+    const r = afterSetupStatus({ ...base, profileSso: "managed" }, { result: "failed", status: unknown });
+    expect(r.profileSso).toBe("managed");
+    expect(r.copilot).toBe("no tab");
+    expect(afterSetupStatus(null, { result: "failed", status: unknown }).profileSso).toBe("unknown");
   });
 });

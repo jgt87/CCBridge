@@ -4,6 +4,9 @@ $ErrorActionPreference = 'Stop'
 
 $script:IgnoredDirs = @('.git', 'node_modules', 'bin', 'obj', 'dist', 'build', 'out', 'target', '.vs', '.vscode',
                         '.idea', '__pycache__', '.venv', 'venv', '.next', '.ccbridge', '.streamhub', '.pytest_cache')
+# Build output at the project's top that holds the built app the person opens (Open app looks there
+# first): the app's Files tree lists it (Get-ProjectFiles -BuiltApp), Copilot's file list does not.
+$script:BuiltAppDirs = @('dist', 'build', 'out')
 
 function Get-OneDriveRoot {
     foreach ($p in $env:OneDriveCommercial, $env:OneDrive, $env:OneDriveConsumer) {
@@ -271,8 +274,9 @@ function Test-Ignored([string]$Name, [string]$RelPath, [string[]]$Patterns) {
 }
 
 function Get-ProjectFiles {
-    <# Project files as relative '/' paths with sizes. Skips build/VCS folders and simple .gitignore entries. #>
-    param([Parameter(Mandatory)][string]$ProjectRoot, [int]$MaxFiles = 5000)
+    <# Project files as relative '/' paths with sizes. Skips build/VCS folders and simple .gitignore entries;
+       -BuiltApp keeps dist/, build/ and out/ at the project's top (for the app's Files tree). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [int]$MaxFiles = 5000, [switch]$BuiltApp)
     $patterns = Get-GitIgnoreMatchers $ProjectRoot
     $result = New-Object System.Collections.Generic.List[object]
     $stack = New-Object System.Collections.Generic.Stack[string]
@@ -283,7 +287,8 @@ function Get-ProjectFiles {
             if (Test-LinkPath $d) { continue }
             $name = [IO.Path]::GetFileName($d)
             $rel = ConvertTo-RelativePath $ProjectRoot $d
-            if ($script:IgnoredDirs -contains $name -or (Test-Ignored $name $rel $patterns)) { continue }
+            $built = $BuiltApp -and $rel -eq $name -and $script:BuiltAppDirs -contains $name
+            if (-not $built -and ($script:IgnoredDirs -contains $name -or (Test-Ignored $name $rel $patterns))) { continue }
             $stack.Push($d)
         }
         foreach ($f in [IO.Directory]::GetFiles($dir)) {
