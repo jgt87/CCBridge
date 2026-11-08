@@ -20,6 +20,9 @@ Nothing yet.
 - The kit's contrast check also measures text on the accent tints (`--kit-accent-tint-1` to `-3`), resolving `var()` and `color-mix()` values.
 - The kit rule and examples: a busy button gets a `kit-sr-only` `role="status"` line beside it; layers come from the `--kit-z-*` tokens.
 
+### Fixed
+- The system check at start noticed a port taken by another program only when Windows listed it, which some Windows builds leave out: it now also tries the port itself, so a busy web or Edge port is moved to a free one instead of failing later.
+
 ## [v0.1.157] - 2026-10-30
 
 ### Changed

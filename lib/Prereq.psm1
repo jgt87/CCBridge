@@ -91,7 +91,19 @@ function Find-FreePort([int]$From, [int]$To, [int[]]$Avoid = @()) {
 }
 
 function Test-PortListening([int]$Port) {
-    @([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object { $_.Port -eq $Port }).Count -gt 0
+    <# Whether something holds the port. The listener table alone is not enough: on some Windows
+       builds it leaves out a port this very process (or the sandbox it runs in) holds, which made the
+       busy-port checks pass a port that was taken (v0.1.158 gate). So a short exclusive bind on
+       loopback and on every address follows: a socket held on either, or an http.sys reservation
+       (access denied), makes the bind fail. #>
+    if (@([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object { $_.Port -eq $Port }).Count -gt 0) { return $true }
+    foreach ($address in [Net.IPAddress]::Loopback, [Net.IPAddress]::Any) {
+        $s = New-Object Net.Sockets.Socket ([Net.Sockets.AddressFamily]::InterNetwork), ([Net.Sockets.SocketType]::Stream), ([Net.Sockets.ProtocolType]::Tcp)
+        try { $s.ExclusiveAddressUse = $true; $s.Bind((New-Object Net.IPEndPoint $address, $Port)) }
+        catch { return $true }
+        finally { $s.Close() }
+    }
+    $false
 }
 
 function Invoke-SafeCheck([string]$Name, [scriptblock]$Body) {
