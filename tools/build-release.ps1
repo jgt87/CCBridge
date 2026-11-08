@@ -120,7 +120,10 @@ $null = Invoke-Git push origin "refs/tags/$Version"
 # The release on that tag, with the zip.
 $ghArgs = @('release', 'create', $Version, $zip, '--verify-tag', '--title', "StreamHub $Version")
 if ($NotesFile) { $ghArgs += @('--notes-file', $NotesFile) } else { $ghArgs += '--generate-notes' }
-$r = Invoke-Native 'gh' $ghArgs
+# gh finds the repository from the current folder (git has -C): run it from the app folder, since
+# the script may be started from anywhere (v0.1.158 was started from C:\Windows\system32).
+Push-Location $root
+try { $r = Invoke-Native 'gh' $ghArgs } finally { Pop-Location }
 if ($r.code) { throw "gh release create failed: $($r.lines -join ' ')" }
 "Released: $($r.lines | Select-Object -Last 1)"
 $null = Invoke-Git fetch --tags origin   # the local copy knows the new tag right away
