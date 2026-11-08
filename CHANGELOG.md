@@ -4,6 +4,10 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [v0.1.158] - 2026-11-08
+
 ### Added
 - UI kit, new parts built only from the kit's existing tokens and classes (existing parts render as before; kit revision not raised yet): a tooltip for icon buttons and cut-off text, `data-kit-tooltip="TEXT"` instead of `title` (the info tip's bubble, `kit-tooltip`; after the pointer rests, at once on keyboard focus and next to one that just closed, never on touch; Escape, a press, scroll and wheel close it; the light/dark button uses it too); an error state with a way out, `kit-notice kit-notice--error` with `role="alert"` and a Retry button in `kit-notice__actions`; a Dismiss button on every toast (`kit-toast__close`, `close: false` leaves it out), and toasts wait while pointed at or focused; a context menu, `data-kit-context` on a row or card whose `kit-menu` (its visible ellipsis button) also opens at the pointer on a right click, Shift+F10 or the context menu key (`kit:menu` gets `detail.target`); a command palette for apps with a `kit-shell`, `<dialog class="kit-dialog kit-palette" data-kit-palette>` with a `kit-search__list`, opened with Ctrl+K (`kit:command`). Examples sections and rule lines for each.
 - UI kit React parts: `Tooltip`, `ThemeToggle`, `AppShell` and `CommandPalette`; `Toaster` toasts have the Dismiss button and wait while pointed at (`dismissToast`); `Menu` takes `buttonLabel` (an icon button) and `contextRef` (also the context menu of that element).

@@ -57,6 +57,20 @@ Describe 'User and machine independence' {
     }
 }
 
+# AGENTS.md is loaded into every coding agent's context, which warns past 40,000 characters (it had
+# grown to 207 KB): module details and the full product rules belong in docs/architecture.md.
+Describe 'Agent instructions stay short' {
+    It 'keeps AGENTS.md under 200 lines and 40,000 characters' {
+        $t = [IO.File]::ReadAllText((Join-Path $root 'AGENTS.md'))
+        @($t -split "`n").Count | Should BeLessThan 200
+        $t.Length | Should BeLessThan 40000
+    }
+    It 'points to the detailed reference, which exists' {
+        [IO.File]::ReadAllText((Join-Path $root 'AGENTS.md')) | Should Match 'docs/architecture\.md'
+        Test-Path (Join-Path $root 'docs\architecture.md') | Should Be $true
+    }
+}
+
 Describe 'Commands Windows PowerShell 5.1 may not have' {
     It 'uses no command of the 5.1 Utility script module in the app, tools and launchers' {
         # Windows PowerShell 5.1 started from PowerShell 7 loads 7's modules, which lack these (the
