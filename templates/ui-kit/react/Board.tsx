@@ -29,6 +29,17 @@ function dropIndex(listEl: HTMLElement, id: string, clientY: number) {
 export function Board({ columns, cards, onMove }: { columns: BoardColumn[]; cards: BoardCard[]; onMove: (id: string, toColumn: string, index: number) => void }) {
   const dragging = useRef<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  const [said, setSaid] = useState("");
+  const board = useRef<HTMLDivElement>(null);
+  // A move, read out by screen readers ("Moved Fix the login to Doing, position 2 of 3"), then passed on.
+  const move = (id: string, toColumn: string, index: number) => {
+    const el = Array.from(board.current?.querySelectorAll("[data-id]") ?? []).find((c) => c.getAttribute("data-id") === id);
+    const name = el?.textContent?.trim().replace(/\s+/g, " ").slice(0, 80) || id;
+    const col = columns.find((c) => c.id === toColumn);
+    const n = cards.filter((c) => c.column === toColumn && c.id !== id).length + 1;
+    setSaid("Moved " + name + " to " + (typeof col?.title === "string" ? col.title : toColumn) + ", position " + (index + 1) + " of " + n);
+    onMove(id, toColumn, index);
+  };
   const inColumn = (col: string) => cards.filter((c) => c.column === col);
   // The end of the column `by` columns away, or null at the board's edge.
   const otherColumn = (ci: number, by: number): [string, number] | null => {
@@ -48,11 +59,11 @@ export function Board({ columns, cards, onMove }: { columns: BoardColumn[]; card
   };
   const keyMove = (card: BoardCard, key: string) => {
     const to = keyTarget(card, key);
-    if (to) onMove(card.id, to[0], to[1]);
+    if (to) move(card.id, to[0], to[1]);
     return !!to;
   };
   return (
-    <div className="kit-board">
+    <div className="kit-board" ref={board}>
       {columns.map((col) => {
         const list = inColumn(col.id);
         return (
@@ -77,7 +88,7 @@ export function Board({ columns, cards, onMove }: { columns: BoardColumn[]; card
                 const id = dragging.current;
                 dragging.current = null;
                 if (!id) return;
-                onMove(id, col.id, dropIndex(e.currentTarget, id, e.clientY));
+                move(id, col.id, dropIndex(e.currentTarget, id, e.clientY));
               }}
             >
               {list.map((card) => (
@@ -105,6 +116,9 @@ export function Board({ columns, cards, onMove }: { columns: BoardColumn[]; card
           </section>
         );
       })}
+      <span aria-live="polite" className="kit-sr-only">
+        {said}
+      </span>
     </div>
   );
 }

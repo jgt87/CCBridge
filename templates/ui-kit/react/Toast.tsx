@@ -9,34 +9,69 @@ interface ToastItem {
   text: string;
   tone?: ToastTone;
   leaving: boolean;
+  close: boolean;
+}
+interface ToastTimer {
+  left: number;
+  since: number;
+  timer: number | null;
 }
 
 // A tiny store, so toast() works from anywhere and one Toaster shows them.
 let items: ToastItem[] = [];
 let nextId = 1;
+const timers = new Map<number, ToastTimer>();
 const listeners = new Set<(list: ToastItem[]) => void>();
 const emit = () => listeners.forEach((l) => l(items));
 
-/** A short confirmation after an action ("Saved"), read out by screen readers. */
-export function toast(text: string, opts: { tone?: ToastTone; ms?: number } = {}) {
-  const id = nextId++;
-  items = [...items, { id, text, tone: opts.tone, leaving: false }];
+/** Takes a toast away now (its Dismiss button does this). */
+export function dismissToast(id: number) {
+  const t = timers.get(id);
+  if (t && t.timer !== null) window.clearTimeout(t.timer);
+  timers.delete(id);
+  if (!items.some((x) => x.id === id && !x.leaving)) return;
+  items = items.map((x) => (x.id === id ? { ...x, leaving: true } : x));
   emit();
-  const ms = opts.ms ?? (opts.tone === "error" ? 8000 : 4000);
-  setTimeout(() => {
-    items = items.map((t) => (t.id === id ? { ...t, leaving: true } : t));
+  window.setTimeout(() => {
+    items = items.filter((x) => x.id !== id);
     emit();
-    setTimeout(() => {
-      items = items.filter((t) => t.id !== id);
-      emit();
-    }, 400);
-  }, ms);
+  }, 400);
+}
+function run(id: number) {
+  const t = timers.get(id);
+  if (!t || t.timer !== null) return;
+  t.since = Date.now();
+  t.timer = window.setTimeout(() => dismissToast(id), t.left);
+}
+// While the pointer is on a toast or the focus is in it, its time stands still.
+function pause(id: number) {
+  const t = timers.get(id);
+  if (!t || t.timer === null) return;
+  window.clearTimeout(t.timer);
+  t.timer = null;
+  t.left = Math.max(1000, t.left - (Date.now() - t.since));
+}
+
+/** A short confirmation after an action ("Saved"), read out by screen readers; close: false leaves out its Dismiss button. */
+export function toast(text: string, opts: { tone?: ToastTone; ms?: number; close?: boolean } = {}) {
+  const id = nextId++;
+  items = [...items, { id, text, tone: opts.tone, leaving: false, close: opts.close !== false }];
+  emit();
+  timers.set(id, { left: opts.ms ?? (opts.tone === "error" ? 8000 : 4000), since: 0, timer: null });
+  run(id);
   return id;
+}
+
+// The kit's x icon when kit-icons.js is on the page, else the multiplication sign.
+function closeMark() {
+  const svg = (window as { KitIcons?: { svg: (name: string) => string } }).KitIcons?.svg("x");
+  return svg ? <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} style={{ display: "inline-flex", lineHeight: 0 }} /> : "\u00d7";
 }
 
 /** Put once on the page (at the end of the app): the place where toasts show. */
 export function Toaster() {
   const [list, setList] = useState<ToastItem[]>(items);
+  const [over, setOver] = useState<number | null>(null);
   useEffect(() => {
     listeners.add(setList);
     return () => {
@@ -45,9 +80,32 @@ export function Toaster() {
   }, []);
   return (
     <div aria-live="polite" className="kit-toasts" role="status">
+      {/* An error is read at once (role alert); a warning or error also says its word, not only its colour. */}
       {list.map((t) => (
-        <div className={"kit-toast" + (t.tone ? " kit-toast--" + t.tone : "") + (t.leaving ? " is-leaving" : "")} key={t.id}>
+        <div
+          className={"kit-toast" + (t.tone ? " kit-toast--" + t.tone : "") + (t.leaving ? " is-leaving" : "")}
+          key={t.id}
+          onBlur={(e) => {
+            if (over !== t.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) run(t.id);
+          }}
+          onFocus={() => pause(t.id)}
+          onMouseEnter={() => {
+            setOver(t.id);
+            pause(t.id);
+          }}
+          onMouseLeave={(e) => {
+            setOver(null);
+            if (!e.currentTarget.contains(document.activeElement)) run(t.id);
+          }}
+          role={t.tone === "error" ? "alert" : undefined}
+        >
+          {t.tone === "error" || t.tone === "warn" ? <span className="kit-sr-only">{t.tone === "error" ? "Error: " : "Warning: "}</span> : null}
           {t.text}
+          {t.close ? (
+            <button aria-label="Dismiss" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-toast__close" onClick={() => dismissToast(t.id)} type="button">
+              {closeMark()}
+            </button>
+          ) : null}
         </div>
       ))}
     </div>

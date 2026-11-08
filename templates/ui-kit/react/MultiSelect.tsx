@@ -1,7 +1,7 @@
 /**
  * UI kit component for React projects: renders the kit's markup (styles/kit/kit.css), needs only React.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 export interface MultiOption {
   value: string;
@@ -15,6 +15,7 @@ export function MultiSelect({ label, options, value, onChange }: { label: string
   const wrap = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const search = useRef<HTMLInputElement>(null);
+  const panelId = useId();
   useEffect(() => {
     if (!open) return;
     search.current?.focus();
@@ -32,17 +33,25 @@ export function MultiSelect({ label, options, value, onChange }: { label: string
   return (
     <div
       className={"kit-multi" + (active ? " is-active" : "")}
+      onBlur={(e) => {
+        // Tab out of the panel closes it.
+        if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false);
+      }}
       onKeyDown={(e) => {
         if (e.key === "Escape" && open) {
+          e.preventDefault(); // the panel only: a dialog or side panel around it stays open
+          e.stopPropagation();
           setOpen(false);
           button.current?.focus();
         }
       }}
       ref={wrap}
     >
+      {/* The button opens a panel of check boxes (a dialog, not a menu). */}
       <button
+        aria-controls={panelId}
         aria-expanded={open}
-        aria-haspopup="true"
+        aria-haspopup="dialog"
         className="kit-input kit-multi__button"
         onClick={() => {
           setQuery("");
@@ -53,7 +62,7 @@ export function MultiSelect({ label, options, value, onChange }: { label: string
       >
         {label}: {text}
       </button>
-      <div className="kit-multi__panel" hidden={!open}>
+      <div aria-label={label} className="kit-multi__panel" hidden={!open} id={panelId} role="dialog">
         <input aria-label={"Search " + label} className="kit-input" onChange={(e) => setQuery(e.target.value)} placeholder="Search" ref={search} type="search" value={query} />
         <ul className="kit-multi__list">
           {options.map((o) => (

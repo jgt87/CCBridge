@@ -18,8 +18,11 @@ export function Popover({ label, children, align = "left", head, className = "ki
     const outside = (e: MouseEvent) => {
       if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
     };
+    // Escape closes the popover only (a dialog or side panel around it stays open), and not when another part already used it.
     const escape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        e.preventDefault();
+        e.stopPropagation();
         setOpen(false);
         button.current?.focus();
       }

@@ -60,11 +60,12 @@ export function Calendar({
           Next
         </button>
       </div>
-      <div className="kit-calendar__grid" role="grid">
+      {/* A group of day buttons named by the month (as in kit.js): a grid role would need rows and grid cells. */}
+      <div aria-label={fmt({ month: "long", year: "numeric" }, first, year + "-" + (mon + 1))} className="kit-calendar__grid" role="group">
         {Array.from({ length: 7 }, (_, d) => {
           const ref = new Date(2024, 0, 7 + ((weekStart + d) % 7)); // 7 Jan 2024 was a Sunday
           return (
-            <div className="kit-calendar__dow" key={"dow" + d} role="columnheader">
+            <div aria-hidden="true" className="kit-calendar__dow" key={"dow" + d}>
               {fmt({ weekday: "short" }, ref, ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][ref.getDay()])}
             </div>
           );

@@ -4,8 +4,12 @@
  */
 import { useEffect } from "react";
 
-/** A button that shows its keyboard shortcut (for example "Ctrl+K") and also runs from it. */
-export function CommandButton({ label, keys, onRun }: { label: string; keys: string; onRun: () => void }) {
+/**
+ * A button that shows its keyboard shortcut (for example "Ctrl+K") and also runs from it. While its
+ * action runs, busy shows the kit's spinner in it (aria-busy) and says busyText to screen readers in a
+ * status line beside it (the spinner alone says nothing).
+ */
+export function CommandButton({ label, keys, onRun, busy = false, busyText = "Working" }: { label: string; keys: string; onRun: () => void; busy?: boolean; busyText?: string }) {
   useEffect(() => {
     const parts = keys.toLowerCase().split("+");
     const key = parts[parts.length - 1];
@@ -13,16 +17,21 @@ export function CommandButton({ label, keys, onRun }: { label: string; keys: str
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === key && e.ctrlKey === ctrl) {
         e.preventDefault();
-        onRun();
+        if (!busy) onRun();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [keys, onRun]);
+  }, [keys, onRun, busy]);
   return (
-    <button className="kit-btn" onClick={onRun} type="button">
-      {label}
-      <kbd className="kit-kbd">{keys}</kbd>
-    </button>
+    <>
+      <button aria-busy={busy || undefined} className="kit-btn" onClick={onRun} type="button">
+        {label}
+        <kbd className="kit-kbd">{keys}</kbd>
+      </button>
+      <span className="kit-sr-only" role="status">
+        {busy ? busyText : ""}
+      </span>
+    </>
   );
 }

@@ -17,12 +17,17 @@ function useIndicator(index: number) {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [index]);
-  return { group, style: { width: box.width, transform: `translateX(${box.left}px)` } };
+  return {
+    group,
+    style: { width: box.width, transform: `translateX(${box.left}px)` },
+    // The tab underline is 100px wide in kit.css and scaled to the tab: it moves by transform, never by width.
+    lineStyle: { transform: `translateX(${box.left}px) scaleX(${box.width / 100})` },
+  };
 }
 
 /** Tabs with a sliding underline. The arrow keys, Home and End move between them (one tab stop). */
 export function Tabs({ tabs, value, onChange, label }: { tabs: string[]; value: number; onChange: (i: number) => void; label: string }) {
-  const { group, style } = useIndicator(value);
+  const { group, lineStyle } = useIndicator(value);
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
     const next = step ? (value + step + tabs.length) % tabs.length : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
@@ -38,7 +43,7 @@ export function Tabs({ tabs, value, onChange, label }: { tabs: string[]; value: 
           {t}
         </button>
       ))}
-      <span aria-hidden="true" className="kit-tabs__indicator" style={style} />
+      <span aria-hidden="true" className="kit-tabs__indicator" style={lineStyle} />
     </div>
   );
 }

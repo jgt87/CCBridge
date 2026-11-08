@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 // The UI kit's React parts (templates/ui-kit/react), which StreamHub copies into people's React
 // projects: what the keys, clicks and drags do. Rendered with React's own act in jsdom.
-import { act, type ReactNode, useEffect } from "react";
+import { act, type ReactNode, useEffect, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { AppShell } from "../../templates/ui-kit/react/AppShell";
 import { Board, type BoardCard } from "../../templates/ui-kit/react/Board";
 import { Calendar } from "../../templates/ui-kit/react/Calendar";
+import { CommandPalette } from "../../templates/ui-kit/react/CommandPalette";
 import { useConfirm } from "../../templates/ui-kit/react/Confirm";
 import { Drawer } from "../../templates/ui-kit/react/Drawer";
 import { HoldButton } from "../../templates/ui-kit/react/HoldButton";
@@ -13,9 +15,14 @@ import { Menu } from "../../templates/ui-kit/react/Menu";
 import { Popover } from "../../templates/ui-kit/react/Popover";
 import { Tabs } from "../../templates/ui-kit/react/Tabs";
 import { TagInput } from "../../templates/ui-kit/react/TagInput";
+import { ThemeToggle } from "../../templates/ui-kit/react/ThemeToggle";
+import { Toaster, toast } from "../../templates/ui-kit/react/Toast";
+import { Tooltip } from "../../templates/ui-kit/react/Tooltip";
 import { Tree, type TreeNode } from "../../templates/ui-kit/react/Tree";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+// Icon.tsx loads kit-icons.js, which StreamHub writes into each project: a stand-in that shows the icon's name.
+vi.mock("../../templates/ui-kit/react/Icon", () => ({ Icon: ({ name }: { name: string }) => <span data-icon={name} /> }));
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -415,7 +422,9 @@ describe("useConfirm", () => {
       second = api!.confirm("Really?");
     });
     expect($("dialog.kit-dialog h3").textContent).toBe("Delete items");
-    expect(document.activeElement).toBe($(".kit-btn--danger"));
+    expect(document.activeElement).toBe($("dialog.kit-dialog [data-cancel]")); // with danger, Cancel has the focus
+    expect($("dialog.kit-dialog").getAttribute("aria-labelledby")).toBe($("dialog.kit-dialog h3").id);
+    expect($("dialog.kit-dialog").getAttribute("aria-describedby")).toBe($("dialog.kit-dialog p").id);
     click($(".kit-btn--danger"));
     await expect(first).resolves.toBe(true);
     expect($("dialog.kit-dialog p").textContent).toBe("Really?");
@@ -455,5 +464,205 @@ describe("Chart", () => {
     });
     expect(onSelect).toHaveBeenCalledWith(pick);
     expect($(".kit-chart").getAttribute("aria-label")).toBe("Sales");
+  });
+});
+
+describe("Tooltip", () => {
+  it("shows at once on keyboard focus, after a rest on hover, describes only when it adds words, and hides on Escape", () => {
+    vi.useFakeTimers({ now: Date.now() + 60000 });
+    render(
+      <div>
+        <Tooltip text="Edit">
+          <button aria-label="Edit" type="button" />
+        </Tooltip>
+        <Tooltip text="Download the table (Ctrl+S)">
+          <button aria-label="Download" id="dl" type="button" />
+        </Tooltip>
+      </div>,
+    );
+    const [edit, dl] = $$("button");
+    act(() => edit.focus());
+    expect($(".kit-tooltip").textContent).toBe("Edit");
+    expect($(".kit-tooltip").getAttribute("role")).toBe("tooltip");
+    expect(edit.getAttribute("aria-describedby")).toBeNull(); // the same words as its name
+    expect(key(edit, "Escape")).toBe(true);
+    expect(document.querySelector(".kit-tooltip")).toBeNull();
+    act(() => edit.blur());
+    act(() => vi.advanceTimersByTime(1000));
+    act(() => {
+      dl.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body }));
+    });
+    act(() => vi.advanceTimersByTime(499));
+    expect(document.querySelector(".kit-tooltip")).toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect($(".kit-tooltip").textContent).toBe("Download the table (Ctrl+S)");
+    expect(dl.getAttribute("aria-describedby")).toBe($(".kit-tooltip").id);
+    act(() => {
+      dl.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+    });
+    expect(document.querySelector(".kit-tooltip")).toBeNull();
+  });
+});
+
+describe("Toaster", () => {
+  it("gives a toast a Dismiss button and keeps it while the pointer is on it", () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+    act(() => {
+      toast("Saved");
+    });
+    const t = $(".kit-toast");
+    const x = $<HTMLButtonElement>(".kit-toast__close");
+    expect(x.getAttribute("aria-label")).toBe("Dismiss");
+    expect(x.className).toBe("kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-toast__close");
+    act(() => {
+      t.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body }));
+    });
+    act(() => vi.advanceTimersByTime(20000));
+    expect(t.classList.contains("is-leaving")).toBe(false);
+    act(() => {
+      t.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+    });
+    act(() => vi.advanceTimersByTime(4100));
+    expect($(".kit-toast").classList.contains("is-leaving")).toBe(true);
+    act(() => vi.advanceTimersByTime(400));
+    expect(document.querySelector(".kit-toast")).toBeNull();
+    act(() => {
+      toast("Plain", { close: false });
+      toast("Sent");
+    });
+    expect($$(".kit-toast__close")).toHaveLength(1);
+    click($(".kit-toast__close"));
+    expect($$(".kit-toast")[1].classList.contains("is-leaving")).toBe(true);
+    act(() => vi.advanceTimersByTime(10000));
+  });
+});
+
+describe("Menu as a context menu", () => {
+  function Row({ onPick }: { onPick: (v: string) => void }) {
+    const row = useRef<HTMLLIElement>(null);
+    return (
+      <ul>
+        <li ref={row}>
+          <span id="name">Report</span>
+          <Menu buttonLabel="Actions for Report" contextRef={row} items={[{ value: "open", label: "Open" }, { value: "del", label: "Delete", danger: true, separatorBefore: true }]} label="..." onPick={onPick} />
+        </li>
+      </ul>
+    );
+  }
+  it("opens the same list at the pointer on a right click and Shift+F10, with an icon button as the visible way", () => {
+    const onPick = vi.fn();
+    render(<Row onPick={onPick} />);
+    const button = $(".kit-menu > button");
+    expect(button.className).toBe("kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm");
+    expect(button.getAttribute("aria-label")).toBe("Actions for Report");
+    const right = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 120, clientY: 40 });
+    act(() => {
+      $("#name").dispatchEvent(right);
+    });
+    expect(right.defaultPrevented).toBe(true);
+    const list = $(".kit-menu__list");
+    expect(list.hidden).toBe(false);
+    expect([list.style.position, list.style.left, list.style.top]).toEqual(["fixed", "120px", "40px"]);
+    expect(document.activeElement!.textContent).toBe("Open");
+    key(document.activeElement!, "Escape");
+    expect(list.hidden).toBe(true);
+    act(() => button.focus());
+    expect(key(button, "F10", { shiftKey: true })).toBe(true);
+    expect(list.hidden).toBe(false);
+    click($$(".kit-menu__item")[1]);
+    expect(onPick).toHaveBeenCalledWith("del");
+    expect(document.activeElement).toBe(button);
+    click(button);
+    expect(list.style.position).toBe(""); // its own button opens it in its own place
+  });
+});
+
+describe("CommandPalette", () => {
+  const commands = [
+    { value: "new", label: "New station", shortcut: "N" },
+    { value: "print", label: "Print this page" },
+  ];
+  it("opens with Ctrl+K but not from a field, filters, runs with Enter and clears the text before it closes", () => {
+    const onRun = vi.fn();
+    render(
+      <div>
+        <input aria-label="Name" id="field" />
+        <button id="start" type="button">
+          Start
+        </button>
+        <CommandPalette commands={commands} onRun={onRun} />
+      </div>,
+    );
+    const d = $<HTMLDialogElement>("dialog.kit-palette");
+    expect(d.className).toBe("kit-dialog kit-palette");
+    expect(key($("#field"), "k", { ctrlKey: true })).toBe(false);
+    expect(d.hasAttribute("open")).toBe(false);
+    act(() => $("#start").focus());
+    expect(key($("#start"), "k", { ctrlKey: true })).toBe(true);
+    expect(d.hasAttribute("open")).toBe(true);
+    const input = $<HTMLInputElement>("dialog input");
+    expect(document.activeElement).toBe(input);
+    expect(input.getAttribute("role")).toBe("combobox");
+    expect(input.getAttribute("aria-activedescendant")).toBe($$(".kit-search__item")[0].id);
+    expect($(".kit-kbd").textContent).toBe("N");
+    typeInto(input, "print");
+    expect($$(".kit-search__item").map((r) => r.textContent)).toEqual(["Print this page"]);
+    expect(key(input, "Escape")).toBe(true); // the text first
+    expect(input.value).toBe("");
+    expect(d.hasAttribute("open")).toBe(true);
+    typeInto(input, "zzz");
+    expect($(".kit-empty").hidden).toBe(false);
+    typeInto(input, "new");
+    key(input, "Enter");
+    expect(onRun).toHaveBeenCalledWith(commands[0]);
+    expect(d.hasAttribute("open")).toBe(false);
+    expect(document.activeElement).toBe($("#start"));
+  });
+});
+
+describe("ThemeToggle", () => {
+  it("switches data-theme on html, keeps the choice and says what a click does", () => {
+    document.documentElement.removeAttribute("data-theme");
+    render(<ThemeToggle />);
+    const b = $<HTMLButtonElement>("button.kit-btn--icon");
+    expect(b.getAttribute("aria-label")).toBe("Switch to the dark theme");
+    expect($("[data-icon]").getAttribute("data-icon")).toBe("moon");
+    const seen = vi.fn();
+    document.addEventListener("kit:theme", seen, { once: true });
+    click(b);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(localStorage.getItem("kit-theme")).toBe("dark");
+    expect(b.getAttribute("aria-label")).toBe("Switch to the light theme");
+    expect($("[data-icon]").getAttribute("data-icon")).toBe("sun");
+    expect(seen).toHaveBeenCalledTimes(1);
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.removeItem("kit-theme");
+  });
+});
+
+describe("AppShell", () => {
+  it("draws the kit-shell with the band header, opens the navigation from its menu button and closes it with a link or Escape", () => {
+    render(
+      <AppShell links={[{ href: "#a", label: "Overview", current: true }, { href: "#b", label: "Items" }]} title="Example app">
+        <h1>Overview</h1>
+      </AppShell>,
+    );
+    expect($(".kit-shell > .kit-header.kit-header--band .kit-header__title").textContent).toBe("Example app");
+    const menu = $<HTMLButtonElement>(".kit-shell__menu");
+    const nav = $(".kit-shell__nav");
+    expect(menu.getAttribute("aria-controls")).toBe(nav.id);
+    expect($(".kit-nav__item").getAttribute("aria-current")).toBe("page");
+    expect($("main.kit-shell__main").id).toBe("main");
+    expect($(".kit-skip").getAttribute("href")).toBe("#main");
+    click(menu);
+    expect(nav.classList.contains("is-open")).toBe(true);
+    expect(menu.getAttribute("aria-expanded")).toBe("true");
+    click($$(".kit-nav__item")[1]);
+    expect(nav.classList.contains("is-open")).toBe(false);
+    click(menu);
+    key(document.body, "Escape");
+    expect(nav.classList.contains("is-open")).toBe(false);
+    expect(document.activeElement).toBe(menu);
   });
 });

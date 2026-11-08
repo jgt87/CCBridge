@@ -145,4 +145,65 @@ Describe 'A look the person asks for' {
         $rule | Should Match 'Look asked for'
     }
 }
+Describe 'Tooltips, error states, toast buttons, context menus and the command palette' {
+    It 'styles them only from the kit''s tokens, in the look of the parts they copy' {
+        foreach ($c in 'kit-tooltip', 'kit-notice__actions', 'kit-toast__close', 'kit-palette') { $kitCss | Should Match ('\.' + [regex]::Escape($c) + '\b') }
+        # The tooltip bubble is the info tip's bubble: the same padding, corners, border, colours, shadow and type.
+        $tip = [regex]::Match($kitCss, '(?s)\.kit-tip__bubble \{(.*?)\}').Groups[1].Value
+        $tooltip = [regex]::Match($kitCss, '(?s)\.kit-tooltip \{(.*?)\}').Groups[1].Value
+        foreach ($d in @([regex]::Matches($tip, '(?:padding|border-radius|border|background|color|box-shadow|font-size|font-weight|line-height|max-width|z-index): [^;]+;') | ForEach-Object { $_.Value })) { $tooltip | Should Match ([regex]::Escape($d)) }
+        $new = (@([regex]::Matches($kitCss, '(?s)\.(kit-tooltip|kit-notice__actions|kit-toast__close|kit-palette)\b[^{]*\{[^}]*\}') | ForEach-Object { $_.Value }) -join "`n")
+        ([regex]::Matches($new, '(?<![-\w])#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\d+(\.\d+)?(rem|em)\b')).Count | Should Be 0
+    }
+    It 'adds their behaviour to kit.js, ASCII only' {
+        foreach ($f in 'function setupTooltip(', 'function showTooltip(', '["[data-kit-tooltip]", setupTooltip]', 'function openContextMenu(', '"[data-kit-context]"', 'function setupPalette(', '["dialog[data-kit-palette]", setupPalette]', '"kit:command"', 'kit-toast__close', 'aria-label", "Dismiss"') {
+            $kitJs | Should Match ([regex]::Escape($f))
+        }
+        $kitJs | Should Not Match 'btn\.setAttribute\("title"'   # the theme switch uses the kit's tooltip
+        [regex]::IsMatch($kitJs, '[^\x00-\x7F]') | Should Be $false
+    }
+    It 'shows each in the examples page, in a section the index finds, and names them in the rule' {
+        $index = @(Get-KitExamplesIndex $examples)
+        foreach ($t in 'Error state', 'Tooltips', 'Toasts', 'Context menu', 'Command palette') { @($index | Where-Object { $_.title -eq $t }).Count | Should Be 1 }
+        $examples | Should Match '(?s)<!-- kit-part:extras -->.*<section id="context-menu">.*<!-- /kit-part:extras -->'
+        $examples | Should Match '(?s)<!-- kit-part:interactive -->.*<section id="command-palette">.*?<!-- /kit-part:interactive -->'
+        $examples | Should Not Match 'class="kit-truncate"[^>]*title='
+        foreach ($s in 'data-kit-tooltip="TEXT", never title', 'data-kit-context', 'data-kit-palette', 'kit-notice__actions', 'a Dismiss button', 'React: AppShell', 'React: ThemeToggle', 'CommandPalette', 'React: Tooltip') { $rule | Should Match ([regex]::Escape($s)) }
+        $rule | Should Not Match 'title holds the whole'
+    }
+    It 'counts the classes kit.js writes for them once a page has the hook' {
+        $p = New-TempProject
+        try {
+            Add-File $p 'styles\kit\kit.js' $kitJs
+            Add-File $p 'index.html' '<button aria-label="Edit" data-kit-tooltip="Edit"></button><script src="styles/kit/kit.js"></script><script>KitUI.toast("Saved")</script>'
+            Clear-KitScanCache
+            $u = Get-KitUsage $p
+            foreach ($c in 'kit-tooltip', 'kit-toast__close', 'kit-btn--ghost', 'kit-btn--icon', 'kit-btn--sm') { "${c}: $($u.classes.Contains($c))" | Should Be "${c}: True" }
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+    It 'gives React projects Tooltip with the basics, and ThemeToggle, AppShell and CommandPalette with the icons' {
+        $files = @(& (Get-Module UiKit) { param($r) Get-UiKitFiles $r } $root)
+        foreach ($f in 'Tooltip', 'ThemeToggle', 'AppShell', 'CommandPalette') {
+            Test-Path (Join-Path $root "templates\ui-kit\react\$f.tsx") | Should Be $true
+            $files -contains "react/$f.tsx" | Should Be $true
+        }
+        $react = & (Get-Module UiKit) { $script:ReactFiles }
+        $react.base -contains 'Tooltip.tsx' | Should Be $true
+        foreach ($f in 'ThemeToggle.tsx', 'AppShell.tsx', 'CommandPalette.tsx') { $react.icons -contains $f | Should Be $true }   # they draw with Icon
+    }
+    It 'gives window apps the badge, notice and switch, and themes the other Windows Forms controls' {
+        $tokens = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\tokens.css'))
+        $x = Get-WpfThemeText $root $tokens
+        $x | Should Not Match '\{\{'
+        foreach ($k in 'KitBadge', 'KitBadgeOk', 'KitBadgeWarn', 'KitBadgeError', 'KitBadgeAccent', 'KitNotice', 'KitNoticeOk', 'KitNoticeWarn', 'KitNoticeError', 'KitSwitch') { $x | Should Match ('x:Key="' + $k + '"') }
+        $x | Should Match 'x:Key="KitErrorSoft" Color="#fde8e8"'
+        ([xml]$x).ResourceDictionary | Should Not BeNullOrEmpty
+        $f = Get-WpfThemeText $root $tokens -Template 'winforms\KitTheme.template.ps1'
+        $f | Should Not Match '\{\{'
+        $f | Should Match "AccentSoft = '#e5f6fc'; Ok = '#187623'; Warn = '#a63b17'; Error = '#c50e16'"
+        foreach ($c in 'TreeView|ListView', 'TabControl', 'ProgressBar', 'TrackBar', 'MenuStrip|ToolStrip', 'StatusStrip', 'function Set-KitToolTipStyle', 'ContextMenuStrip') { $f | Should Match ([regex]::Escape($c)) }
+        $errs = $null; $null = [Management.Automation.Language.Parser]::ParseInput($f, [ref]$null, [ref]$errs)
+        @($errs).Count | Should Be 0
+    }
+}
 Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

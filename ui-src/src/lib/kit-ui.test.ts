@@ -3,7 +3,7 @@
 // document: tables, search, the parts' accessibility, and what a chart does with odd data.
 import fs from "node:fs";
 import path from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const repo = path.resolve(import.meta.dirname, "../../..");
 const kitJs = fs.readFileSync(path.join(repo, "templates/ui-kit/kit.js"), "utf8");
@@ -493,6 +493,32 @@ describe("kit.js basics (revision 11)", () => {
     expect(await a).toBeUndefined();
     expect(document.querySelector("dialog.kit-dialog")).toBeNull();
   });
+  it("shows one box at a time with Cancel focused for danger, and keeps an Escape that closed a popover from closing more", async () => {
+    document.body.innerHTML = '<div class="kit-popover-wrap"><button type="button" data-kit-popover="pp" aria-expanded="false">P</button><div class="kit-popover" id="pp" hidden><input id="pi"></div></div>';
+    load(kitJs);
+    await tick();
+    const first = b.KitUI.confirm("Delete?", { danger: true });
+    const second = b.KitUI.confirm("And this?");
+    expect(document.querySelectorAll("dialog.kit-dialog").length).toBe(1);   // the second waits
+    expect((document.activeElement as HTMLElement).getAttribute("data-value")).toBe("cancel");
+    (document.querySelector('dialog.kit-dialog [data-value="ok"]') as HTMLButtonElement).click();
+    expect(await first).toBe(true);
+    expect(document.querySelector("dialog.kit-dialog p")!.textContent).toBe("And this?");
+    (document.querySelector('dialog.kit-dialog [data-value="cancel"]') as HTMLButtonElement).click();
+    expect(await second).toBe(false);
+    (document.querySelector("[data-kit-popover]") as HTMLButtonElement).click();
+    expect(document.getElementById("pp")!.hidden).toBe(false);
+    const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.getElementById("pi")!.dispatchEvent(esc);
+    expect(document.getElementById("pp")!.hidden).toBe(true);
+    expect(esc.defaultPrevented).toBe(true);   // a dialog or side panel around the popover stays open
+  });
+  it("makes an error toast an alert that says its tone, not only its colour", () => {
+    const t = (w.KitUI.toast as unknown as (text: string, o: Record<string, unknown>) => HTMLElement)("Upload failed", { tone: "error" });
+    expect(t.getAttribute("role")).toBe("alert");
+    expect(t.textContent).toBe("Error: Upload failed\u00d7");   // the tone word, the text, and the Dismiss button's mark (no kit-icons.js here)
+    expect(w.KitUI.toast("Saved").getAttribute("role")).toBeNull();
+  });
 });
 
 describe("page check: kit classes without a rule", () => {
@@ -666,5 +692,149 @@ describe("kit-icons-runtime.js", () => {
     expect(el("plain").getAttribute("role")).toBeNull();
     expect(el("plain").querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
     expect(el("plain").getAttribute("data-kit-icon-drawn")).toBe("plus");
+  });
+});
+
+describe("kit.js tooltips, toast buttons, context menus and the command palette", () => {
+  const press = (el: Element, key: string, more: KeyboardEventInit = {}) => {
+    const e = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...more });
+    el.dispatchEvent(e);
+    return e;
+  };
+  const tip = () => document.querySelector<HTMLElement>(".kit-tooltip");
+  afterEach(() => vi.useRealTimers());
+  it("shows data-kit-tooltip instead of title: at once on keyboard focus, after a rest on hover, at once next to one that just closed, never after a tap", async () => {
+    document.body.innerHTML = `<button id="ta" class="kit-btn kit-btn--icon" type="button" title="Edit" data-kit-tooltip="Edit"></button>
+      <button id="tb" type="button" aria-label="Delete" data-kit-tooltip="Delete">x</button><span id="tc" tabindex="0" data-kit-tooltip="The whole long name">The whole...</span>`;
+    load(kitJs);
+    await tick();
+    vi.useFakeTimers({ now: Date.now() + 60000 });
+    const a = document.getElementById("ta")!, b = document.getElementById("tb")!, c = document.getElementById("tc")!;
+    expect(a.getAttribute("title")).toBeNull();   // no second, browser-drawn tooltip
+    expect(a.getAttribute("aria-label")).toBe("Edit");   // the name the title gave it
+    a.focus();
+    expect(tip()!.hidden).toBe(false);
+    expect(tip()!.textContent).toBe("Edit");
+    expect(tip()!.getAttribute("role")).toBe("tooltip");
+    expect(a.getAttribute("aria-describedby")).toBeNull();   // it says the same as the name
+    expect(press(a, "Escape").defaultPrevented).toBe(true);   // the tooltip only: a dialog around it stays open
+    expect(tip()!.hidden).toBe(true);
+    a.blur();
+    vi.advanceTimersByTime(1000);
+    b.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    vi.advanceTimersByTime(499);
+    expect(tip()!.hidden).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(tip()!.hidden).toBe(false);
+    expect(tip()!.textContent).toBe("Delete");
+    b.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: c }));
+    expect(tip()!.hidden).toBe(true);
+    c.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: b }));
+    expect(tip()!.hidden).toBe(false);   // a neighbour opens at once
+    expect(c.getAttribute("aria-describedby")).toBe("kit-tooltip");
+    c.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+    expect(c.getAttribute("aria-describedby")).toBeNull();
+    vi.advanceTimersByTime(2000);
+    document.body.dispatchEvent(new Event("touchstart", { bubbles: true }));
+    b.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    vi.advanceTimersByTime(1000);
+    expect(tip()!.hidden).toBe(true);   // the mouse events after a tap show nothing
+  });
+  it("gives a toast a Dismiss button, and keeps it while the pointer is on it", () => {
+    vi.useFakeTimers();
+    const toast = (w.KitUI.toast as unknown as (text: string, o?: Record<string, unknown>) => HTMLElement);
+    const t = toast("Saved");
+    const x = t.querySelector<HTMLButtonElement>(".kit-toast__close")!;
+    expect(x.getAttribute("aria-label")).toBe("Dismiss");
+    expect(x.className).toBe("kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-toast__close");
+    t.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(20000);
+    expect(t.classList.contains("is-leaving")).toBe(false);
+    t.dispatchEvent(new MouseEvent("mouseleave"));
+    vi.advanceTimersByTime(4100);
+    expect(t.classList.contains("is-leaving")).toBe(true);
+    expect(toast("Saved", { close: false }).querySelector(".kit-toast__close")).toBeNull();
+    const u = toast("Sent");
+    u.querySelector<HTMLButtonElement>(".kit-toast__close")!.click();
+    expect(u.classList.contains("is-leaving")).toBe(true);
+    vi.advanceTimersByTime(400);
+    expect(u.parentNode).toBeNull();
+  });
+  it("opens a row's menu at the pointer on a right click and with Shift+F10, and names the row in kit:menu", async () => {
+    document.body.innerHTML = `<ul><li id="row" data-kit-context><span id="name">Report</span><div class="kit-menu"><button id="more" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false" aria-label="Actions for Report">...</button>
+      <div class="kit-menu__list" role="menu" hidden><button class="kit-menu__item" type="button" data-value="open">Open</button><button class="kit-menu__item" type="button" data-value="del">Delete</button></div></div></li></ul>
+      <p id="away">Elsewhere</p>`;
+    await tick();
+    const row = document.getElementById("row")!, more = document.getElementById("more")!, list = document.querySelector<HTMLElement>(".kit-menu__list")!;
+    const right = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 100, clientY: 50 });
+    document.getElementById("name")!.dispatchEvent(right);
+    expect(right.defaultPrevented).toBe(true);
+    expect(list.hidden).toBe(false);
+    expect([list.style.position, list.style.left, list.style.top]).toEqual(["fixed", "100px", "50px"]);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement!.textContent).toBe("Open");
+    let got: { value?: string; target?: Element } = {};
+    document.addEventListener("kit:menu", (e) => { got = (e as CustomEvent).detail; }, { once: true });
+    list.querySelectorAll<HTMLButtonElement>(".kit-menu__item")[1].click();
+    expect(got.value).toBe("del");
+    expect(got.target).toBe(row);
+    expect(list.hidden).toBe(true);
+    expect(list.style.position).toBe("");   // back in its place for its own button
+    more.focus();
+    expect(press(more, "F10", { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(list.hidden).toBe(false);
+    press(document.activeElement!, "Escape");
+    expect(list.hidden).toBe(true);
+    expect(document.activeElement).toBe(more);
+    more.click();
+    expect(list.hidden).toBe(false);
+    expect(list.style.position).toBe("");
+    document.getElementById("away")!.click();
+    expect(list.hidden).toBe(true);
+    const plain = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
+    document.getElementById("away")!.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);   // the browser's own menu everywhere else
+  });
+  it("opens the command palette with Ctrl+K (not from a field), filters, runs a row with Enter, and clears the text before it closes", async () => {
+    document.body.innerHTML = `<button id="start" type="button">Start</button><input id="field" aria-label="Name">
+      <dialog class="kit-dialog kit-palette" id="pal" data-kit-palette aria-label="Commands"><div class="kit-input-icon"><input class="kit-input" type="search" placeholder="Type a command"></div>
+      <ul class="kit-search__list"><li class="kit-search__item" data-value="new">New station<span class="kit-search__meta"><kbd class="kit-kbd">N</kbd></span></li><li class="kit-search__item" data-value="print">Print this page</li></ul>
+      <p class="kit-empty" hidden>No commands match</p></dialog>`;
+    await tick();
+    const pal = document.getElementById("pal")!, input = pal.querySelector("input")!, list = pal.querySelector<HTMLElement>(".kit-search__list")!, empty = pal.querySelector<HTMLElement>(".kit-empty")!;
+    const rows = Array.from(list.children) as HTMLElement[];
+    expect(input.getAttribute("role")).toBe("combobox");
+    expect(input.getAttribute("aria-label")).toBe("Commands");
+    expect(input.getAttribute("aria-controls")).toBe(list.id);
+    expect(list.getAttribute("role")).toBe("listbox");
+    expect(press(document.getElementById("field")!, "k", { ctrlKey: true }).defaultPrevented).toBe(false);   // a field keeps Ctrl+K
+    expect(pal.hasAttribute("open")).toBe(false);
+    document.getElementById("start")!.focus();
+    expect(press(document.getElementById("start")!, "k", { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(pal.hasAttribute("open")).toBe(true);
+    expect(document.activeElement).toBe(input);
+    expect(input.getAttribute("aria-activedescendant")).toBe(rows[0].id);
+    input.value = "print";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(rows.map((r) => r.hidden)).toEqual([true, false]);
+    expect(input.getAttribute("aria-activedescendant")).toBe(rows[1].id);
+    let ran: { value?: string; text?: string } = {};
+    pal.addEventListener("kit:command", (e) => { ran = (e as CustomEvent).detail; });
+    press(input, "Enter");
+    expect(ran).toEqual({ value: "print", text: "Print this page" });
+    expect(pal.hasAttribute("open")).toBe(false);
+    press(document.body, "k", { metaKey: true });
+    expect(pal.hasAttribute("open")).toBe(true);
+    expect(input.value).toBe("");
+    press(input, "ArrowUp");
+    expect(input.getAttribute("aria-activedescendant")).toBe(rows[1].id);   // round to the last row
+    input.value = "zzz";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect([list.hidden, empty.hidden, input.getAttribute("aria-expanded")]).toEqual([true, false, "false"]);
+    expect(press(input, "Escape").defaultPrevented).toBe(true);   // the text first
+    expect(input.value).toBe("");
+    expect(pal.hasAttribute("open")).toBe(true);
+    press(input, "k", { ctrlKey: true });
+    expect(pal.hasAttribute("open")).toBe(false);
   });
 });

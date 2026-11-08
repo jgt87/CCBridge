@@ -1,7 +1,7 @@
 /**
  * UI kit component for React projects: renders the kit's markup (styles/kit/kit.css), needs only React.
  */
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 
 interface Box {
   text: ReactNode;
@@ -43,15 +43,20 @@ export function useConfirm() {
 
 function ConfirmDialog({ box, onDone }: { box: Box; onDone: (yes: boolean) => void }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const textId = useId();
   useEffect(() => {
     const d = ref.current;
     if (!d || d.open) return;
     if (d.showModal) d.showModal();
     else d.setAttribute("open", "");
-    d.querySelector<HTMLButtonElement>(".kit-btn--primary, .kit-btn--danger")?.focus();
+    // A dangerous answer is never the default: with danger, Cancel has the focus (Enter does not delete).
+    d.querySelector<HTMLButtonElement>(box.danger ? "[data-cancel]" : ".kit-btn--primary")?.focus();
   }, [box]);
   return (
     <dialog
+      aria-describedby={textId}
+      aria-labelledby={box.title ? titleId : textId}
       className="kit-dialog"
       onCancel={(e) => {
         e.preventDefault();
@@ -60,11 +65,15 @@ function ConfirmDialog({ box, onDone }: { box: Box; onDone: (yes: boolean) => vo
       ref={ref}
       role="alertdialog"
     >
-      {box.title ? <h3 className="kit-h3">{box.title}</h3> : null}
-      <p>{box.text}</p>
+      {box.title ? (
+        <h3 className="kit-h3" id={titleId}>
+          {box.title}
+        </h3>
+      ) : null}
+      <p id={textId}>{box.text}</p>
       <div className="kit-dialog__actions">
         {box.alert ? null : (
-          <button className="kit-btn" onClick={() => onDone(false)} type="button">
+          <button className="kit-btn" data-cancel onClick={() => onDone(false)} type="button">
             {box.cancel ?? "Cancel"}
           </button>
         )}

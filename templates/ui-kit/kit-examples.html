@@ -62,8 +62,11 @@
     <button class="kit-btn kit-btn--danger" type="button"><span data-kit-icon="trash-2" aria-hidden="true"></span>Delete</button>
     <button class="kit-btn kit-btn--sm" type="button">Small</button>
     <!-- While an action runs: aria-busy="true" on the button (a spinner takes the place of its text, no
-         clicks); a form that saves gets <fieldset disabled> around its fields. -->
+         clicks) and a kit-sr-only role="status" line beside it that says what runs (the spinner alone
+         says nothing to a screen reader; empty it when done); a form that saves gets <fieldset disabled>
+         around its fields. -->
     <button class="kit-btn kit-btn--primary" type="button" aria-busy="true">Saving</button>
+    <span class="kit-sr-only" role="status">Saving the report</span>
   </div>
 </section>
 
@@ -281,6 +284,36 @@
   </div>
 </section>
 
+<!-- Error state: what failed, in which part, and the way out; the rest of the page keeps working. A part that
+     could not load: a kit-notice kit-notice--error with role="alert" (it appears after the failure), the circle-x
+     icon, a kit-notice__title saying what failed, a line on what it affects, and a Retry button in
+     kit-notice__actions (kit-btn kit-btn--sm, its aria-label says what it retries; aria-busy="true" while it
+     retries). In the place of a chart or table that failed: the same in a kit-empty. Never "something went wrong". -->
+<section id="error-state">
+  <h2 class="kit-h2">Error state</h2>
+  <div class="kit-stack">
+    <div class="kit-notice kit-notice--error" role="alert"><span data-kit-icon="circle-x" aria-hidden="true"></span>
+      <div><p class="kit-notice__title">Could not load the stations</p>The server did not answer. Your filters are kept.</div>
+      <div class="kit-notice__actions"><button class="kit-btn kit-btn--sm" type="button" aria-label="Retry loading the stations">Retry</button><span class="kit-sr-only" role="status"></span></div>
+    </div>
+    <div class="kit-panel kit-empty" role="alert">
+      <span data-kit-icon="circle-x" aria-hidden="true"></span>
+      <p class="kit-empty__title">The chart could not be drawn</p>
+      <p>The file has no date column. Pick another file, or try again.</p>
+      <button class="kit-btn" type="button" aria-label="Retry drawing the chart"><span data-kit-icon="refresh-cw" aria-hidden="true"></span>Retry</button>
+    </div>
+  </div>
+  <script>
+    Array.prototype.forEach.call(document.querySelectorAll("#error-state .kit-btn"), function (b) {
+      b.addEventListener("click", function () {
+        var said = b.parentNode.querySelector('[role="status"]');
+        b.setAttribute("aria-busy", "true"); if (said) said.textContent = "Retrying";
+        setTimeout(function () { b.removeAttribute("aria-busy"); if (said) said.textContent = ""; }, 1500);
+      });
+    });
+  </script>
+</section>
+
 <!-- kit-empty -->
 <section id="empty">
   <h2 class="kit-h2">Empty state</h2>
@@ -310,7 +343,24 @@
   </dialog>
 </section>
 
-<!-- KitUI.confirm, KitUI.alert (a kit-dialog built by kit.js instead of the browser's own boxes), kit-popover with data-kit-popover, kit-popover__head, kit-popover__actions -->
+<!-- Tooltips: data-kit-tooltip="TEXT" instead of title, on an icon button (with the same aria-label) or a text
+     cut with kit-truncate (the whole text); kit.js shows one kit-tooltip bubble, the info tip's look: after the
+     pointer rests on it, at once on keyboard focus and next to one that just closed, never on touch; above the
+     element, below it at the top edge; Escape, a press, scroll and wheel close it. A shortcut goes in the text. -->
+<section id="tooltips">
+  <h2 class="kit-h2">Tooltips</h2>
+  <div class="kit-row">
+    <button class="kit-btn kit-btn--icon" type="button" aria-label="Edit" data-kit-tooltip="Edit"><span data-kit-icon="pencil" aria-hidden="true"></span></button>
+    <button class="kit-btn kit-btn--icon" type="button" aria-label="Download" data-kit-tooltip="Download (Ctrl+S)"><span data-kit-icon="download" aria-hidden="true"></span></button>
+    <button class="kit-btn kit-btn--icon kit-btn--danger" type="button" aria-label="Delete" data-kit-tooltip="Delete"><span data-kit-icon="trash-2" aria-hidden="true"></span></button>
+    <span class="kit-truncate" style="max-width: 16rem" tabindex="0" data-kit-tooltip="Rentals per station in October 2026, with the trips under two minutes">Rentals per station in October 2026, with the trips under two minutes</span>
+  </div>
+</section>
+
+<!-- KitUI.confirm, KitUI.alert (a kit-dialog built by kit.js instead of the browser's own boxes; one at a time, a
+     second call waits for the first; with danger, Cancel has the focus), kit-popover with data-kit-popover,
+     kit-popover__head, kit-popover__actions (Escape closes the popover, menu or list it is in, never the dialog
+     or side panel around it) -->
 <section id="boxes">
   <h2 class="kit-h2">Confirm, alert and popover</h2>
   <div class="kit-row">
@@ -386,7 +436,7 @@
 FROM trips
 GROUP BY station;</pre>
       <p>Search hits are shown with <mark class="kit-mark">a highlight</mark>, a status with a dot: <span class="kit-dot kit-dot--ok"></span>Open, <span class="kit-dot kit-dot--warn"></span>Busy, <span class="kit-dot kit-dot--error"></span>Closed.</p>
-      <p class="kit-truncate" style="max-width: 16rem" title="A long station name that does not fit in its column and is cut with an ellipsis">A long station name that does not fit in its column and is cut with an ellipsis</p>
+      <p class="kit-truncate" style="max-width: 16rem" tabindex="0" data-kit-tooltip="A long station name that does not fit in its column and is cut with an ellipsis">A long station name that does not fit in its column and is cut with an ellipsis</p>
       <p>A link only screen readers hear: <a class="kit-link" href="#content">Details<span class="kit-sr-only"> about the Central station</span></a>.</p>
     </div>
     <div class="kit-stack">
@@ -410,7 +460,8 @@ GROUP BY station;</pre>
 <!-- kit-part:interactive -->
 <!-- Adapted from kokonutui (MIT, see LICENSE-kokonutui.txt): the parts below need kit.js. -->
 
-<!-- kit-btn--hold with data-kit-hold (ms); listens: kit:hold -->
+<!-- kit-btn--hold with data-kit-hold (ms); listens: kit:hold. kit.js describes it as a hold to screen readers
+     and says when it is done. -->
 <section id="hold">
   <h2 class="kit-h2">Hold to confirm</h2>
   <div class="kit-row">
@@ -499,6 +550,34 @@ GROUP BY station;</pre>
       <tbody></tbody>
     </table>
   </div>
+</section>
+
+<!-- Command palette, for an app with a kit-shell: <dialog class="kit-dialog kit-palette" data-kit-palette
+     aria-label="Commands"> with a kit-input-icon field, a kit-search__list of kit-search__item rows (data-value;
+     the shortcut as a kit-kbd in a kit-search__meta) and a kit-empty for no match. kit.js opens it with Ctrl+K
+     (Cmd+K) from anywhere but a field, and from a button with data-kit-open="ID" (every command also has a
+     visible place); typing filters, the arrow keys move, Enter runs the row (kit:command with detail.value),
+     Escape clears the text, then closes. -->
+<section id="command-palette">
+  <h2 class="kit-h2">Command palette</h2>
+  <div class="kit-row">
+    <button class="kit-btn" type="button" data-kit-open="ex-palette"><span data-kit-icon="search" aria-hidden="true"></span>Commands<kbd class="kit-kbd">Ctrl K</kbd></button>
+    <span class="kit-small kit-muted">Or press <kbd class="kit-kbd">Ctrl</kbd> + <kbd class="kit-kbd">K</kbd> anywhere on the page.</span>
+  </div>
+  <dialog class="kit-dialog kit-palette" id="ex-palette" data-kit-palette aria-label="Commands">
+    <div class="kit-input-icon"><span data-kit-icon="search" aria-hidden="true"></span><input class="kit-input" type="search" placeholder="Type a command" aria-label="Command"></div>
+    <ul class="kit-search__list">
+      <li class="kit-search__item" data-value="new">New station<span class="kit-search__meta"><kbd class="kit-kbd">N</kbd></span></li>
+      <li class="kit-search__item" data-value="export">Export the table as CSV<span class="kit-search__meta"><kbd class="kit-kbd">Ctrl S</kbd></span></li>
+      <li class="kit-search__item" data-value="print">Print this page<span class="kit-search__meta"><kbd class="kit-kbd">Ctrl P</kbd></span></li>
+      <li class="kit-search__item" data-value="theme">Switch the theme</li>
+      <li class="kit-search__item" data-value="settings">Open the settings</li>
+    </ul>
+    <p class="kit-empty" hidden>No commands match</p>
+  </dialog>
+  <script>
+    document.getElementById("ex-palette").addEventListener("kit:command", function (e) { KitUI.toast("Ran: " + e.detail.text); });
+  </script>
 </section>
 
 <!-- /kit-part:interactive -->
@@ -665,7 +744,9 @@ GROUP BY station;</pre>
      totals row (tfoot kit-table__total) and a fixed first column (kit-table--sticky-first); row
      details in a side panel (dialog kit-drawer with kit-drawer__head, kit-drawer__title,
      kit-drawer__body, kit-drawer__actions; data-kit-open, data-kit-close); a confirmation with
-     KitUI.toast; skeletons (kit-skeleton --text --figure --chart --row) while data loads. -->
+     KitUI.toast (an error toast is read at once and says "Error"); skeletons (kit-skeleton --text --figure
+     --chart --row) while data loads. An info tip opens when the pointer rests on it (at once on focus), below
+     its button when there is no room above, and closes on scroll. -->
 <section id="dashboard-parts" class="kit-stack">
   <h2 class="kit-h2">Dashboard parts</h2>
   <div class="kit-panel">
@@ -732,6 +813,24 @@ GROUP BY station;</pre>
     document.getElementById("kit-station-save").addEventListener("click", function () { KitUI.toast("Station saved", { tone: "ok" }); });
   </script>
 </section>
+<!-- Toasts: KitUI.toast(TEXT, { tone: "ok" | "warn" | "error", ms, close: false }) shows a kit-toast at the bottom
+     right with a Dismiss button (kit-toast__close); it waits while the pointer is on it or the focus is in it. An
+     error stays 8 seconds, is read at once and says "Error". Not for a form's result: say that at the form. -->
+<section id="toasts">
+  <h2 class="kit-h2">Toasts</h2>
+  <div class="kit-row">
+    <button class="kit-btn" type="button" data-ex-toast="ok">Show a confirmation</button>
+    <button class="kit-btn" type="button" data-ex-toast="warn">Show a warning</button>
+    <button class="kit-btn" type="button" data-ex-toast="error">Show an error</button>
+  </div>
+  <script>
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ex-toast]"), function (b) {
+      var text = { ok: "Station saved", warn: "Two rows were skipped", error: "Could not save the station" }[b.getAttribute("data-ex-toast")];
+      b.addEventListener("click", function () { KitUI.toast(text, { tone: b.getAttribute("data-ex-toast") }); });
+    });
+  </script>
+</section>
+
 <!-- /kit-part:dashboard -->
 
 <!-- kit-part:extras -->
@@ -744,7 +843,9 @@ GROUP BY station;</pre>
      kit-slider-range with data-kit-slider-range), a tag input (kit-tags with data-kit-tags), a board (kit-board,
      kit-board__column, kit-board__title, kit-board__list with data-kit-board, kit-board__card), a calendar month
      (kit-calendar with data-kit-calendar; KitUI.calendar), a bento grid (kit-bento, kit-bento__item--wide, --tall),
-     changing loading text (data-kit-cycle on kit-loading__text) and a success check (kit-success, kit-success__check). -->
+     changing loading text (data-kit-cycle on kit-loading__text) and a success check (kit-success, kit-success__check).
+     kit.js reads out to screen readers what changes without a focus move: a tag added or removed, a card moved
+     (its column and place). -->
 <section id="more-components" class="kit-stack">
   <h2 class="kit-h2">More components</h2>
   <nav class="kit-breadcrumbs" aria-label="Breadcrumb"><ol><li><a href="#more-components">Stations</a></li><li><a href="#more-components">Central</a></li><li aria-current="page">Bikes</li></ol></nav>
@@ -817,6 +918,39 @@ GROUP BY station;</pre>
     });
   </script>
 </section>
+<!-- Context menu: data-kit-context on a row or card that holds a kit-menu. Its visible button (kit-btn kit-btn--ghost
+     kit-btn--icon kit-btn--sm with the ellipsis icon, an aria-label naming the row) is the way for every hand; a right
+     click, Shift+F10 or the context menu key on the row opens the same kit-menu__list at the pointer (kit.js: kept
+     inside the window, closed by scroll). data-kit-context="ID" points many rows to one kit-menu. kit:menu has
+     detail.value and detail.target (the row). Never the only way to an action. -->
+<section id="context-menu">
+  <h2 class="kit-h2">Context menu</h2>
+  <ul class="kit-list" aria-label="Reports">
+    <li class="kit-list__item" data-kit-context><span data-kit-icon="file-text" aria-hidden="true"></span><div class="kit-list__body"><div class="kit-list__title">Rentals in October</div><div class="kit-list__meta">PDF, 240 KB</div></div>
+      <div class="kit-list__actions"><div class="kit-menu"><button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false" aria-label="Actions for Rentals in October" data-kit-tooltip="More actions"><span data-kit-icon="ellipsis" aria-hidden="true"></span></button>
+        <div class="kit-menu__list" role="menu" hidden>
+          <button class="kit-menu__item" role="menuitem" type="button" data-value="open"><span data-kit-icon="external-link" aria-hidden="true"></span>Open</button>
+          <button class="kit-menu__item" role="menuitem" type="button" data-value="download"><span data-kit-icon="download" aria-hidden="true"></span>Download</button>
+          <hr class="kit-menu__sep">
+          <button class="kit-menu__item kit-menu__item--danger" role="menuitem" type="button" data-value="delete"><span data-kit-icon="trash-2" aria-hidden="true"></span>Delete</button>
+        </div></div></div></li>
+    <li class="kit-list__item" data-kit-context><span data-kit-icon="table" aria-hidden="true"></span><div class="kit-list__body"><div class="kit-list__title">Bikes out of order</div><div class="kit-list__meta">Excel, 18 KB</div></div>
+      <div class="kit-list__actions"><div class="kit-menu"><button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false" aria-label="Actions for Bikes out of order" data-kit-tooltip="More actions"><span data-kit-icon="ellipsis" aria-hidden="true"></span></button>
+        <div class="kit-menu__list" role="menu" hidden>
+          <button class="kit-menu__item" role="menuitem" type="button" data-value="open"><span data-kit-icon="external-link" aria-hidden="true"></span>Open</button>
+          <button class="kit-menu__item" role="menuitem" type="button" data-value="download"><span data-kit-icon="download" aria-hidden="true"></span>Download</button>
+          <hr class="kit-menu__sep">
+          <button class="kit-menu__item kit-menu__item--danger" role="menuitem" type="button" data-value="delete"><span data-kit-icon="trash-2" aria-hidden="true"></span>Delete</button>
+        </div></div></div></li>
+  </ul>
+  <script>
+    document.querySelector("#context-menu .kit-list").addEventListener("kit:menu", function (e) {
+      var row = e.target.closest(".kit-list__item");
+      KitUI.toast(e.detail.value + ": " + row.querySelector(".kit-list__title").textContent);
+    });
+  </script>
+</section>
+
 <!-- /kit-part:extras -->
 
 <!-- kit-part:print -->

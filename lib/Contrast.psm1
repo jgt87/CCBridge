@@ -74,8 +74,35 @@ $script:TokenPairs = @(
     @('--kit-chart-3', '--kit-surface', 3.0, 'chart colour 3 on panels'),
     @('--kit-chart-4', '--kit-surface', 3.0, 'chart colour 4 on panels'),
     @('--kit-chart-5', '--kit-surface', 3.0, 'chart colour 5 on panels'),
-    @('--kit-chart-6', '--kit-surface', 3.0, 'chart colour 6 on panels')
+    @('--kit-chart-6', '--kit-surface', 3.0, 'chart colour 6 on panels'),
+    @('--kit-text', '--kit-accent-tint-1', 4.5, 'text on a hovered row (accent tint 1)'),
+    @('--kit-text', '--kit-accent-tint-2', 4.5, 'text on a selected row (accent tint 2)'),
+    @('--kit-text', '--kit-accent-tint-3', 4.5, 'text on a picked chip (accent tint 3)')
 )
+
+function Resolve-TokenColor([AllowEmptyString()][string]$Value, $Table, [int]$Depth = 0) {
+    <# A token's value as a colour ConvertFrom-CssColor reads: var(--name) is looked up in the same
+       table (or its fallback), color-mix(in srgb, A P%, B) is mixed; other values come back as they are. #>
+    $v = "$Value".Trim()
+    if ($Depth -gt 5) { return $v }
+    $m = [regex]::Match($v, '^var\(\s*(--[\w-]+)\s*(?:,\s*(.+))?\)$')
+    if ($m.Success) {
+        $name = $m.Groups[1].Value
+        if ($Table -and $Table.ContainsKey($name)) { return (Resolve-TokenColor ([string]$Table[$name]) $Table ($Depth + 1)) }
+        if ($m.Groups[2].Success) { return (Resolve-TokenColor $m.Groups[2].Value $Table ($Depth + 1)) }
+        return $v
+    }
+    $m = [regex]::Match($v, '^color-mix\(\s*in\s+srgb\s*,\s*(.+?)\s+([\d.]+)%\s*,\s*(.+?)\s*\)$')
+    if ($m.Success) {
+        $a = ConvertFrom-CssColor (Resolve-TokenColor $m.Groups[1].Value $Table ($Depth + 1))
+        $b = ConvertFrom-CssColor (Resolve-TokenColor $m.Groups[3].Value $Table ($Depth + 1))
+        if (-not $a -or -not $b) { return $v }
+        $p = [double]$m.Groups[2].Value / 100
+        $mix = foreach ($k in 'r', 'g', 'b') { [Math]::Round([double]$a[$k] * $p + [double]$b[$k] * (1 - $p), 2) }
+        return ('rgb(' + ($mix -join ', ') + ')')
+    }
+    $v
+}
 
 function Get-TokenBlocks([AllowEmptyString()][string]$Css) {
     <# The --kit-* colour values of a tokens file: @{ light = @{ name = value }; dark = @{...} }. Dark
@@ -107,7 +134,7 @@ function Test-TokenContrast([AllowEmptyString()][string]$Css) {
         if (-not $t.Count) { continue }
         foreach ($p in $script:TokenPairs) {
             if (-not $t.ContainsKey($p[0]) -or -not $t.ContainsKey($p[1])) { continue }
-            $r = Get-ContrastRatio $t[$p[0]] $t[$p[1]]
+            $r = Get-ContrastRatio (Resolve-TokenColor $t[$p[0]] $t) (Resolve-TokenColor $t[$p[1]] $t)
             if ($null -ne $r -and $r -lt $p[2]) { "contrast ($mode): $($p[3]) is $($r):1 ($($p[0]) $($t[$p[0]]) on $($p[1]) $($t[$p[1]])); WCAG AA needs $($p[2]):1" }
         }
         # Chart colours next to each other (a stacked bar, ring slices, a legend) must tell apart:

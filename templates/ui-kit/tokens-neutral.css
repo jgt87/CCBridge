@@ -77,6 +77,13 @@
   --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);
   --kit-speed: 140ms;
   --kit-speed-slow: 280ms;
+  /* Layers (z-index) of the parts that sit over the page, from low to high: the sticky filter bar,
+     menus, list panels and popovers, info tips, toasts, the skip link. */
+  --kit-z-sticky: 5;
+  --kit-z-dropdown: 30;
+  --kit-z-tip: 40;
+  --kit-z-toast: 50;
+  --kit-z-skip: 100;
 }
 
 @media (prefers-color-scheme: dark) {

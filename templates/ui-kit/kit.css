@@ -29,7 +29,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-header--band a, .kit-header--band .kit-link { color: var(--kit-on-gradient); }
 .kit-header--band .kit-btn { border-color: var(--kit-on-gradient); }
 .kit-header--band .kit-btn--ghost { border-color: transparent; color: var(--kit-on-gradient); }
-.kit-header--band .kit-btn--ghost:hover { background: color-mix(in srgb, var(--kit-on-gradient) 16%, transparent); }
+@media (hover: hover) { .kit-header--band .kit-btn--ghost:hover { background: color-mix(in srgb, var(--kit-on-gradient) 16%, transparent); } }
 /* Sections of a page: the same left edge as the header, spacing from the kit's steps only. */
 .kit-section + .kit-section { margin-top: var(--kit-space-6); }
 .kit-prose { max-width: 70ch; }
@@ -42,7 +42,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-small { font-size: var(--kit-text-sm); }
 .kit-mono { font-family: var(--kit-font-mono); font-size: 0.92em; }
 .kit-link { color: var(--kit-accent); text-decoration: underline; text-underline-offset: 2px; }
-.kit-link:hover { color: var(--kit-accent-hover); }
+@media (hover: hover) { .kit-link:hover { color: var(--kit-accent-hover); } }
 
 /* The gradient (light blue to blue, bottom left to top right): for a header band or a
    decorative area, never for text. Text on it is white and large or bold (the light-blue end is
@@ -59,7 +59,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-page ::-webkit-scrollbar, .kit-page::-webkit-scrollbar { width: 10px; height: 10px; }
 .kit-page ::-webkit-scrollbar-track, .kit-page::-webkit-scrollbar-track { background: transparent; }
 .kit-page ::-webkit-scrollbar-thumb, .kit-page::-webkit-scrollbar-thumb { background-color: var(--kit-scroll-thumb); border: 2px solid transparent; border-radius: 999px; background-clip: content-box; }
-.kit-page ::-webkit-scrollbar-thumb:hover, .kit-page::-webkit-scrollbar-thumb:hover { background-color: var(--kit-scroll-thumb-hover); }
+@media (hover: hover) { .kit-page ::-webkit-scrollbar-thumb:hover, .kit-page::-webkit-scrollbar-thumb:hover { background-color: var(--kit-scroll-thumb-hover); } }
 .kit-page ::-webkit-scrollbar-corner { background: transparent; }
 
 /* Layout */
@@ -96,7 +96,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-panel__head { display: flex; align-items: center; justify-content: space-between; gap: var(--kit-space-2); margin-bottom: var(--kit-space-3); }
 .kit-panel__title { font-size: var(--kit-text-md); font-weight: 600; line-height: 1.3; margin: 0; color: var(--kit-title); }
 /* A filter bar that stays at the top while the page scrolls. */
-.kit-panel--sticky { position: sticky; top: 0; z-index: 5; box-shadow: var(--kit-shadow); }
+.kit-panel--sticky { position: sticky; top: 0; z-index: var(--kit-z-sticky, 5); box-shadow: var(--kit-shadow); }
 
 /* Buttons */
 .kit-btn {
@@ -107,16 +107,16 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   font: inherit; font-size: var(--kit-text-sm); font-weight: 550; cursor: pointer;
   transition: background var(--kit-speed) ease-out, border-color var(--kit-speed) ease-out;
 }
-.kit-btn:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-btn:hover { background: var(--kit-surface-2); } }
 .kit-btn:focus-visible { outline: none; box-shadow: var(--kit-focus); }
 .kit-btn:active:not(:disabled) { background: var(--kit-accent-soft); }
 .kit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .kit-btn--primary { background: var(--kit-accent); border-color: var(--kit-accent); color: var(--kit-on-accent); --kit-icon: var(--kit-on-accent); }
-.kit-btn--primary:hover { background: var(--kit-accent-hover); border-color: var(--kit-accent-hover); }
+@media (hover: hover) { .kit-btn--primary:hover { background: var(--kit-accent-hover); border-color: var(--kit-accent-hover); } }
 .kit-btn--ghost { background: transparent; border-color: transparent; }
-.kit-btn--ghost:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-btn--ghost:hover { background: var(--kit-surface-2); } }
 .kit-btn--danger { color: var(--kit-error); border-color: var(--kit-error); background: transparent; }
-.kit-btn--danger:hover { background: var(--kit-error-soft); }
+@media (hover: hover) { .kit-btn--danger:hover { background: var(--kit-error-soft); } }
 .kit-btn--sm { min-height: 1.875rem; padding: 0 var(--kit-space-3); font-size: var(--kit-text-xs); }
 
 /* Forms */
@@ -167,7 +167,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   padding: var(--kit-space-2) var(--kit-space-3); font: inherit; font-size: var(--kit-text-sm);
   color: var(--kit-text-muted); cursor: pointer;
 }
-.kit-tab:hover { color: var(--kit-text); }
+@media (hover: hover) { .kit-tab:hover { color: var(--kit-text); } }
 .kit-tab:focus-visible, .kit-segmented button:focus-visible, .kit-nav__item:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
 .kit-tab[aria-selected="true"] { color: var(--kit-text); border-bottom-color: var(--kit-accent); font-weight: 600; }
 .kit-segmented { display: inline-flex; flex-wrap: wrap; max-width: 100%; align-self: flex-start; border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); padding: 2px; gap: 2px; }
@@ -183,7 +183,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   display: block; padding: var(--kit-space-2) var(--kit-space-3); border-radius: var(--kit-radius);
   color: var(--kit-text-muted); text-decoration: none; font-size: var(--kit-text-sm);
 }
-.kit-nav__item:hover { background: var(--kit-surface-2); color: var(--kit-text); }
+@media (hover: hover) { .kit-nav__item:hover { background: var(--kit-surface-2); color: var(--kit-text); } }
 .kit-nav__item[aria-current="page"] { background: var(--kit-accent-soft); color: var(--kit-text); font-weight: 600; }
 
 /* Table */
@@ -200,7 +200,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 }
 .kit-table th, .kit-table td { padding: var(--kit-space-2) var(--kit-space-3); border-bottom: 1px solid var(--kit-border); }
 .kit-table tr:last-child td { border-bottom: 0; }
-.kit-table tbody tr:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-table tbody tr:hover { background: var(--kit-surface-2); } }
 .kit-table td.kit-num, .kit-table th.kit-num { text-align: right; font-variant-numeric: tabular-nums; }
 /* Sortable headers (kit.js, data-kit-sort): the whole header cell is the sort button (no button
    frame), with a quiet up/down mark that turns into one arrow in the accent once the column is
@@ -216,8 +216,8 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   content: ""; flex: 0 0 auto; width: 8px; height: 12px; background: currentColor; opacity: 0.35;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 1 9 5.5H1zM5 13 1 8.5h8z'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 1 9 5.5H1zM5 13 1 8.5h8z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
-.kit-table__sort:hover { color: var(--kit-text); background: color-mix(in srgb, var(--kit-border) 45%, transparent); }
-.kit-table__sort:hover::after { opacity: 0.7; }
+@media (hover: hover) { .kit-table__sort:hover { color: var(--kit-text); background: color-mix(in srgb, var(--kit-border) 45%, transparent); } }
+@media (hover: hover) { .kit-table__sort:hover::after { opacity: 0.7; } }
 .kit-table__sort:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
 .kit-table th[aria-sort="ascending"], .kit-table th[aria-sort="descending"] { color: var(--kit-text); box-shadow: inset 0 -2px 0 var(--kit-accent); }
 .kit-table th[aria-sort="ascending"] .kit-table__sort::after { opacity: 1; background: var(--kit-accent); -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 3 9.5 9.5H.5z'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M5 3 9.5 9.5H.5z'/%3E%3C/svg%3E"); }
@@ -245,7 +245,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   border: 1px solid var(--kit-accent); border-radius: 999px; background: var(--kit-accent-soft); color: var(--kit-text);
   font: inherit; font-size: var(--kit-text-xs); font-weight: 600; cursor: pointer;
 }
-.kit-chip:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-chip:hover { background: var(--kit-surface-2); } }
 .kit-chip:focus-visible { outline: none; box-shadow: var(--kit-focus); }
 
 /* Notices: a tinted block with a full border (no side stripes). */
@@ -258,6 +258,8 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-notice--warn { background: var(--kit-warn-soft); border-color: var(--kit-warn); }
 .kit-notice--error { background: var(--kit-error-soft); border-color: var(--kit-error); }
 .kit-notice__title { font-weight: 600; margin: 0 0 var(--kit-space-1); }
+/* An error that offers a way out (Retry): the buttons at the right end of the notice (role="alert"). */
+.kit-notice__actions { display: flex; gap: var(--kit-space-2); margin-left: auto; flex-shrink: 0; }
 
 /* Key figures: compact label + value rows, not big hero numbers. */
 .kit-figures { display: grid; gap: var(--kit-space-3) var(--kit-space-5); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
@@ -278,6 +280,11 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 }
 .kit-dialog::backdrop { background: var(--kit-backdrop); }
 .kit-dialog__actions { display: flex; justify-content: flex-end; gap: var(--kit-space-2); margin-top: var(--kit-space-5); }
+/* Command palette (Ctrl+K): <dialog class="kit-dialog kit-palette" data-kit-palette aria-label="Commands"> with
+   a kit-input-icon field, a kit-search__list of kit-search__item rows and a kit-empty (kit.js). It keeps the
+   dialog's width and stays at the top while the list gets shorter; the list scrolls inside it. */
+.kit-palette { width: min(520px, 92vw); box-sizing: border-box; margin-top: var(--kit-space-7); }
+.kit-palette .kit-search__list { max-height: 240px; overflow: auto; box-shadow: none; }
 
 /* Icons (kit-icons.js, Lucide): <span data-kit-icon="NAME" aria-hidden="true"></span>, in the text colour. */
 [data-kit-icon] { display: inline-flex; align-items: center; justify-content: center; line-height: 0; vertical-align: -0.2em; color: var(--kit-icon); }
@@ -316,10 +323,12 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-drawer__body { flex: 1; overflow: auto; padding: var(--kit-space-5); }
 .kit-drawer__actions { display: flex; justify-content: flex-end; gap: var(--kit-space-2); padding: var(--kit-space-4) var(--kit-space-5); border-top: 1px solid var(--kit-border); }
 @keyframes kit-slide-in { from { transform: translateX(24px); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .kit-drawer[open] { animation: none; } }
+/* Reduced motion: no slide, only a short fade in. */
+@keyframes kit-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .kit-drawer[open] { animation-name: kit-fade; } }
 
 /* Toasts: KitUI.toast("Saved", { tone: "ok" }) shows a short confirmation at the bottom right. */
-.kit-toasts { position: fixed; right: var(--kit-space-5); bottom: var(--kit-space-5); z-index: 50; display: flex; flex-direction: column; gap: var(--kit-space-2); pointer-events: none; }
+.kit-toasts { position: fixed; right: var(--kit-space-5); bottom: var(--kit-space-5); z-index: var(--kit-z-toast, 50); display: flex; flex-direction: column; gap: var(--kit-space-2); pointer-events: none; }
 .kit-toast {
   pointer-events: auto; display: flex; align-items: center; gap: var(--kit-space-2); min-width: 220px; max-width: min(380px, 90vw);
   padding: var(--kit-space-3) var(--kit-space-4); border-radius: var(--kit-radius); border: 1px solid var(--kit-border);
@@ -330,8 +339,11 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-toast--warn { border-left-color: var(--kit-warn); }
 .kit-toast--error { border-left-color: var(--kit-error); }
 .kit-toast.is-leaving { opacity: 0; transition: opacity var(--kit-speed) ease-out; }
+/* Its Dismiss button (kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm), at the right end; the negative
+   margins keep the toast as high as one line of its text. */
+.kit-toast__close { flex-shrink: 0; margin: calc(-1 * var(--kit-space-2)) calc(-1 * var(--kit-space-2)) calc(-1 * var(--kit-space-2)) auto; }
 @keyframes kit-toast-in { from { transform: translateY(8px); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .kit-toast { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .kit-toast { animation-name: kit-fade; } }
 
 /* Info tip: <button class="kit-tip" type="button" aria-label="How it is counted" data-kit-tip="TEXT">
    next to a figure or column name; kit.js shows the text on hover and focus (role="tooltip"). */
@@ -340,16 +352,27 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   border: 0; border-radius: 999px; background: transparent; color: var(--kit-text-muted); cursor: help; vertical-align: middle; position: relative;
 }
 .kit-tip::before { content: "?"; display: inline-flex; align-items: center; justify-content: center; width: 1rem; height: 1rem; border: 1px solid currentColor; border-radius: 999px; font-size: var(--kit-text-2xs); font-weight: 600; line-height: 1; }
-.kit-tip:hover, .kit-tip:focus-visible { color: var(--kit-text); outline: none; }
+@media (hover: hover) { .kit-tip:hover { color: var(--kit-text); outline: none; } }
+.kit-tip:focus-visible { color: var(--kit-text); outline: none; }
 .kit-tip:focus-visible { box-shadow: var(--kit-focus); }
 .kit-tip__bubble {
-  position: absolute; z-index: 40; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); width: max-content; max-width: 280px;
+  position: absolute; z-index: var(--kit-z-tip, 40); left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); width: max-content; max-width: 280px;
   padding: var(--kit-space-2) var(--kit-space-3); border-radius: var(--kit-radius); border: 1px solid var(--kit-border);
   background: var(--kit-surface); color: var(--kit-text); box-shadow: var(--kit-shadow);
   font-size: var(--kit-text-xs); font-weight: 400; line-height: 1.45; text-align: left; white-space: normal; pointer-events: none;
 }
 .kit-tip__bubble.is-left { left: 0; transform: none; }
 .kit-tip__bubble.is-right { left: auto; right: 0; transform: none; }
+.kit-tip__bubble.is-below { top: calc(100% + 6px); bottom: auto; }
+/* Tooltip: data-kit-tooltip="TEXT" on any element (an icon button, a cut-off text) instead of title. kit.js
+   shows one bubble with the info tip's look, placed by script above the element (below when there is no
+   room), after the pointer rests on it and at once on keyboard focus; never on touch. */
+.kit-tooltip {
+  position: fixed; z-index: var(--kit-z-tip, 40); top: 0; left: 0; width: max-content; max-width: 280px;
+  padding: var(--kit-space-2) var(--kit-space-3); border-radius: var(--kit-radius); border: 1px solid var(--kit-border);
+  background: var(--kit-surface); color: var(--kit-text); box-shadow: var(--kit-shadow);
+  font-size: var(--kit-text-xs); font-weight: 400; line-height: 1.45; text-align: left; white-space: normal; pointer-events: none;
+}
 
 /* Skeleton: grey placeholders in the shape of what is loading (aria-busy="true" on the box). */
 .kit-skeleton { display: block; border-radius: var(--kit-radius); background: linear-gradient(90deg, var(--kit-surface-2) 25%, var(--kit-border) 37%, var(--kit-surface-2) 63%); background-size: 400% 100%; animation: kit-shimmer 1.4s ease infinite; }
@@ -377,12 +400,12 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-multi__button { display: inline-flex; align-items: center; justify-content: space-between; gap: var(--kit-space-2); min-width: 180px; }
 .kit-multi__button::after { content: ""; width: 0.45em; height: 0.45em; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg) translateY(-2px); opacity: 0.7; }
 .kit-multi__panel {
-  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content; max-width: min(320px, calc(100vw - 2 * var(--kit-page-pad)));
+  position: absolute; z-index: var(--kit-z-dropdown, 30); top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content; max-width: min(320px, calc(100vw - 2 * var(--kit-page-pad)));
   padding: var(--kit-space-2); border: 1px solid var(--kit-border); border-radius: var(--kit-radius); background: var(--kit-surface); box-shadow: var(--kit-shadow);
 }
 .kit-multi__list { list-style: none; margin: var(--kit-space-2) 0 0; padding: 0; max-height: 240px; overflow: auto; }
 .kit-multi__list label { display: flex; align-items: center; gap: var(--kit-space-2); padding: 4px var(--kit-space-1); border-radius: var(--kit-radius); font-size: var(--kit-text-sm); cursor: pointer; }
-.kit-multi__list label:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-multi__list label:hover { background: var(--kit-surface-2); } }
 .kit-multi__actions { display: flex; justify-content: space-between; gap: var(--kit-space-2); margin-top: var(--kit-space-2); }
 .kit-multi.is-active .kit-multi__button, .kit-range.is-active .kit-range__custom .kit-input { border-color: var(--kit-accent); }
 .kit-range { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--kit-space-2); }
@@ -423,7 +446,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-accordion > summary::-webkit-details-marker { display: none; }
 .kit-accordion > summary::after { content: ""; width: 0.5em; height: 0.5em; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); transition: transform var(--kit-speed) ease-out; opacity: 0.7; flex: 0 0 auto; }
 .kit-accordion[open] > summary::after { transform: rotate(225deg); }
-.kit-accordion > summary:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-accordion > summary:hover { background: var(--kit-surface-2); } }
 .kit-accordion > summary:focus-visible { outline: none; box-shadow: var(--kit-focus); }
 .kit-accordion__body { padding: 0 var(--kit-space-4) var(--kit-space-4); }
 
@@ -431,7 +454,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-breadcrumbs ol { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kit-space-1); list-style: none; margin: 0; padding: 0; font-size: var(--kit-text-sm); color: var(--kit-text-muted); }
 .kit-breadcrumbs li + li::before { content: "/"; margin-right: var(--kit-space-1); opacity: 0.6; }
 .kit-breadcrumbs a { color: inherit; text-decoration: none; }
-.kit-breadcrumbs a:hover { color: var(--kit-text); text-decoration: underline; }
+@media (hover: hover) { .kit-breadcrumbs a:hover { color: var(--kit-text); text-decoration: underline; } }
 .kit-breadcrumbs [aria-current="page"] { color: var(--kit-text); font-weight: 600; }
 
 /* Stepper: <ol class="kit-stepper"><li class="kit-stepper__step is-done">..</li><li class="kit-stepper__step" aria-current="step">..</li><li class="kit-stepper__step">..</li></ol> */
@@ -484,7 +507,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-tags:focus-within { box-shadow: var(--kit-focus); border-color: var(--kit-accent); }
 .kit-tags__tag { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px var(--kit-space-2); border-radius: var(--kit-radius); background: var(--kit-accent-soft); color: var(--kit-text); font-size: var(--kit-text-sm); }
 .kit-tags__remove { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; padding: 0; border: 0; border-radius: var(--kit-radius); background: transparent; color: var(--kit-text-muted); cursor: pointer; font-size: 1rem; line-height: 1; }
-.kit-tags__remove:hover { color: var(--kit-text); background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-tags__remove:hover { color: var(--kit-text); background: var(--kit-surface-2); } }
 .kit-tags__input { flex: 1; min-width: 8rem; border: 0; outline: none; background: transparent; color: var(--kit-text); font: inherit; padding: var(--kit-space-1); }
 
 /* Board (kanban): <div class="kit-board"><div class="kit-board__column"><h3 class="kit-board__title">To do</h3>
@@ -593,7 +616,7 @@ fieldset:disabled .kit-btn, fieldset:disabled .kit-input, fieldset:disabled .kit
    dates and numbers use tabular figures; the browser draws its pickers in the page's theme (color-scheme). */
 .kit-input[type="file"] { padding: 0 var(--kit-space-2) 0 0; line-height: 2.125rem; color: var(--kit-text-muted); cursor: pointer; }
 .kit-input::file-selector-button { font: inherit; font-size: var(--kit-text-xs); min-height: 1.75rem; margin: 3px var(--kit-space-2) 3px 3px; padding: 0 var(--kit-space-3); border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius-sm); background: var(--kit-surface-2); color: var(--kit-text); cursor: pointer; }
-.kit-input::file-selector-button:hover { background: var(--kit-border); }
+@media (hover: hover) { .kit-input::file-selector-button:hover { background: var(--kit-border); } }
 .kit-input[type="color"] { width: 2.75rem; padding: 3px; cursor: pointer; }
 .kit-input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .kit-input[type="color"]::-webkit-color-swatch { border: 0; border-radius: var(--kit-radius-sm); }
@@ -634,7 +657,7 @@ fieldset:disabled .kit-btn, fieldset:disabled .kit-input, fieldset:disabled .kit
 .kit-list__meta { font-size: var(--kit-text-xs); color: var(--kit-text-muted); }
 .kit-list__actions { display: flex; align-items: center; gap: var(--kit-space-1); flex: 0 0 auto; }
 a.kit-list__item, button.kit-list__item { width: 100%; font: inherit; color: inherit; text-align: left; text-decoration: none; background: none; border-left: 0; border-right: 0; border-bottom: 0; cursor: pointer; }
-a.kit-list__item:hover, button.kit-list__item:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { a.kit-list__item:hover, button.kit-list__item:hover { background: var(--kit-surface-2); } }
 a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
 .kit-list__item[aria-current], .kit-list__item.is-active { background: var(--kit-accent-soft); }
 .kit-list--plain { border: 0; background: none; }
@@ -647,13 +670,13 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-tree ul { padding-left: var(--kit-space-5); }
 .kit-tree li[aria-expanded="false"] > ul { display: none; }
 .kit-tree__row { display: flex; align-items: center; gap: var(--kit-space-1); min-height: 2rem; padding: 0 var(--kit-space-2); border-radius: var(--kit-radius); cursor: default; }
-.kit-tree__row:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-tree__row:hover { background: var(--kit-surface-2); } }
 .kit-tree__row:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
 .kit-tree li[aria-selected="true"] > .kit-tree__row { background: var(--kit-accent-soft); font-weight: 550; }
 .kit-tree__toggle { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: var(--kit-radius-sm); background: none; color: var(--kit-text-muted); cursor: pointer; }
 .kit-tree__toggle::before { content: ""; width: 0.4rem; height: 0.4rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateX(-1px) rotate(-45deg); transition: transform var(--kit-speed) ease-out; }
 .kit-tree li[aria-expanded="true"] > .kit-tree__row > .kit-tree__toggle::before { transform: translateY(-1px) rotate(45deg); }
-.kit-tree__toggle:hover { background: var(--kit-border); color: var(--kit-text); }
+@media (hover: hover) { .kit-tree__toggle:hover { background: var(--kit-border); color: var(--kit-text); } }
 .kit-tree__spacer { flex: 0 0 auto; width: 1.25rem; }
 .kit-tree__row [data-kit-icon] { color: var(--kit-icon); }
 @media (prefers-reduced-motion: reduce) { .kit-tree__toggle::before { transition: none; } }
@@ -663,7 +686,7 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
    aria-expanded="false" aria-controls="ID">Columns</button><div class="kit-popover" id="ID" hidden>...</div></div> (kit.js).
    For actions use a kit-menu, for a long form a kit-drawer or kit-dialog. */
 .kit-popover-wrap { position: relative; display: inline-block; }
-.kit-popover { position: absolute; top: 100%; left: 0; z-index: 30; min-width: 14rem; max-width: min(24rem, 90vw); margin-top: var(--kit-space-1); padding: var(--kit-space-3) var(--kit-space-4); background: var(--kit-surface); color: var(--kit-text); border: 1px solid var(--kit-border); border-radius: var(--kit-radius-lg); box-shadow: var(--kit-shadow); box-sizing: border-box; }
+.kit-popover { position: absolute; top: 100%; left: 0; z-index: var(--kit-z-dropdown, 30); min-width: 14rem; max-width: min(24rem, 90vw); margin-top: var(--kit-space-1); padding: var(--kit-space-3) var(--kit-space-4); background: var(--kit-surface); color: var(--kit-text); border: 1px solid var(--kit-border); border-radius: var(--kit-radius-lg); box-shadow: var(--kit-shadow); box-sizing: border-box; }
 .kit-popover--right { left: auto; right: 0; }
 .kit-popover__head { font-weight: 600; margin: 0 0 var(--kit-space-2); font-size: var(--kit-text-sm); }
 .kit-popover__actions { display: flex; justify-content: flex-end; gap: var(--kit-space-2); margin-top: var(--kit-space-3); }
@@ -686,10 +709,17 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-dot--accent { background: var(--kit-accent); }
 .kit-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .kit-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-.kit-skip { position: absolute; left: var(--kit-space-3); top: -100px; z-index: 100; padding: var(--kit-space-2) var(--kit-space-3); background: var(--kit-surface); color: var(--kit-text); border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); text-decoration: none; }
+.kit-skip { position: absolute; left: var(--kit-space-3); top: -100px; z-index: var(--kit-z-skip, 100); padding: var(--kit-space-2) var(--kit-space-3); background: var(--kit-surface); color: var(--kit-text); border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); text-decoration: none; }
 .kit-skip:focus { top: var(--kit-space-3); outline: none; box-shadow: var(--kit-focus); }
 .kit-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--kit-space-2) var(--kit-space-4); margin-top: var(--kit-space-6); padding: var(--kit-space-4) 0; border-top: 1px solid var(--kit-border); font-size: var(--kit-text-xs); color: var(--kit-text-muted); }
 .kit-footer a { color: inherit; }
+/* Forced colours (Windows contrast themes) drop box-shadows, which draw the kit's focus ring: an outline
+   in the system's text colour takes its place there. Fills that carry meaning (progress, a switch, chart
+   parts) keep their colours. Nothing here applies outside forced colours. */
+@media (forced-colors: active) {
+  [class*="kit-"]:focus-visible, .kit-input:focus, .kit-select:focus, .kit-textarea:focus, .kit-skip:focus, .kit-check input:focus-visible, .kit-switch input:focus-visible + .kit-switch__track, .kit-tags:focus-within, .kit-composer:focus-within, .kit-drop:focus-within { outline: 2px solid CanvasText !important; outline-offset: 2px; }
+  .kit-progress__bar, .kit-switch__track, .kit-slider-range__fill, .kit-barlist__fill, .kit-chart__bar, .kit-chart__arc, .kit-chart__path, .kit-chart__cell, .kit-chart__dot, .kit-chart__point, .kit-chart__swatch { forced-color-adjust: none; }
+}
 
 /*
   Interactive components adapted from kokonutui (MIT licence, see LICENSE-kokonutui.txt; website
@@ -723,7 +753,8 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
   padding: var(--kit-space-2) var(--kit-space-3); border-radius: calc(var(--kit-radius) - 2px);
   font-size: var(--kit-text-sm); cursor: pointer;
 }
-.kit-search__item:hover, .kit-search__item.is-active { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-search__item:hover { background: var(--kit-surface-2); } }
+.kit-search__item.is-active { background: var(--kit-surface-2); }
 .kit-search__meta { font-size: var(--kit-text-xs); color: var(--kit-text-muted); }
 
 /* File drop zone (from kokonutui file-upload): <label class="kit-drop" data-kit-drop> with an <input type="file"> inside */
@@ -734,7 +765,8 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
   background: var(--kit-surface); color: var(--kit-text-muted); font-size: var(--kit-text-sm);
   transition: border-color var(--kit-speed) ease-out, background var(--kit-speed) ease-out;
 }
-.kit-drop:hover, .kit-drop.is-over { border-color: var(--kit-accent); background: var(--kit-accent-soft); }
+@media (hover: hover) { .kit-drop:hover { border-color: var(--kit-accent); background: var(--kit-accent-soft); } }
+.kit-drop.is-over { border-color: var(--kit-accent); background: var(--kit-accent-soft); }
 .kit-drop:focus-within { border-color: var(--kit-accent); box-shadow: var(--kit-focus); }
 .kit-drop input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .kit-drop__title { color: var(--kit-text); font-weight: 600; }
@@ -752,8 +784,9 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-tabs--animated, .kit-segmented--animated { position: relative; }
 .kit-tabs--animated .kit-tab[aria-selected="true"] { border-bottom-color: transparent; }
 .kit-tabs__indicator {
-  position: absolute; bottom: -1px; left: 0; height: 2px; width: 0; background: var(--kit-accent);
-  transition: transform var(--kit-speed-slow) cubic-bezier(0.22, 1, 0.36, 1), width var(--kit-speed-slow) cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute; bottom: -1px; left: 0; height: 2px; width: 100px; background: var(--kit-accent);
+  transform: scaleX(0); transform-origin: left;
+  transition: transform var(--kit-speed-slow) cubic-bezier(0.22, 1, 0.36, 1);
 }
 .kit-segmented--animated button { position: relative; z-index: 1; }
 .kit-segmented--animated button[aria-pressed="true"] { background: none; }
@@ -802,11 +835,11 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
    <button class="kit-menu__item kit-menu__item--danger" role="menuitem" type="button" data-value="delete">Delete</button></div></div>
    (kit.js: arrow keys, Escape, a click beside it; kit:menu with detail.value). */
 .kit-menu { position: relative; display: inline-block; }
-.kit-menu__list { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; min-width: 12rem; padding: var(--kit-space-1); border: 1px solid var(--kit-border); border-radius: var(--kit-radius); background: var(--kit-surface); box-shadow: var(--kit-shadow); }
+.kit-menu__list { position: absolute; z-index: var(--kit-z-dropdown, 30); top: calc(100% + 4px); right: 0; min-width: 12rem; padding: var(--kit-space-1); border: 1px solid var(--kit-border); border-radius: var(--kit-radius); background: var(--kit-surface); box-shadow: var(--kit-shadow); }
 .kit-menu--left .kit-menu__list { right: auto; left: 0; }
 .kit-menu__head { display: flex; flex-direction: column; padding: var(--kit-space-2) var(--kit-space-3); border-bottom: 1px solid var(--kit-border); margin-bottom: var(--kit-space-1); font-weight: 600; font-size: var(--kit-text-sm); }
 .kit-menu__item { display: flex; align-items: center; gap: var(--kit-space-2); width: 100%; padding: var(--kit-space-2) var(--kit-space-3); border: 0; border-radius: var(--kit-radius); background: transparent; color: var(--kit-text); font: inherit; font-size: var(--kit-text-sm); text-align: left; cursor: pointer; }
-.kit-menu__item:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-menu__item:hover { background: var(--kit-surface-2); } }
 .kit-menu__item:focus-visible { background: var(--kit-surface-2); outline: none; box-shadow: inset var(--kit-focus); }
 .kit-menu__item--danger { color: var(--kit-error); }
 .kit-menu__sep { border: 0; border-top: 1px solid var(--kit-border); margin: var(--kit-space-1) 0; }
@@ -816,7 +849,7 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
    The pressed button shows its label; arrow keys move between buttons; kit:select with detail.value. */
 .kit-iconbar { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 2px; padding: 2px; border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); background: var(--kit-surface); }
 .kit-iconbar__item { display: inline-flex; align-items: center; gap: var(--kit-space-1); min-width: 2rem; height: 2rem; justify-content: center; padding: 0 var(--kit-space-2); border: 0; border-radius: calc(var(--kit-radius) - 2px); background: transparent; color: var(--kit-text-muted); font: inherit; font-size: var(--kit-text-sm); cursor: pointer; }
-.kit-iconbar__item:hover { color: var(--kit-text); background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-iconbar__item:hover { color: var(--kit-text); background: var(--kit-surface-2); } }
 .kit-iconbar__item:focus-visible { outline: none; box-shadow: var(--kit-focus); }
 .kit-iconbar__item[aria-pressed="true"] { color: var(--kit-text); background: var(--kit-accent-soft); font-weight: 600; }
 .kit-iconbar__label { display: none; }
@@ -845,8 +878,8 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 /* The side panel as a sheet from the bottom on a phone (from kokonutui smooth-drawer). */
 @media (max-width: 640px) {
   .kit-drawer { inset: auto 0 0 0; width: 100%; max-width: 100%; height: auto; max-height: 85%; border-left: 0; border-top: 1px solid var(--kit-border); border-radius: var(--kit-radius-lg) var(--kit-radius-lg) 0 0; }
-  .kit-drawer[open] { animation-name: kit-sheet-in; }
 }
+@media (max-width: 640px) and (prefers-reduced-motion: no-preference) { .kit-drawer[open] { animation-name: kit-sheet-in; } }
 @keyframes kit-sheet-in { from { transform: translateY(24px); opacity: 0; } }
 
 /* Success (from kokonutui currency-transfer, the check only): <div class="kit-success" role="status"><svg class="kit-success__check"
@@ -887,7 +920,7 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-chart [role="button"] { cursor: pointer; }
 .kit-chart [role="button"]:focus-visible { outline: 2px solid var(--kit-accent); outline-offset: 2px; }
 .kit-chart__legend li[role="button"] { border-radius: var(--kit-radius); padding: var(--kit-space-1) var(--kit-space-2); min-height: 1.5rem; margin: 0 calc(-1 * var(--kit-space-2)); }
-.kit-chart__legend li[role="button"]:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { .kit-chart__legend li[role="button"]:hover { background: var(--kit-surface-2); } }
 /* Ring legend with values (data.legend "values"): label, value and share in columns. */
 .kit-chart__legend--values { display: block; max-width: 320px; margin: var(--kit-space-3) auto 0; font-size: var(--kit-text-sm); color: var(--kit-text); }
 .kit-chart__legend--values li { display: grid; grid-template-columns: 12px 1fr auto 4rem; gap: var(--kit-space-2); align-items: center; padding: 4px 0; border-bottom: 1px solid var(--kit-border); }
@@ -914,7 +947,7 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
   font: inherit; font-size: var(--kit-text-sm); color: var(--kit-text); text-align: left;
 }
 button.kit-barlist__row { cursor: pointer; transition: background var(--kit-speed) ease-out; }
-button.kit-barlist__row:hover { background: var(--kit-surface-2); }
+@media (hover: hover) { button.kit-barlist__row:hover { background: var(--kit-surface-2); } }
 button.kit-barlist__row:focus-visible { outline: none; box-shadow: var(--kit-focus); }
 .kit-barlist__label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kit-barlist__track { display: block; height: 0.75rem; border-radius: 999px; overflow: hidden; background: var(--kit-surface-2); }

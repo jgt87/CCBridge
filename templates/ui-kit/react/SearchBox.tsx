@@ -2,7 +2,7 @@
  * UI kit component for React projects: renders the kit's markup (styles/kit/kit.css), needs only React.
  * Adapted from kokonutui action-search-bar (MIT licence, see ../LICENSE-kokonutui.txt; https://kokonutui.com).
  */
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 export interface SearchOption {
   value: string;
@@ -10,11 +10,13 @@ export interface SearchOption {
   meta?: string;
 }
 
-/** A search box with a suggestion list; arrow keys and Enter pick one. */
+/** A search box with a suggestion list (a combo box); arrow keys and Enter pick one, the number of suggestions is read out. */
 export function SearchBox({ options, onPick, placeholder = "Search", label = "Search" }: { options: SearchOption[]; onPick: (o: SearchOption) => void; placeholder?: string; label?: string }) {
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
+  const [said, setSaid] = useState("");
+  const listId = useId();
   const shown = useMemo(() => {
     const q = text.trim().toLowerCase();
     return q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
@@ -26,16 +28,24 @@ export function SearchBox({ options, onPick, placeholder = "Search", label = "Se
     onPick(o);
   };
   const step = (by: number) => setActive((a) => (shown.length ? (a + by + shown.length) % shown.length : -1));
+  const expanded = open && shown.length > 0;
   return (
     <div className="kit-search">
       <input
+        aria-activedescendant={expanded && active >= 0 ? listId + "-" + active : undefined}
+        aria-autocomplete="list"
+        aria-controls={listId}
+        aria-expanded={expanded}
         aria-label={label}
         className="kit-input"
         onBlur={() => window.setTimeout(() => setOpen(false), 120)}
         onChange={(e) => {
+          const q = e.target.value.trim().toLowerCase();
+          const n = q ? options.filter((o) => o.label.toLowerCase().includes(q)).length : options.length;
           setText(e.target.value);
           setOpen(true);
           setActive(-1);
+          setSaid(n === 1 ? "1 result" : n + " results");
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
@@ -48,28 +58,39 @@ export function SearchBox({ options, onPick, placeholder = "Search", label = "Se
           } else if (e.key === "Enter" && active >= 0) {
             e.preventDefault();
             pick(shown[active]);
-          } else if (e.key === "Escape") setOpen(false);
+          } else if (e.key === "Escape" && expanded) {
+            e.preventDefault(); // the list only: a dialog or side panel around it stays open
+            e.stopPropagation();
+            setOpen(false);
+          }
         }}
         placeholder={placeholder}
+        role="combobox"
         value={text}
       />
-      {open && shown.length > 0 && (
-        <ul className="kit-search__list">
-          {shown.map((o, i) => (
-            <li
-              className={`kit-search__item${i === active ? " is-active" : ""}`}
-              key={o.value}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                pick(o);
-              }}
-            >
-              <span>{o.label}</span>
-              {o.meta && <span className="kit-search__meta">{o.meta}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="kit-search__list" hidden={!expanded} id={listId} role="listbox">
+        {expanded
+          ? shown.map((o, i) => (
+              <li
+                aria-selected={i === active}
+                className={`kit-search__item${i === active ? " is-active" : ""}`}
+                id={listId + "-" + i}
+                key={o.value}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(o);
+                }}
+                role="option"
+              >
+                <span>{o.label}</span>
+                {o.meta && <span className="kit-search__meta">{o.meta}</span>}
+              </li>
+            ))
+          : null}
+      </ul>
+      <span aria-live="polite" className="kit-sr-only">
+        {said}
+      </span>
     </div>
   );
 }

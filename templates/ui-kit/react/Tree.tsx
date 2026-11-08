@@ -77,7 +77,9 @@ export function Tree({ nodes, label, selected, onSelect, defaultOpen = [] }: { n
             tabIndex={current === n.value ? 0 : -1}
           >
             {branch ? (
+              // A pointer-only affordance (no tab stop): screen readers get aria-expanded on the treeitem instead.
               <button
+                aria-hidden="true"
                 aria-label="Open or close"
                 className="kit-tree__toggle"
                 onClick={(e) => {

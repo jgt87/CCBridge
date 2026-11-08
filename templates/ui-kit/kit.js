@@ -11,15 +11,50 @@
   "use strict";
   if (window.KitUI) return;   // loaded twice (head and tail of the page): once is enough
 
+  // Short announcements for screen readers (a tag added, a card moved, a search's result count): one
+  // polite live region, made the first time it is needed; text in it is read, not shown. Its look is
+  // set here too, so a page whose kit.css lacks kit-sr-only still shows nothing.
+  var SR_ONLY = "position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0";
+  var liveRegion = null, liveTimer = null;
+  function srOnly(el) { el.className = "kit-sr-only"; el.style.cssText = SR_ONLY; return el; }
+  function announce(text) {
+    if (!document.body) return;
+    if (!liveRegion || !liveRegion.parentNode) {
+      liveRegion = srOnly(document.createElement("div"));
+      liveRegion.setAttribute("aria-live", "polite");
+      liveRegion.setAttribute("aria-atomic", "true");
+      document.body.appendChild(liveRegion);
+    }
+    liveRegion.textContent = "";
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(function () { liveRegion.textContent = String(text); }, 120);   // a new text after a pause is read even when it repeats
+  }
+  // Escape that closed a kit part stops there: a dialog or side panel around it stays open.
+  function escapeHandled(e) { e.preventDefault(); e.stopPropagation(); }
+
   // Hold to confirm: <button class="kit-btn kit-btn--hold" data-kit-hold="1500">Delete</button>
   // Fires "kit:hold" on the button when held long enough (mouse, touch, Space or Enter).
   function isHoldKey(k) { return k === " " || k === "Enter"; }
+  // One hidden description for every hold button (aria-describedby reads hidden text).
+  function holdHelp() {
+    var help = document.getElementById("kit-hold-help");
+    if (!help) {
+      help = document.createElement("span");
+      help.id = "kit-hold-help";
+      help.hidden = true;
+      help.textContent = "Press and hold to confirm";
+      document.body.appendChild(help);
+    }
+    return help.id;
+  }
   function setupHold(btn) {
     if (btn.kitHold) return;
     btn.kitHold = true;
     var ms = parseInt(btn.getAttribute("data-kit-hold"), 10) || 1500;
     var timer = null;
     btn.style.setProperty("--kit-hold-ms", ms + "ms");
+    var described = btn.getAttribute("aria-describedby") || "";
+    if (!/(^|\s)kit-hold-help(\s|$)/.test(described)) btn.setAttribute("aria-describedby", (described + " " + holdHelp()).trim());
     function isKey(e) { return !!e && e.type === "keydown"; }
     function begin(e) {
       if (timer || btn.disabled) return;
@@ -31,6 +66,7 @@
         timer = null;
         btn.classList.remove("is-holding");
         btn.classList.add("is-done");
+        announce((btn.getAttribute("aria-label") || btn.textContent.trim()) + ": confirmed");
         btn.dispatchEvent(new CustomEvent("kit:hold", { bubbles: true }));
       }, ms);
     }
@@ -81,14 +117,18 @@
       open(visible().length > 0);
       mark(-1);
     }
-    input.addEventListener("input", filter);
+    input.addEventListener("input", function () {
+      filter();
+      var n = visible().length;
+      announce(n === 1 ? "1 result" : n + " results");
+    });
     input.addEventListener("focus", filter);
     input.addEventListener("blur", function () { setTimeout(function () { open(false); }, 120); });
     input.addEventListener("keydown", function (e) {
       if (e.key === "ArrowDown") { e.preventDefault(); mark(active + 1); }
       else if (e.key === "ArrowUp") { e.preventDefault(); mark(active - 1); }
       else if (e.key === "Enter" && active >= 0) { e.preventDefault(); pick(visible()[active]); }
-      else if (e.key === "Escape") { open(false); }
+      else if (e.key === "Escape" && !list.hidden) { escapeHandled(e); open(false); }
     });
     items.forEach(function (i) { i.addEventListener("mousedown", function (e) { e.preventDefault(); pick(i); }); });
     open(false);
@@ -121,8 +161,10 @@
     ind.setAttribute("aria-hidden", "true");
     group.appendChild(ind);
     var buttons = Array.prototype.slice.call(group.querySelectorAll(itemSel));
+    var scaled = indicatorClass === "kit-tabs__indicator";   // kit.css: 100px wide, scaled to the tab
     function move() {
       var cur = buttons.filter(function (b) { return b.getAttribute(attr) === "true"; })[0];
+      if (scaled) { ind.style.transform = cur ? "translateX(" + cur.offsetLeft + "px) scaleX(" + cur.offsetWidth / 100 + ")" : "scaleX(0)"; return; }
       if (!cur) { ind.style.width = "0"; return; }
       ind.style.width = cur.offsetWidth + "px";
       ind.style.transform = "translateX(" + cur.offsetLeft + "px)";
@@ -452,7 +494,9 @@
       var dark = isDark(), icon = btn.querySelector("[data-kit-icon]");
       if (icon) icon.setAttribute("data-kit-icon", dark ? "sun" : "moon");
       btn.setAttribute("aria-label", dark ? "Switch to the light theme" : "Switch to the dark theme");
-      btn.setAttribute("title", btn.getAttribute("aria-label"));
+      btn.removeAttribute("title");
+      btn.setAttribute("data-kit-tooltip", btn.getAttribute("aria-label"));   // the kit's tooltip says the same
+      if (tooltipFor === btn && tooltip) tooltip.textContent = btn.getAttribute("aria-label");
     }
     btn.addEventListener("click", function () {
       var theme = isDark() ? "light" : "dark";
@@ -514,24 +558,58 @@
     if (isKitPanel(e.target)) e.target.dispatchEvent(new CustomEvent("kit:close", { bubbles: true }));
   }, true);
 
-  // Toasts: KitUI.toast("Saved", { tone: "ok" | "warn" | "error", ms: 4000 }), read out by screen readers.
+  // Toasts: KitUI.toast("Saved", { tone: "ok" | "warn" | "error", ms: 4000, close: false }), read out by
+  // screen readers. Each has a Dismiss button (close: false leaves it out) and waits while the pointer is
+  // on it or the focus is in it.
+  function toastClose(onClick) {
+    var x = document.createElement("button");
+    x.type = "button";
+    x.className = "kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-toast__close";
+    x.setAttribute("aria-label", "Dismiss");
+    if (window.KitIcons) { var ic = document.createElement("span"); ic.setAttribute("data-kit-icon", "x"); ic.setAttribute("aria-hidden", "true"); x.appendChild(ic); }   // the icons script draws it
+    else x.textContent = "\u00d7";
+    x.addEventListener("click", onClick);
+    return x;
+  }
   function toast(text, opts) {
     opts = opts || {};
     var region = toastRegion();
     var t = document.createElement("div");
     t.className = "kit-toast" + (/^(ok|warn|error)$/.test(opts.tone || "") ? " kit-toast--" + opts.tone : "");
     t.textContent = String(text);
-    region.appendChild(t);
-    var ms = opts.ms || (opts.tone === "error" ? 8000 : 4000);
-    setTimeout(function () {
+    var word = { error: "Error: ", warn: "Warning: " }[opts.tone];
+    if (word) { var w = srOnly(document.createElement("span")); w.textContent = word; t.insertBefore(w, t.firstChild); }
+    if (opts.tone === "error") t.setAttribute("role", "alert");
+    var left = opts.ms || (opts.tone === "error" ? 8000 : 4000), timer = null, since = 0, over = false;
+    var leave = function () {
+      clearTimeout(timer); timer = null;
+      if (t.classList.contains("is-leaving")) return;
       t.classList.add("is-leaving");
       setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 400);
-    }, ms);
+    };
+    var run = function () { if (timer || t.classList.contains("is-leaving")) return; since = Date.now(); timer = setTimeout(leave, left); };
+    var pause = function () { if (!timer) return; clearTimeout(timer); timer = null; left = Math.max(1000, left - (Date.now() - since)); };
+    if (opts.close !== false) t.appendChild(toastClose(leave));
+    t.addEventListener("mouseenter", function () { over = true; pause(); });
+    t.addEventListener("mouseleave", function () { over = false; if (!t.contains(document.activeElement)) run(); });
+    t.addEventListener("focusin", pause);
+    t.addEventListener("focusout", function (e) { if (!over && !(e.relatedTarget && t.contains(e.relatedTarget))) run(); });
+    region.appendChild(t);
+    run();
     return t;
   }
 
   // Info tip: <button class="kit-tip" type="button" aria-label="How it is counted" data-kit-tip="TEXT">.
-  var tipCount = 0;
+  var tipCount = 0, tipWarmUntil = 0, TIP_DELAY = 500, TIP_WARM = 600;
+  function hideTips(except) {
+    Array.prototype.forEach.call(document.querySelectorAll(".kit-tip__bubble:not([hidden])"), function (b) {
+      if (except && except.contains(b)) return;
+      if (b.kitHide) b.kitHide(); else b.hidden = true;
+    });
+  }
+  window.addEventListener("scroll", function () { hideTips(); }, true);
+  window.addEventListener("wheel", function () { hideTips(); }, { passive: true });
+  document.addEventListener("pointerdown", function (e) { hideTips(e.target && e.target.closest ? e.target.closest(".kit-tip, [data-kit-tip]") : null); }, true);
   function setupTip(btn) {
     if (btn.kitTip) return;
     btn.kitTip = true;
@@ -543,20 +621,110 @@
     bubble.textContent = btn.getAttribute("data-kit-tip");
     btn.appendChild(bubble);
     btn.setAttribute("aria-describedby", bubble.id);
+    var wait = null;
     var show = function () {
+      clearTimeout(wait); wait = null;
       bubble.textContent = btn.getAttribute("data-kit-tip"); bubble.hidden = false;
-      bubble.classList.remove("is-left", "is-right");
+      bubble.classList.remove("is-left", "is-right", "is-below");
       var r = bubble.getBoundingClientRect();
       if (r.left < 8) bubble.classList.add("is-left"); else if (r.right > window.innerWidth - 8) bubble.classList.add("is-right");
+      if (r.top < 8) bubble.classList.add("is-below");
     };
-    var hide = function () { bubble.hidden = true; };
-    btn.addEventListener("mouseenter", show);
+    var hide = function () {
+      clearTimeout(wait); wait = null;
+      if (!bubble.hidden) tipWarmUntil = Date.now() + TIP_WARM;
+      bubble.hidden = true;
+    };
+    bubble.kitHide = hide;
+    btn.addEventListener("mouseenter", function () {
+      if (!bubble.hidden || wait) return;
+      if (Date.now() < tipWarmUntil) show(); else wait = setTimeout(show, TIP_DELAY);
+    });
     btn.addEventListener("focus", show);
     btn.addEventListener("mouseleave", function () { if (document.activeElement !== btn) hide(); });
     btn.addEventListener("blur", hide);
-    btn.addEventListener("keydown", function (e) { if (e.key === "Escape") hide(); });
+    btn.addEventListener("keydown", function (e) { if (e.key === "Escape" && !bubble.hidden) { escapeHandled(e); hide(); } });
     btn.addEventListener("click", function (e) { e.preventDefault(); if (bubble.hidden) show(); else hide(); });
   }
+
+  // Tooltip: data-kit-tooltip="TEXT" on any element (an icon button, a cut-off text) instead of title. One
+  // bubble for the page (kit-tooltip, role="tooltip") with the info tip's look and timing: after the pointer
+  // rests on the element, at once on keyboard focus and next to a tip that just closed; above the element,
+  // below it when there is no room, kept inside the window; gone on leave, blur, Escape, a press, scroll and
+  // wheel; never on touch. It describes the element (aria-describedby), and names one that has no name.
+  var tooltip = null, tooltipFor = null, tooltipWait = null, pressAt = 0, touchAt = 0;
+  function setupTooltip(el) {
+    var title = el.getAttribute("title");
+    if (title !== null) {   // a title would show the browser's own tooltip as well
+      if (!el.getAttribute("data-kit-tooltip")) el.setAttribute("data-kit-tooltip", title);
+      el.removeAttribute("title");
+    }
+    var text = (el.getAttribute("data-kit-tooltip") || "").trim();
+    if (text && !el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby") && !el.textContent.trim()) el.setAttribute("aria-label", text);
+  }
+  function tooltipOf(t) { return t && t.closest ? t.closest("[data-kit-tooltip]") : null; }
+  function hideTooltip(warm) {
+    clearTimeout(tooltipWait); tooltipWait = null;
+    if (!tooltipFor) return;
+    if (tooltip && !tooltip.hidden) { tooltip.hidden = true; if (warm !== false) tipWarmUntil = Date.now() + TIP_WARM; }
+    if (tooltipFor.getAttribute("aria-describedby") === "kit-tooltip") tooltipFor.removeAttribute("aria-describedby");
+    tooltipFor = null;
+  }
+  function placeTooltip(el) {
+    var r = el.getBoundingClientRect(), b = tooltip.getBoundingClientRect(), gap = 6, edge = 8;
+    var left = Math.max(edge, Math.min(r.left + r.width / 2 - b.width / 2, window.innerWidth - edge - b.width));
+    var top = r.top - gap - b.height;
+    if (top < edge) top = r.bottom + gap;
+    tooltip.style.left = Math.round(left) + "px";
+    tooltip.style.top = Math.round(top) + "px";
+  }
+  function showTooltip(el) {
+    clearTimeout(tooltipWait); tooltipWait = null;
+    var text = (el.getAttribute("data-kit-tooltip") || "").trim();
+    if (!text || !document.body || !document.body.contains(el)) return;
+    if (tooltipFor && tooltipFor !== el) hideTooltip(false);
+    if (!tooltip || !tooltip.parentNode) {
+      tooltip = document.createElement("div");
+      tooltip.className = "kit-tooltip";
+      tooltip.id = "kit-tooltip";
+      tooltip.setAttribute("role", "tooltip");
+      document.body.appendChild(tooltip);
+    }
+    tooltip.textContent = text;
+    tooltip.hidden = false;
+    tooltipFor = el;
+    if (text !== (el.getAttribute("aria-label") || "").trim() && !el.getAttribute("aria-describedby")) el.setAttribute("aria-describedby", tooltip.id);
+    placeTooltip(el);
+  }
+  function pressed(e) { pressAt = Date.now(); if (e.pointerType === "touch" || e.type === "touchstart") touchAt = pressAt; hideTooltip(); }
+  document.addEventListener("pointerdown", pressed, true);
+  document.addEventListener("touchstart", pressed, { capture: true, passive: true });
+  document.addEventListener("mousedown", function () { pressAt = Date.now(); }, true);
+  document.addEventListener("mouseover", function (e) {
+    var el = tooltipOf(e.target);
+    if (!el || el === tooltipFor || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+    if (Date.now() - touchAt < 1000) return;   // the mouse events a tap makes: no hover tooltips on touch
+    clearTimeout(tooltipWait);
+    if (Date.now() < tipWarmUntil) showTooltip(el); else tooltipWait = setTimeout(function () { showTooltip(el); }, TIP_DELAY);
+  });
+  document.addEventListener("mouseout", function (e) {
+    var el = tooltipOf(e.target);
+    if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+    clearTimeout(tooltipWait); tooltipWait = null;
+    if (el === tooltipFor && !el.contains(document.activeElement)) hideTooltip();
+  });
+  document.addEventListener("focusin", function (e) {
+    var el = tooltipOf(e.target);
+    if (el && Date.now() - pressAt > 600) showTooltip(el);   // keyboard focus, not the focus a click gives
+  });
+  document.addEventListener("focusout", function (e) {
+    var el = tooltipOf(e.target);
+    if (el && el === tooltipFor && !(e.relatedTarget && el.contains(e.relatedTarget))) hideTooltip();
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && tooltipFor && tooltip && !tooltip.hidden) { escapeHandled(e); hideTooltip(); } }, true);
+  window.addEventListener("scroll", function () { hideTooltip(); }, true);
+  window.addEventListener("wheel", function () { hideTooltip(); }, { passive: true });
+  window.addEventListener("resize", function () { hideTooltip(); });
 
   // Several values: <select multiple class="kit-select" data-kit-multi aria-label="Country">. The kit
   // draws a field with a list of check boxes and a search; nothing ticked means all. The select
@@ -570,10 +738,14 @@
     var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "kit-input kit-multi__button";
-    btn.setAttribute("aria-haspopup", "true");
+    btn.setAttribute("aria-haspopup", "dialog");
     btn.setAttribute("aria-expanded", "false");
     var panel = document.createElement("div");
     panel.className = "kit-multi__panel";
+    panel.id = "kit-multi-" + Math.random().toString(36).slice(2, 8);
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", label);
+    btn.setAttribute("aria-controls", panel.id);
     panel.hidden = true;
     panel.innerHTML = '<input class="kit-input" type="search" placeholder="Search"><ul class="kit-multi__list"></ul><div class="kit-multi__actions"><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-all>Select all</button><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-none>Clear</button></div>';
     var search = panel.querySelector("input"), list = panel.querySelector("ul");
@@ -628,7 +800,8 @@
     search.addEventListener("input", filterList);
     panel.querySelector("[data-all]").addEventListener("click", function () { setAll(true); });
     panel.querySelector("[data-none]").addEventListener("click", function () { setAll(false); });
-    wrap.addEventListener("keydown", function (e) { if (e.key === "Escape" && !panel.hidden) { toggle(false); btn.focus(); } });
+    wrap.addEventListener("keydown", function (e) { if (e.key === "Escape" && !panel.hidden) { escapeHandled(e); toggle(false); btn.focus(); } });
+    wrap.addEventListener("focusout", function (e) { if (!panel.hidden && e.relatedTarget && !wrap.contains(e.relatedTarget)) toggle(false); });
     document.addEventListener("click", function (e) { if (!panel.hidden && !wrap.contains(e.target)) toggle(false); });
     if (window.MutationObserver) new MutationObserver(build).observe(select, { childList: true });
     build();
@@ -759,12 +932,13 @@
     Array.prototype.forEach.call(document.querySelectorAll("[data-kit-menu][aria-expanded=true]"), function (b) {
       if (b === except) return;
       b.setAttribute("aria-expanded", "false");
-      var l = menuList(b); if (l) l.hidden = true;
+      var l = menuList(b); if (l) { l.hidden = true; unplaceMenu(l); }
     });
   }
   function closestOf(target, selector) { return target.closest ? target.closest(selector) : null; }
   function toggleMenu(btn) {
     var list = menuList(btn), open = btn.getAttribute("aria-expanded") === "true";
+    if (list) unplaceMenu(list);   // opened as a context menu before: back next to its button
     closeMenus(btn);
     btn.setAttribute("aria-expanded", String(!open));
     if (!list) return;
@@ -774,11 +948,14 @@
     if (first) first.focus();
   }
   function pickMenuItem(item) {
-    var menu = item.closest(".kit-menu");
+    var menu = item.closest(".kit-menu"), list = item.closest(".kit-menu__list");
     var b2 = menu && menu.querySelector("[data-kit-menu]");
+    var area = list && list.kitArea, back = list && list.kitBack;
     closeMenus();
-    if (menu) menu.dispatchEvent(new CustomEvent("kit:menu", { bubbles: true, detail: { value: item.getAttribute("data-value") || item.textContent.trim() } }));
-    if (b2) b2.focus();
+    var detail = { value: item.getAttribute("data-value") || item.textContent.trim() };
+    if (area) detail.target = area;   // opened as a context menu: the row or card it was opened on
+    if (menu) menu.dispatchEvent(new CustomEvent("kit:menu", { bubbles: true, detail: detail }));
+    focusBack(back, b2);
   }
   document.addEventListener("click", function (e) {
     var btn = closestOf(e.target, "[data-kit-menu]");
@@ -807,8 +984,67 @@
     var items = menuItems(list);
     var to = menuTarget(items, items.indexOf(document.activeElement), e.key);
     if (to !== undefined) { e.preventDefault(); if (to) to.focus(); }
-    else if (e.key === "Escape" || e.key === "Tab") { var mb = menuButtonOf(list); closeMenus(); if (e.key === "Escape" && mb) mb.focus(); }
+    else if (e.key === "Escape" || e.key === "Tab") { var mb = menuButtonOf(list), back = list.kitBack; closeMenus(); if (e.key === "Escape") { escapeHandled(e); focusBack(back, mb); } }
   });
+  function focusBack(first, second) {
+    var to = first && document.body && document.body.contains(first) && first.focus ? first : second;
+    if (to && to.focus) to.focus();
+  }
+
+  // Context menu: data-kit-context on a row, card or area that holds a kit-menu (its visible "..." button:
+  // the same actions for every hand), or data-kit-context="ID" of a kit-menu elsewhere. A right click,
+  // Shift+F10 or the context menu key there opens that menu's list at the pointer (under the focused
+  // element for a key), kept inside the window. It works and closes like the menu, and also closes on
+  // scroll, wheel and resize; kit:menu then has detail.target, the element it was opened on.
+  var contextList = null, contextKeyAt = 0;
+  function contextMenuOf(area) {
+    var id = area.getAttribute("data-kit-context");
+    var m = id ? document.getElementById(id) : area.querySelector(".kit-menu");
+    if (m && !m.classList.contains("kit-menu")) m = m.querySelector(".kit-menu") || m.closest(".kit-menu");
+    return m && m.querySelector("[data-kit-menu]") ? m : null;
+  }
+  function unplaceMenu(list) {
+    if (list !== contextList) return;
+    ["position", "left", "top", "right", "bottom"].forEach(function (p) { list.style[p] = ""; });
+    list.kitArea = null; list.kitBack = null; contextList = null;
+  }
+  function openContextMenu(area, x, y) {
+    var menu = contextMenuOf(area), btn = menu && menu.querySelector("[data-kit-menu]"), list = btn && menuList(btn);
+    if (!list) return false;
+    var back = document.activeElement;
+    closeMenus();
+    btn.setAttribute("aria-expanded", "true");
+    list.hidden = false;
+    contextList = list; list.kitArea = area; list.kitBack = back && back !== document.body ? back : btn;
+    var s = list.style, edge = 8;
+    s.position = "fixed"; s.right = "auto"; s.bottom = "auto"; s.left = "0px"; s.top = "0px";
+    var w = list.offsetWidth, h = list.offsetHeight;
+    s.left = Math.round(x + w > window.innerWidth - edge ? Math.max(edge, x - w) : x) + "px";
+    s.top = Math.round(y + h > window.innerHeight - edge ? Math.max(edge, y - h) : y) + "px";
+    var first = menuItems(list)[0];
+    if (first) first.focus();
+    return true;
+  }
+  function contextArea(t) { return closestOf(t, ".kit-menu__list") ? null : closestOf(t, "[data-kit-context]"); }
+  document.addEventListener("contextmenu", function (e) {
+    var area = contextArea(e.target);
+    if (!area) return;
+    if (Date.now() - contextKeyAt < 300) { e.preventDefault(); return; }   // the key already opened it
+    var x = e.clientX, y = e.clientY;
+    if (!x && !y) { var r = (e.target.getBoundingClientRect ? e.target : area).getBoundingClientRect(); x = r.left; y = r.bottom; }   // from the keyboard
+    if (openContextMenu(area, x, y)) e.preventDefault();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (!((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu")) return;
+    var area = contextArea(e.target);
+    if (!area) return;
+    var r = (e.target.getBoundingClientRect ? e.target : area).getBoundingClientRect();
+    if (openContextMenu(area, r.left, r.bottom)) { e.preventDefault(); contextKeyAt = Date.now(); }
+  });
+  function closeContext(e) { if (contextList && !contextList.hidden && !(e && e.target && e.target.nodeType === 1 && contextList.contains(e.target))) closeMenus(); }
+  window.addEventListener("scroll", closeContext, true);
+  window.addEventListener("wheel", closeContext, { passive: true });
+  window.addEventListener("resize", function () { closeContext(); });
 
   // Icon toolbar (from kokonutui toolbar): data-kit-iconbar="single" (one pressed) or "multiple";
   // arrow keys move between the buttons; "kit:select" with detail.value and detail.values.
@@ -915,7 +1151,7 @@
       values.forEach(function (v, i) {
         var t = document.createElement("span"); t.className = "kit-tags__tag"; t.textContent = v;
         var x = document.createElement("button"); x.type = "button"; x.className = "kit-tags__remove"; x.setAttribute("aria-label", "Remove " + v); x.textContent = String.fromCharCode(215);
-        x.addEventListener("click", function () { values.splice(i, 1); draw(true); input.focus(); });
+        x.addEventListener("click", function () { values.splice(i, 1); draw(true); announce("Removed " + v); input.focus(); });
         t.appendChild(x);
         el.insertBefore(t, input);
       });
@@ -925,12 +1161,12 @@
     }
     function add(text) {
       var v = text.replace(/,/g, " ").trim();
-      if (v && values.indexOf(v) < 0) { values.push(v); draw(true); }
+      if (v && values.indexOf(v) < 0) { values.push(v); draw(true); announce("Added " + v); }
       input.value = "";
     }
     input.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(input.value); }
-      else if (e.key === "Backspace" && !input.value && values.length) { values.pop(); draw(true); }
+      else if (e.key === "Backspace" && !input.value && values.length) { var gone = values.pop(); draw(true); announce("Removed " + gone); }
     });
     input.addEventListener("change", function () { if (input.value.indexOf(",") < 0 && input.value) add(input.value); });
     el.addEventListener("click", function (e) { if (e.target === el) input.focus(); });
@@ -941,8 +1177,18 @@
   // key (left and right: the next list, up and down: the order); "kit:move" with detail.id, from, to and index.
   var dragCard = null, dragFrom = null;
   function boardLists(card) { var b = card.closest(".kit-board"); return b ? Array.prototype.slice.call(b.querySelectorAll("[data-kit-board]")) : []; }
+  // A column's name: its kit-board__title without the count badge, else its data-kit-board.
+  function boardColumnName(list) {
+    var col = list.closest(".kit-board__column"), title = col && col.querySelector(".kit-board__title");
+    if (!title) return list.getAttribute("data-kit-board") || "";
+    var copy = title.cloneNode(true);
+    Array.prototype.forEach.call(copy.querySelectorAll(".kit-badge"), function (b) { b.parentNode.removeChild(b); });
+    return copy.textContent.trim() || list.getAttribute("data-kit-board") || "";
+  }
   function moved(card, from) {
     var to = card.parentNode;
+    var name = (card.getAttribute("aria-label") || card.textContent).trim().replace(/\s+/g, " ").slice(0, 80);
+    announce("Moved " + name + " to " + boardColumnName(to) + ", position " + (Array.prototype.indexOf.call(to.children, card) + 1) + " of " + to.children.length);
     card.dispatchEvent(new CustomEvent("kit:move", { bubbles: true, detail: { id: card.getAttribute("data-id"), from: from.getAttribute("data-kit-board"), to: to.getAttribute("data-kit-board"), index: Array.prototype.indexOf.call(to.children, card) } }));
   }
   // Alt+Arrow keys: up and down within the card's list, left and right into the next list. True when it moved.
@@ -1093,9 +1339,85 @@
     var set = function (open) { nav.classList.toggle("is-open", open); btn.setAttribute("aria-expanded", String(open)); };
     btn.addEventListener("click", function () { set(!nav.classList.contains("is-open")); });
     nav.addEventListener("click", function (e) { if (e.target.closest && e.target.closest("a")) set(false); });
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && nav.classList.contains("is-open")) { set(false); btn.focus(); } });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !e.defaultPrevented && nav.classList.contains("is-open")) { e.preventDefault(); set(false); btn.focus(); } });
     set(false);
   }
+
+  // Command palette: a dialog of the kit with data-kit-palette and aria-label="Commands" (see the command
+  // palette section of the examples): a search field, a list of search rows (data-value; the shortcut in
+  // the row's meta part) and an empty state for no match. Ctrl+K (Cmd+K) opens it from anywhere but a field,
+  // a button with data-kit-open="ID" too. Typing filters (the number of rows is read out), the arrow keys
+  // move, Enter runs the row: "kit:command" with detail.value and detail.text on the dialog (a row with a
+  // link follows it). Escape clears the text first, then closes; the focus goes back where it was.
+  var paletteCount = 0;
+  function setupPalette(d) {
+    if (d.kitPalette) return;
+    var input = d.querySelector("input"), list = d.querySelector(".kit-search__list"), empty = d.querySelector(".kit-empty");
+    if (!input || !list) return;
+    d.kitPalette = true;
+    if (!list.id) list.id = "palette-list-" + (++paletteCount);
+    list.setAttribute("role", "listbox");
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-controls", list.id);
+    input.setAttribute("autocomplete", "off");
+    if (!input.getAttribute("aria-label") && !input.id) input.setAttribute("aria-label", d.getAttribute("aria-label") || "Command");
+    var rows = function () { return Array.prototype.slice.call(list.querySelectorAll(".kit-search__item")); };
+    var shown = function () { return rows().filter(function (r) { return !r.hidden; }); };
+    var active = null;
+    rows().forEach(function (r, n) { r.setAttribute("role", "option"); if (!r.id) r.id = list.id + "-" + n; });
+    function markRow(r) {
+      active = r || null;
+      rows().forEach(function (x) { x.classList.toggle("is-active", x === active); x.setAttribute("aria-selected", String(x === active)); });
+      if (active) { input.setAttribute("aria-activedescendant", active.id); if (active.scrollIntoView && d.open) active.scrollIntoView({ block: "nearest" }); }
+      else input.removeAttribute("aria-activedescendant");
+    }
+    function filterRows(quiet) {
+      var q = input.value.trim().toLowerCase();
+      rows().forEach(function (r) { r.hidden = q !== "" && r.textContent.toLowerCase().indexOf(q) < 0; });
+      var v = shown();
+      list.hidden = !v.length;
+      if (empty) empty.hidden = v.length > 0;
+      input.setAttribute("aria-expanded", String(v.length > 0));
+      markRow(v[0]);
+      if (quiet !== true) announce(v.length === 1 ? "1 result" : v.length + " results");
+    }
+    function run(r) {
+      var label = r.cloneNode(true), meta = label.querySelector(".kit-search" + "__meta");   // put together: the page brings its rule
+      if (meta) meta.parentNode.removeChild(meta);
+      var link = r.querySelector("a[href]");
+      closePanel(d);
+      d.dispatchEvent(new CustomEvent("kit:command", { bubbles: true, detail: { value: r.getAttribute("data-value") || label.textContent.trim(), text: label.textContent.trim() } }));
+      if (link) link.click();
+    }
+    input.addEventListener("input", filterRows);
+    input.addEventListener("keydown", function (e) {
+      if (e.isComposing) return;   // Enter that ends a composition (IME) runs nothing
+      var v = shown(), i = v.indexOf(active);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (v.length) markRow(v[(i + (e.key === "ArrowDown" ? 1 : -1) + v.length) % v.length]);
+      } else if (e.key === "Enter" && active && !active.hidden) { e.preventDefault(); run(active); }
+      else if (e.key === "Escape" && input.value) { escapeHandled(e); input.value = ""; filterRows(); }
+    });
+    list.addEventListener("mousedown", function (e) { e.preventDefault(); });   // the field keeps the focus
+    list.addEventListener("mousemove", function (e) { var r = closestOf(e.target, ".kit-search__item"); if (r && r !== active) markRow(r); });
+    list.addEventListener("click", function (e) { var r = closestOf(e.target, ".kit-search__item"); if (r && !r.hidden) run(r); });
+    d.addEventListener("kit:open", function () { input.value = ""; filterRows(true); input.focus(); });
+    d.addEventListener("close", function () { var b = d.kitBack; d.kitBack = null; if (b && b.focus && document.body.contains(b)) b.focus(); });
+    filterRows(true);
+  }
+  document.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== "k") return;
+    var d = document.querySelector("dialog[data-kit-palette]");
+    if (!d) return;
+    if (d.open) { e.preventDefault(); closePanel(d); return; }
+    if (closestOf(e.target, "input, textarea, select, [contenteditable]")) return;   // a field keeps its own keys
+    e.preventDefault();
+    setupPalette(d);
+    d.kitBack = document.activeElement;
+    openPanel(d);
+  });
 
   // Numbers, percentages, dates and times the same on every page (the page's language, html lang,
   // decides the separators): KitUI.format.number(v, { decimals }), percent(v, decimals) (v as 0..100;
@@ -1171,6 +1493,7 @@
     var t = document.createElement("button");
     t.type = "button"; t.className = "kit-tree__toggle"; t.tabIndex = -1;
     t.setAttribute("aria-label", "Open or close");
+    t.setAttribute("aria-hidden", "true");   // screen readers get aria-expanded on the treeitem, not one more "Open or close" per row
     row.insertBefore(t, row.firstChild);
   }
   // An item: its role, its row, a toggle for a branch and a spacer for a leaf.
@@ -1272,9 +1595,10 @@
     if (!closestOf(e.target, ".kit-popover")) closePopovers();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key !== "Escape") return;
+    if (e.key !== "Escape" || e.defaultPrevented) return;
     var open = Array.prototype.slice.call(document.querySelectorAll("[data-kit-popover][aria-expanded=true]"));
     if (!open.length) return;
+    escapeHandled(e);
     var inside = e.target.closest && e.target.closest(".kit-popover");
     closePopovers();
     var back = inside ? open.filter(function (b) { return popoverOf(b) === inside; })[0] : open[open.length - 1];
@@ -1309,18 +1633,33 @@
       d.addEventListener("cancel", function (e) { e.preventDefault(); finish(false); });
       d.addEventListener("close", function () { finish(false); });
       openPanel(d);
-      var first = row.querySelector(".kit-btn--primary, .kit-btn--danger") || row.querySelector("button");
+      var first = row.querySelector(".kit-btn--danger") ? row.querySelector('[data-value="cancel"]') : row.querySelector(".kit-btn--primary") || row.querySelector("button");
       if (first) first.focus();
     });
   }
-  var boxCount = 0;
+  // One box at a time: a second question waits until the first is answered (it opens at once when none is open).
+  var boxCount = 0, boxOpen = false, boxWaiting = [];
+  function queuedBox(text, opts, buttons) {
+    return new Promise(function (resolve) {
+      var start = function () {
+        boxOpen = true;
+        dialogBox(text, opts, buttons).then(function (v) {
+          boxOpen = false;
+          var next = boxWaiting.shift();
+          if (next) next();
+          resolve(v);
+        });
+      };
+      if (boxOpen) boxWaiting.push(start); else start();
+    });
+  }
   function confirmBox(text, opts) {
     opts = opts || {};
-    return dialogBox(text, opts, [{ label: opts.cancel || "Cancel", value: "cancel" }, { label: opts.ok || "OK", value: "ok", kind: opts.danger ? "danger" : "primary" }]);
+    return queuedBox(text, opts, [{ label: opts.cancel || "Cancel", value: "cancel" }, { label: opts.ok || "OK", value: "ok", kind: opts.danger ? "danger" : "primary" }]);
   }
   function alertBox(text, opts) {
     opts = opts || {};
-    return dialogBox(text, opts, [{ label: opts.ok || "OK", value: "ok", kind: "primary" }]).then(function () { });
+    return queuedBox(text, opts, [{ label: opts.ok || "OK", value: "ok", kind: "primary" }]).then(function () { });
   }
 
   // The parts that need setting up, in what the page has now or writes later.
@@ -1332,7 +1671,8 @@
     ["[data-kit-hold]", setupHold], ["[data-kit-search]", setupSearch], ["[data-kit-drop]", setupDrop], ["[data-kit-theme]", setupTheme],
     [".kit-tabs--animated", function (g) { setupSlider(g, ".kit-tab", "aria-selected", "kit-tabs__indicator"); }],
     [".kit-segmented--animated", function (g) { setupSlider(g, "button", "aria-pressed", "kit-segmented__indicator"); }],
-    ['[role="tablist"], .kit-tabs', setupTablist], ["[data-kit-shell-menu]", setupShellMenu]];
+    ['[role="tablist"], .kit-tabs', setupTablist], ["[data-kit-shell-menu]", setupShellMenu],
+    ["[data-kit-tooltip]", setupTooltip], ["dialog[data-kit-palette]", setupPalette]];
   function setupParts(root) {
     PARTS.forEach(function (p) {
       if (root.matches && root.matches(p[0])) safe(p[1], root);

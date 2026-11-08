@@ -6,11 +6,15 @@ import { useId, useRef, useState } from "react";
 /** Tags typed in a field: Enter or a comma adds one, Backspace in the empty field removes the last. */
 export function TagInput({ value, onChange, label, suggestions }: { value: string[]; onChange: (values: string[]) => void; label: string; suggestions?: string[] }) {
   const [text, setText] = useState("");
+  const [said, setSaid] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const listId = useId();
   const add = (t: string) => {
     const v = t.replace(/,/g, " ").trim();
-    if (v && !value.includes(v)) onChange([...value, v]);
+    if (v && !value.includes(v)) {
+      onChange([...value, v]);
+      setSaid("Added " + v);
+    }
     setText("");
   };
   return (
@@ -30,6 +34,7 @@ export function TagInput({ value, onChange, label, suggestions }: { value: strin
             className="kit-tags__remove"
             onClick={() => {
               onChange(value.filter((x) => x !== v));
+              setSaid("Removed " + v);
               input.current?.focus();
             }}
             type="button"
@@ -47,7 +52,10 @@ export function TagInput({ value, onChange, label, suggestions }: { value: strin
           if (e.key === "Enter" || e.key === ",") {
             e.preventDefault();
             add(text);
-          } else if (e.key === "Backspace" && !text && value.length) onChange(value.slice(0, -1));
+          } else if (e.key === "Backspace" && !text && value.length) {
+            onChange(value.slice(0, -1));
+            setSaid("Removed " + value[value.length - 1]);
+          }
         }}
         ref={input}
         type="text"
@@ -60,6 +68,10 @@ export function TagInput({ value, onChange, label, suggestions }: { value: strin
           ))}
         </datalist>
       ) : null}
+      {/* Adds and removes, read out by screen readers. */}
+      <span aria-live="polite" className="kit-sr-only">
+        {said}
+      </span>
     </div>
   );
 }

@@ -8,6 +8,11 @@
   Buttons, fields, tables, check boxes and progress bars then take the kit's look by themselves; a main
   action uses Style="{StaticResource KitPrimaryButton}", a muted text Style="{StaticResource KitMuted}",
   a heading Style="{StaticResource KitTitle}", a panel <Border Style="{StaticResource KitPanel}">.
+  A status word is <Border Style="{StaticResource KitBadgeOk}"><TextBlock Text="Done"/></Border> (KitBadge,
+  KitBadgeAccent, KitBadgeOk, KitBadgeWarn, KitBadgeError), a message in the window
+  <Border Style="{StaticResource KitNoticeError}"><TextBlock TextWrapping="Wrap" Text="..."/></Border> (KitNotice,
+  KitNoticeOk, KitNoticeWarn, KitNoticeError), an on/off setting <ToggleButton Style="{StaticResource KitSwitch}"
+  Content="Send a copy"/>: the web kit's kit-badge, kit-notice and kit-switch.
 -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <SolidColorBrush x:Key="KitBg" Color="{{bg}}"/>
@@ -24,6 +29,9 @@
   <SolidColorBrush x:Key="KitOk" Color="{{ok}}"/>
   <SolidColorBrush x:Key="KitWarn" Color="{{warn}}"/>
   <SolidColorBrush x:Key="KitError" Color="{{error}}"/>
+  <SolidColorBrush x:Key="KitOkSoft" Color="{{ok-soft}}"/>
+  <SolidColorBrush x:Key="KitWarnSoft" Color="{{warn-soft}}"/>
+  <SolidColorBrush x:Key="KitErrorSoft" Color="{{error-soft}}"/>
   <SolidColorBrush x:Key="KitChart1" Color="{{chart-1}}"/>
   <SolidColorBrush x:Key="KitChart2" Color="{{chart-2}}"/>
   <SolidColorBrush x:Key="KitChart3" Color="{{chart-3}}"/>
@@ -260,6 +268,83 @@
   </Style>
   <Style TargetType="Slider">
     <Setter Property="Foreground" Value="{StaticResource KitAccent}"/>
+  </Style>
+
+  <!-- Badge (kit-badge): a pill with a short status word, 12px semibold. -->
+  <Style x:Key="KitBadge" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource KitSurface2}"/>
+    <Setter Property="TextElement.Foreground" Value="{StaticResource KitTextMuted}"/>
+    <Setter Property="TextElement.FontSize" Value="12"/>
+    <Setter Property="TextElement.FontWeight" Value="SemiBold"/>
+    <Setter Property="CornerRadius" Value="11"/>
+    <Setter Property="Padding" Value="8,0"/>
+    <Setter Property="MinHeight" Value="22"/>
+    <Setter Property="HorizontalAlignment" Value="Left"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+  </Style>
+  <Style x:Key="KitBadgeAccent" TargetType="Border" BasedOn="{StaticResource KitBadge}">
+    <Setter Property="Background" Value="{StaticResource KitAccentSoft}"/>
+    <Setter Property="TextElement.Foreground" Value="{StaticResource KitAccent}"/>
+  </Style>
+  <Style x:Key="KitBadgeOk" TargetType="Border" BasedOn="{StaticResource KitBadge}">
+    <Setter Property="Background" Value="{StaticResource KitOkSoft}"/>
+    <Setter Property="TextElement.Foreground" Value="{StaticResource KitOk}"/>
+  </Style>
+  <Style x:Key="KitBadgeWarn" TargetType="Border" BasedOn="{StaticResource KitBadge}">
+    <Setter Property="Background" Value="{StaticResource KitWarnSoft}"/>
+    <Setter Property="TextElement.Foreground" Value="{StaticResource KitWarn}"/>
+  </Style>
+  <Style x:Key="KitBadgeError" TargetType="Border" BasedOn="{StaticResource KitBadge}">
+    <Setter Property="Background" Value="{StaticResource KitErrorSoft}"/>
+    <Setter Property="TextElement.Foreground" Value="{StaticResource KitError}"/>
+  </Style>
+  <!-- Notice (kit-notice): a tinted block with a full border, 14px text; no side stripe. -->
+  <Style x:Key="KitNotice" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource KitSurface2}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitBorder}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="CornerRadius" Value="{{radius}}"/>
+    <Setter Property="Padding" Value="16,12"/>
+    <Setter Property="TextElement.Foreground" Value="{StaticResource KitText}"/>
+    <Setter Property="TextElement.FontSize" Value="14"/>
+  </Style>
+  <Style x:Key="KitNoticeOk" TargetType="Border" BasedOn="{StaticResource KitNotice}">
+    <Setter Property="Background" Value="{StaticResource KitOkSoft}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitOk}"/>
+  </Style>
+  <Style x:Key="KitNoticeWarn" TargetType="Border" BasedOn="{StaticResource KitNotice}">
+    <Setter Property="Background" Value="{StaticResource KitWarnSoft}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitWarn}"/>
+  </Style>
+  <Style x:Key="KitNoticeError" TargetType="Border" BasedOn="{StaticResource KitNotice}">
+    <Setter Property="Background" Value="{StaticResource KitErrorSoft}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource KitError}"/>
+  </Style>
+  <!-- Switch (kit-switch): a 36 x 20 pill track (the strong border colour, the accent when on) with a 16px knob, then the label. -->
+  <Style x:Key="KitSwitch" TargetType="ToggleButton">
+    <Setter Property="Foreground" Value="{StaticResource KitText}"/>
+    <Setter Property="FontSize" Value="14"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ToggleButton">
+          <StackPanel Orientation="Horizontal" Background="Transparent">
+            <Border x:Name="Ring" BorderThickness="2" BorderBrush="Transparent" CornerRadius="12" VerticalAlignment="Center">
+              <Border x:Name="Track" Width="36" Height="20" CornerRadius="10" Background="{StaticResource KitBorderStrong}">
+                <Ellipse x:Name="Knob" Width="16" Height="16" Margin="2" Fill="{StaticResource KitSurface}" HorizontalAlignment="Left"/>
+              </Border>
+            </Border>
+            <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center"/>
+          </StackPanel>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Track" Property="Background" Value="{StaticResource KitAccent}"/><Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/></Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Ring" Property="BorderBrush" Value="{StaticResource KitAccent}"/></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
   </Style>
 
   <Style TargetType="ProgressBar">
