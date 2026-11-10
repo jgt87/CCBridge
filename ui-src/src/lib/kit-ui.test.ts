@@ -40,6 +40,7 @@ describe("kit.js tables", () => {
   it("searches on whitespace-separated words, every word must match", async () => {
     const t = await table([["Central", "1"], ["Harbour station", "2"], ["Park", "3"]]);
     expect(document.querySelector(".kit-toasts")).not.toBeNull();   // the live region is on the page before the first toast
+    expect(document.querySelector(".kit-toasts > .kit-toasts__alerts[role=alert]")).not.toBeNull();   // and the alert region for errors
     t.kitFilter("harbour station");
     expect(shown(t)).toEqual(["Harbour station"]);
     t.kitFilter("sales");
@@ -513,11 +514,58 @@ describe("kit.js basics (revision 11)", () => {
     expect(document.getElementById("pp")!.hidden).toBe(true);
     expect(esc.defaultPrevented).toBe(true);   // a dialog or side panel around the popover stays open
   });
-  it("makes an error toast an alert that says its tone, not only its colour", () => {
+  it("puts an error toast in the alert region, made empty at start, and says its tone, not only its colour", () => {
+    const s = w.KitUI.toast("Saved") as unknown as HTMLElement;
+    expect(s.parentElement!.className).toBe("kit-toasts");   // the polite status region
+    expect(s.getAttribute("role")).toBeNull();
+    const alerts = document.querySelector(".kit-toasts > .kit-toasts__alerts")!;
+    expect(alerts.getAttribute("role")).toBe("alert");   // made with the stack, empty, before the first error
+    expect(alerts.childElementCount).toBe(0);
     const t = (w.KitUI.toast as unknown as (text: string, o: Record<string, unknown>) => HTMLElement)("Upload failed", { tone: "error" });
-    expect(t.getAttribute("role")).toBe("alert");
+    expect(t.parentElement).toBe(alerts);
+    expect(t.getAttribute("role")).toBeNull();   // the region speaks, not the toast as well
     expect(t.textContent).toBe("Error: Upload failed\u00d7");   // the tone word, the text, and the Dismiss button's mark (no kit-icons.js here)
-    expect(w.KitUI.toast("Saved").getAttribute("role")).toBeNull();
+  });
+  it("gives a toast one action that runs and closes it, and keeps it at least 10 s", () => {
+    vi.useFakeTimers();
+    try {
+      const toast = (w.KitUI.toast as unknown as (text: string, o?: Record<string, unknown>) => HTMLElement);
+      let undone = 0;
+      const t = toast("Row deleted", { action: { label: "Undo", onClick: () => { undone++; } } });
+      const a = t.querySelector<HTMLButtonElement>(".kit-toast__action")!;
+      expect(a.textContent).toBe("Undo");
+      expect(a.className).toBe("kit-btn kit-btn--ghost kit-btn--sm kit-toast__action");
+      expect(a.nextElementSibling!.classList.contains("kit-toast__close")).toBe(true);   // Dismiss stays last
+      vi.advanceTimersByTime(9000);
+      expect(t.classList.contains("is-leaving")).toBe(false);
+      a.click();
+      expect(undone).toBe(1);
+      expect(t.classList.contains("is-leaving")).toBe(true);
+      const u = toast("Sent", { action: { label: "Open" }, ms: 3000 });
+      vi.advanceTimersByTime(9900);
+      expect(u.classList.contains("is-leaving")).toBe(false);
+      vi.advanceTimersByTime(200);
+      expect(u.classList.contains("is-leaving")).toBe(true);
+      expect(toast("Saved", { action: {} }).querySelector(".kit-toast__action")).toBeNull();   // no label, no button
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("kit.css pointer rules", () => {
+  const css = fs.readFileSync(path.join(repo, "templates/ui-kit/kit.css"), "utf8");
+  it("shows hover looks only to a fine pointer", () => {
+    const hovers = css.match(/@media[^{]*hover:\s*hover[^{]*\{/g) || [];
+    expect(hovers.length).toBeGreaterThan(0);
+    expect(hovers.filter((m) => !/pointer:\s*fine/.test(m))).toEqual([]);
+  });
+  it("gives small controls a 44px reach on touch screens through an invisible ::after", () => {
+    const coarse = css.slice(css.indexOf("@media (pointer: coarse)"));
+    expect(coarse.length).toBeLessThan(css.length);
+    for (const part of [".kit-btn:not([aria-busy=\"true\"])", ".kit-segmented button", ".kit-tab", ".kit-calendar__day", ".kit-tip"]) expect(coarse).toContain(part);
+    expect(coarse).toMatch(/width: max\(100%, 44px\); height: max\(100%, 44px\)/);
+    expect(coarse).toMatch(/font-size: max\(16px, 1em\)/);
   });
 });
 

@@ -815,18 +815,24 @@ GROUP BY station;</pre>
 </section>
 <!-- Toasts: KitUI.toast(TEXT, { tone: "ok" | "warn" | "error", ms, close: false }) shows a kit-toast at the bottom
      right with a Dismiss button (kit-toast__close); it waits while the pointer is on it or the focus is in it. An
-     error stays 8 seconds, is read at once and says "Error". Not for a form's result: say that at the form. -->
+     error stays 8 seconds, is read at once and says "Error". Not for a form's result: say that at the form.
+     One action at most, action: { label: "Undo", onClick: FN } (kit-toast__action): a click runs it and closes
+     the toast, which then stays at least 10 seconds; the same action is also reachable elsewhere on the page. -->
 <section id="toasts">
   <h2 class="kit-h2">Toasts</h2>
   <div class="kit-row">
     <button class="kit-btn" type="button" data-ex-toast="ok">Show a confirmation</button>
     <button class="kit-btn" type="button" data-ex-toast="warn">Show a warning</button>
     <button class="kit-btn" type="button" data-ex-toast="error">Show an error</button>
+    <button class="kit-btn" type="button" id="ex-toast-undo">Remove a station</button>
   </div>
   <script>
     Array.prototype.forEach.call(document.querySelectorAll("[data-ex-toast]"), function (b) {
       var text = { ok: "Station saved", warn: "Two rows were skipped", error: "Could not save the station" }[b.getAttribute("data-ex-toast")];
       b.addEventListener("click", function () { KitUI.toast(text, { tone: b.getAttribute("data-ex-toast") }); });
+    });
+    document.getElementById("ex-toast-undo").addEventListener("click", function () {
+      KitUI.toast("Station removed", { action: { label: "Undo", onClick: function () { KitUI.toast("Station restored", { tone: "ok" }); } } });
     });
   </script>
 </section>

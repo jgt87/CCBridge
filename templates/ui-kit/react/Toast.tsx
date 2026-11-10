@@ -10,6 +10,12 @@ interface ToastItem {
   tone?: ToastTone;
   leaving: boolean;
   close: boolean;
+  action?: ToastAction;
+}
+/** One action on a toast (Undo, Retry, Open): clicking it runs onClick and closes the toast. */
+export interface ToastAction {
+  label: string;
+  onClick?: () => void;
 }
 interface ToastTimer {
   left: number;
@@ -52,12 +58,17 @@ function pause(id: number) {
   t.left = Math.max(1000, t.left - (Date.now() - t.since));
 }
 
-/** A short confirmation after an action ("Saved"), read out by screen readers; close: false leaves out its Dismiss button. */
-export function toast(text: string, opts: { tone?: ToastTone; ms?: number; close?: boolean } = {}) {
+/**
+ * A short confirmation after an action ("Saved"), read out by screen readers; close: false leaves out its
+ * Dismiss button; action adds one ghost button, and the toast then stays at least 10 s.
+ */
+export function toast(text: string, opts: { tone?: ToastTone; ms?: number; close?: boolean; action?: ToastAction } = {}) {
   const id = nextId++;
-  items = [...items, { id, text, tone: opts.tone, leaving: false, close: opts.close !== false }];
+  const action = opts.action && opts.action.label ? opts.action : undefined;
+  items = [...items, { id, text, tone: opts.tone, leaving: false, close: opts.close !== false, action }];
   emit();
-  timers.set(id, { left: opts.ms ?? (opts.tone === "error" ? 8000 : 4000), since: 0, timer: null });
+  const ms = opts.ms ?? (opts.tone === "error" ? 8000 : 4000);
+  timers.set(id, { left: action ? Math.max(ms, 10000) : ms, since: 0, timer: null });
   run(id);
   return id;
 }
@@ -78,36 +89,52 @@ export function Toaster() {
       listeners.delete(setList);
     };
   }, []);
+  // An error is read at once (in the alert region, there from the first render, errors on top); the
+  // others politely. A warning or error also says its word, not only its colour.
+  const item = (t: ToastItem) => (
+    <div
+      className={"kit-toast" + (t.tone ? " kit-toast--" + t.tone : "") + (t.leaving ? " is-leaving" : "")}
+      key={t.id}
+      onBlur={(e) => {
+        if (over !== t.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) run(t.id);
+      }}
+      onFocus={() => pause(t.id)}
+      onMouseEnter={() => {
+        setOver(t.id);
+        pause(t.id);
+      }}
+      onMouseLeave={(e) => {
+        setOver(null);
+        if (!e.currentTarget.contains(document.activeElement)) run(t.id);
+      }}
+    >
+      {t.tone === "error" || t.tone === "warn" ? <span className="kit-sr-only">{t.tone === "error" ? "Error: " : "Warning: "}</span> : null}
+      {t.text}
+      {t.action ? (
+        <button
+          className="kit-btn kit-btn--ghost kit-btn--sm kit-toast__action"
+          onClick={() => {
+            dismissToast(t.id);
+            t.action?.onClick?.();
+          }}
+          type="button"
+        >
+          {t.action.label}
+        </button>
+      ) : null}
+      {t.close ? (
+        <button aria-label="Dismiss" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-toast__close" onClick={() => dismissToast(t.id)} type="button">
+          {closeMark()}
+        </button>
+      ) : null}
+    </div>
+  );
   return (
     <div aria-live="polite" className="kit-toasts" role="status">
-      {/* An error is read at once (role alert); a warning or error also says its word, not only its colour. */}
-      {list.map((t) => (
-        <div
-          className={"kit-toast" + (t.tone ? " kit-toast--" + t.tone : "") + (t.leaving ? " is-leaving" : "")}
-          key={t.id}
-          onBlur={(e) => {
-            if (over !== t.id && !e.currentTarget.contains(e.relatedTarget as Node | null)) run(t.id);
-          }}
-          onFocus={() => pause(t.id)}
-          onMouseEnter={() => {
-            setOver(t.id);
-            pause(t.id);
-          }}
-          onMouseLeave={(e) => {
-            setOver(null);
-            if (!e.currentTarget.contains(document.activeElement)) run(t.id);
-          }}
-          role={t.tone === "error" ? "alert" : undefined}
-        >
-          {t.tone === "error" || t.tone === "warn" ? <span className="kit-sr-only">{t.tone === "error" ? "Error: " : "Warning: "}</span> : null}
-          {t.text}
-          {t.close ? (
-            <button aria-label="Dismiss" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-toast__close" onClick={() => dismissToast(t.id)} type="button">
-              {closeMark()}
-            </button>
-          ) : null}
-        </div>
-      ))}
+      <div className="kit-toasts__alerts" role="alert">
+        {list.filter((t) => t.tone === "error").map(item)}
+      </div>
+      {list.filter((t) => t.tone !== "error").map(item)}
     </div>
   );
 }

@@ -6,6 +6,17 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.159] - 2026-11-10
+
+### Added
+- UI kit (revision 14): a toast can carry one action button, such as Undo, Retry or Open (`KitUI.toast(text, { action: { label, onClick } })`, the React `toast()` the same). A click runs it and closes the toast, which then stays at least 10 seconds.
+
+### Changed
+- UI kit, touch screens: buttons, segmented choices, tabs, calendar days, icon toolbar items, tag remove buttons and info tips are reachable over 44px without looking bigger; menu rows and sliders get the same height, and fields use 16px text so the phone does not zoom in on them. Hover looks now apply only to a mouse or similar fine pointer.
+- UI kit: error toasts go into an alert region that is on the page from the start, so the first error is read out reliably (other toasts stay in the polite status region).
+- Third-party parts brought up to date: the UI kit's icons (Lucide 1.70.0, more icons) and its SQL engine (sql.js 1.15.2); in the app, mermaid 12.3, katex 0.19.1, Tailwind 4.3.5, lucide-react 1.70 and shadcn 4.23.
+- The dependency check shows pdf.js 6 as held on purpose: pdf.js 4 and later load only as modules, which Edge does not run in a page opened from disk, so the UI kit stays on pdf.js 3.11.
+
 ## [v0.1.158] - 2026-11-08
 
 ### Added

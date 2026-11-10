@@ -102,6 +102,7 @@ if (Test-Path -LiteralPath $pj) {
 # A later major version shows as a major step again, so the reason gets looked at once more.
 $held = @(
     @{ package = 'typescript'; major = 7; reason = 'TypeScript 7 is a native program with no browser build, and the built-in builder runs TypeScript in Edge; the app build stays on the same version (one TypeScript to keep)' }
+    @{ package = 'pdfjs-dist'; major = 6; reason = 'pdf.js 4 and later ship only ES modules (pdf.min.mjs), and the UI kit loads pdf.js with classic script tags so a page opened from disk can read PDFs (Edge loads no module scripts from file://)' }
 )
 
 $rows = foreach ($p in $parts) {

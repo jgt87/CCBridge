@@ -558,9 +558,12 @@
     if (isKitPanel(e.target)) e.target.dispatchEvent(new CustomEvent("kit:close", { bubbles: true }));
   }, true);
 
-  // Toasts: KitUI.toast("Saved", { tone: "ok" | "warn" | "error", ms: 4000, close: false }), read out by
-  // screen readers. Each has a Dismiss button (close: false leaves it out) and waits while the pointer is
-  // on it or the focus is in it.
+  // Toasts: KitUI.toast("Saved", { tone: "ok" | "warn" | "error", ms: 4000, close: false,
+  // action: { label: "Undo", onClick: fn } }), read out by screen readers. Each has a Dismiss button
+  // (close: false leaves it out) and waits while the pointer is on it or the focus is in it. One action
+  // at most (a ghost button: Undo, Retry, Open): clicking it runs onClick and closes the toast; a toast
+  // with an action stays at least 10 s, so there is time to use it. Errors go into the alert region
+  // (read at once), the others into the polite status region; both exist from the start.
   function toastClose(onClick) {
     var x = document.createElement("button");
     x.type = "button";
@@ -574,13 +577,15 @@
   function toast(text, opts) {
     opts = opts || {};
     var region = toastRegion();
+    if (opts.tone === "error") region = toastAlerts(region);
     var t = document.createElement("div");
     t.className = "kit-toast" + (/^(ok|warn|error)$/.test(opts.tone || "") ? " kit-toast--" + opts.tone : "");
     t.textContent = String(text);
     var word = { error: "Error: ", warn: "Warning: " }[opts.tone];
     if (word) { var w = srOnly(document.createElement("span")); w.textContent = word; t.insertBefore(w, t.firstChild); }
-    if (opts.tone === "error") t.setAttribute("role", "alert");
+    var action = opts.action && opts.action.label ? opts.action : null;
     var left = opts.ms || (opts.tone === "error" ? 8000 : 4000), timer = null, since = 0, over = false;
+    if (action) left = Math.max(left, 10000);
     var leave = function () {
       clearTimeout(timer); timer = null;
       if (t.classList.contains("is-leaving")) return;
@@ -589,6 +594,14 @@
     };
     var run = function () { if (timer || t.classList.contains("is-leaving")) return; since = Date.now(); timer = setTimeout(leave, left); };
     var pause = function () { if (!timer) return; clearTimeout(timer); timer = null; left = Math.max(1000, left - (Date.now() - since)); };
+    if (action) {
+      var a = document.createElement("button");
+      a.type = "button";
+      a.className = "kit-btn kit-btn--ghost kit-btn--sm kit-toast__action";
+      a.textContent = String(action.label);
+      a.addEventListener("click", function () { leave(); if (typeof action.onClick === "function") action.onClick(); });
+      t.appendChild(a);
+    }
     if (opts.close !== false) t.appendChild(toastClose(leave));
     t.addEventListener("mouseenter", function () { over = true; pause(); });
     t.addEventListener("mouseleave", function () { over = false; if (!t.contains(document.activeElement)) run(); });
@@ -1821,7 +1834,20 @@
       region.setAttribute("aria-live", "polite");
       document.body.appendChild(region);
     }
+    toastAlerts(region);
     return region;
+  }
+  // The alert region for error toasts, inside the toast stack (same corner, errors on top). Made empty
+  // with the stack at start, so the first error is read out.
+  function toastAlerts(region) {
+    var alerts = region.querySelector(".kit-toasts__alerts");
+    if (!alerts) {
+      alerts = document.createElement("div");
+      alerts.className = "kit-toasts__alerts";
+      alerts.setAttribute("role", "alert");
+      region.insertBefore(alerts, region.firstChild);
+    }
+    return alerts;
   }
   // Tabs (role="tablist"): the arrow keys, Home and End move between the tabs and select; one tab stop.
   function setupTablist(group) {
