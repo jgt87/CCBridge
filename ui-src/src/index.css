@@ -182,6 +182,11 @@
   .ccb-connect-done { animation: none; }
 }
 
+/* Layers above the page, lowest first: z-10 sticky bars, z-30 and z-40 side panels and their scrims,
+   z-50 menus, dialogs and toasts, then the named ones here. A new layer above z-50 gets a name in this
+   list, never a bare number in a component (design-rules.test.ts). */
+:root { --ccb-z-hint: 100; }
+
 /* First-time Split screen hint: a small upward nudge toward Edge's toolbar (split-view-hint.tsx). */
 @keyframes ccb-hint-nudge { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 @media (prefers-reduced-motion: reduce) { [class*="ccb-hint-nudge"] { animation: none; } }

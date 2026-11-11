@@ -4,7 +4,18 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- UI kit (revision 15), calendar: the days are one stop for the Tab key. Arrow keys move a day or a week, Home and End go to the week's first and last day, PageUp and PageDown go a month back or on (with Shift a year), and a new Today button goes back to this month. Previous, Next and Today keep the focus. The React `Calendar` does the same.
+- UI kit, calendar: `data-week-start="0"` to `"6"` on a calendar sets its first day of the week. Without it the calendar uses the setting "First day of the week" as before, and where that is missing, the day the browser's language starts on (the React `Calendar` the same when `weekStart` is left out).
+- UI kit, two-value slider: `data-unit="min"` (React `unit`) shows the unit after the values and reads it out with each thumb.
+
+### Changed
+- UI kit, two-value slider: the thumbs stop at each other, so the one named "Lowest" never holds the higher value; values given the wrong way round are swapped at the start.
+- UI kit, scrolling parts (side panel, multi-select list, command list, scrolling table, dialog): scrolling to the end no longer scrolls the page behind, and the room for the scrollbar is kept, so the content does not jump sideways when a list grows.
+- UI kit, phones: the app shell and the bottom sheet follow the visible window height (the browser's bars no longer cut them off), and the sheet and toasts stay clear of the home bar.
+- UI kit, touch screens: a tap on a button, tab, menu row, segmented choice, calendar day or icon toolbar item acts at once, without the wait for a double tap.
+- UI kit, calendar: today is marked for screen readers as the current date.
+- The app: the window height follows the visible window, the progress bar of an index run and the buttons no longer animate their layout, and the Split screen hint's layer has a name. A new test (`design-rules.test.ts`) keeps these and the colour and type-size rules of the app's own UI in place.
 
 ## [v0.1.159] - 2026-11-10
 

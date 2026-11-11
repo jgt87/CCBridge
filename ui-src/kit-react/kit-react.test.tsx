@@ -291,7 +291,7 @@ describe("TagInput", () => {
 
 describe("Calendar", () => {
   it("lays out whole weeks from the week start, with the other months' days marked", () => {
-    render(<Calendar events={[]} month="2024-02" />);
+    render(<Calendar events={[]} month="2024-02" weekStart={1} />);
     const days = $$(".kit-calendar__day");
     expect(days).toHaveLength(35); // 1 Feb 2024 is a Thursday: 3 days of January before it
     expect(days[0].getAttribute("data-date")).toBe("2024-01-29");
@@ -312,9 +312,41 @@ describe("Calendar", () => {
     expect(day.getAttribute("aria-label")).toContain("4 items");
     click(day);
     expect(onDay).toHaveBeenCalledWith("2024-12-14", events);
-    click($$(".kit-calendar__head button")[1]);
-    click($$(".kit-calendar__head button")[0]);
+    click($('.kit-calendar__head [data-step="1"]'));
+    click($('.kit-calendar__head [data-step="-1"]'));
     expect(onMonth.mock.calls.map((c) => c[0])).toEqual(["2025-01", "2024-11"]);
+  });
+
+  it("keeps the days as one tab stop and moves with the arrow, Home, End and Page keys", () => {
+    const onMonth = vi.fn();
+    const key = (el: Element, k: string, more: KeyboardEventInit = {}) => act(() => void el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...more })));
+    const stops = () => $$(".kit-calendar__day").filter((d) => d.getAttribute("tabindex") === "0").map((d) => d.getAttribute("data-date"));
+    render(<Calendar events={[]} month="2024-03" onMonth={onMonth} weekStart={1} />);
+    expect(stops()).toEqual(["2024-03-01"]); // not this month: the 1st takes the Tab key
+    act(() => ($('[data-date="2024-03-31"]') as HTMLElement).focus());
+    expect(stops()).toEqual(["2024-03-31"]);
+    key($('[data-date="2024-03-31"]'), "ArrowLeft");
+    expect(document.activeElement?.getAttribute("data-date")).toBe("2024-03-30");
+    key($('[data-date="2024-03-30"]'), "Home");
+    expect(document.activeElement?.getAttribute("data-date")).toBe("2024-03-25"); // the Monday of that week
+    key($('[data-date="2024-03-25"]'), "End");
+    expect(document.activeElement?.getAttribute("data-date")).toBe("2024-03-31");
+    key($('[data-date="2024-03-31"]'), "PageDown"); // 31 March -> 30 April: the page is asked for April
+    expect(onMonth).toHaveBeenLastCalledWith("2024-04");
+    rerender(<Calendar events={[]} month="2024-04" onMonth={onMonth} weekStart={1} />);
+    expect(document.activeElement?.getAttribute("data-date")).toBe("2024-04-30");
+    expect(stops()).toEqual(["2024-04-30"]);
+    key($('[data-date="2024-04-30"]'), "PageUp", { shiftKey: true });
+    expect(onMonth).toHaveBeenLastCalledWith("2023-04");
+    click($(".kit-calendar__head [data-today]"));
+    expect(onMonth).toHaveBeenLastCalledWith(new Date().toISOString().slice(0, 4) + "-" + ("0" + (new Date().getMonth() + 1)).slice(-2));
+  });
+
+  it("takes the week start from the kit's setting when the page gives none", () => {
+    document.documentElement.style.setProperty("--kit-week-start", "0");
+    render(<Calendar events={[]} month="2024-02" />);
+    expect($$(".kit-calendar__day")[0].getAttribute("data-date")).toBe("2024-01-28");
+    document.documentElement.style.removeProperty("--kit-week-start");
   });
 });
 

@@ -309,7 +309,7 @@ function TabButton({
       aria-selected={isSelected}
       className={cn(
         "relative flex items-center justify-center gap-1 rounded-lg px-1 py-1.5",
-        "font-medium text-sm transition-all duration-300",
+        "font-medium text-sm transition duration-300",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         "truncate",
         isSelected
@@ -416,7 +416,7 @@ export default function SmoothTab({
           "relative flex items-center justify-between gap-1 p-1",
           "w-full bg-background",
           "rounded-xl border",
-          "transition-all duration-200",
+          "transition duration-200",
           className
         )}
         ref={containerRef}

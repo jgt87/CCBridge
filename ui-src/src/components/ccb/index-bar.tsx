@@ -57,8 +57,9 @@ export function IndexBar(props: IndexBarProps) {
       {running && (
         <div className="kit-progress mt-1.5 h-0.5">
           <div
-            className={cn("h-full rounded-full bg-foreground/60 transition-[width] duration-500", pct === null && "w-1/3 animate-pulse")}
-            style={pct === null ? undefined : { width: `${pct}%` }}
+            // The fill grows by scale, not width: a width change would lay the bar out again on every step.
+            className={cn("h-full origin-left rounded-full bg-foreground/60 transition-transform duration-500", pct === null && "w-1/3 animate-pulse")}
+            style={pct === null ? undefined : { transform: `scaleX(${pct / 100})` }}
           />
         </div>
       )}

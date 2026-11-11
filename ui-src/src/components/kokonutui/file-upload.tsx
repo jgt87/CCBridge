@@ -478,7 +478,7 @@ const DropzoneView = ({
     </div>
 
     <button
-      className="group flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
+      className="group flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
       onClick={up.triggerFileInput}
       type="button"
     >
@@ -530,7 +530,7 @@ const UploadingView = ({ up }: { up: UploadState }) => (
     </div>
 
     <button
-      className="flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition-all duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
+      className="flex w-4/5 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 font-semibold text-foreground text-sm transition duration-200 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20"
       onClick={up.resetState}
       type="button"
     >
@@ -568,7 +568,7 @@ const DragGlow = ({ dragging }: { dragging: boolean }) => (
     <div className="absolute inset-x-0 bottom-0 h-[20%] bg-gradient-to-t from-zinc-500/10 to-transparent" />
     <div className="absolute inset-y-0 left-0 w-[20%] bg-gradient-to-r from-zinc-500/10 to-transparent" />
     <div className="absolute inset-y-0 right-0 w-[20%] bg-gradient-to-l from-zinc-500/10 to-transparent" />
-    <div className="absolute inset-[20%] animate-pulse rounded-lg bg-zinc-500/5 transition-all duration-300" />
+    <div className="absolute inset-[20%] animate-pulse rounded-lg bg-zinc-500/5 transition duration-300" />
   </div>
 );
 

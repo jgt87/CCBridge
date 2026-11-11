@@ -664,6 +664,74 @@ describe("kit.js menus, boards, calendars, pagers and filled cells", () => {
     (cal.querySelector('[data-date="2026-02-10"]') as HTMLElement).click();
     expect(picked).toBe("2026-02-10:5");
   });
+  it("keeps a calendar's days as one tab stop and moves with the arrow, Home, End and Page keys", async () => {
+    document.body.innerHTML = '<div data-kit-calendar data-month="2024-03" data-week-start="1"></div>';
+    load(kitJs);
+    await tick();
+    const cal = document.querySelector("[data-kit-calendar]") as HTMLElement;
+    const stops = () => Array.from(cal.querySelectorAll(".kit-calendar__day")).filter((d) => (d as HTMLElement).tabIndex === 0).map((d) => d.getAttribute("data-date"));
+    const at = () => document.activeElement?.getAttribute("data-date");
+    const day = (iso: string) => cal.querySelector('[data-date="' + iso + '"]') as HTMLElement;
+    const months: string[] = [];
+    cal.addEventListener("kit:month", (e) => months.push((e as CustomEvent).detail.month));
+    expect(cal.querySelector(".kit-calendar__day")!.getAttribute("data-date")).toBe("2024-02-26"); // weeks from Monday
+    expect(stops()).toEqual(["2024-03-01"]); // not this month: the 1st takes the Tab key
+    day("2024-03-31").focus();
+    expect(stops()).toEqual(["2024-03-31"]);
+    press(day("2024-03-31"), "ArrowLeft");
+    expect(at()).toBe("2024-03-30");
+    press(day("2024-03-30"), "ArrowUp");
+    expect(at()).toBe("2024-03-23");
+    press(day("2024-03-23"), "Home");
+    expect(at()).toBe("2024-03-18");
+    press(day("2024-03-18"), "End");
+    expect(at()).toBe("2024-03-24");
+    expect(months).toEqual([]); // all on the month shown
+    day("2024-03-31").focus();
+    press(day("2024-03-31"), "PageDown"); // 31 March -> 30 April
+    expect([at(), months.join()]).toEqual(["2024-04-30", "2024-04"]);
+    press(day("2024-04-30"), "PageUp", { shiftKey: true });
+    expect([at(), months.join()]).toEqual(["2023-04-30", "2024-04,2023-04"]);
+    press(day("2023-04-30"), "ArrowDown"); // past the days on show: the next month is drawn
+    expect([at(), stops().join()]).toEqual(["2023-05-07", "2023-05-07"]);
+    // Previous, Next and Today keep the focus although the month is drawn again.
+    (cal.querySelector('[data-step="1"]') as HTMLButtonElement).focus();
+    (cal.querySelector('[data-step="1"]') as HTMLButtonElement).click();
+    expect(document.activeElement).toBe(cal.querySelector('[data-step="1"]'));
+    (cal.querySelector("[data-today]") as HTMLButtonElement).click();
+    const now = new Date(), iso = now.getFullYear() + "-" + ("0" + (now.getMonth() + 1)).slice(-2) + "-" + ("0" + now.getDate()).slice(-2);
+    expect(months[months.length - 1]).toBe(iso.slice(0, 7));
+    expect(stops()).toEqual([iso]);
+    expect(day(iso).getAttribute("aria-current")).toBe("date");
+    expect(document.activeElement).toBe(cal.querySelector("[data-today]"));
+  });
+  it("starts a calendar's week on the element's own day, else the kit's setting", async () => {
+    document.documentElement.style.setProperty("--kit-week-start", "0");
+    document.body.innerHTML = '<div id="a" data-kit-calendar data-month="2024-02"></div><div id="b" data-kit-calendar data-month="2024-02" data-week-start="6"></div>';
+    load(kitJs);
+    await tick();
+    const first = (id: string) => document.querySelector("#" + id + " .kit-calendar__day")!.getAttribute("data-date");
+    expect([first("a"), first("b")]).toEqual(["2024-01-28", "2024-01-27"]); // Sunday from the setting, Saturday asked for
+    document.documentElement.style.removeProperty("--kit-week-start");
+  });
+  it("keeps the two thumbs of a range slider from crossing and reads the unit out", async () => {
+    document.body.innerHTML = '<div><div class="kit-slider-range" data-kit-slider-range data-min="0" data-max="100" data-from="80" data-to="20" data-unit="km" aria-label="distance"></div></div>';
+    load(kitJs);
+    await tick();
+    const el = document.querySelector("[data-kit-slider-range]") as HTMLElement;
+    const [lo, hi] = Array.from(el.querySelectorAll("input")) as HTMLInputElement[];
+    expect([lo.value, hi.value]).toEqual(["20", "80"]); // given the wrong way round: swapped
+    expect([lo.getAttribute("aria-valuetext"), hi.getAttribute("aria-valuetext")]).toEqual(["20 km", "80 km"]);
+    let sent = "";
+    el.addEventListener("kit:slide", (e) => { const d = (e as CustomEvent).detail; sent = d.from + "-" + d.to; });
+    lo.value = "95";
+    lo.dispatchEvent(new Event("input", { bubbles: true }));
+    expect([lo.value, sent, lo.getAttribute("aria-valuetext")]).toEqual(["80", "80-80", "80 km"]);
+    hi.value = "5";
+    hi.dispatchEvent(new Event("input", { bubbles: true }));
+    expect([hi.value, sent]).toEqual(["80", "80-80"]);
+    expect(el.nextElementSibling!.textContent).toBe("80 - 80 km");
+  });
   it("writes an avatar's initials and gives the same name the same colour", async () => {
     document.body.innerHTML = '<span data-kit-avatar="ada  de lovelace"></span><span data-kit-avatar="Grace"></span><span data-kit-avatar="ada  de lovelace"><img alt=""></span>';
     load(kitJs);

@@ -108,6 +108,8 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   transition: background var(--kit-speed) ease-out, border-color var(--kit-speed) ease-out;
 }
 @media (hover: hover) and (pointer: fine) { .kit-btn:hover { background: var(--kit-surface-2); } }
+/* A tap on a button acts at once: no wait for a double tap (panning and pinching stay). */
+:where(.kit-btn, .kit-segmented button, .kit-tab, .kit-menu__item, .kit-iconbar__item, .kit-calendar__day, .kit-tags__remove, .kit-tip) { touch-action: manipulation; }
 .kit-btn:focus-visible { outline: none; box-shadow: var(--kit-focus); }
 .kit-btn:active:not(:disabled) { background: var(--kit-accent-soft); }
 .kit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -189,7 +191,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 /* Table */
 .kit-table-wrap { overflow-x: auto; border: 1px solid var(--kit-border); border-radius: var(--kit-radius-lg); background: var(--kit-surface); }
 /* A long table that scrolls in its own box with the header row kept in view (--kit-table-height). */
-.kit-table-wrap--scroll { max-height: var(--kit-table-height, 70vh); overflow: auto; }
+.kit-table-wrap--scroll { max-height: var(--kit-table-height, 70vh); overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .kit-table-wrap--scroll .kit-table thead th { position: sticky; top: 0; z-index: 1; }
 .kit-table { width: 100%; border-collapse: collapse; font-size: var(--kit-text-sm); }
 /* Header row: one fill, titles left (numeric columns right, like their cells), the sort arrow always
@@ -276,7 +278,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 /* Dialog (the <dialog> element). */
 .kit-dialog {
   border: 1px solid var(--kit-border); border-radius: var(--kit-radius-lg); padding: var(--kit-space-5);
-  background: var(--kit-surface); color: var(--kit-text); box-shadow: var(--kit-shadow); max-width: min(520px, 92vw);
+  background: var(--kit-surface); color: var(--kit-text); box-shadow: var(--kit-shadow); max-width: min(520px, 92vw); overscroll-behavior: contain;
 }
 .kit-dialog::backdrop { background: var(--kit-backdrop); }
 .kit-dialog__actions { display: flex; justify-content: flex-end; gap: var(--kit-space-2); margin-top: var(--kit-space-5); }
@@ -284,7 +286,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
    a kit-input-icon field, a kit-search__list of kit-search__item rows and a kit-empty (kit.js). It keeps the
    dialog's width and stays at the top while the list gets shorter; the list scrolls inside it. */
 .kit-palette { width: min(520px, 92vw); box-sizing: border-box; margin-top: var(--kit-space-7); }
-.kit-palette .kit-search__list { max-height: 240px; overflow: auto; box-shadow: none; }
+.kit-palette .kit-search__list { max-height: 240px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; box-shadow: none; }
 
 /* Icons (kit-icons.js, Lucide): <span data-kit-icon="NAME" aria-hidden="true"></span>, in the text colour. */
 [data-kit-icon] { display: inline-flex; align-items: center; justify-content: center; line-height: 0; vertical-align: -0.2em; color: var(--kit-icon); }
@@ -320,7 +322,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-drawer::backdrop { background: var(--kit-backdrop); }
 .kit-drawer__head { display: flex; align-items: center; justify-content: space-between; gap: var(--kit-space-3); padding: var(--kit-space-4) var(--kit-space-5); border-bottom: 1px solid var(--kit-border); }
 .kit-drawer__title { margin: 0; font-size: var(--kit-text-md); font-weight: 600; color: var(--kit-title); }
-.kit-drawer__body { flex: 1; overflow: auto; padding: var(--kit-space-5); }
+.kit-drawer__body { flex: 1; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: var(--kit-space-5); }
 .kit-drawer__actions { display: flex; justify-content: flex-end; gap: var(--kit-space-2); padding: var(--kit-space-4) var(--kit-space-5); border-top: 1px solid var(--kit-border); }
 @keyframes kit-slide-in { from { transform: translateX(24px); opacity: 0; } }
 /* Reduced motion: no slide, only a short fade in. */
@@ -328,7 +330,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 @media (prefers-reduced-motion: reduce) { .kit-drawer[open] { animation-name: kit-fade; } }
 
 /* Toasts: KitUI.toast("Saved", { tone: "ok" }) shows a short confirmation at the bottom right. */
-.kit-toasts { position: fixed; right: var(--kit-space-5); bottom: var(--kit-space-5); z-index: var(--kit-z-toast, 50); display: flex; flex-direction: column; gap: var(--kit-space-2); pointer-events: none; }
+.kit-toasts { position: fixed; right: var(--kit-space-5); bottom: calc(var(--kit-space-5) + env(safe-area-inset-bottom, 0px)); z-index: var(--kit-z-toast, 50); display: flex; flex-direction: column; gap: var(--kit-space-2); pointer-events: none; }
 .kit-toast {
   pointer-events: auto; display: flex; align-items: center; gap: var(--kit-space-2); min-width: 220px; max-width: min(380px, 90vw);
   padding: var(--kit-space-3) var(--kit-space-4); border-radius: var(--kit-radius); border: 1px solid var(--kit-border);
@@ -410,7 +412,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   position: absolute; z-index: var(--kit-z-dropdown, 30); top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content; max-width: min(320px, calc(100vw - 2 * var(--kit-page-pad)));
   padding: var(--kit-space-2); border: 1px solid var(--kit-border); border-radius: var(--kit-radius); background: var(--kit-surface); box-shadow: var(--kit-shadow);
 }
-.kit-multi__list { list-style: none; margin: var(--kit-space-2) 0 0; padding: 0; max-height: 240px; overflow: auto; }
+.kit-multi__list { list-style: none; margin: var(--kit-space-2) 0 0; padding: 0; max-height: 240px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .kit-multi__list label { display: flex; align-items: center; gap: var(--kit-space-2); padding: 4px var(--kit-space-1); border-radius: var(--kit-radius); font-size: var(--kit-text-sm); cursor: pointer; }
 @media (hover: hover) and (pointer: fine) { .kit-multi__list label:hover { background: var(--kit-surface-2); } }
 .kit-multi__actions { display: flex; justify-content: space-between; gap: var(--kit-space-2); margin-top: var(--kit-space-2); }
@@ -490,7 +492,8 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-timeline__time { display: block; font-size: var(--kit-text-xs); color: var(--kit-text-muted); font-variant-numeric: tabular-nums; }
 
 /* Slider: <input class="kit-slider" type="range" aria-label="..">; two values: <div class="kit-slider-range"
-   data-kit-slider-range data-min="0" data-max="100" data-from="20" data-to="80" aria-label=".."></div> (kit.js). */
+   data-kit-slider-range data-min="0" data-max="100" data-from="20" data-to="80" data-unit="min" aria-label=".."></div>
+   (kit.js: the thumbs stop at each other, the unit is shown and read out). */
 .kit-slider { width: 100%; height: 1.5rem; margin: 0; background: transparent; accent-color: var(--kit-accent); -webkit-appearance: none; appearance: none; }
 .kit-slider::-webkit-slider-runnable-track { height: 6px; border-radius: 999px; background: var(--kit-surface-2); }
 .kit-slider::-moz-range-track { height: 6px; border-radius: 999px; background: var(--kit-surface-2); }
@@ -530,9 +533,12 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-board__card.is-dragging { opacity: 0.5; }
 
 /* Calendar month: <div class="kit-calendar" data-kit-calendar data-month="2026-10" aria-label="Bookings"></div>, events with
-   KitUI.calendar(element, { month, events: [{ date: "2026-10-09", title, tone }] }); weeks start on the day Settings give. */
+   KitUI.calendar(element, { month, events: [{ date: "2026-10-09", title, tone }] }); weeks start on the day Settings give
+   (data-week-start="0" to "6" on the element wins; with neither, the day the browser's language starts on). The days are
+   one tab stop: arrow keys, Home, End, PageUp and PageDown (with Shift a year) move; Today goes back to this month. */
 .kit-calendar { font-size: var(--kit-text-sm); }
 .kit-calendar__head { display: flex; align-items: center; justify-content: space-between; gap: var(--kit-space-2); margin-bottom: var(--kit-space-2); }
+.kit-calendar__nav { display: inline-flex; align-items: center; gap: var(--kit-space-1); }
 .kit-calendar__title { margin: 0; font-size: var(--kit-text-md); font-weight: 600; color: var(--kit-title); }
 .kit-calendar__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-top: 1px solid var(--kit-border); border-left: 1px solid var(--kit-border); }
 .kit-calendar__dow { padding: var(--kit-space-1) var(--kit-space-2); font-size: var(--kit-text-xs); color: var(--kit-text-muted); border-right: 1px solid var(--kit-border); border-bottom: 1px solid var(--kit-border); background: var(--kit-surface-2); }
@@ -554,7 +560,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
    <span data-kit-icon="menu" aria-hidden="true"></span></button></div></header>
    <nav class="kit-shell__nav kit-nav" id="ID" aria-label="Sections">...</nav><main class="kit-shell__main kit-container">...</main></div> */
 .kit-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: auto 1fr; }
-.kit-page > .kit-shell { min-height: 100vh; }
+.kit-page > .kit-shell { min-height: 100vh; min-height: 100dvh; }
 .kit-shell > .kit-header { grid-column: 1 / -1; }
 .kit-shell__nav { padding: var(--kit-space-4); border-right: 1px solid var(--kit-border); background: var(--kit-surface); align-self: start; position: sticky; top: 0; }
 .kit-shell__main { min-width: 0; }
@@ -899,7 +905,7 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 
 /* The side panel as a sheet from the bottom on a phone (from kokonutui smooth-drawer). */
 @media (max-width: 640px) {
-  .kit-drawer { inset: auto 0 0 0; width: 100%; max-width: 100%; height: auto; max-height: 85%; border-left: 0; border-top: 1px solid var(--kit-border); border-radius: var(--kit-radius-lg) var(--kit-radius-lg) 0 0; }
+  .kit-drawer { inset: auto 0 0 0; width: 100%; max-width: 100%; height: auto; max-height: 85%; max-height: 85dvh; padding-bottom: env(safe-area-inset-bottom, 0px); border-left: 0; border-top: 1px solid var(--kit-border); border-radius: var(--kit-radius-lg) var(--kit-radius-lg) 0 0; }
 }
 @media (max-width: 640px) and (prefers-reduced-motion: no-preference) { .kit-drawer[open] { animation-name: kit-sheet-in; } }
 @keyframes kit-sheet-in { from { transform: translateY(24px); opacity: 0; } }

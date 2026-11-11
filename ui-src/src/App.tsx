@@ -89,7 +89,7 @@ export default function App() {
   const pickerOpen = !state.project || showPicker;
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div className="flex h-dvh flex-col bg-background text-foreground">
       <AppHeader
         onMenu={() => palette.open("commands")}
         onOpenDrawer={() => setDrawerOpen(true)}

@@ -156,7 +156,7 @@ export default function GradientButton({
   return (
     <Button
       className={cn(
-        "group relative h-12 overflow-hidden rounded-lg px-4 transition-all duration-500",
+        "group relative h-12 overflow-hidden rounded-lg px-4 transition duration-500",
         className
       )}
       variant="ghost"

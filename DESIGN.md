@@ -250,3 +250,12 @@ Flat and unassuming: controls look like part of the page until you need them.
 - **Don't** use `border-left` or `border-right` wider than 1px as a coloured or grey stripe on cards, notes or alerts. (Markdown callouts in replies still use a 3px left rule; that is existing drift to replace with a full tint, not a pattern to copy.)
 - **Don't** introduce a second typeface or uppercase anything but section labels and tags.
 - **Don't** wrap a Copilot reply in a card; replies sit directly on the page.
+
+### Rules a test holds
+`ui-src/src/design-rules.test.ts` reads the app's own source and fails with file and line:
+- Hex colour literals in CSS stay within a budget that only goes down (today all in `styles/markdown.css`).
+- Font sizes in px are on the scale 10, 11, 12, 13, 14, 16, 18, 20.
+- Transitions never animate layout properties (width, height, position, margin, padding) and never `all`; a bar grows by `transform`.
+- The app sizes to the visible window (`h-dvh`, full width), never `100vh`, `h-screen` or `100vw`.
+- Layers: z-10 sticky bars, z-30 and z-40 side panels, z-50 menus, dialogs and toasts. A layer above z-50 has a name in `index.css` (`--ccb-z-hint` for the Split screen hint), never a bare number in a component.
+- Native controls follow the theme (`color-scheme` under `:root` and `.dark`).

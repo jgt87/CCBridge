@@ -69,7 +69,7 @@ export function SplitViewHint({ appWindow, shownBefore }: { appWindow?: string; 
   return createPortal(
     // In the page's top-right corner. The pointer sits under Edge's menu button (...), which is just
     // left of Edge's own Copilot button at the far right, so about 60 px from the right edge.
-    <div className="fixed top-3.5 right-2 z-[100] w-[22rem] animate-[ccb-hint-nudge_1.6s_ease-in-out_3]" role="dialog" aria-label="Use Split screen in Edge">
+    <div className="fixed top-3.5 right-2 z-(--ccb-z-hint) w-[22rem] animate-[ccb-hint-nudge_1.6s_ease-in-out_3]" role="dialog" aria-label="Use Split screen in Edge">
       {/* Inverted against the app (light on the dark app, dark on the light one), still without
           color, so it reads as a hint and not as part of the page. */}
       <div className="relative w-full rounded-xl bg-foreground p-4 text-background text-sm shadow-[0_0_0_4px_color-mix(in_oklab,var(--foreground)_18%,transparent),0_18px_50px_rgba(0,0,0,0.55)]">

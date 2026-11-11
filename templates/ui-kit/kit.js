@@ -1108,8 +1108,9 @@
     if (!el.hasAttribute("aria-label")) { el.setAttribute("role", "img"); el.setAttribute("aria-label", name); }
   }
 
-  // Two values on one slider: data-kit-slider-range with data-min, data-max, data-step, data-from, data-to;
-  // "kit:slide" with detail.from and detail.to; the values show under it.
+  // Two values on one slider: data-kit-slider-range with data-min, data-max, data-step, data-from, data-to and
+  // data-unit (shown and read out after the value); "kit:slide" with detail.from and detail.to; the values
+  // show under it.
   function setupSliderRange(el) {
     if (el.kitSlider) return;
     el.kitSlider = true;
@@ -1126,7 +1127,10 @@
       el.appendChild(i);
       return i;
     };
-    var a = mk(num("data-from", min), "Lowest " + name), b = mk(num("data-to", max), "Highest " + name);
+    var from = num("data-from", min), to = num("data-to", max), unit = el.getAttribute("data-unit") || "";
+    var a = mk(Math.min(from, to), "Lowest " + name), b = mk(Math.max(from, to), "Highest " + name);
+    // A screen reader hears the value with its unit ("45 min"), not the bare number.
+    var said = function (v) { return v.toLocaleString() + (unit ? " " + unit : ""); };
     var out = document.createElement("div");
     out.className = "kit-slider__value";
     out.setAttribute("aria-live", "polite");
@@ -1135,12 +1139,14 @@
       var lo = Math.min(+a.value, +b.value), hi = Math.max(+a.value, +b.value);
       fill.style.left = ((lo - min) / (max - min || 1)) * 100 + "%";
       fill.style.width = ((hi - lo) / (max - min || 1)) * 100 + "%";
-      out.textContent = lo.toLocaleString() + " - " + hi.toLocaleString();
+      out.textContent = lo.toLocaleString() + " - " + said(hi);
+      a.setAttribute("aria-valuetext", said(lo)); b.setAttribute("aria-valuetext", said(hi));
       el.setAttribute("data-from", lo); el.setAttribute("data-to", hi);
       if (send) el.dispatchEvent(new CustomEvent("kit:slide", { bubbles: true, detail: { from: lo, to: hi } }));
     };
-    a.addEventListener("input", function () { draw(true); });
-    b.addEventListener("input", function () { draw(true); });
+    // The thumbs stop at each other, so "Lowest" never holds the higher value.
+    a.addEventListener("input", function () { if (+a.value > +b.value) a.value = b.value; draw(true); });
+    b.addEventListener("input", function () { if (+b.value < +a.value) b.value = a.value; draw(true); });
     draw(false);
   }
 
@@ -1248,13 +1254,27 @@
 
   // Calendar month: data-kit-calendar with data-month="YYYY-MM" (default this month); KitUI.calendar(el,
   // { month, events: [{ date, title, tone }] }) sets the events; "kit:day" (detail.date, events) and "kit:month".
+  // The days are one tab stop: arrow keys move a day or a week, Home and End go to the week's first and last
+  // day, PageUp and PageDown a month (with Shift a year); Today goes back to this month. The week starts on
+  // data-week-start (0 = Sunday ... 6), else --kit-week-start, else the day the browser's language starts on.
+  function calendarWeekStart(el) {
+    var own = parseInt(el.getAttribute("data-week-start"), 10);
+    if (own >= 0 && own <= 6) return own;
+    var css = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--kit-week-start"), 10);
+    if (css >= 0 && css <= 6) return css;
+    try {
+      var loc = new Intl.Locale(navigator.language), info = loc.getWeekInfo ? loc.getWeekInfo() : loc.weekInfo;
+      if (info && info.firstDay >= 1 && info.firstDay <= 7) return info.firstDay % 7;   // 7 = Sunday
+    } catch (e) { /* a browser without week data: Monday */ }
+    return 1;
+  }
   function calendarTitle(first, y, m) {
     try { return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(first); } catch (e) { return y + "-" + (m + 1); }
   }
   function calendarHead(title) {
     var head = document.createElement("div");
     head.className = "kit-calendar__head";
-    head.innerHTML = '<button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-step="-1">Previous</button><h3 class="kit-calendar__title" aria-live="polite"></h3><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-step="1">Next</button>';
+    head.innerHTML = '<button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-step="-1">Previous</button><h3 class="kit-calendar__title" aria-live="polite"></h3><span class="kit-calendar__nav"><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-today>Today</button><button class="kit-btn kit-btn--sm kit-btn--ghost" type="button" data-step="1">Next</button></span>';
     head.querySelector("h3").textContent = title;
     return head;
   }
@@ -1283,6 +1303,8 @@
     b.type = "button";
     b.className = "kit-calendar__day" + (day.getMonth() !== m ? " is-other" : "") + (iso === today ? " is-today" : "");
     b.setAttribute("data-date", iso);
+    b.tabIndex = iso === st.focus ? 0 : -1;
+    if (iso === today) b.setAttribute("aria-current", "date");
     var num = document.createElement("span"); num.className = "kit-calendar__num"; num.textContent = day.getDate(); b.appendChild(num);
     var evs = (st.events || []).filter(function (ev) { return String(ev.date).slice(0, 10) === iso; });
     evs.slice(0, 3).forEach(function (ev) { b.appendChild(calendarEvent(ev)); });
@@ -1294,10 +1316,13 @@
   }
   function calendarDraw(el) {
     var st = el.kitCal, y = st.year, m = st.month;
-    var start = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--kit-week-start"), 10);
-    if (isNaN(start)) start = 1;
+    var start = calendarWeekStart(el);
     var first = new Date(y, m, 1), lead = (first.getDay() - start + 7) % 7, today = isoDay(new Date());
     var title = calendarTitle(first, y, m);
+    var cells = Math.ceil((lead + new Date(y, m + 1, 0).getDate()) / 7) * 7;
+    // The day that takes the Tab key: the one last focused while it is on show, else today, else the 1st.
+    var shown = function (iso) { var t = new Date(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)).getTime(); return t >= new Date(y, m, 1 - lead).getTime() && t <= new Date(y, m, cells - lead).getTime(); };
+    if (!st.focus || !shown(st.focus)) st.focus = today.slice(0, 7) === isoDay(first).slice(0, 7) ? today : isoDay(first);
     el.innerHTML = "";
     el.appendChild(calendarHead(title));
     var grid = document.createElement("div");
@@ -1305,7 +1330,6 @@
     grid.setAttribute("role", "group");
     grid.setAttribute("aria-label", title);
     calendarWeekdays(grid, start);
-    var cells = Math.ceil((lead + new Date(y, m + 1, 0).getDate()) / 7) * 7;
     for (var c = 0; c < cells; c++) {
       var day = new Date(y, m, 1 - lead + c);
       grid.appendChild(calendarDay(day, isoDay(day), st, m, today));
@@ -1313,11 +1337,47 @@
     el.appendChild(grid);
   }
   // Previous or next month (a button with data-step="-1" or "1"): drawn again, "kit:month".
-  function calendarStep(el, stepBtn) {
-    var d = new Date(el.kitCal.year, el.kitCal.month + parseInt(stepBtn.getAttribute("data-step"), 10), 1);
-    el.kitCal.year = d.getFullYear(); el.kitCal.month = d.getMonth();
+  // The month on show: drawn again, "kit:month" when it is another month than before.
+  function calendarShow(el, y, m) {
+    var st = el.kitCal, changed = st.year !== y || st.month !== m;
+    st.year = y; st.month = m;
     calendarDraw(el);
-    el.dispatchEvent(new CustomEvent("kit:month", { bubbles: true, detail: { month: d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) } }));
+    if (changed) el.dispatchEvent(new CustomEvent("kit:month", { bubbles: true, detail: { month: y + "-" + ("0" + (m + 1)).slice(-2) } }));
+  }
+  // Drawing replaces the buttons, so the one that was pressed gets the focus back.
+  function calendarRefocus(el, selector) { var b = el.querySelector(selector); if (b) b.focus(); }
+  function calendarStep(el, stepBtn) {
+    var by = stepBtn.getAttribute("data-step"), d = new Date(el.kitCal.year, el.kitCal.month + parseInt(by, 10), 1);
+    calendarShow(el, d.getFullYear(), d.getMonth());
+    calendarRefocus(el, '[data-step="' + by + '"]');
+  }
+  function calendarToday(el) {
+    var now = new Date();
+    el.kitCal.focus = isoDay(now);
+    calendarShow(el, now.getFullYear(), now.getMonth());
+    calendarRefocus(el, "[data-today]");
+  }
+  // One day takes the Tab key (el.kitCal.focus); the others are reached with the keys below.
+  function calendarRove(el) {
+    Array.prototype.forEach.call(el.querySelectorAll(".kit-calendar__day"), function (b) { b.tabIndex = b.getAttribute("data-date") === el.kitCal.focus ? 0 : -1; });
+  }
+  function calendarGo(el, to, turn) {
+    var iso = isoDay(to), at = '[data-date="' + iso + '"]';
+    el.kitCal.focus = iso;
+    if (turn || !el.querySelector(at)) calendarShow(el, to.getFullYear(), to.getMonth()); else calendarRove(el);
+    calendarRefocus(el, at);
+  }
+  function calendarKey(el, e) {
+    var day = e.target.closest && e.target.closest(".kit-calendar__day");
+    if (!day || e.altKey || e.ctrlKey || e.metaKey) return;
+    var p = day.getAttribute("data-date").split("-"), y = +p[0], m = +p[1] - 1, d = +p[2];
+    var col = (new Date(y, m, d).getDay() - calendarWeekStart(el) + 7) % 7;
+    var steps = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7, Home: -col, End: 6 - col };
+    if (Object.prototype.hasOwnProperty.call(steps, e.key)) { e.preventDefault(); calendarGo(el, new Date(y, m, d + steps[e.key]), false); return; }
+    if (e.key !== "PageUp" && e.key !== "PageDown") return;
+    e.preventDefault();
+    var by = (e.key === "PageUp" ? -1 : 1) * (e.shiftKey ? 12 : 1);
+    calendarGo(el, new Date(y, m + by, Math.min(d, new Date(y, m + by + 1, 0).getDate())), true);   // 31 March -> 30 April
   }
   // A day clicked: "kit:day" with that day's events.
   function calendarPick(el, day) {
@@ -1328,6 +1388,7 @@
   function calendarClick(el, e) {
     var stepBtn = e.target.closest("[data-step]");
     if (stepBtn) { calendarStep(el, stepBtn); return; }
+    if (e.target.closest("[data-today]")) { calendarToday(el); return; }
     var day = e.target.closest(".kit-calendar__day");
     if (day) calendarPick(el, day);
   }
@@ -1336,6 +1397,11 @@
     if (!el.kitCal) {
       el.kitCal = { year: mm ? +mm[1] : now.getFullYear(), month: mm ? +mm[2] - 1 : now.getMonth(), events: [] };
       el.addEventListener("click", function (e) { calendarClick(el, e); });
+      el.addEventListener("keydown", function (e) { calendarKey(el, e); });
+      el.addEventListener("focusin", function (e) {
+        var day = e.target.closest && e.target.closest(".kit-calendar__day");
+        if (day && day.getAttribute("data-date") !== el.kitCal.focus) { el.kitCal.focus = day.getAttribute("data-date"); calendarRove(el); }
+      });
     }
     if (opts && mm) { el.kitCal.year = +mm[1]; el.kitCal.month = +mm[2] - 1; }
     if (opts && opts.events) el.kitCal.events = opts.events;
