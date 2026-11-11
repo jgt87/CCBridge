@@ -152,6 +152,20 @@ function New-InstallManifest {
     $files.Count
 }
 
+function New-ReleaseChecksums {
+    <# SHA256SUMS for release assets (tools/build-release.ps1): one "<hash>  <file name>" line per file,
+       lower-case hex, LF endings, in the format `sha256sum -c` reads. Returns the number of lines. #>
+    param([Parameter(Mandatory)][string[]]$Files, [Parameter(Mandatory)][string]$OutFile)
+    $lines = foreach ($f in $Files) {
+        $hash = "$(Get-FileHashShared $f)".Replace('-', '').ToLowerInvariant()
+        if (-not $hash) { throw "Cannot read $f for its checksum." }
+        "$hash  $(Split-Path -Leaf $f)"
+    }
+    $lines = @($lines)
+    [IO.File]::WriteAllText($OutFile, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
+    $lines.Count
+}
+
 function Test-InstallIntegrity {
     <# Compares the app folder with its manifest.json: @{ version; missing; changed } (paths with /),
        or $null without a manifest (a git clone or a development copy). Files the release does not
@@ -240,4 +254,4 @@ function Set-LocalHarnessValue([string]$AppRoot, [string]$Key, $Value) {
     [IO.File]::WriteAllText($file, ($obj | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
 }
 
-Export-ModuleMember -Function ConvertTo-ReleaseVersion, Test-ReleaseSkipped, Get-RollbackSkip, Test-UpdaterSkipsReleases, Get-LocalHarnessValue, Set-LocalHarnessValue, New-InstallManifest, Test-InstallIntegrity, Format-InstallProblem, Get-UpdateNewFiles, Save-UpdateBackup, Restore-UpdateBackup, Test-FileLocked, Get-FileHashShared, Get-UpdateTouchedFiles, Get-LockedUpdateFiles, Format-LockedUpdateFiles, Get-RobocopyFailures
+Export-ModuleMember -Function ConvertTo-ReleaseVersion, Test-ReleaseSkipped, Get-RollbackSkip, Test-UpdaterSkipsReleases, Get-LocalHarnessValue, Set-LocalHarnessValue, New-InstallManifest, New-ReleaseChecksums, Test-InstallIntegrity, Format-InstallProblem, Get-UpdateNewFiles, Save-UpdateBackup, Restore-UpdateBackup, Test-FileLocked, Get-FileHashShared, Get-UpdateTouchedFiles, Get-LockedUpdateFiles, Format-LockedUpdateFiles, Get-RobocopyFailures

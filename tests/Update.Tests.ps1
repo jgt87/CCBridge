@@ -154,6 +154,17 @@ Describe 'Going back to an earlier release (update.cmd -To)' {
     }
 }
 
+Describe 'Release checksums' {
+    It 'writes SHA256SUMS that sha256sum -c reads: lower-case hash, two spaces, file name, LF' {
+        $b = New-UpdateDirs
+        [IO.File]::WriteAllText("$b\a.zip", 'abc')
+        (New-ReleaseChecksums -Files @("$b\a.zip") -OutFile "$b\SHA256SUMS") | Should Be 1
+        [IO.File]::ReadAllText("$b\SHA256SUMS") | Should BeExactly "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.zip`n"
+        { New-ReleaseChecksums -Files @("$b\missing.zip") -OutFile "$b\SHA256SUMS" } | Should Throw 'Cannot read'
+        Remove-Item $b -Recurse -Force
+    }
+}
+
 Describe 'The install check' {
     It 'finds files missing or different from the release, and nothing in a complete folder' {
         $b = New-UpdateDirs

@@ -6,6 +6,12 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.161] - 2026-11-12
+
+### Added
+
+- Every release on GitHub now carries a `SHA256SUMS` file beside the zip, so a download can be checked (`sha256sum -c SHA256SUMS`, or compare with `Get-FileHash`).
+
 ## [v0.1.160] - 2026-11-11
 
 ### Added

@@ -4,7 +4,8 @@
   (no UI source, tests or git data). The zip contains one folder, CCBridge\, with version.txt.
   Then publishes the version: an annotated git tag with the same name on the current commit
   (created locally and pushed), and a GitHub Release "StreamHub <version>" on that tag with
-  the zip. A version always has its tag and its release; -NoPublish only builds the zip.
+  the zip and SHA256SUMS (its checksum, also in dist\SHA256SUMS-<version>\). A version always has
+  its tag and its release; -NoPublish only builds the zip and SHA256SUMS.
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1 -Version v0.1.0 -NotesFile notes.md
 #>
@@ -110,6 +111,13 @@ try {
 [IO.Directory]::Delete($stage, $true)
 $size = (Get-Item $zip).Length
 "Built $zip ($([Math]::Round($size / 1KB)) KB)"
+# The zip's checksum, published beside it so a download can be checked (sha256sum -c SHA256SUMS).
+# One file per version in dist\, uploaded under the name SHA256SUMS.
+$sumsDir = Join-Path $dist "SHA256SUMS-$Version"
+$null = New-Item -ItemType Directory -Force -Path $sumsDir
+$sums = Join-Path $sumsDir 'SHA256SUMS'
+$null = New-ReleaseChecksums -Files @($zip) -OutFile $sums
+"Wrote $sums"
 if ($NoPublish) { return }
 
 # The tag: annotated, on the commit that was built, locally and on GitHub.
@@ -117,8 +125,8 @@ if (-not @(Invoke-Git tag --list $Version).Count) { $null = Invoke-Git tag -a $V
 $null = Invoke-Git push origin "refs/tags/$Version"
 "Tagged $Version at $commit and pushed the tag"
 
-# The release on that tag, with the zip.
-$ghArgs = @('release', 'create', $Version, $zip, '--verify-tag', '--title', "StreamHub $Version")
+# The release on that tag, with the zip and its SHA256SUMS.
+$ghArgs = @('release', 'create', $Version, $zip, $sums, '--verify-tag', '--title', "StreamHub $Version")
 if ($NotesFile) { $ghArgs += @('--notes-file', $NotesFile) } else { $ghArgs += '--generate-notes' }
 # gh finds the repository from the current folder (git has -C): run it from the app folder, since
 # the script may be started from anywhere (v0.1.158 was started from C:\Windows\system32).
