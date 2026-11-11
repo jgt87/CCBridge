@@ -4,6 +4,10 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [v0.1.160] - 2026-11-11
+
 ### Added
 - UI kit (revision 15), calendar: the days are one stop for the Tab key. Arrow keys move a day or a week, Home and End go to the week's first and last day, PageUp and PageDown go a month back or on (with Shift a year), and a new Today button goes back to this month. Previous, Next and Today keep the focus. The React `Calendar` does the same.
 - UI kit, calendar: `data-week-start="0"` to `"6"` on a calendar sets its first day of the week. Without it the calendar uses the setting "First day of the week" as before, and where that is missing, the day the browser's language starts on (the React `Calendar` the same when `weekStart` is left out).
