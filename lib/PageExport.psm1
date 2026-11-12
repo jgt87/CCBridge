@@ -41,7 +41,8 @@ function Open-PageTab {
     param([Parameter(Mandatory)][int]$Port, [Parameter(Mandatory)][string]$Url, [int]$SettleMs = 2500)
     $target = Invoke-RestMethod -Method Put "http://127.0.0.1:$Port/json/new?about:blank"
     $s = Connect-Cdp $target.webSocketDebuggerUrl
-    $close = { try { Disconnect-Cdp $s } catch { }; try { $null = Invoke-RestMethod "http://127.0.0.1:$Port/json/close/$($target.id)" } catch { } }.GetNewClosure()
+    $disconnect = Get-Command Disconnect-Cdp   # GetNewClosure() cannot see imported commands
+    $close = { try { & $disconnect $s } catch { }; try { $null = Invoke-RestMethod "http://127.0.0.1:$Port/json/close/$($target.id)" } catch { } }.GetNewClosure()
     try {
         $null = Invoke-Cdp $s 'Emulation.setDeviceMetricsOverride' @{ width = 1400; height = 900; deviceScaleFactor = 1; mobile = $false }
         # Reports are light, whatever the computer's theme (a slide or page in dark mode prints badly).

@@ -9,6 +9,9 @@
   stdout carries JSON-RPC only; diagnostics go to stderr.
 #>
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell's own module paths: an MCP client started from PowerShell 7 passes on its
+# paths, and 5.1 would then load 7's modules (Expand-Archive fails on a .NET Core-only overload).
+$env:PSModulePath = (@([Environment]::GetEnvironmentVariable('PSModulePath', 'User'), [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'), (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Modules')) | Where-Object { $_ }) -join ';'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 # Update before anything is loaded; the updater writes only to stderr.

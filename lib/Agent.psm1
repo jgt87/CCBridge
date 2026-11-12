@@ -456,11 +456,15 @@ function Send-ToCopilot {
     }
     $who = if ($Agent) { $Agent } elseif ($State.AgentChat) { [string]$State.AgentChat } else { 'Copilot' }
     # The waiting card: reply data and the page's own signs of work count as signs of life (WorkStatus).
-    $progress = { param($t) $State.Progress = $t; Set-WorkSign $State -Data; if ($State.Work -and $State.Work.phase -like 'Waiting for*reply*') { Set-WorkPhase $State "$who is writing the reply" -Step } }.GetNewClosure()
+    # GetNewClosure() runs the block in a new dynamic module that cannot see commands imported into this
+    # module (WorkStatus...). Where only Agent.psm1 is imported (the MCP worker) they are missing, so the
+    # closures call them through command objects taken here.
+    $signCmd = Get-Command Set-WorkSign; $phaseCmd = Get-Command Set-WorkPhase; $stepCmd = Get-Command Add-WorkStep
+    $progress = { param($t) $State.Progress = $t; & $signCmd $State -Data; if ($State.Work -and $State.Work.phase -like 'Waiting for*reply*') { & $phaseCmd $State "$who is writing the reply" -Step } }.GetNewClosure()
     $cancel = { [bool]$State.Cancel }.GetNewClosure()
     # An agent's progress lines ("Searching for release details") show in the waiting indicator.
     # $null clears the line again (the wait for the send lock is over).
-    $status = { param($t) if (-not $t) { $State.Activity.label = ''; return }; Set-WorkSign $State; Add-WorkStep $State "${who}: $t"; $State.Activity.kind = $(if ($who -eq 'Copilot') { 'busy' } else { 'agent' }); $State.Activity.label = "${who}: $t" }.GetNewClosure()
+    $status = { param($t) if (-not $t) { $State.Activity.label = ''; return }; & $signCmd $State; & $stepCmd $State "${who}: $t"; $State.Activity.kind = $(if ($who -eq 'Copilot') { 'busy' } else { 'agent' }); $State.Activity.label = "${who}: $t" }.GetNewClosure()
     Set-WorkPhase $State "Waiting for ${who}'s reply" -Step
     Add-WorkStep $State "Sent a message to ${who} ($($Message.Length) characters)"
     try {

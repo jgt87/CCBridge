@@ -13,3 +13,8 @@ end_of_line = crlf
 [*.md]
 # Two trailing spaces are a Markdown line break.
 trim_trailing_whitespace = false
+
+[install.ps1]
+# The install bootstrap must not end with a newline: some shells run it line by line through iex,
+# and the empty last line then gives an 'empty string' error (tests/InstallBootstrap.Tests.ps1).
+insert_final_newline = false

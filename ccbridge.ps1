@@ -23,6 +23,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell's own module paths: started from PowerShell 7, 5.1 would load 7's modules.
+$env:PSModulePath = (@([Environment]::GetEnvironmentVariable('PSModulePath', 'User'), [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'), (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Modules')) | Where-Object { $_ }) -join ';'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Update before anything is loaded (GitHub; skipped offline, for local edits or "autoUpdate": false).
 if (-not $NoUpdate) { & (Join-Path $root 'tools\update.ps1') }

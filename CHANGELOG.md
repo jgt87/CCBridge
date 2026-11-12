@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.162] - 2026-11-12
+
+### Fixed
+
+- MCP server: `copilot_ask` and the other Copilot tools failed with "The term 'Set-WorkSign' is not recognized". The waiting-card callbacks in `Send-ToCopilot` are closures (`GetNewClosure()`), and those cannot see commands that `Agent.psm1` imports. The web app hid the problem because `Server.psm1` exports those commands globally; the MCP worker imports only `Agent.psm1`. The callbacks now call command objects taken before the closure is made. Closing a page tab in `PageExport` had the same latent problem (`Disconnect-Cdp`).
+- New test `tests/ClosureCommands.Tests.ps1`: no `GetNewClosure()` block in `lib/` may call a command that the closure cannot see.
+- Started from PowerShell 7 (for example an MCP client running in a PowerShell 7 terminal), the app and the MCP server inherited PowerShell 7's module paths, so Windows PowerShell loaded 7's modules: installing Node.js failed in `Expand-Archive`. Both entry points now use Windows PowerShell's own module paths, as `tools/install-tool.ps1` and `tools/run-tests.ps1` already did.
+- The install command (`irm .../install.ps1 | iex`) failed on machines whose shell hands the script to `iex` line by line: blank lines gave "empty string" errors and multi-line blocks would not parse. `install.ps1` is now a one-line bootstrap that downloads the full installer (`tools/install-main.ps1`) and runs it as a file, so it works either way. New test `tests/InstallBootstrap.Tests.ps1` keeps it line-by-line safe.
+
 ## [v0.1.161] - 2026-11-12
 
 ### Added
