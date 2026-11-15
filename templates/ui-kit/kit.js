@@ -222,15 +222,15 @@
   }
   // Ascending order of two sort keys; what is not a number (empty, "n/a") sorts last, whichever way.
   function compareKeys(x, y, asc) {
-    var c;
-    if (typeof x === "number" || typeof y === "number") {
-      var nx = typeof x === "number" && !isNaN(x), ny = typeof y === "number" && !isNaN(y);
-      if (!nx && !ny) return 0;
-      if (!nx) return 1;
-      if (!ny) return -1;
-      c = x - y;
-    } else c = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+    if (typeof x === "number" || typeof y === "number") return compareNumbers(x, y, asc);
+    var c = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
     return asc ? c : -c;
+  }
+  // Two number keys; one that is not a number (NaN, a word) goes last in both directions.
+  function compareNumbers(x, y, asc) {
+    var nx = typeof x === "number" && !isNaN(x), ny = typeof y === "number" && !isNaN(y);
+    if (nx && ny) return asc ? x - y : y - x;
+    return nx === ny ? 0 : (nx ? -1 : 1);
   }
   function hasWords(row, words) { var t = row.textContent.toLowerCase(); return words.every(function (x) { return t.indexOf(x) >= 0; }); }
   // A header cell's sort button (none for data-kit-nosort or a cell that has one).
@@ -461,9 +461,13 @@
       if (c.rows) forgetKeys();
       if (c.head || c.rows) arm();
       if (c.rows && table.kitArmSelect) table.kitArmSelect();
+      reapply(c);
+      obs.takeRecords();
+    }
+    // External mode: the page's rows again on any change; else new rows start again at the first page.
+    function reapply(c) {
       if (external) { if (c.attrs || c.rows) apply(); }
       else if (c.rows) { page = 0; apply(); }
-      obs.takeRecords();
     }
     arm();
     if (table.hasAttribute("data-kit-select")) setupRowSelect(table, rows, function () { return body; }, arm);
@@ -574,18 +578,35 @@
     x.addEventListener("click", onClick);
     return x;
   }
+  // The toast itself: its tone as a class and, for screen readers, as its first word.
+  function toastBox(text, tone) {
+    var t = document.createElement("div");
+    t.className = "kit-toast" + (/^(ok|warn|error)$/.test(tone || "") ? " kit-toast--" + tone : "");
+    t.textContent = String(text);
+    var word = { error: "Error: ", warn: "Warning: " }[tone];
+    if (word) { var w = srOnly(document.createElement("span")); w.textContent = word; t.insertBefore(w, t.firstChild); }
+    return t;
+  }
+  // How long a toast stays: opts.ms, else 8 s for an error and 4 s for the rest; with an action at least 10 s.
+  function toastMs(opts, action) {
+    var ms = opts.ms || (opts.tone === "error" ? 8000 : 4000);
+    return action ? Math.max(ms, 10000) : ms;
+  }
+  function toastAction(action, leave) {
+    var a = document.createElement("button");
+    a.type = "button";
+    a.className = "kit-btn kit-btn--ghost kit-btn--sm kit-toast__action";
+    a.textContent = String(action.label);
+    a.addEventListener("click", function () { leave(); if (typeof action.onClick === "function") action.onClick(); });
+    return a;
+  }
   function toast(text, opts) {
     opts = opts || {};
     var region = toastRegion();
     if (opts.tone === "error") region = toastAlerts(region);
-    var t = document.createElement("div");
-    t.className = "kit-toast" + (/^(ok|warn|error)$/.test(opts.tone || "") ? " kit-toast--" + opts.tone : "");
-    t.textContent = String(text);
-    var word = { error: "Error: ", warn: "Warning: " }[opts.tone];
-    if (word) { var w = srOnly(document.createElement("span")); w.textContent = word; t.insertBefore(w, t.firstChild); }
+    var t = toastBox(text, opts.tone);
     var action = opts.action && opts.action.label ? opts.action : null;
-    var left = opts.ms || (opts.tone === "error" ? 8000 : 4000), timer = null, since = 0, over = false;
-    if (action) left = Math.max(left, 10000);
+    var left = toastMs(opts, action), timer = null, since = 0, over = false;
     var leave = function () {
       clearTimeout(timer); timer = null;
       if (t.classList.contains("is-leaving")) return;
@@ -594,19 +615,12 @@
     };
     var run = function () { if (timer || t.classList.contains("is-leaving")) return; since = Date.now(); timer = setTimeout(leave, left); };
     var pause = function () { if (!timer) return; clearTimeout(timer); timer = null; left = Math.max(1000, left - (Date.now() - since)); };
-    if (action) {
-      var a = document.createElement("button");
-      a.type = "button";
-      a.className = "kit-btn kit-btn--ghost kit-btn--sm kit-toast__action";
-      a.textContent = String(action.label);
-      a.addEventListener("click", function () { leave(); if (typeof action.onClick === "function") action.onClick(); });
-      t.appendChild(a);
-    }
+    if (action) t.appendChild(toastAction(action, leave));
     if (opts.close !== false) t.appendChild(toastClose(leave));
     t.addEventListener("mouseenter", function () { over = true; pause(); });
     t.addEventListener("mouseleave", function () { over = false; if (!t.contains(document.activeElement)) run(); });
     t.addEventListener("focusin", pause);
-    t.addEventListener("focusout", function (e) { if (!over && !(e.relatedTarget && t.contains(e.relatedTarget))) run(); });
+    t.addEventListener("focusout", function (e) { if (!over && !withinEl(t, e)) run(); });
     region.appendChild(t);
     run();
     return t;
@@ -673,9 +687,13 @@
       el.removeAttribute("title");
     }
     var text = (el.getAttribute("data-kit-tooltip") || "").trim();
-    if (text && !el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby") && !el.textContent.trim()) el.setAttribute("aria-label", text);
+    if (text && !hasName(el)) el.setAttribute("aria-label", text);
   }
+  function hasName(el) { return !!(el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || el.textContent.trim()); }
   function tooltipOf(t) { return t && t.closest ? t.closest("[data-kit-tooltip]") : null; }
+  // The pointer or focus moved to a part of el itself (not really in or out of it).
+  function withinEl(el, e) { return !!(e.relatedTarget && el.contains(e.relatedTarget)); }
+  function tooltipShown() { return !!(tooltipFor && tooltip && !tooltip.hidden); }
   function hideTooltip(warm) {
     clearTimeout(tooltipWait); tooltipWait = null;
     if (!tooltipFor) return;
@@ -696,18 +714,25 @@
     var text = (el.getAttribute("data-kit-tooltip") || "").trim();
     if (!text || !document.body || !document.body.contains(el)) return;
     if (tooltipFor && tooltipFor !== el) hideTooltip(false);
-    if (!tooltip || !tooltip.parentNode) {
-      tooltip = document.createElement("div");
-      tooltip.className = "kit-tooltip";
-      tooltip.id = "kit-tooltip";
-      tooltip.setAttribute("role", "tooltip");
-      document.body.appendChild(tooltip);
-    }
+    tooltipBubble();
     tooltip.textContent = text;
     tooltip.hidden = false;
     tooltipFor = el;
-    if (text !== (el.getAttribute("aria-label") || "").trim() && !el.getAttribute("aria-describedby")) el.setAttribute("aria-describedby", tooltip.id);
+    tooltipDescribes(el, text);
     placeTooltip(el);
+  }
+  // The page's one bubble, made the first time (and again when the page removed it).
+  function tooltipBubble() {
+    if (tooltip && tooltip.parentNode) return;
+    tooltip = document.createElement("div");
+    tooltip.className = "kit-tooltip";
+    tooltip.id = "kit-tooltip";
+    tooltip.setAttribute("role", "tooltip");
+    document.body.appendChild(tooltip);
+  }
+  // The bubble describes el, unless it only repeats el's name or el is described already.
+  function tooltipDescribes(el, text) {
+    if (text !== (el.getAttribute("aria-label") || "").trim() && !el.getAttribute("aria-describedby")) el.setAttribute("aria-describedby", tooltip.id);
   }
   function pressed(e) { pressAt = Date.now(); if (e.pointerType === "touch" || e.type === "touchstart") touchAt = pressAt; hideTooltip(); }
   document.addEventListener("pointerdown", pressed, true);
@@ -715,14 +740,14 @@
   document.addEventListener("mousedown", function () { pressAt = Date.now(); }, true);
   document.addEventListener("mouseover", function (e) {
     var el = tooltipOf(e.target);
-    if (!el || el === tooltipFor || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+    if (!el || el === tooltipFor || withinEl(el, e)) return;
     if (Date.now() - touchAt < 1000) return;   // the mouse events a tap makes: no hover tooltips on touch
     clearTimeout(tooltipWait);
     if (Date.now() < tipWarmUntil) showTooltip(el); else tooltipWait = setTimeout(function () { showTooltip(el); }, TIP_DELAY);
   });
   document.addEventListener("mouseout", function (e) {
     var el = tooltipOf(e.target);
-    if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+    if (!el || withinEl(el, e)) return;
     clearTimeout(tooltipWait); tooltipWait = null;
     if (el === tooltipFor && !el.contains(document.activeElement)) hideTooltip();
   });
@@ -732,9 +757,9 @@
   });
   document.addEventListener("focusout", function (e) {
     var el = tooltipOf(e.target);
-    if (el && el === tooltipFor && !(e.relatedTarget && el.contains(e.relatedTarget))) hideTooltip();
+    if (el && el === tooltipFor && !withinEl(el, e)) hideTooltip();
   });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && tooltipFor && tooltip && !tooltip.hidden) { escapeHandled(e); hideTooltip(); } }, true);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && tooltipShown()) { escapeHandled(e); hideTooltip(); } }, true);
   window.addEventListener("scroll", function () { hideTooltip(); }, true);
   window.addEventListener("wheel", function () { hideTooltip(); }, { passive: true });
   window.addEventListener("resize", function () { hideTooltip(); });
@@ -910,16 +935,23 @@
     var unit = a < 60 ? ["second", s] : a < 3600 ? ["minute", Math.round(s / 60)] : a < 86400 ? ["hour", Math.round(s / 3600)] : ["day", Math.round(s / 86400)];
     try { return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(unit[1], unit[0]); } catch (e) { return ""; }
   }
-  function showStamp(el, when) {
+  // The stamp's time: the one given, else data-kit-stamp, else window.kitDataAsOf[data-kit-stamp-of];
+  // null when there is none or it is not a date.
+  function stampDate(el, when) {
     var v = when || el.getAttribute("data-kit-stamp");
     var of = el.getAttribute("data-kit-stamp-of");
     if (!v && of && window.kitDataAsOf) v = window.kitDataAsOf[of];
     var d = v ? new Date(v) : null;
-    if (!d || isNaN(d.getTime())) return;
+    return d && !isNaN(d.getTime()) ? d : null;
+  }
+  function stampText(d) {
+    try { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(d); } catch (e) { return d.toLocaleString(); }
+  }
+  function showStamp(el, when) {
+    var d = stampDate(el, when);
+    if (!d) return;
     if (when) el.setAttribute("data-kit-stamp", d.toISOString());
-    var text;
-    try { text = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(d); } catch (e) { text = d.toLocaleString(); }
-    el.textContent = (el.getAttribute("data-kit-prefix") || "Data as of") + " " + text + " (" + ago(d.getTime()) + ")";
+    el.textContent = (el.getAttribute("data-kit-prefix") || "Data as of") + " " + stampText(d) + " (" + ago(d.getTime()) + ")";
     el.setAttribute("title", d.toISOString());
   }
   function showStamps() { Array.prototype.forEach.call(document.querySelectorAll(".kit-stamp, [data-kit-stamp], [data-kit-stamp-of]"), function (el) { showStamp(el); }); }
@@ -1029,14 +1061,18 @@
     btn.setAttribute("aria-expanded", "true");
     list.hidden = false;
     contextList = list; list.kitArea = area; list.kitBack = back && back !== document.body ? back : btn;
+    placeAt(list, x, y);
+    var first = menuItems(list)[0];
+    if (first) first.focus();
+    return true;
+  }
+  // A list fixed at x, y; to the left of or above the point when it would run past the window.
+  function placeAt(list, x, y) {
     var s = list.style, edge = 8;
     s.position = "fixed"; s.right = "auto"; s.bottom = "auto"; s.left = "0px"; s.top = "0px";
     var w = list.offsetWidth, h = list.offsetHeight;
     s.left = Math.round(x + w > window.innerWidth - edge ? Math.max(edge, x - w) : x) + "px";
     s.top = Math.round(y + h > window.innerHeight - edge ? Math.max(edge, y - h) : y) + "px";
-    var first = menuItems(list)[0];
-    if (first) first.focus();
-    return true;
   }
   function contextArea(t) { return closestOf(t, ".kit-menu__list") ? null : closestOf(t, "[data-kit-context]"); }
   document.addEventListener("contextmenu", function (e) {
@@ -1054,7 +1090,9 @@
     var r = (e.target.getBoundingClientRect ? e.target : area).getBoundingClientRect();
     if (openContextMenu(area, r.left, r.bottom)) { e.preventDefault(); contextKeyAt = Date.now(); }
   });
-  function closeContext(e) { if (contextList && !contextList.hidden && !(e && e.target && e.target.nodeType === 1 && contextList.contains(e.target))) closeMenus(); }
+  function contextOpen() { return !!contextList && !contextList.hidden; }
+  function inContext(e) { return !!(e && e.target && e.target.nodeType === 1 && contextList.contains(e.target)); }
+  function closeContext(e) { if (contextOpen() && !inContext(e)) closeMenus(); }
   window.addEventListener("scroll", closeContext, true);
   window.addEventListener("wheel", closeContext, { passive: true });
   window.addEventListener("resize", function () { closeContext(); });
@@ -1261,7 +1299,10 @@
     var own = parseInt(el.getAttribute("data-week-start"), 10);
     if (own >= 0 && own <= 6) return own;
     var css = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--kit-week-start"), 10);
-    if (css >= 0 && css <= 6) return css;
+    return css >= 0 && css <= 6 ? css : localeWeekStart();
+  }
+  // The first day of the week in the browser's language (0 = Sunday); Monday without week data.
+  function localeWeekStart() {
     try {
       var loc = new Intl.Locale(navigator.language), info = loc.getWeekInfo ? loc.getWeekInfo() : loc.weekInfo;
       if (info && info.firstDay >= 1 && info.firstDay <= 7) return info.firstDay % 7;   // 7 = Sunday
@@ -1307,12 +1348,20 @@
     if (iso === today) b.setAttribute("aria-current", "date");
     var num = document.createElement("span"); num.className = "kit-calendar__num"; num.textContent = day.getDate(); b.appendChild(num);
     var evs = (st.events || []).filter(function (ev) { return String(ev.date).slice(0, 10) === iso; });
+    calendarDayEvents(b, evs);
+    b.setAttribute("aria-label", calendarDayLabel(day, iso, evs.length));
+    return b;
+  }
+  // Up to three events on a day's button, and "+N" for the rest.
+  function calendarDayEvents(b, evs) {
     evs.slice(0, 3).forEach(function (ev) { b.appendChild(calendarEvent(ev)); });
     if (evs.length > 3) { var more = document.createElement("span"); more.className = "kit-calendar__event"; more.textContent = "+" + (evs.length - 3); b.appendChild(more); }
+  }
+  // A day's name: its full date, and how many items it has.
+  function calendarDayLabel(day, iso, n) {
     var label;
     try { label = new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(day); } catch (e) { label = iso; }
-    b.setAttribute("aria-label", label + (evs.length ? ", " + evs.length + " item" + (evs.length > 1 ? "s" : "") : ""));
-    return b;
+    return label + (n ? ", " + n + " item" + (n > 1 ? "s" : "") : "");
   }
   function calendarDraw(el) {
     var st = el.kitCal, y = st.year, m = st.month;
@@ -1374,10 +1423,16 @@
     var col = (new Date(y, m, d).getDay() - calendarWeekStart(el) + 7) % 7;
     var steps = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7, Home: -col, End: 6 - col };
     if (Object.prototype.hasOwnProperty.call(steps, e.key)) { e.preventDefault(); calendarGo(el, new Date(y, m, d + steps[e.key]), false); return; }
-    if (e.key !== "PageUp" && e.key !== "PageDown") return;
+    var to = calendarPageTo(e, y, m, d);
+    if (!to) return;
     e.preventDefault();
+    calendarGo(el, to, true);
+  }
+  // PageUp and PageDown: the same day a month earlier or later (with Shift a year), or that month's last day.
+  function calendarPageTo(e, y, m, d) {
+    if (e.key !== "PageUp" && e.key !== "PageDown") return null;
     var by = (e.key === "PageUp" ? -1 : 1) * (e.shiftKey ? 12 : 1);
-    calendarGo(el, new Date(y, m + by, Math.min(d, new Date(y, m + by + 1, 0).getDate())), true);   // 31 March -> 30 April
+    return new Date(y, m + by, Math.min(d, new Date(y, m + by + 1, 0).getDate()));   // 31 March -> 30 April
   }
   // A day clicked: "kit:day" with that day's events.
   function calendarPick(el, day) {
@@ -1392,18 +1447,26 @@
     var day = e.target.closest(".kit-calendar__day");
     if (day) calendarPick(el, day);
   }
+  // The month asked for, from opts.month or data-month ("YYYY-MM"): { year, month } or null.
+  function calendarMonthOf(el, opts) {
+    var mm = /^(\d{4})-(\d{2})$/.exec((opts && opts.month) || el.getAttribute("data-month") || "");
+    return mm ? { year: +mm[1], month: +mm[2] - 1 } : null;
+  }
+  function calendarListen(el) {
+    el.addEventListener("click", function (e) { calendarClick(el, e); });
+    el.addEventListener("keydown", function (e) { calendarKey(el, e); });
+    el.addEventListener("focusin", function (e) {
+      var day = e.target.closest && e.target.closest(".kit-calendar__day");
+      if (day && day.getAttribute("data-date") !== el.kitCal.focus) { el.kitCal.focus = day.getAttribute("data-date"); calendarRove(el); }
+    });
+  }
   function setupCalendar(el, opts) {
-    var now = new Date(), mm = /^(\d{4})-(\d{2})$/.exec((opts && opts.month) || el.getAttribute("data-month") || "");
+    var now = new Date(), at = calendarMonthOf(el, opts);
     if (!el.kitCal) {
-      el.kitCal = { year: mm ? +mm[1] : now.getFullYear(), month: mm ? +mm[2] - 1 : now.getMonth(), events: [] };
-      el.addEventListener("click", function (e) { calendarClick(el, e); });
-      el.addEventListener("keydown", function (e) { calendarKey(el, e); });
-      el.addEventListener("focusin", function (e) {
-        var day = e.target.closest && e.target.closest(".kit-calendar__day");
-        if (day && day.getAttribute("data-date") !== el.kitCal.focus) { el.kitCal.focus = day.getAttribute("data-date"); calendarRove(el); }
-      });
+      el.kitCal = { year: at ? at.year : now.getFullYear(), month: at ? at.month : now.getMonth(), events: [] };
+      calendarListen(el);
     }
-    if (opts && mm) { el.kitCal.year = +mm[1]; el.kitCal.month = +mm[2] - 1; }
+    if (opts && at) { el.kitCal.year = at.year; el.kitCal.month = at.month; }
     if (opts && opts.events) el.kitCal.events = opts.events;
     calendarDraw(el);
   }
@@ -1486,8 +1549,13 @@
     d.addEventListener("close", function () { var b = d.kitBack; d.kitBack = null; if (b && b.focus && document.body.contains(b)) b.focus(); });
     filterRows(true);
   }
+  // Ctrl+K or Cmd+K, without Alt or Shift.
+  function paletteKey(e) {
+    var mod = e.ctrlKey || e.metaKey, extra = e.altKey || e.shiftKey;
+    return mod && !extra && String(e.key).toLowerCase() === "k";
+  }
   document.addEventListener("keydown", function (e) {
-    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== "k") return;
+    if (!paletteKey(e)) return;
     var d = document.querySelector("dialog[data-kit-palette]");
     if (!d) return;
     if (d.open) { e.preventDefault(); closePanel(d); return; }

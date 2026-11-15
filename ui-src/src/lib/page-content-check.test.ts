@@ -175,6 +175,39 @@ describe("page check: what the page shows", () => {
 });
 
 describe("page checks on odd pages (code review)", () => {
+  // Pinned before the checks were split into helpers (2026-11-15): the branches the main page does not reach.
+  it("measures a kit-progress bar, and takes no track with text in it for a bar", async () => {
+    document.head.innerHTML = "";
+    const bars = async (html: string) => {
+      document.body.innerHTML = "<table><caption>T</caption><tbody>" + html + "</tbody></table>";
+      return (await run()).filter((f) => f.kind === "bar").map((f) => f.text ?? "");
+    };
+    expect(await bars('<tr><td>Ann</td><td>40%</td><td><div class="kit-progress" data-w="200" data-h="10"><div class="kit-progress__bar" data-w="150" data-h="10"></div></div></td></tr>')).toEqual([
+      expect.stringContaining("'Ann' shows 40% but its bar is 75% full"),
+    ]);
+    expect(await bars('<tr><td>Ann</td><td>40%</td><td><div data-w="200" data-h="10" style="background: #eee">x<div data-w="150" data-h="10" style="background: red"></div></div></td></tr>')).toEqual([]);
+  });
+  it("leaves a chart that is still loading alone", async () => {
+    document.head.innerHTML = "";
+    document.body.innerHTML = '<div aria-busy="true"><div data-kit-chart="bar"></div></div><div data-kit-chart="line"><div class="kit-skeleton"></div></div>';
+    expect((await run()).filter((f) => f.kind === "empty")).toEqual([]);
+  });
+  it("names the text of a box that runs past its right edge", async () => {
+    document.head.innerHTML = "";
+    document.body.innerHTML = '<table><tr><td data-w="80">AVeryLongWordWithoutBreaks</td></tr></table>';
+    Object.defineProperty(document.querySelector("td")!, "scrollWidth", { configurable: true, value: 130 });
+    expect((await run()).filter((f) => f.kind === "escape").map((f) => f.text ?? "")).toEqual([
+      expect.stringMatching(/^has 1 part sticking out of their box: the text 'AVeryLongWordWithoutBreaks' runs 50 px past the right edge of its table cell: /),
+    ]);
+  });
+  it("places an ISO date where the first ISO date is, also after a two-digit year", async () => {
+    document.head.innerHTML = "";
+    document.body.innerHTML = "<p>16 Jul 26</p><table><caption>Dates</caption><tbody><tr><td>2026-07-16</td></tr></tbody></table>";
+    expect((await run()).filter((f) => f.kind === "date").map((f) => f.text ?? "")).toEqual([
+      expect.stringContaining("(such as '2026-07-16' in 'Dates')"),
+      expect.stringContaining("(such as '16 Jul 26')"),
+    ]);
+  });
   it("runs on a document without a body (an SVG or XML file) instead of throwing", async () => {
     const b = document.body;
     document.documentElement.removeChild(b);

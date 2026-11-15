@@ -283,6 +283,30 @@
       axis: pct ? Object.assign({}, data, { format: function (v) { return Math.round(v * 10) / 10 + "%"; } }) : data
     };
   }
+  // c below: one bar chart's data, sr (bar series), ln (line series), stacked, pct, total(li),
+  // horizontal, pad, plotH and bw (bar width).
+  // Where a bar goes: on top of the ones below it (stacked), or next to the others in its group.
+  function barPlace(c, start, si, len, from) {
+    var pad = c.pad, plotH = c.plotH, bw = c.bw;
+    if (c.stacked) return c.horizontal ? { x: pad.l + from, y: start, width: len, height: bw } : { x: start, y: pad.t + plotH - from - len, width: bw, height: len };
+    return c.horizontal ? { x: pad.l, y: start + si * (bw + 2), width: Math.max(0, len), height: bw } : { x: start + si * (bw + 2), y: pad.t + plotH - len, width: bw, height: Math.max(0, len) };
+  }
+  // A bar's value: a percent bar's is its share of the label's total.
+  function barValue(c, x, li) {
+    var v = x.values[li] || 0, tot = c.total(li);
+    if (!c.pct) return v;
+    return tot ? (Math.max(0, v) / tot) * 100 : 0;
+  }
+  // The tooltip: a stacked bar lists every part of its label, a grouped bar its own value; line
+  // series follow.
+  function barTip(c, lab, li, x, v) {
+    var data = c.data;
+    var partLine = function (y) { return "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li], data)) + (c.pct ? " (" + percent(y.values[li], c.total(li)) + ")" : ""); };
+    var text = c.stacked
+      ? "<strong>" + esc(lab) + "</strong> &middot; " + esc(fmt(c.total(li), data)) + c.sr.map(function (y) { return (y.values[li] || 0) > 0 ? partLine(y) : ""; }).join("")
+      : "<strong>" + esc(lab) + "</strong><br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(v, data));
+    return text + c.ln.map(function (y) { return "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li] || 0, data)); }).join("");
+  }
   function bar(host, data) {
     clear(host);
     var all = series(data), labels = data.labels || [], s = size(host), horizontal = !!data.horizontal;
@@ -303,26 +327,7 @@
     var lstep = horizontal ? 1 : labelStep(labels, plotW);
     var inner = band * 0.72, bw = stacked ? Math.max(1, inner) : Math.max(2, inner / Math.max(1, sr.length) - 2);
     var room = horizontal ? plotW : plotH;
-    // Where a bar goes: on top of the ones below it (stacked), or next to the others in its group.
-    var place = function (start, si, len, from) {
-      if (stacked) return horizontal ? { x: pad.l + from, y: start, width: len, height: bw } : { x: start, y: pad.t + plotH - from - len, width: bw, height: len };
-      return horizontal ? { x: pad.l, y: start + si * (bw + 2), width: Math.max(0, len), height: bw } : { x: start + si * (bw + 2), y: pad.t + plotH - len, width: bw, height: Math.max(0, len) };
-    };
-    // The tooltip: a stacked bar lists every part of its label, a grouped bar its own value; line
-    // series follow.
-    var partLine = function (y, li) { return "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li], data)) + (pct ? " (" + percent(y.values[li], total(li)) + ")" : ""); };
-    var tipText = function (lab, li, x, v) {
-      var text = stacked
-        ? "<strong>" + esc(lab) + "</strong> &middot; " + esc(fmt(total(li), data)) + sr.map(function (y) { return (y.values[li] || 0) > 0 ? partLine(y, li) : ""; }).join("")
-        : "<strong>" + esc(lab) + "</strong><br>" + (x.name ? esc(x.name) + ": " : "") + esc(fmt(v, data));
-      return text + ln.map(function (y) { return "<br>" + esc(y.name || "Value") + ": " + esc(fmt(y.values[li] || 0, data)); }).join("");
-    };
-    // A bar's value: a percent bar's is its share of the label's total.
-    var valueAt = function (x, li) {
-      var v = x.values[li] || 0, tot = total(li);
-      if (!pct) return v;
-      return tot ? (Math.max(0, v) / tot) * 100 : 0;
-    };
+    var c = { data: data, sr: sr, ln: ln, stacked: stacked, pct: pct, total: total, horizontal: horizontal, pad: pad, plotH: plotH, bw: bw };
     var barHover = function (rect, li, text) {
       var show = function () {
         bars.forEach(function (b) { b.el.classList.toggle("is-faded", stacked ? b.li !== li : b.el !== rect); });
@@ -338,7 +343,7 @@
       var rect = svgEl("path", { d: barPath(a, rounded ? Math.min(bw / 4, 4) : 0, horizontal), fill: color(x.i), class: "kit-chart__bar" }, svg);
       if (isOff(data.selected, lab) || isOff(data.selectedSeries, x.name)) rect.classList.add("is-off");
       growIn(host, rect, horizontal, growFrom);
-      barHover(rect, li, tipText(lab, li, x, v));
+      barHover(rect, li, barTip(c, lab, li, x, v));
       pickable(host, data, rect, { chart: "bar", part: "bar", value: lab, index: li, series: x.name, seriesIndex: x.i }, lab + (x.name ? ", " + x.name : "") + ": " + fmt(v, data));
       bars.push({ el: rect, s: x.i, li: li });
     };
@@ -346,9 +351,9 @@
       var start = (horizontal ? pad.t : pad.l) + li * band + (band - inner) / 2;
       var acc = 0, top = stacked ? topPart(sr, li) : -1;
       sr.forEach(function (x, si) {
-        var v = valueAt(x, li);
+        var v = barValue(c, x, li);
         if (stacked && v <= 0) return;
-        var a = place(start, si, room * (Math.max(0, v) / scale.max), room * (acc / scale.max));
+        var a = barPlace(c, start, si, room * (Math.max(0, v) / scale.max), room * (acc / scale.max));
         if (stacked) acc += Math.max(0, v);
         drawBar(x, lab, li, a, v, !stacked || si === top);
       });

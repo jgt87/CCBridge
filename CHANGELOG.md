@@ -6,6 +6,13 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.163] - 2026-11-15
+
+### Changed
+
+- UI kit (`kit.js`, `kit-charts.js`) and the page check (`lib/page-content-check.js`): long functions split into small named helpers (sorting, toasts, tooltips, data stamps, context menus, the calendar, bar charts; the date, chart, bar and overflow checks). Nothing changes in what pages show or what the page check reports.
+- Page check: new tests for a `kit-progress` bar, a chart that is still loading, text that runs past its table cell, and the place named for an ISO date.
+
 ## [v0.1.162] - 2026-11-12
 
 ### Fixed
