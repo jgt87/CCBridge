@@ -1,0 +1,43 @@
+{
+  "base": "http://127.0.0.1:5297",
+  "primary": ".kit-btn--primary",
+  "waivers": [
+    { "rule": "field-edge", "match": "textarea.flex", "reason": "The message field and its tool row are one box with one 3:1 edge: the field draws the top and sides, the tool row the sides and bottom, so the field itself has no bottom edge (the check reads only the bottom)." },
+    { "rule": "first-screen", "match": "Ask Copilot", "reason": "The message box is docked at the bottom of the chat, fully visible on the first screen at every width; the 60% line suits a page whose main control sits at the top." }
+  ],
+  "api": {
+    "/api/poll": {
+      "events": [
+        { "seq": 1, "type": "user", "text": "Add a total row to the sales table" },
+        { "seq": 2, "type": "assistant", "text": "I added a total row under the table. It sums the Amount column and updates when the data changes." },
+        { "seq": 3, "type": "done", "text": "Done" }
+      ],
+      "state": {
+        "project": { "name": "Budget tracker", "path": "C:/demo/Budget tracker", "location": ["Demo", "Budget tracker"] },
+        "mode": "ask", "busy": false, "progress": "", "copilot": "ready", "copilotMessage": "",
+        "throttle": { "used": 3, "max": 30 }, "credits": null, "todos": [], "promptLimit": 16000,
+        "workIq": "off", "workIqActual": null, "workIqAvailable": true, "logLevel": "info",
+        "version": "v0.1.163", "instance": "design-check", "queue": [], "schedules": []
+      }
+    },
+    "/api/projects": { "root": "C:/demo", "projects": [
+      { "name": "Budget tracker", "path": "C:/demo/Budget tracker", "modified": "2026-11-14T10:00:00" },
+      { "name": "Team rota", "path": "C:/demo/Team rota", "modified": "2026-11-10T09:00:00" }
+    ] },
+    "/api/files": { "files": [
+      { "path": "index.html", "size": 2048 },
+      { "path": "data/sales.csv", "size": 512 }
+    ] },
+    "/api/hints": { "hints": [] },
+    "/api/settings": { "settings": [] }
+  },
+  "views": [
+    { "name": "chat", "path": "/", "ready": "[placeholder^=\"Ask Copilot\"]", "main": "[placeholder^=\"Ask Copilot\"]", "fill": true },
+    { "name": "menu", "path": "/", "ready": "[placeholder^=\"Ask Copilot\"]", "steps": [{ "click": "Menu" }, { "wait": 400 }] },
+    { "name": "settings", "path": "/", "ready": "[placeholder^=\"Ask Copilot\"]", "steps": [{ "clickSelector": "[aria-label=\"Settings\"]" }, { "wait": 400 }] },
+    { "name": "automation tab", "path": "/", "ready": "#tab-automation", "steps": [{ "clickSelector": "#tab-automation" }, { "wait": 500 }] },
+    { "name": "history tab", "path": "/", "ready": "#tab-changes", "steps": [{ "clickSelector": "#tab-changes" }, { "wait": 500 }] },
+    { "name": "actions tab", "path": "/", "ready": "#tab-tasks", "steps": [{ "clickSelector": "#tab-tasks" }, { "wait": 500 }] },
+    { "name": "code health tab", "path": "/", "ready": "#tab-health", "steps": [{ "clickSelector": "#tab-health" }, { "wait": 500 }] }
+  ]
+}

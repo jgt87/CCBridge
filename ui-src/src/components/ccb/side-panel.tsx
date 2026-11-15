@@ -627,7 +627,7 @@ function ChangesPanel({
   onConfirmUndo: (seq: number | null) => void;
 }) {
   return (
-    <div>
+    <div className="p-3">
       <div className="flex flex-col gap-2">
       <GradientButton
         className="h-9 w-full"

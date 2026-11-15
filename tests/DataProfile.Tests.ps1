@@ -141,21 +141,24 @@ Describe 'Data profile report' {
         { Get-DataProfile $proj '..\outside.csv' } | Should Throw 'not one of the project'
     }
 
-    It 'profiles 10,000 rows quickly enough to run in the request' {
-        $big = New-Object System.Collections.Generic.List[string]
-        $big.Add('Id,Region,Amount,Day,Flag,Code')
+    # Fast enough to run in the request: the work grows with the rows, not faster. Bounded as a ratio
+    # of 1,000 and 10,000 rows timed in the same run (tests/Scaling.ps1), never in seconds: a slow
+    # machine or a busy CI runner makes both slower alike. Linear work gives about 10.
+    It 'profiles 10,000 rows in about ten times the work of 1,000 rows' {
+        . (Join-Path $root 'tests\Scaling.ps1')
         $regions = 'North', 'South', 'East', 'West'
-        for ($i = 1; $i -le 10000; $i++) { $big.Add(('{0},{1},{2}.{3},2024-{4:00}-{5:00},{6},{7:00000}' -f $i, $regions[$i % 4], ($i % 500), ($i % 100), (1 + $i % 12), (1 + $i % 28), $(if ($i % 2) { 'true' } else { 'false' }), ($i % 777))) }
-        [IO.File]::WriteAllText((Join-Path $proj 'Source\big.csv'), ($big -join "`n"))
+        foreach ($n in 1000, 10000) {
+            $rows = New-Object System.Collections.Generic.List[string]
+            $rows.Add('Id,Region,Amount,Day,Flag,Code')
+            for ($i = 1; $i -le $n; $i++) { $rows.Add(('{0},{1},{2}.{3},2024-{4:00}-{5:00},{6},{7:00000}' -f $i, $regions[$i % 4], ($i % 500), ($i % 100), (1 + $i % 12), (1 + $i % 28), $(if ($i % 2) { 'true' } else { 'false' }), ($i % 777))) }
+            [IO.File]::WriteAllText((Join-Path $proj "Source\rows$n.csv"), ($rows -join "`n"))
+        }
         $null = Update-DataImports -ProjectRoot $proj -JsCopy $false
-        $watch = [Diagnostics.Stopwatch]::StartNew()
-        $b = Get-DataProfile $proj 'Source/big.csv'
-        $null = ConvertTo-DataProfileCsv $b
-        $null = Format-DataProfileReport $b
-        $watch.Stop()
-        Write-Host "    10,000 rows x 6 columns profiled in $([Math]::Round($watch.Elapsed.TotalSeconds, 2)) s"
-        @($b.tables)[0].rows | Should Be 10000
-        $watch.Elapsed.TotalSeconds | Should BeLessThan 15
+        $makeReport = { param($Path) $p = Get-DataProfile $proj $Path; $null = ConvertTo-DataProfileCsv $p; $null = Format-DataProfileReport $p; $p }
+        @((& $makeReport 'Source/rows10000.csv').tables)[0].rows | Should Be 10000
+        $ratio = Measure-Growth { & $makeReport 'Source/rows1000.csv' } { & $makeReport 'Source/rows10000.csv' }
+        Write-Host "    10,000 rows took $([Math]::Round($ratio, 1)) times as long as 1,000 rows"
+        $ratio | Should BeLessThan 30
     }
 
     Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue

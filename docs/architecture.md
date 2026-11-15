@@ -138,3 +138,20 @@ The detailed reference behind `AGENTS.md`: what each module does, the functions 
 - Undo covers commands: around every `run`, `Start-RunSnapshot` copies files not yet in the step's checkpoint aside (`prerun\`, skipping files over 20 MB, 300 MB in all, `Source/` and ignored folders) and `Complete-RunSnapshot` adds what the command changed, deleted (old copy) or created (`new`); `Clear-RunSnapshot` at the end of the turn. `Undo-LastCheckpoint -Detailed` returns per file the lines that come back and go (`Get-UndoFileChange`) for the undo card; the Changes list drops a set when it is undone. Tests: `tests/Undo.Tests.ps1`.
 - History file diffs: `Get-ChangeSetFileDiff` (Executor) gives one file of a change set before (its backup; empty when the set created it) and right after it (the next change set's backup of that file, else the file now; `after` = later/now), API `GET /api/changeset/file?id=&path=`; the History card opens it in `FileViewer` with a Changes/File switch (`openChangeFile` in App.tsx, `DiffView tall`). Tests: `tests/ChangeSetDiff.Tests.ps1`.
 - Every agent turn is one checkpoint (backups under `%LOCALAPPDATA%\CCBridge\projects\...`, never in OneDrive).
+
+## Script parameters
+
+Every parameter of a script people run (the root, `tools/`, `mcp/`, `test-tools/`) and every `.cmd` launcher is named in README.md, AGENTS.md, CLAUDE.md or this file; `tests/DocsInStep.Tests.ps1` checks it. Each line below is a script whose parameters are not described elsewhere. Test launchers in `test-tools/` pass their options on (`%*`).
+
+- `tools/check.ps1` (`check.cmd`): `-Offline` skips the online checks (GitHub, Copilot, tool updates; `ccbridge.ps1` runs it so at every start); `-NoFix` only reports; `-Install NAME` installs one optional tool first.
+- `tools/check-deps.ps1`: `-Markdown FILE` also writes the report as Markdown; `-FailOnNewer` exits 1 when anything has a newer release (the weekly workflow); `-Quiet` prints only the summary and the parts with a newer release; `-Offline` makes no registry requests and `-NewestFor @{ package = 'x.y.z' }` gives the newest versions instead (both for tests).
+- `tools/collect-diagnostics.ps1` (`diagnostics.cmd`): `-Days N` of logs (2); `-IncludeReplies` adds the raw reply frames (full answers: only when asked); `-NoOpen` does not open Explorer at the zip.
+- `tools/run-tests.ps1`: `-Path` and `-Workers` as in AGENTS.md; `-Files` with `-ResultFile` is worker mode, used by the script itself: run these files and write the results there.
+- `tools/scan-repo.ps1`: `-Quiet` prints only the count, not each report.
+- `tools/agent-capture.ps1` (`test-tools/agent-capture.cmd`): records until Enter or `-MaxMinutes` (90); `-Seconds N` stops after N seconds and `-NoPicker` skips the @ step (unattended); `-KeepStepText` keeps progress step texts in timeline.txt; `-Agent Researcher|Analyst` runs the test by itself for at most `-RunMinutes` (40), `-SkipMention` the same run in a plain chat, `-TypeOnly` leaves the @mention as text.
+- `tools/complexity-test.ps1` (`test-tools/complexity-test.cmd`): steps `-From`..`-To`; `-StepTimeoutSec` longest wait per reply (300); `-PauseSec` between steps (3); `-PageCheckMs` how often the page is read (200).
+- `tools/html-echo-test.ps1` (`test-tools/html-echo-test.cmd`): `-Route both|normal|page` which reply route to test.
+- `tools/ondemand-test.ps1` (`test-tools/ondemand-test.cmd`): `-StepTimeoutMin` longest wait per step (6); `-Keep` is accepted and changes nothing (the test project is always kept).
+- `tools/rate-limit-test.ps1` (`test-tools/rate-limit-test.cmd`): `-Count` prompts at most (40); `-GapSec` between a reply and the next prompt (0); `-NewChatEvery N` prompts (0 = one chat); `-StopAfter` failures in a row (3).
+- `tools/stream-shape.ps1` (`test-tools/stream-shape.cmd`): `-Count` newest recordings (3); `-Path` one recording instead and `-OutFile` the summary file (agent-capture uses both).
+- `test-tools/probe.ps1` (`test-tools/probe.cmd`): `-SkipCdp` leaves out the Edge debug-port part; `-ReportPath` where the report goes (beside the script).

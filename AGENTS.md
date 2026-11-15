@@ -65,6 +65,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Pester .\tests"
 # The whole suite in parallel processes, as the release gate runs it (about 2 minutes; -Workers 1 = one process).
 # A test file that uses something machine-wide (a window, the Copilot lock, the real last-project.txt)
 # goes into $script:Alone in tools\run-tests.ps1, so it runs on its own after the parallel part.
+# .github/workflows/tests.yml runs it (Pester 3.4 pinned) and the UI checks on each push to main, tag and pull request.
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\run-tests.ps1
 # Third-party parts StreamHub ships with a newer release on npm (read from their own files: kit vendor
 # READMEs, templates/build/VERSIONS.txt, the Lucide JSON, ui-src/package-lock.json). The release gate
@@ -76,6 +77,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-deps.ps1
 powershell -NoProfile -Command "$e=$null; $null=[Management.Automation.Language.Parser]::ParseFile('<file>',[ref]$null,[ref]$e); $e"
 # Rebuild the UI after any change in ui-src (writes ui/); UI unit tests (vitest, dev only: src/**/*.test.ts)
 cd ui-src; npm run build; npm test
+# Rendered design checks on the built ui/ with invented data (design-check.json: views, API stubs, waivers;
+# test ports 5297, 9571, 9572), never the running app: touch reach, field edges, row heights, layout lint
+cd ui-src; npm run check:design
 # Build a release zip (dist\) and publish it as a GitHub Release
 # (it also creates and pushes the annotated tag of the same name on HEAD and publishes the GitHub
 # Release "StreamHub vX.Y.Z" with the zip; needs a clean, pushed tree and refuses an existing tag or
@@ -88,6 +92,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File mcp\ccbridge-mcp.ps1
 ```
 
 The running web server holds `lib/*.psm1` in memory: restart it after backend changes (the UI files are read fresh from disk).
+
+A new script parameter or launcher gets its line in `docs/architecture.md` "Script parameters" (`tests/DocsInStep.Tests.ps1`). A speed test bounds a ratio with `tests/Scaling.ps1` (`Measure-Growth`), never seconds (`tests/SpeedRules.Tests.ps1`).
 
 Project routing: `Submit-AgentTask` captures the project in every project task's payload; `Start-AgentWorker` applies it before preferences, vault sync and execution (including MCP undo), then restores the selected project after cleanup. `ProjectGate` excludes `Set-Project` for the whole task and idle project maintenance, including gaps when Busy is false. Tests: `tests/ProjectRouting.Tests.ps1`. Linked paths: `Resolve-ProjectLinkPath` follows complete junction/symlink chains with confinement and cycle checks; `Assert-Writable` applies protections to the resolved destination too. Project listings skip links, as vault traversal does. Tests: `tests/LinkedPaths.Tests.ps1`.
 

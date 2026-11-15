@@ -8,7 +8,7 @@
 .EXAMPLE
     check.cmd
 #>
-param([switch]$Offline, [switch]$Quiet, [switch]$NoFix, [ValidateSet('', 'python', 'pytest', 'node', 'dotnet', 'git')][string]$Install = '')
+param([switch]$Offline, [switch]$NoFix, [ValidateSet('', 'python', 'pytest', 'node', 'dotnet', 'git')][string]$Install = '')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Prereq.psm1') -Force

@@ -8,6 +8,7 @@
     "build": "tsc -b && node scripts/clean-ui.mjs && vite build --emptyOutDir=false",
     "lint": "oxlint",
     "test": "vitest run",
+    "check:design": "node scripts/design-checks.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

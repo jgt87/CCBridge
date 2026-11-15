@@ -22,6 +22,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')
+# The tests are written for Pester 3.4, the version Windows ships. A newer Pester beside it (GitHub's
+# Windows runners have one) would load first and does not read `Should Be`. Each worker runs this too.
+try { Import-Module Pester -RequiredVersion 3.4.0 -ErrorAction Stop } catch { Write-Warning "Pester 3.4.0 is not installed: the tests run with the newest Pester found." }
 
 # Test files that use something machine-wide, so they never run next to each other or the rest.
 $script:Alone = @(

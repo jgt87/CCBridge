@@ -1,0 +1,99 @@
+# Every test runner the repository has, on each push to main, each release tag and each pull request:
+# the Pester suite under Windows PowerShell 5.1 (tools/run-tests.ps1, as the release gate runs it),
+# and the UI's typecheck, lint, vitest, build and rendered design checks (Edge, which the runner has);
+# the build must reproduce the committed ui/ exactly.
+# No third-party actions: the commit is fetched with git, as in dependency-check.yml. One command per
+# step, so each step fails on its own command's exit code.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['**/*.md']
+  pull_request:
+    paths-ignore: ['**/*.md']
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pester:
+    name: Pester (Windows PowerShell 5.1)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Get the commit
+        shell: powershell
+        run: |
+          git init -q repo
+          git -C repo fetch -q --depth 1 "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git" "$env:GITHUB_SHA"
+          git -C repo checkout -q FETCH_HEAD
+
+      - name: Run the suite
+        shell: powershell
+        working-directory: repo
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools\run-tests.ps1
+
+  ui:
+    name: UI (typecheck, lint, vitest, build)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Get the commit
+        shell: powershell
+        run: |
+          git init -q repo
+          git -C repo fetch -q --depth 1 "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY.git" "$env:GITHUB_SHA"
+          git -C repo checkout -q FETCH_HEAD
+
+      - name: Node version
+        shell: powershell
+        run: node --version
+
+      - name: Install
+        shell: powershell
+        working-directory: repo/ui-src
+        run: npm ci
+
+      - name: Typecheck
+        shell: powershell
+        working-directory: repo/ui-src
+        run: npx tsc -b
+
+      - name: Lint
+        shell: powershell
+        working-directory: repo/ui-src
+        run: npm run lint
+
+      - name: Unit tests
+        shell: powershell
+        working-directory: repo/ui-src
+        run: npm test
+
+      - name: Build
+        shell: powershell
+        working-directory: repo/ui-src
+        run: npm run build
+
+      - name: Design checks (rendered, invented data)
+        shell: powershell
+        working-directory: repo/ui-src
+        run: npm run check:design
+
+      - name: The build matches the committed ui/
+        shell: powershell
+        working-directory: repo
+        run: |
+          $changed = @(git status --porcelain -- ui)
+          if ($changed.Count) {
+              $changed | ForEach-Object { Write-Host $_ }
+              Write-Host "::error::ui/ differs from a fresh build of ui-src: run 'npm run build' in ui-src and commit ui/."
+              exit 1
+          }
+          Write-Host 'ui/ matches the build.'

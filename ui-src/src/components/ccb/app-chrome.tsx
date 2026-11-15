@@ -25,7 +25,7 @@ export function AppHeader({ state, showDrawerButton, onOpenDrawer, onSwitchProje
       {showDrawerButton && (
         <button
           aria-label="Open side panel"
-          className="kit-btn kit-btn--ghost kit-btn--icon -ml-1.5 h-8 w-8 text-muted-foreground hover:text-foreground"
+          className="kit-btn kit-btn--ghost kit-btn--icon -ml-1.5 h-8 min-h-0 w-8 text-muted-foreground hover:text-foreground"
           onClick={onOpenDrawer}
           title="Open side panel (the window is too narrow to show it beside the chat)"
           type="button"
@@ -34,12 +34,12 @@ export function AppHeader({ state, showDrawerButton, onOpenDrawer, onSwitchProje
         </button>
       )}
       <div className="flex items-center gap-2 font-semibold tracking-tight">
-        <span className="grid h-7 w-7 place-items-center rounded-lg bg-foreground text-background text-xs">SH</span>
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground text-background text-xs">SH</span>
         <span>StreamHub <span className="ml-0.5 font-normal text-muted-foreground">by JGT</span></span>
       </div>
       {state.project && (
         <button
-          className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-muted-foreground text-sm hover:bg-(--kit-surface-2) hover:text-foreground"
+          className="flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2 text-muted-foreground text-sm hover:bg-(--kit-surface-2) hover:text-foreground"
           onClick={onSwitchProject}
           title={`${state.project.name}\n${state.project.path}\nClick to open or create another project`}
           type="button"
@@ -52,7 +52,7 @@ export function AppHeader({ state, showDrawerButton, onOpenDrawer, onSwitchProje
       <CopilotStatus copilot={state.copilot} message={state.copilotMessage} retryAt={state.copilotRetryAt} />
       <button
         aria-label="Settings"
-        className="kit-btn kit-btn--ghost kit-btn--icon h-8 w-8 text-muted-foreground hover:text-foreground"
+        className="kit-btn kit-btn--ghost kit-btn--icon h-8 min-h-0 w-8 text-muted-foreground hover:text-foreground"
         onClick={onSettings}
         title="Settings"
         type="button"

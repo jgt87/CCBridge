@@ -335,7 +335,7 @@ export default function AI_Prompt({
             <div className="overflow-y-auto" style={{ maxHeight: "400px" }}>
               <Textarea aria-label="Message"
                 className={cn(
-                  "w-full resize-none rounded-xl rounded-b-none border-none bg-white px-4 py-3 placeholder:text-black/70 focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-white/5 dark:text-foreground dark:placeholder:text-white/50",
+                  "w-full resize-none rounded-xl rounded-b-none border border-b-0 border-(--input) bg-white px-4 py-3 placeholder:text-black/70 focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-white/5 dark:text-foreground dark:placeholder:text-white/50",
                   "min-h-[72px]"
                 )}
                 disabled={disabled}
@@ -351,7 +351,9 @@ export default function AI_Prompt({
               />
             </div>
 
-            <div className="flex h-14 items-center rounded-b-xl bg-white dark:bg-white/5">
+            {/* CCBridge: the field and this tool row are one box with one edge (DESIGN.md "Edge"): the
+                field draws the top and sides, this row the sides and bottom. */}
+            <div className="flex h-14 items-center rounded-b-xl border border-t-0 border-(--input) bg-white dark:bg-white/5">
               <div className="absolute right-3 bottom-3 left-3 flex w-[calc(100%-24px)] items-center justify-between">
                 <PromptTools
                   clarify={clarify}

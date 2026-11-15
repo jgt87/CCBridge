@@ -6,6 +6,20 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.164] - 2026-11-16
+
+### Changed
+
+- `check.cmd` no longer accepts `-Quiet`: it never had an effect. Every option of the scripts and test launchers is now described (`docs/architecture.md`, "Script parameters"), and a new test keeps it that way.
+- The data profile speed test compares 1,000 and 10,000 rows timed in the same run instead of a limit in seconds, so a slow machine no longer fails it. A new test refuses clock limits in test files.
+- Fields and bordered controls have a clearly visible outline (3:1 against what is behind them, light and dark): the message box with its tool row is one outlined box, and the Agent and Response menus, Work IQ, New chat, Settings choices and the Menu search field read as places to choose or type. A focused field's outline turns dark (light in the dark theme) instead of paler. Dividers keep their faint line.
+
+### Fixed
+
+- On a touch screen every button of the app is easy to hit (44 px reach, the look unchanged), and menus and text fields are 44 px tall with 16 px text, so a phone does not zoom in on them.
+- The top bar's buttons (side panel, Switch project, Settings, Menu) are one height, and the StreamHub badge no longer shrinks in a narrow window.
+- The History tab keeps its text and Undo button off the panel's edge.
+
 ## [v0.1.163] - 2026-11-15
 
 ### Changed

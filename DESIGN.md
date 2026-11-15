@@ -8,6 +8,8 @@ colors:
   pencil: "oklch(0.556 0 0)"
   shelf: "oklch(0.97 0 0)"
   hairline: "oklch(0.922 0 0)"
+  edge: "oklch(0.62 0 0)"
+  edge-night: "oklch(1 0 0 / 38%)"
   graphite: "oklch(0.261 0.004 84.6)"
   graphite-raised: "oklch(0.29 0.004 84.6)"
   graphite-float: "oklch(0.305 0.004 84.6)"
@@ -138,7 +140,8 @@ A grey scale (pure in light; in dark, Copilot's warm graphite with a barely visi
 ### Neutral
 - **Paper** (oklch(1 0 0)): the light page and every light surface.
 - **Shelf** (oklch(0.97 0 0)): light muted surfaces and secondary fills.
-- **Hairline** (oklch(0.922 0 0)): light borders and inputs; in practice drawn as black at 10%.
+- **Hairline** (oklch(0.922 0 0)): light dividers and panel borders; in practice drawn as black at 10%.
+- **Edge** (oklch(0.62 0 0); **Edge Night** white at 38% in dark; CSS `--input`): the outline of every field and bordered control, at least 3:1 against the surface and the 5% bands it sits on, so a place to type or choose reads as one at rest (operator, 2026-11-16; before, fields used the Hairline).
 - **Pencil** (oklch(0.556 0 0)): light secondary text, labels, counts, placeholders' darker cousin.
 - **Graphite** (oklch(0.261 0.004 84.6), rgb 37 36 34): the dark page. It is exactly the base color of the Copilot window, measured from its page, so the two panes meet without a seam.
 - **Graphite Raised** (oklch(0.29 0.004 84.6)) and **Graphite Float** (oklch(0.305 0.004 84.6)): dark cards, the side panel, popovers and menus, one and two steps above the page in the same hue.
@@ -198,7 +201,7 @@ Flat and unassuming: controls look like part of the page until you need them.
 - **Tinted:** the default action in a row (Create, Send answer): a 5% tint at rest (10% in dark), 10% on hover.
 - **Solid:** Ink fill with Paper text (inverted in dark), for the one active choice; hover at 85% opacity.
 - **Disabled:** 40% opacity and no hover tint.
-- **Bordered (Settings):** a 1px hairline, 32px tall, one fixed width (192px) so every control column lines up.
+- **Bordered (Settings, the message box header):** a 1px Edge, 32px tall, one fixed width (192px) so every control column lines up.
 
 ### Chips
 - **Count chip:** 10px tabular numbers in Pencil inside a 1px ring at 10%, 4px radius, beside section labels.
@@ -213,9 +216,9 @@ Flat and unassuming: controls look like part of the page until you need them.
 - **Internal Padding:** 8px for list cards, 12px for panel sections.
 
 ### Inputs / Fields
-- **Style:** 1px hairline, transparent fill, 8px radius, 32px tall, 14px text.
-- **Focus:** the border darkens to 30% (black or white); no glow, no colour ring.
-- **Composer:** a 5% tinted well with 18px outer radius; placeholder at 70% (light) or 50% (dark).
+- **Style:** 1px Edge, transparent fill, 8px radius, 32px tall, 14px text (16px on a touch screen).
+- **Focus:** the border turns Ink (Chalk in dark), never lighter than at rest; no glow, no colour ring.
+- **Composer:** a 5% tinted well with 18px outer radius; the message field and its tool row inside are one white box with one 1px Edge all round; placeholder at 70% (light) or 50% (dark).
 - **Segmented choice:** a bordered strip, the selected option on a 10% tint (15% in dark); used for every on/off and small set of choices in Settings.
 
 ### Navigation
@@ -232,7 +235,7 @@ Flat and unassuming: controls look like part of the page until you need them.
 ## 6. Do's and Don'ts
 
 ### Do:
-- **Do** keep all chrome on the grey scale tokens (Paper, Shelf, Hairline, Pencil; Graphite, Graphite Raised, Graphite Shelf, Dust, Chalk), never hard-coded gray/zinc/neutral classes.
+- **Do** keep all chrome on the grey scale tokens (Paper, Shelf, Hairline, Edge, Pencil; Graphite, Graphite Raised, Graphite Shelf, Dust, Chalk), never hard-coded gray/zinc/neutral classes.
 - **Do** express hover, selection and grouping as black or white at 3, 5, 10 or 15 percent.
 - **Do** separate surfaces with 1px hairlines at 10% and one tonal step, never with shadows.
 - **Do** keep dark mode on Copilot's palette: Graphite page, Chalk text (about 11:1), Dust secondary (about 7:1); red text in dark uses the lighter rose (rose-400) to stay above 4.5:1.
