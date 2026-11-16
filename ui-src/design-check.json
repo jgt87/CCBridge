@@ -2,7 +2,6 @@
   "base": "http://127.0.0.1:5297",
   "primary": ".kit-btn--primary",
   "waivers": [
-    { "rule": "field-edge", "match": "textarea.flex", "reason": "The message field and its tool row are one box with one 3:1 edge: the field draws the top and sides, the tool row the sides and bottom, so the field itself has no bottom edge (the check reads only the bottom)." },
     { "rule": "first-screen", "match": "Ask Copilot", "reason": "The message box is docked at the bottom of the chat, fully visible on the first screen at every width; the 60% line suits a page whose main control sits at the top." }
   ],
   "api": {

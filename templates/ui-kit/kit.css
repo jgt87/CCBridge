@@ -99,9 +99,11 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-panel--sticky { position: sticky; top: 0; z-index: var(--kit-z-sticky, 5); box-shadow: var(--kit-shadow); }
 
 /* Buttons */
+/* box-sizing: the border inside the height, so an <a class="kit-btn"> is as tall as a <button> (38 next
+   to 36px before; CommonShared docs/17 §2, measured with check-control-rows 2026-11-16). */
 .kit-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--kit-space-2);
-  min-height: 2.25rem; padding: 0 var(--kit-space-4);
+  box-sizing: border-box; min-height: 2.25rem; padding: 0 var(--kit-space-4);
   border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius);
   background: var(--kit-surface); color: var(--kit-text);
   font: inherit; font-size: var(--kit-text-sm); font-weight: 550; cursor: pointer;
@@ -126,10 +128,11 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-label { font-size: var(--kit-text-sm); font-weight: 550; }
 .kit-help { font-size: var(--kit-text-xs); color: var(--kit-text-muted); }
 .kit-error-text { font-size: var(--kit-text-xs); color: var(--kit-error); }
+/* box-sizing: an <input> counts its border on top of the height otherwise (38px next to a 36px select). */
 .kit-input, .kit-select, .kit-textarea {
   font: inherit; font-size: var(--kit-text-sm); color: var(--kit-text);
   background: var(--kit-surface); border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius);
-  min-height: 2.25rem; padding: 0 var(--kit-space-3);
+  box-sizing: border-box; min-height: 2.25rem; padding: 0 var(--kit-space-3);
 }
 .kit-textarea { min-height: 5rem; padding: var(--kit-space-2) var(--kit-space-3); resize: vertical; }
 .kit-input:focus, .kit-select:focus, .kit-textarea:focus { outline: none; border-color: var(--kit-accent); box-shadow: var(--kit-focus); }

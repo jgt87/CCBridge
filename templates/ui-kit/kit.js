@@ -929,7 +929,8 @@
 
   // When the data is from: <span class="kit-stamp" data-kit-stamp="2026-10-09T14:00"> or
   // data-kit-stamp-of="GLOBAL" (the time the helper program gives a data block: window.kitDataAsOf).
-  // Shows "Data as of 9 Oct 2026, 14:00 (2 hours ago)"; data-kit-prefix changes the first words.
+  // Shows "Data as of 14:00 (2 hours ago)" for today and "Data as of 9 Oct 2026, 14:00 (3 days ago)" for an
+  // earlier day; data-kit-prefix changes the first words.
   function ago(ms) {
     var s = Math.round((ms - Date.now()) / 1000), a = Math.abs(s);
     var unit = a < 60 ? ["second", s] : a < 3600 ? ["minute", Math.round(s / 60)] : a < 86400 ? ["hour", Math.round(s / 3600)] : ["day", Math.round(s / 86400)];
@@ -944,14 +945,17 @@
     var d = v ? new Date(v) : null;
     return d && !isNaN(d.getTime()) ? d : null;
   }
+  // The time alone when it is today, the date first on any other day (CommonShared kit/stamp.js).
   function stampText(d) {
-    try { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(d); } catch (e) { return d.toLocaleString(); }
+    var opts = d.toDateString() === new Date().toDateString() ? { timeStyle: "short" } : { dateStyle: "medium", timeStyle: "short" };
+    try { return new Intl.DateTimeFormat(undefined, opts).format(d); } catch (e) { return d.toLocaleString(); }
   }
   function showStamp(el, when) {
     var d = stampDate(el, when);
     if (!d) return;
     if (when) el.setAttribute("data-kit-stamp", d.toISOString());
-    el.textContent = (el.getAttribute("data-kit-prefix") || "Data as of") + " " + stampText(d) + " (" + ago(d.getTime()) + ")";
+    var rel = ago(d.getTime());   // empty in a browser without relative time formats: no empty brackets
+    el.textContent = (el.getAttribute("data-kit-prefix") || "Data as of") + " " + stampText(d) + (rel ? " (" + rel + ")" : "");
     el.setAttribute("title", d.toISOString());
   }
   function showStamps() { Array.prototype.forEach.call(document.querySelectorAll(".kit-stamp, [data-kit-stamp], [data-kit-stamp-of]"), function (el) { showStamp(el); }); }

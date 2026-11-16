@@ -196,7 +196,10 @@ const lintScan = (phone, coarse, ignore) => `(() => { ${visible}
     const s = getComputedStyle(e); const under = [];
     for (let p = e.parentElement; p; p = p.parentElement) { const c = getComputedStyle(p).backgroundColor; if (!clear(c)) under.unshift(c); }
     const base = paint(under);
-    const edge = px(s.borderBottomWidth) >= 1 && !clear(s.borderBottomColor) ? contrast(paint([...under, s.borderBottomColor]), base) : 0;
+    // The strongest side: an underlined field has only a bottom edge, and a field joined to a tool row
+    // below it has its edge on the top and sides (a PowerShell bridge's message box, 16 Nov 2026).
+    const side = (n) => (px(s['border' + n + 'Width']) >= 1 && !clear(s['border' + n + 'Color']) ? contrast(paint([...under, s['border' + n + 'Color']]), base) : 0);
+    const edge = Math.max(side('Top'), side('Right'), side('Bottom'), side('Left'));
     const fill = clear(s.backgroundColor) ? 0 : contrast(paint([...under, s.backgroundColor]), base);
     if (Math.max(edge, fill) < 3) say('fail', 'field-edge', e, 'edge ' + edge.toFixed(2) + ':1, fill ' + fill.toFixed(2) + ':1 against what is behind it (3:1 needed)');
   }

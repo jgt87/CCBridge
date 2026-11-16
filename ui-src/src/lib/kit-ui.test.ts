@@ -176,6 +176,31 @@ type KitFormat = { number: (v: unknown, o?: { decimals?: number }) => string; pe
 type KitTable = HTMLTableElement & { kitSelected: () => HTMLTableRowElement[]; kitSelect: (on: boolean) => void };
 
 describe("kit.js additions", () => {
+  it("writes a data stamp as the time alone today, the date first on another day, and no empty brackets", async () => {
+    await table([["a", "1"]]);
+    const kit = (w as unknown as { KitUI: { stamp: (el: Element, when?: string) => void } }).KitUI;
+    vi.useFakeTimers({ now: new Date(2026, 10, 16, 15, 0, 0) });
+    try {
+      document.body.innerHTML = '<span id="s1" class="kit-stamp"></span><span id="s2" class="kit-stamp" data-kit-prefix="Prices from"></span>';
+      const s1 = document.getElementById("s1")!, s2 = document.getElementById("s2")!;
+      kit.stamp(s1, new Date(2026, 10, 16, 14, 0, 0).toISOString());
+      expect(s1.textContent).toMatch(/^Data as of [^,]*\b(14:00|2:00\s?PM)\b \(1 hour ago\)$/);   // no date: it is today
+      kit.stamp(s2, new Date(2026, 10, 13, 9, 30, 0).toISOString());
+      expect(s2.textContent).toMatch(/^Prices from .*2026.* \(3 days ago\)$/);
+      expect(s2.getAttribute("title")).toBe(new Date(2026, 10, 13, 9, 30, 0).toISOString());
+      // A browser without relative time formats: the time without "()".
+      const real = Intl.RelativeTimeFormat;
+      (Intl as unknown as Record<string, unknown>).RelativeTimeFormat = undefined;
+      try {
+        kit.stamp(s1, new Date(2026, 10, 16, 14, 0, 0).toISOString());
+        expect(s1.textContent).not.toContain("(");
+      } finally {
+        (Intl as unknown as Record<string, unknown>).RelativeTimeFormat = real;
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("formats numbers, percentages and dates by the page's language", async () => {
     await table([["a", "1"]]);
     const fmt = (w as unknown as { KitUI: { format: KitFormat } }).KitUI.format;

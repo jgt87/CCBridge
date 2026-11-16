@@ -6,6 +6,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 Nothing yet.
 
+## [v0.1.165] - 2026-11-16
+
+### Fixed
+
+- UI kit (revision 16): a link styled as a button (`<a class="kit-btn">`) and a text field are as tall as a button and a select beside them (they were 2 px taller), so a row of controls in a kit page is one height. Projects get it with their next kit update.
+- UI kit (revision 16): a data stamp shows the time alone for today ("Data as of 14:00 (1 hour ago)") and the date first only for an earlier day, and no longer shows empty brackets in a browser that cannot say "1 hour ago".
+- Tests on GitHub: a test file that runs longer than 5 minutes is stopped and named, instead of the whole run hanging until GitHub cancels it; the log lists each file as it finishes.
+- `.gitignore`: each block says why its paths stay out; output and scratch folders are anchored to the root; files that tools write on this machine (`.vscode/`, `.mcp.json`, `.github/copilot-instructions.md`) and common local files (`.env`, logs, OS files) stay out of git.
+
 ## [v0.1.164] - 2026-11-16
 
 ### Changed
