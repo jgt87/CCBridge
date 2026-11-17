@@ -13,6 +13,7 @@ All notable changes to StreamHub are listed here, newest first.
 ### Fixed
 
 - A project opened by its short Windows path (such as `C:\PROGRA~1\...`) refused its own files as "outside the project". Every check that compares a path with the project folder now uses the folder's full, long form, and a project is stored in that form when it opens. On GitHub this made the test run fail 250 tests and hang on one; the test runner now also uses the long form of the temporary folder.
+- The parallel test run could stop a group of tests with a file access error: the list of finished files was read while a test process was adding to it. It is now read without blocking the writer.
 
 ## [v0.1.165] - 2026-11-16
 

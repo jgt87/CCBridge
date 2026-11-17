@@ -47,14 +47,24 @@ $script:Alone = @(
     'DataMirror.Tests.ps1'    # saves and puts back the real last-project.txt
 )
 
+# A worker's line in its progress file. The parent reads the file while the worker runs, so a write
+# can meet that read: it is tried again for about a second, and a line that still fails is left out
+# rather than stopping the worker (the v0.1.166 gate failed on an IOException here).
+function Add-ProgressLine([string]$Line) {
+    if (-not $ProgressFile) { return }
+    for ($i = 0; $i -lt 20; $i++) {
+        try { [IO.File]::AppendAllText($ProgressFile, "$Line`r`n"); return } catch { Start-Sleep -Milliseconds 50 }
+    }
+}
+
 if ($Files) {
     # Worker: one Invoke-Pester per file, so each file's time is known for the next balancing.
     $out = foreach ($f in $Files) {
-        if ($ProgressFile) { [IO.File]::AppendAllText($ProgressFile, "start`t$f`t$([DateTime]::UtcNow.Ticks)`r`n") }
+        Add-ProgressLine "start`t$f`t$([DateTime]::UtcNow.Ticks)"
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $r = Invoke-Pester -Script $f -PassThru -Quiet
         $sw.Stop()
-        if ($ProgressFile) { [IO.File]::AppendAllText($ProgressFile, "done`t$f`t$([math]::Round($sw.Elapsed.TotalSeconds, 1))`r`n") }
+        Add-ProgressLine "done`t$f`t$([math]::Round($sw.Elapsed.TotalSeconds, 1))"
         @{ file = (Split-Path -Leaf $f); passed = $r.PassedCount; failed = $r.FailedCount; seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1)
            failures = @($r.TestResult | Where-Object { -not $_.Passed } | ForEach-Object { @{ name = "$($_.Describe) / $($_.Name)"; message = "$($_.FailureMessage)" } }) }
     }
@@ -112,12 +122,25 @@ $start = {
 # Waits for the workers, watching their progress files: prints each finished file on GitHub Actions,
 # and stops a worker (with the processes it started) whose current file runs past -FileTimeoutSec.
 $onCi = [bool]$env:GITHUB_ACTIONS
+# The complete lines of a worker's progress file, read with write sharing so the worker can keep
+# appending (ReadAllLines denies writers, and the worker's append then failed). A last line without
+# its line end is still being written and waits for the next look.
+function Read-ProgressLines([string]$File) {
+    $text = ''
+    try {
+        $fs = New-Object IO.FileStream($File, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        try { $text = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+    } catch { $text = '' }
+    $parts = $text -split "`r`n"
+    if ($parts.Count -lt 2) { return }
+    $parts[0..($parts.Count - 2)]
+}
 $watch = {
     param([object[]]$List)
     while (@($List | Where-Object { -not $_.process.HasExited }).Count) {
         foreach ($r in $List) {
             if (-not (Test-Path -LiteralPath $r.progress)) { continue }
-            $lines = @(try { [IO.File]::ReadAllLines($r.progress) } catch { @() })
+            $lines = @(Read-ProgressLines $r.progress)
             for ($k = $r.shown; $k -lt $lines.Count; $k++) {
                 $p = $lines[$k] -split "`t"
                 if ($onCi -and $p[0] -eq 'done') { Write-Host ("  {0} ({1} s, {2})" -f (Split-Path -Leaf $p[1]), $p[2], $r.name) }
