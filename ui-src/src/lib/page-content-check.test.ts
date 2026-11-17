@@ -2,12 +2,11 @@
 // The page check (lib/page-content-check.js) on a page that has one of each problem, and on a clean
 // one: every kind it reports, in order, with its text. jsdom has no layout, so boxes come from
 // data-w / data-h (100 x 50 when not given) and innerText is the text content.
-import fs from "node:fs";
-import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-const repo = path.resolve(import.meta.dirname, "../../..");
-const pageCheck = fs.readFileSync(path.join(repo, "lib/page-content-check.js"), "utf8");
+// Imported as text (Vite ?raw), not read from disk: an import is how code-health tools pair a test
+// with the file it tests. The check is one expression, evaluated below as the app evaluates it.
+import pageCheck from "../../../lib/page-content-check.js?raw";
+import contrast from "../../../lib/contrast-check.js?raw";
 const run = async () => JSON.parse(await (new Function("return (\n" + pageCheck + "\n)")() as Promise<string>)) as { kind: string; text?: string; classes?: string[] }[];
 
 const size = (el: Element, name: string, fallback: number) => {
@@ -218,7 +217,6 @@ describe("page checks on odd pages (code review)", () => {
     }
   });
   it("compares sizes in a row, not a tip button in a heading or a button beside one that wraps", () => {
-    const contrast = fs.readFileSync(path.join(repo, "lib/contrast-check.js"), "utf8");
     const real = window.getComputedStyle;
     const ctx = HTMLCanvasElement.prototype.getContext;
     // jsdom: no canvas and no computed opacity; heights from data-h.

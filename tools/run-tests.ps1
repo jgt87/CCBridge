@@ -28,6 +28,13 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')
+# TEMP in its long form: GitHub's Windows runners give an 8.3 short path (a user folder named RUNNER~1), the
+# tests make their projects under it, and paths the code reads back from the disk come in the long
+# form, so 171 tests failed there and one hung (2026-11-16). The workers inherit the long form.
+foreach ($v in 'TEMP', 'TMP') {
+    $t = [Environment]::GetEnvironmentVariable($v)
+    if ($t -and (Test-Path -LiteralPath $t)) { [Environment]::SetEnvironmentVariable($v, [IO.Path]::GetFullPath($t).TrimEnd('\')) }
+}
 # The tests are written for Pester 3.4, the version Windows ships. A newer Pester beside it (GitHub's
 # Windows runners have one) would load first and does not read `Should Be`. Each worker runs this too.
 try { Import-Module Pester -RequiredVersion 3.4.0 -ErrorAction Stop } catch { Write-Warning "Pester 3.4.0 is not installed: the tests run with the newest Pester found." }

@@ -1278,7 +1278,8 @@ function Set-Project($State, [string]$Path) {
     try {
     if ($State.Busy) { throw "$($script:SwitchTaskText) $current. Wait for it to finish or press Stop, then open the project again." }
     $State.SwitchWanted = $false
-    $State.ProjectRoot = $Path.TrimEnd('\')
+    # The long, full form (Get-FullRoot): paths under it are compared and cut in that form everywhere.
+    $State.ProjectRoot = Get-FullRoot $Path
     $State.SessionSince = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')   # line-change counts start here
     $State.OpenedAt = $State.SessionSince   # "last change" counts only changes made after this open
     $State.Todos = @()

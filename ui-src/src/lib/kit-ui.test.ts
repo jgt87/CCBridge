@@ -4,10 +4,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-
-const repo = path.resolve(import.meta.dirname, "../../..");
-const kitJs = fs.readFileSync(path.join(repo, "templates/ui-kit/kit.js"), "utf8");
-const chartsJs = fs.readFileSync(path.join(repo, "templates/ui-kit/kit-charts.js"), "utf8");
+// The kit's scripts imported as text (Vite ?raw), not read from disk: an import is how code-health
+// tools pair a test with the file it tests. Each script runs below as a page runs it.
+import kitJs from "../../../templates/ui-kit/kit.js?raw";
+import chartsJs from "../../../templates/ui-kit/kit-charts.js?raw";
+import iconsRuntimeJs from "../../../templates/ui-kit/kit-icons-runtime.js?raw";
+import pageCheckJs from "../../../lib/page-content-check.js?raw";
 
 function load(code: string) {
   // The kit's scripts set up what the page has when they load; run them against this document.
@@ -579,7 +581,8 @@ describe("kit.js basics (revision 11)", () => {
 });
 
 describe("kit.css pointer rules", () => {
-  const css = fs.readFileSync(path.join(repo, "templates/ui-kit/kit.css"), "utf8");
+  // Read from disk: vitest hands an imported stylesheet over empty, ?raw included.
+  const css = fs.readFileSync(path.resolve(import.meta.dirname, "../../../templates/ui-kit/kit.css"), "utf8");
   it("shows hover looks only to a fine pointer", () => {
     const hovers = css.match(/@media[^{]*hover:\s*hover[^{]*\{/g) || [];
     expect(hovers.length).toBeGreaterThan(0);
@@ -595,7 +598,7 @@ describe("kit.css pointer rules", () => {
 });
 
 describe("page check: kit classes without a rule", () => {
-  const pageCheck = fs.readFileSync(path.join(repo, "lib/page-content-check.js"), "utf8");
+  const pageCheck = pageCheckJs;
   it("lists kit classes on the page, also ones a script added, that no loaded stylesheet has a rule for", async () => {
     document.head.innerHTML = "<style>.kit-panel { padding: 4px; } @media (min-width: 1px) { .kit-table th { color: red; } }</style>";
     document.body.innerHTML = '<div class="kit-panel"><table class="kit-table"><thead><tr><th><button class="kit-table__sort">Name</button></th></tr></thead></table><span class="kit-chart__swatch other"></span></div><template><i class="kit-ghost"></i></template>';
@@ -815,7 +818,7 @@ describe("kit-charts.js bar charts with a line series", () => {
 
 describe("kit-icons-runtime.js", () => {
   it("draws icons before existing text and makes only a named, non-interactive icon an image", () => {
-    const iconsJs = fs.readFileSync(path.join(repo, "templates/ui-kit/kit-icons-runtime.js"), "utf8");
+    const iconsJs = iconsRuntimeJs;
     (window as unknown as { KitIconData: Record<string, string> }).KitIconData = { plus: '<path d="M5 12h14"/>' };
     document.body.innerHTML = `<span id="img" data-kit-icon="plus" aria-label="Add"></span>
       <button id="btn" data-kit-icon="plus" aria-label="Add">New</button>

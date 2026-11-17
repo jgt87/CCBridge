@@ -4,7 +4,15 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
-Nothing yet.
+## [v0.1.166] - 2026-11-17
+
+### Changed
+
+- New tests for the side panel (Files tree, History with Undo and Restore) and the upload box (refused files, progress, several files one after another, a failed upload), and the two design check scripts now prove their own rules with the tests when Edge is installed. The UI kit and page check tests load those files as imports, so code health tools see them as tested.
+
+### Fixed
+
+- A project opened by its short Windows path (such as `C:\PROGRA~1\...`) refused its own files as "outside the project". Every check that compares a path with the project folder now uses the folder's full, long form, and a project is stored in that form when it opens. On GitHub this made the test run fail 250 tests and hang on one; the test runner now also uses the long form of the temporary folder.
 
 ## [v0.1.165] - 2026-11-16
 

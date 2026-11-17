@@ -143,7 +143,7 @@ function Get-OneDriveLocation {
     }
     foreach ($od in $env:OneDriveCommercial, $env:OneDrive, $env:OneDriveConsumer) {
         if (-not $od) { continue }
-        $root = $od.TrimEnd('\')
+        $root = Get-FullRoot $od
         if ($full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
             return [pscustomobject]@{ Display = (@('OneDrive') + @($full.Substring($root.Length + 1).Split('\'))) -join ' > '; Url = $null }
         }
@@ -160,6 +160,16 @@ function Get-ProjectStateDir([string]$ProjectRoot) {
     $dir = Join-Path $base "$((Split-Path $ProjectRoot -Leaf) -replace '[^\w.-]', '_')-$hash"
     if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir }
     $dir
+}
+
+function Get-FullRoot([string]$Path) {
+    <# A root to compare paths against, in the form [IO.Path]::GetFullPath gives every path: full, with
+       no trailing \, and an 8.3 short name (a user folder named RUNNER~1) expanded to its long form for a folder
+       that exists. A root compared as given while the paths under it came from GetFullPath made every
+       file of a project opened by its short path "outside the project" (GitHub's Windows runners, whose
+       TEMP is a short path, 2026-11-16). On a path GetFullPath refuses, the path as given. #>
+    if (-not $Path) { return '' }
+    try { return [IO.Path]::GetFullPath($Path).TrimEnd('\') } catch { return $Path.TrimEnd('\') }
 }
 
 function Test-RootedPath([string]$Path) {
@@ -187,14 +197,14 @@ function Resolve-ProjectPath {
     $rel = $RelativePath.Trim().Trim('"', "'", '`').Replace('/', '\').TrimStart('\')
     if (-not $rel -or (Test-RootedPath $rel)) { throw "Path must be relative to the project: '$RelativePath'" }
     if (-not (Test-PathChars $rel)) { throw "Path holds a character a file name cannot have (a quote, <, >, | or a control character): '$RelativePath'" }
-    $root = $ProjectRoot.TrimEnd('\')
+    $root = Get-FullRoot $ProjectRoot
     # shared/... (library/ when the project has a shared folder of its own: Get-SharedPrefix) is the
     # library beside the projects (Get-SharedRoot).
     $prefix = Get-SharedPrefix $ProjectRoot
     if ($rel -match "^$([regex]::Escape($prefix))(\\|$)") {
         $shared = Get-SharedRoot $ProjectRoot
         if (-not $shared) { throw "There is no shared library beside this project ($prefix/ is the .streamhub folder next to the projects): '$RelativePath'" }
-        $sroot = $shared.TrimEnd('\')
+        $sroot = Get-FullRoot $shared
         $sfull = [IO.Path]::GetFullPath((Join-Path $sroot $rel.Substring($prefix.Length).TrimStart('\')))
         if ($sfull -ne $sroot -and -not $sfull.StartsWith($sroot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw "Path is outside the shared library: '$RelativePath'" }
         Assert-NoOutsideLink $sroot $sfull $RelativePath
@@ -251,10 +261,12 @@ function Resolve-ProjectLinkPath {
 
 function ConvertTo-RelativePath([string]$ProjectRoot, [string]$FullPath) {
     # A path in the project as PATH; one in the shared library beside the projects as shared/PATH.
-    $root = $ProjectRoot.TrimEnd('\')
+    # Both sides in GetFullPath's form (Get-FullRoot): a short root and a long path name the same folder.
+    $root = Get-FullRoot $ProjectRoot
+    $FullPath = Get-FullRoot $FullPath
     if ($FullPath.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { return $FullPath.Substring($root.Length + 1).Replace('\', '/') }
-    $shared = Get-SharedRoot $ProjectRoot
-    if ($shared -and $FullPath.StartsWith($shared.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return "$(Get-SharedPrefix $ProjectRoot)/" + $FullPath.Substring($shared.TrimEnd('\').Length + 1).Replace('\', '/') }
+    $shared = Get-FullRoot (Get-SharedRoot $ProjectRoot)
+    if ($shared -and $FullPath.StartsWith($shared + '\', [StringComparison]::OrdinalIgnoreCase)) { return "$(Get-SharedPrefix $ProjectRoot)/" + $FullPath.Substring($shared.Length + 1).Replace('\', '/') }
     $FullPath.Substring($root.Length + 1).Replace('\', '/')
 }
 
@@ -555,6 +567,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Test-RootedPath, Get-PathLeaf, Test-PathChars,Move-TempFile, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Get-FullRoot, Test-RootedPath, Get-PathLeaf, Test-PathChars,Move-TempFile, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile, Get-FileFingerprint, Get-SharedRoot, Get-SharedPrefix, Initialize-SharedRoot, Get-SharedNotes

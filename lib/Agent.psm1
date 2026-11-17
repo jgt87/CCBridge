@@ -6412,6 +6412,7 @@ function Start-AgentWorker {
                 # must never inherit a project that was opened after the request.
                 $taskRoot = if ($task.ContainsKey('projectRoot')) { $task.projectRoot } else { $State.ProjectRoot }
                 if (-not $taskRoot) { throw 'Open or create a project first.' }
+                $taskRoot = Get-FullRoot $taskRoot   # as Set-Project stores it: a short form is the same project
                 if (-not (Test-Path -LiteralPath $taskRoot -PathType Container)) { throw "The project folder $taskRoot no longer exists" }
                 if ($taskRoot -ne $State.ProjectRoot) {
                     $projectChanged = $true

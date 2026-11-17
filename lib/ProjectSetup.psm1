@@ -156,7 +156,7 @@ function Test-LiveSourcePath {
     if ($p -notmatch $script:LiveExt) { return "'$p' is not a CSV, TSV, Excel or JSON file" }
     if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return "'$p' was not found (is the folder synced by OneDrive on this computer?)" }
     $full = [IO.Path]::GetFullPath($p)
-    if ($ProjectRoot -and $full.StartsWith($ProjectRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return "'$p' is already in the project; a live file is one outside it" }
+    if ($ProjectRoot -and $full.StartsWith((Get-FullRoot $ProjectRoot) + '\', [StringComparison]::OrdinalIgnoreCase)) { return "'$p' is already in the project; a live file is one outside it" }
     if ((Get-Item -LiteralPath $full).Length -gt $script:LiveMaxBytes) { return "'$p' is larger than $($script:LiveMaxBytes / 1MB) MB" }
     ''
 }

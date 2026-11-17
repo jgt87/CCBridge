@@ -2497,7 +2497,7 @@ function Resolve-CommandPath([string]$ProjectRoot, [string]$Token, [hashtable]$M
 }
 
 function Test-InProject([string]$ProjectRoot, [string]$Full) {
-    $root = $ProjectRoot.TrimEnd('\')
+    $root = Get-FullRoot $ProjectRoot
     [bool]($Full -and ($Full -eq $root -or $Full.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)))
 }
 
@@ -2509,7 +2509,7 @@ function Test-ScopedPath([string]$ProjectRoot, [string]$Token, [switch]$AllowUnc
     if (-not $r) { return $null }
     $t = $r.text
     if ($r.why) { if ($AllowUnchecked) { return $null }; return $r.why }
-    $root = $ProjectRoot.TrimEnd('\')
+    $root = Get-FullRoot $ProjectRoot
     # Windows drops dots and spaces at the end of a name ("Remove-Item ..\x" read as one path becomes
     # "Remove-Item" + "x"), so such a name cannot be checked as written.
     if ($r.path -match '(^|\\)(?!\.\.?(\\|$))[^\\]*[. ](\\|$)') { return "'$t' has a name ending in a dot or space, which Windows reads differently" }
