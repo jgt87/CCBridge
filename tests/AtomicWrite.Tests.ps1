@@ -25,23 +25,29 @@ Describe 'Putting a temporary file in place' {
     It 'waits for a file another program holds for a moment' {
         $p = Join-Path $base 'held.json'; $tmp = "$p.tmp"
         [IO.File]::WriteAllText($p, 'old'); [IO.File]::WriteAllText($tmp, 'new')
-        # Held open without delete sharing in another runspace, then let go after 300 ms.
+        # Held open without delete sharing in another runspace. Signals, not timing: the holder says
+        # when it holds the file and lets go 300 ms after the test says it is about to write, so the
+        # write always meets the hold (a 300 ms hold watched by polling was missed under the
+        # release gate's parallel load).
+        $heldNow = New-Object Threading.ManualResetEventSlim($false)
+        $writing = New-Object Threading.ManualResetEventSlim($false)
         $ps = [powershell]::Create()
         $null = $ps.AddScript({
-            param($Path)
+            param($Path, $Held, $Go)
             $fs = [IO.File]::Open($Path, 'Open', 'Read', 'Read')
+            $Held.Set()
+            $null = $Go.Wait(10000)
             Start-Sleep -Milliseconds 300
             $fs.Dispose()
-        }).AddArgument($p)
+        }).AddArgument($p).AddArgument($heldNow).AddArgument($writing)
         $async = $ps.BeginInvoke()
-        $deadline = (Get-Date).AddSeconds(5)
-        do {
-            $held = $false
-            try { $f = [IO.File]::Open($p, 'Open', 'Read', 'None'); $f.Dispose() } catch { $held = $true }
-        } while (-not $held -and (Get-Date) -lt $deadline -and -not $async.IsCompleted)
+        $heldNow.Wait(10000) | Should Be $true
+        $held = $false
+        try { $f = [IO.File]::Open($p, 'Open', 'Read', 'None'); $f.Dispose() } catch { $held = $true }
         $held | Should Be $true
+        $writing.Set()
         Move-TempFile $tmp $p
-        $null = $ps.EndInvoke($async); $ps.Dispose()
+        $null = $ps.EndInvoke($async); $ps.Dispose(); $heldNow.Dispose(); $writing.Dispose()
         [IO.File]::ReadAllText($p) | Should Be 'new'
     }
 

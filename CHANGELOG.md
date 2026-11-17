@@ -10,6 +10,7 @@ All notable changes to StreamHub are listed here, newest first.
 
 - The row-height design check (`check-control-rows.mjs`) waits until a page has loaded before it measures, instead of a fixed pause; on a slow machine it measured an empty page and missed every problem.
 - Tests on GitHub: the version check no longer fails when the copy has no release tags.
+- A test of saving over a file another program holds could fail when the machine was busy: it now holds and releases the file on signals instead of a timed pause.
 
 ## [v0.1.167] - 2026-11-17
 
