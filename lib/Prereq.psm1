@@ -59,11 +59,18 @@ function Get-EdgeExePath {
     $null
 }
 
-function Get-EdgePolicyValue([string]$Name) {
-    foreach ($k in 'HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'HKCU:\SOFTWARE\Policies\Microsoft\Edge') {
-        try { $v = (Get-ItemProperty -Path $k -Name $Name -ErrorAction Stop).$Name; if ($null -ne $v) { return [int]$v } } catch { }
-    }
-    $null
+# Edge policies (Get-EdgePolicyValue, Test-EdgeForcedSignIn) and the profile account type
+# (Get-EdgeProfileAccount) live in lib/Cdp.psm1, which CopilotBridge also uses.
+Import-Module (Join-Path $PSScriptRoot 'Cdp.psm1')
+
+function Get-EdgeSignInCheck {
+    <# The 'Edge sign-in policy' check, pure: -Forced = Edge policy BrowserSignin = 2, -Account = the
+       account type of StreamHub's Edge profile ('work', 'personal', 'none', 'unknown'). #>
+    param([bool]$Forced, [string]$Account = 'unknown')
+    $n = 'Edge sign-in policy'
+    if (-not $Forced) { return New-Check $n 'OK' 'signing in to Edge is not required' }
+    if ($Account -eq 'work') { return New-Check $n 'OK' 'required by policy (BrowserSignin = 2); StreamHub''s Edge profile is signed in with a work account' }
+    New-Check $n 'WARN' 'required by policy (BrowserSignin = 2); StreamHub''s Edge profile is not signed in to Edge with a work account yet' 'Edge closes the Copilot window of a profile that is not signed in to Edge itself. In StreamHub''s Edge window, sign in to Edge with your work account (Edge''s own sign-in prompt, or the profile picture at the top left), then start StreamHub again.'
 }
 
 function Get-DotNetVersionText([int]$Release) {
@@ -231,7 +238,8 @@ function Get-UiKitCheck {
 function Get-PrereqChecks {
     <# The checks, in order. -Online adds GitHub and Copilot reachability (a few seconds at most).
        Each check runs in its own guard (Invoke-SafeCheck): one that breaks is a WARN, never fatal. #>
-    param([int]$WebPort = 8765, [int]$CdpPort = 9333, [switch]$Online, [switch]$Tools)
+    param([int]$WebPort = 8765, [int]$CdpPort = 9333, [switch]$Online, [switch]$Tools,
+        [string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'))
     $out = New-Object System.Collections.Generic.List[object]
 
     # The installed StreamHub version first, so a pasted report says which release it came from.
@@ -287,6 +295,13 @@ function Get-PrereqChecks {
         if ($rd -eq 0) { New-Check 'Edge remote debugging' 'FAIL' 'blocked by policy (RemoteDebuggingAllowed = 0)' 'StreamHub needs it to drive Copilot; ask IT to allow it.' }
         elseif ($dt -eq 2) { New-Check 'Edge remote debugging' 'FAIL' 'developer tools blocked by policy (DeveloperToolsAvailability = 2)' 'StreamHub needs them to drive Copilot; ask IT to allow them.' }
         else { New-Check 'Edge remote debugging' 'OK' 'allowed' }
+    }))
+
+    $out.Add((Invoke-SafeCheck 'Edge sign-in policy' {
+        # The profile's account type is read only when the policy asks for it (type only, no names).
+        $forced = Test-EdgeForcedSignIn
+        $account = if ($forced) { Get-EdgeProfileAccount -ProfileDir $ProfileDir } else { 'unknown' }
+        Get-EdgeSignInCheck -Forced $forced -Account $account
     }))
 
     $out.Add((Invoke-SafeCheck 'Local web server' {
@@ -425,4 +440,4 @@ function Write-PrereqReport {
     -not @($Checks | Where-Object { $_.status -eq 'FAIL' }).Count
 }
 
-Export-ModuleMember -Function Get-ToolVersion, ConvertTo-ToolVersion, Get-ToolMinimum, Test-BelowToolMinimum, Get-OptionalToolChecks, Get-UiKitCheck, Rename-AppShortcuts, Get-DeviceJoinStatus, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText
+Export-ModuleMember -Function Get-ToolVersion, ConvertTo-ToolVersion, Get-ToolMinimum, Test-BelowToolMinimum, Get-OptionalToolChecks, Get-UiKitCheck, Rename-AppShortcuts, Get-DeviceJoinStatus, Get-EdgeSignInCheck, Get-PrereqChecks, Repair-PrereqChecks, Write-PrereqReport, Get-DotNetVersionText

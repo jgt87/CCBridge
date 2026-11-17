@@ -3,7 +3,7 @@ import { SettingsPanel } from "@/components/ccb/settings-panel";
 import { SidePanel } from "@/components/ccb/side-panel";
 import { FileViewer } from "@/components/ccb/file-viewer";
 import { SplitViewHint } from "@/components/ccb/split-view-hint";
-import { AppHeader, ErrorBar, InstallProblem, NoticeBar, VersionLine } from "@/components/ccb/app-chrome";
+import { AppHeader, ErrorBar, InstallProblem, NoticeBar, PendingChatBar, VersionLine } from "@/components/ccb/app-chrome";
 import { ChatTranscript, PickerView, SideDrawer } from "@/components/ccb/app-layout";
 import { ChatComposer, type Scheduling } from "@/components/ccb/chat-composer";
 import { type Notice, useCommandPalette } from "@/components/ccb/command-palette";
@@ -101,6 +101,7 @@ export default function App() {
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {notice && <NoticeBar notice={notice} onDismiss={() => setNotice(null)} />}
+      {state.pendingChat && <PendingChatBar since={state.pendingChat.since} />}
       {error && <ErrorBar error={error} onDismiss={() => setError("")} />}
 
       {pickerOpen ? (

@@ -3,7 +3,7 @@
 # injected into index.html, so other web pages cannot drive CCBridge.
 
 $ErrorActionPreference = 'Stop'
-foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer', 'Progress', 'WorkStatus', 'DataProfile', 'RunbookFromChat', 'KitTheme', 'Download', 'PptxLayoutMatch', 'PptxRetheme', 'PptxDeck') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
+foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer', 'Progress', 'WorkStatus', 'DataProfile', 'RunbookFromChat', 'KitTheme', 'Download', 'PptxLayoutMatch', 'PptxRetheme', 'PptxDeck', 'SyncedFiles') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
@@ -134,6 +134,8 @@ function Get-StateSnapshot($State) {
         commit = $(if ($State.Build) { [string]$State.Build.commit } else { '' })
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
         workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
+        # A chat Copilot was left running in at the time cap (Read the answer); the address stays here.
+        pendingChat = $(if ($State.PendingChat) { @{ since = [string]$State.PendingChat.since } } else { $null })
         activity = (Get-ActivityView $State)
         work = (Get-WorkView $State)   # the waiting card: phase, timers, counts, last steps (WorkStatus)
         look = [bool]($State.Busy -and $State.VisualTurn)   # a turn about how something looks: the indicator's art lines
@@ -463,6 +465,17 @@ function Invoke-ApiRequest($Ctx, $State) {
             $v = Get-FileViewText $full
             return Send-Json $Ctx @{ path = $req.QueryString['path']; text = $v.text; truncated = $v.truncated; note = $v.note }
         }
+        '^GET /api/file-web-url$' {
+            # The file's https address in the OneDrive / SharePoint folder that syncs it (SyncedFiles),
+            # for the viewer's Copy web address. Read only; the path stays inside the project.
+            if (-not $State.ProjectRoot) { return Send-Json $Ctx @{ url = $null; reason = 'No project is open.' } }
+            $full = Resolve-ProjectPath $State.ProjectRoot ([string]$req.QueryString['path'])
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { return Send-Json $Ctx @{ url = $null; reason = 'The file does not exist.' } }
+            $url = $null
+            try { $url = Get-SyncedWebUrl -Path $full } catch { Write-CCBLogError server 'file web address' $_ }
+            if ($url) { return Send-Json $Ctx @{ url = $url } }
+            return Send-Json $Ctx @{ url = $null; reason = 'The file is not in a folder OneDrive or SharePoint syncs.' }
+        }
         '^GET /api/changeset/file$' {
             # History: one file of a change set, before and right after it (Get-ChangeSetFileDiff).
             if (-not $State.ProjectRoot) { throw 'No project is open' }
@@ -577,7 +590,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             $events = @(Get-AgentEvents $State $from)
             if ($null -ne $job.endSeq) { $events = @($events | Where-Object { $_.seq -le $job.endSeq }) }
             return Send-Json $Ctx @{ job = (Get-JobView $State $job); events = $events
-                info = @{ workIq = $State.WorkIq; workIqActual = $State.WorkIqActual; throttle = $State.Throttle; credits = $State.Credits; seq = $State.Seq } }
+                info = @{ workIq = $State.WorkIq; workIqActual = $State.WorkIqActual; throttle = $State.Throttle; credits = $State.Credits; seq = $State.Seq; pendingChat = $(if ($State.PendingChat) { [string]$State.PendingChat.since } else { $null }) } }
         }
         '^GET /api/runbooks$' {
             # @(if ...): an if expression would unroll a list of one into a single object.
@@ -1221,6 +1234,11 @@ function Invoke-ApiRequest($Ctx, $State) {
             return Send-Json $Ctx @{ ok = $true }
         }
         '^GET /api/response-options$' { return Send-Json $Ctx @{ read = [string]$State.ResponseOptionsRead; options = @($State.ResponseOptions); days = $State.Config.responseOptionsDays } }
+        '^POST /api/read-answer$' {
+            # Read the answer: the worker opens the chat Copilot was left running in and reads its answer.
+            $entry = Submit-AgentTask $State @{ kind = 'read-answer' } 'user' 'Read Copilot''s answer'
+            return Send-Json $Ctx @{ ok = $true; queueId = $entry.id }
+        }
         '^POST /api/response-options/refresh$' {
             # Settings > Copilot > Read now: the worker opens the picker when it is free.
             $null = Submit-AgentTask $State @{ kind = 'response-options' } 'user' 'Read Copilot''s response options'

@@ -3,14 +3,24 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Prereq.psm1') -Force
 
 Describe 'Get-PrereqChecks' {
+    # The forced sign-in row never reads the real policy or Edge profile (tests/EdgeSignIn.Tests.ps1 covers it).
+    Mock -ModuleName Prereq Test-EdgeForcedSignIn { $false }
+    Mock -ModuleName Prereq Get-EdgeProfileAccount { 'unknown' }
     $checks = @(Get-PrereqChecks -WebPort 8765 -CdpPort 9333)
     It 'checks every part StreamHub needs, each with OK, WARN or FAIL' {
-        ($checks | ForEach-Object { $_.name }) -join '|' | Should Match '^StreamHub\|Windows PowerShell\|Language mode\|Execution policy\|\.NET Framework\|Microsoft Edge\|Edge remote debugging\|Local web server\|Port 8765 \(web app\)\|Port 9333 \(Edge for Copilot\)\|OneDrive\|Single sign-on\|Data folder$'
+        ($checks | ForEach-Object { $_.name }) -join '|' | Should Match '^StreamHub\|Windows PowerShell\|Language mode\|Execution policy\|\.NET Framework\|Microsoft Edge\|Edge remote debugging\|Edge sign-in policy\|Local web server\|Port 8765 \(web app\)\|Port 9333 \(Edge for Copilot\)\|OneDrive\|Single sign-on\|Data folder$'
         @($checks | Where-Object { $_.status -notin 'OK', 'WARN', 'FAIL' }).Count | Should Be 0
     }
     It 'starts with the StreamHub version and commit' {
         $checks[0].name | Should Be 'StreamHub'
-        $checks[0].detail | Should Match '^v\d+\.\d+\.\d+( \(commit [0-9a-f]+\))?$'
+        # A copy with no version.txt and no release tag git can find (GitHub's checkout fetches the
+        # commit alone) is honestly "dev"; with a tag, the version must be shown.
+        $tag = & git -C $root describe --tags --abbrev=0 2>$null | Select-Object -First 1
+        if ($tag -or (Test-Path (Join-Path $root 'version.txt'))) {
+            $checks[0].detail | Should Match '^v\d+\.\d+\.\d+( \(commit [0-9a-f]+\))?$'
+        } else {
+            $checks[0].detail | Should Match '^dev( \(commit [0-9a-f]+\))?$'
+        }
     }
     It 'gives a hint for everything that is not OK' {
         @($checks | Where-Object { $_.status -ne 'OK' -and -not $_.hint }).Count | Should Be 0

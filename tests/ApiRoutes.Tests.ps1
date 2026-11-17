@@ -136,4 +136,43 @@ Describe 'POST /api/runbook-from-chat and the other on-request features' {
     Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+Describe 'GET /api/file-web-url' {
+    # A made-up synced folder in %TEMP% stands in for OneDrive (lib/SyncedFiles.psm1); the mock
+    # reads it from an environment variable, since a Mock body cannot see the Describe's variables.
+    $sync = Join-Path $env:TEMP ('ccb-weburl-' + [guid]::NewGuid().ToString('N'))
+    $p = Join-Path $sync 'CCBridge\My site'
+    New-Item -ItemType Directory (Join-Path $p 'Source') -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $p 'Source\sales data.xlsx'), 'x')
+    $env:CCB_TEST_SYNC_ROOT = $sync
+    Mock Get-SyncRoots -ModuleName SyncedFiles { @(@{ path = $env:CCB_TEST_SYNC_ROOT; url = 'https://contoso.sharepoint.com/sites/Team/Shared Documents' }) }
+    function Get-WebUrl($State, [string]$Rel) {
+        $c = New-FakeCtx 'GET' '/api/file-web-url' $null
+        $c.Request.QueryString['path'] = $Rel
+        Invoke-FakeApi $c $State
+        Get-FakeJson $c
+    }
+    It 'gives a project file its web address in the synced folder' {
+        $s = New-TestState; $s.ProjectRoot = $p
+        (Get-WebUrl $s 'Source/sales data.xlsx').url | Should Be 'https://contoso.sharepoint.com/sites/Team/Shared%20Documents/CCBridge/My%20site/Source/sales%20data.xlsx'
+    }
+    It 'gives no address, with the reason, for a missing file or a project outside the synced folders' {
+        $s = New-TestState; $s.ProjectRoot = $p
+        $r = Get-WebUrl $s 'nope.txt'
+        $r.url | Should Be $null
+        $r.reason | Should Match 'does not exist'
+        $env:CCB_TEST_SYNC_ROOT = Join-Path $sync 'Elsewhere'
+        $r = Get-WebUrl $s 'Source/sales data.xlsx'
+        $r.url | Should Be $null
+        $r.reason | Should Match 'not in a folder OneDrive or SharePoint syncs'
+        $env:CCB_TEST_SYNC_ROOT = $sync
+    }
+    It 'refuses a path outside the project' {
+        $s = New-TestState; $s.ProjectRoot = $p
+        { Get-WebUrl $s '..\..\outside.txt' } | Should Throw 'outside the project'
+        { Get-WebUrl $s 'C:\Windows\win.ini' } | Should Throw 'relative to the project'
+    }
+    Remove-Item Env:\CCB_TEST_SYNC_ROOT -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $sync -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Remove-Item -LiteralPath $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

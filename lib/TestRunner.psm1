@@ -36,6 +36,23 @@ function Get-RelatedTests {
     @($out | Select-Object -Unique)
 }
 
+# Pester 5 does not read the older `Should Be` form, and a machine with Pester 5 beside the 3.4 that
+# ships with Windows loads 5 first (GitHub's Windows runners do; the project's tests then all failed).
+# So the test command loads Pester 4 or older, which reads both forms, unless the project's tests are
+# written for Pester 5 (a fixed rule on their text): then the newest Pester is left to load.
+$script:Pester5Marks = '(?im)\bBeforeDiscovery\b|\bNew-PesterConfiguration\b|ModuleName\s*=\s*.?Pester.?\s*;\s*ModuleVersion\s*=\s*.?5'
+
+function Get-PesterLoad {
+    <# The start of the Pester test command: an import of Pester 4 or older, or nothing for tests
+       written for Pester 5 (or that cannot be read). #>
+    param([Parameter(Mandatory)][string]$ProjectRoot, [string[]]$Tests)
+    foreach ($t in @($Tests)) {
+        $text = try { [IO.File]::ReadAllText((Join-Path $ProjectRoot $t)) } catch { '' }
+        if ($text -match $script:Pester5Marks) { return '' }
+    }
+    'Import-Module Pester -MaximumVersion 4.99 -ErrorAction SilentlyContinue; '
+}
+
 function Find-TestCommand {
     <# The test command for a change: @{ command; kind (pester, pytest, unittest, npm); tests; scope
        (related or all) }, or $null when the project has no tests for what changed. #>
@@ -52,7 +69,7 @@ function Find-TestCommand {
             $rel = @(Get-RelatedTests $ProjectRoot $tests $changed)
             $run = if ($rel.Count) { $rel } else { $tests }
             return [pscustomobject]@{ kind = 'pester'; tests = $run; scope = $(if ($rel.Count) { 'related' } else { 'all' })
-                command = "powershell -NoProfile -ExecutionPolicy Bypass -Command `"Invoke-Pester -Path $(& $quote $run) -EnableExit`"" }
+                command = "powershell -NoProfile -ExecutionPolicy Bypass -Command `"$(Get-PesterLoad $ProjectRoot $run)Invoke-Pester -Path $(& $quote $run) -EnableExit`"" }
         }
     }
     # Python: pytest when installed, else unittest.

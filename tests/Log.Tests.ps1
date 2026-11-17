@@ -56,7 +56,15 @@ Describe 'CCBridge log' {
     }
 
     It 'masks user name, profile and OneDrive paths and email addresses' {
-        Write-CCBLog info test "$marker path $env:USERPROFILE\Documents\x.txt onedrive $env:OneDrive\y.txt user $env:USERNAME mail anna.de.vries@contoso.com"
+        # A machine without OneDrive (GitHub's runners) has no OneDrive path to mask: the test gives it
+        # one, and drops the masks the log built so they are made again with it.
+        $wasOneDrive = $env:OneDrive
+        if (-not $env:OneDrive) { $env:OneDrive = Join-Path $env:USERPROFILE 'OneDrive - Contoso'; & (Get-Module Log) { $script:Masks = $null } }
+        try {
+            Write-CCBLog info test "$marker path $env:USERPROFILE\Documents\x.txt onedrive $env:OneDrive\y.txt user $env:USERNAME mail anna.de.vries@contoso.com"
+        } finally {
+            if (-not $wasOneDrive) { $env:OneDrive = $wasOneDrive; & (Get-Module Log) { $script:Masks = $null } }
+        }
         $line = Get-MarkerLines | Where-Object { $_ -match ' path ' } | Select-Object -First 1
         $line | Should Match '%USERPROFILE%\\Documents'
         $line | Should Match '%OneDrive%\\y.txt'

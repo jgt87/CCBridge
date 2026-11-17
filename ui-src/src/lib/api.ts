@@ -296,6 +296,8 @@ export interface AppState {
   workIq: "on" | "off" | "leave";
   workIqActual: string | null;
   workIqAvailable: boolean;
+  /** A chat Copilot was left running in at the time cap: Read the answer opens it later. */
+  pendingChat?: { since: string } | null;
   logLevel: "off" | "info" | "verbose" | "trace";
   /** Installed CCBridge version (version.txt), or git-<sha> for a development copy. */
   version: string;
@@ -795,6 +797,9 @@ export const api = {
   files: () => call<{ files: FileInfo[] }>("GET", "/api/files"),
   file: (path: string) =>
     call<{ path: string; text: string; truncated?: boolean; note?: string }>("GET", `/api/file?path=${encodeURIComponent(path)}`),
+  /** The file's https address in the OneDrive / SharePoint folder that syncs it; url null (with a reason) otherwise. */
+  fileWebUrl: (path: string) =>
+    call<{ url: string | null; reason?: string }>("GET", `/api/file-web-url?path=${encodeURIComponent(path)}`),
   changeFile: (changeSet: string, path: string) =>
     call<ChangeFileDiff>("GET", `/api/changeset/file?id=${encodeURIComponent(changeSet)}&path=${encodeURIComponent(path)}`),
   chat: (text: string, opts: ChatOptions = {}) => call<{ ok: boolean }>("POST", "/api/chat", { text, ...opts }),
@@ -903,6 +908,7 @@ export const api = {
     })),
   /** Reads Copilot's response picker again now (a small task; the result shows in the chat). */
   refreshResponseOptions: () => call<{ ok: boolean }>("POST", "/api/response-options/refresh"),
+  readAnswer: () => call<{ ok: boolean; queueId: string }>("POST", "/api/read-answer"),
   clearEdgeCache: () => call<{ freedNow: number; pending: boolean; info: EdgeCacheInfo }>("POST", "/api/edge-cache/clear"),
   newChat: () => call<{ ok: boolean }>("POST", "/api/newchat"),
   undo: (to?: string) => call<{ ok: boolean }>("POST", "/api/undo", to ? { to } : {}),

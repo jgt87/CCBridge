@@ -156,6 +156,8 @@ Describe 'Errors carry what is needed to investigate them' {
         (Get-CCBErrorHelp 'Lost the connection to the Copilot tab in Edge (connection Aborted)').code | Should Be 'EDGE-LOST'
         (Get-CCBErrorHelp "Copilot answered with 'NoAnswer': Copilot stopped without answering").code | Should Be 'NO-ANSWER'
         (Get-CCBErrorHelp 'No complete reply within 300 s (partial: 0 chars)').code | Should Be 'TIMEOUT'
+        (Get-CCBErrorHelp 'Copilot is still working after 30 min. StreamHub stopped waiting but left it running: use Read the answer when it is done.').code | Should Be 'STILL-WORKING'
+        (Get-CCBErrorHelp 'Copilot is still working on the earlier request (sent at 10:42). Wait until it is done').code | Should Be 'STILL-WORKING'
         (Get-CCBErrorHelp "pair 1: SEARCH text not found in the file").code | Should Be 'EDIT'
         (Get-CCBErrorHelp 'Copilot message box did not appear after starting a new chat; the page shows a sign-in page').code | Should Be 'SIGN-IN'
         (Get-CCBErrorHelp "You've reached your daily limit").code | Should Be 'CREDITS'

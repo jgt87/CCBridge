@@ -48,6 +48,161 @@ function Start-CdpEdge {
     throw "Edge did not open a CDP endpoint on port $Port within 15s"
 }
 
+# --- Edge policy BrowserSignin = 2 (forced browser sign-in) --------------------------------------
+# Ported from the sister project ObsidiNote (its lib/Cdp.psm1 and lib/CopilotBridge.psm1, verified
+# on a business tenant). With that policy, Edge closes the window of a profile that is not signed
+# in to Edge itself when it is started with --no-first-run and a debug port, so StreamHub's tab
+# vanishes. Registry, file and process reads all go through parameters, so tests inject stand-ins.
+
+function Get-EdgePolicyValue([string]$Name) {
+    <# An Edge policy value as a number (machine first, then user); $null when not set. Read only. #>
+    foreach ($k in 'HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'HKCU:\SOFTWARE\Policies\Microsoft\Edge') {
+        try { $v = (Get-ItemProperty -Path $k -Name $Name -ErrorAction Stop).$Name; if ($null -ne $v) { return [int]$v } } catch { }
+    }
+    $null
+}
+
+function Test-EdgeForcedSignIn {
+    <# Edge policy BrowserSignin = 2: every Edge profile must be signed in to the browser before it
+       can be used. -GetPolicy replaces the registry read in tests. #>
+    param([scriptblock]$GetPolicy = { param($n) Get-EdgePolicyValue $n })
+    "$(& $GetPolicy 'BrowserSignin')" -eq '2'
+}
+
+function Get-EdgeProfileAccount {
+    <# Which account an Edge profile (a --user-data-dir folder) is signed in with: 'work' (work or
+       school account), 'personal' (Microsoft account), 'none' or 'unknown' (also: no profile yet).
+       Only the account TYPE is read from 'Local State', never names, e-mail addresses or ids. #>
+    param([Parameter(Mandatory)][string]$ProfileDir)
+    $msaTenant = '9188040d-6c67-4c5b-b112-36a304b66dad'   # the tenant of personal Microsoft accounts
+    try { $j = [IO.File]::ReadAllText((Join-Path $ProfileDir 'Local State')) | ConvertFrom-Json } catch { return 'unknown' }
+    $d = $j.profile.info_cache.Default
+    if (-not $d) { return 'unknown' }
+    $type = "$($d.edge_account_type)"
+    $tenant = "$($d.edge_account_tenant_id)"
+    if ($type -eq '2' -or ($tenant -and $tenant -ne $msaTenant -and $type -ne '1' -and $type -ne '0')) { return 'work' }
+    if ($type -eq '1') { return 'personal' }
+    if ($type -eq '' -or $type -eq '0') { return 'none' }
+    'unknown'
+}
+
+function Get-EdgeBrowserProcesses {
+    <# msedge.exe processes with their command lines (ProcessId, CommandLine). Replaced in tests. #>
+    @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" -ErrorAction SilentlyContinue |
+        ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; CommandLine = "$($_.CommandLine)" } })
+}
+
+function Get-EdgeProfileUse {
+    <# Is an Edge browser process running with this profile (--user-data-dir), and with the debug
+       port? state: 'none' (no Edge with this profile), 'debug' (with --remote-debugging-port=$Port)
+       or 'no-debug' (without it, or with another port: starting Edge again would only hand its
+       window to that Edge, and no debug port would appear). Helper processes (--type=renderer...)
+       are left out: only the browser process carries the port. -Processes for tests. #>
+    param([Parameter(Mandatory)][string]$ProfileDir, [Parameter(Mandatory)][int]$Port, $Processes)
+    if (-not $PSBoundParameters.ContainsKey('Processes')) { $Processes = Get-EdgeBrowserProcesses }
+    $dir = [regex]::Escape($ProfileDir.TrimEnd('\'))
+    $mine = @(@($Processes) | Where-Object {
+        $_ -and "$($_.CommandLine)" -notmatch '\s--type=' -and "$($_.CommandLine)" -match ('(?i)--user-data-dir=("?)' + $dir + '\\?\1(\s|$)')
+    })
+    $withPort = @($mine | Where-Object { "$($_.CommandLine)" -match ('--remote-debugging-port=' + $Port + '(\s|$)') })
+    $state = if (-not $mine.Count) { 'none' } elseif ($withPort.Count) { 'debug' } else { 'no-debug' }
+    [pscustomobject]@{ state = $state; pids = @($mine | ForEach-Object { $_.ProcessId }) }
+}
+
+function Get-ProfileInUseMessage([int]$Port) {
+    "StreamHub's Edge profile is already open in an Edge window that was started without its debug port (port $Port), so StreamHub cannot reach Copilot in it and starting Edge again would only open another window. Close every window of that Edge (the one that shows Copilot for StreamHub; also check the taskbar), then start StreamHub again."
+}
+
+function Get-ForcedSignInMessage {
+    "Edge on this PC must be signed in to before it can be used (Edge policy BrowserSignin = 2), and StreamHub's Edge profile is not signed in yet, so Edge closed the Copilot window to ask for that first. In StreamHub's Edge window, sign in to Edge itself with your work account (Edge's own sign-in prompt, or the profile picture at the top left), then start StreamHub again. Copilot then signs in with that account by itself."
+}
+
+function Get-WebPageCount([int]$Port) {
+    <# How many tabs in StreamHub's Edge show a web page (http or https); 0 when Edge does not answer. #>
+    try { @((Invoke-RestMethod "http://127.0.0.1:$Port/json/list" -TimeoutSec 3) | Where-Object { $_.type -eq 'page' -and "$($_.url)" -match '^(?i)https?://' }).Count } catch { 0 }
+}
+
+function Test-ForcedSignInBlock {
+    <# The Copilot window went away because Edge wants the profile signed in to Edge first: policy
+       BrowserSignin = 2, the profile has no work account yet, and no web page is left in that Edge.
+       -GetForced, -GetAccount and -GetPageCount replace the real reads in tests. #>
+    param(
+        [int]$Port = 9333,
+        [string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'),
+        [scriptblock]$GetForced = { Test-EdgeForcedSignIn },
+        [scriptblock]$GetAccount = { param($d) Get-EdgeProfileAccount -ProfileDir $d },
+        [scriptblock]$GetPageCount = { param($p) Get-WebPageCount $p }
+    )
+    if (-not (& $GetForced)) { return $false }
+    if ((& $GetAccount $ProfileDir) -eq 'work') { return $false }
+    [int](& $GetPageCount $Port) -eq 0
+}
+
+function Test-CopilotNavigateAllowed {
+    <# Whether Connect-Copilot may send a tab to Copilot's address: an empty one (about:blank, edge://
+       pages, no address) always; another web page only on the first attempt; never a tab already on
+       Copilot (-IsCopilot) and never Microsoft's sign-in. After the first attempt a web page that is
+       not Copilot is a sign-in on its way (Microsoft's or the organisation's own): sending it back to
+       Copilot restarted the sign-in and closed the tab's connection again (ObsidiNote, business tenant). #>
+    param([string]$Url, [switch]$IsCopilot, [switch]$FirstAttempt)
+    if ($IsCopilot) { return $false }
+    if ("$Url" -notmatch '^(?i)https?://') { return $true }
+    if ("$Url" -match '^(?i)https://(login\.microsoftonline\.com|login\.live\.com|login\.microsoft\.com|login\.windows\.net)(/|$)') { return $false }
+    [bool]$FirstAttempt
+}
+
+function Invoke-EdgeProfileSignIn {
+    <# One-time Edge sign-in for StreamHub's own profile when Edge policy requires signing in to the
+       browser (BrowserSignin = 2). Started with --no-first-run and a debug port, Edge closes the window
+       of a profile that is not signed in, and nobody gets a chance to sign in. So: start Edge for the
+       profile the plain way (only --user-data-dir: Edge runs its own sign-in), wait until the profile
+       reports a work account (account type from 'Local State', nothing else), then close that Edge, so
+       Start-CdpEdge can start it with the debug port. Returns @{ ok; started; detail }.
+       -GetAccount, -GetUse, -StartEdge, -StopEdge and -OnWait replace the real calls in tests. #>
+    param(
+        [string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'),
+        [int]$Port = 9333,
+        [int]$TimeoutSec = 600,
+        [int]$PollMs = 2000,
+        [scriptblock]$GetAccount = { param($d) Get-EdgeProfileAccount -ProfileDir $d },
+        [scriptblock]$GetUse = { param($d, $p) Get-EdgeProfileUse -ProfileDir $d -Port $p },
+        [scriptblock]$StartEdge = { param($d) Start-Process -FilePath (Get-EdgePath) -ArgumentList @("--user-data-dir=`"$d`"") },
+        [scriptblock]$StopEdge = {
+            param($ids)
+            foreach ($i in @($ids)) { try { [void](Get-Process -Id $i -ErrorAction Stop).CloseMainWindow() } catch { } }
+            Start-Sleep -Seconds 3
+            foreach ($i in @($ids)) { try { Stop-Process -Id $i -Force -ErrorAction Stop } catch { } }
+        },
+        [scriptblock]$OnWait = $null
+    )
+    $result = [pscustomobject]@{ ok = $false; started = $false; detail = '' }
+    if ((& $GetAccount $ProfileDir) -eq 'work') { $result.ok = $true; $result.detail = 'Edge profile already signed in with a work account'; return $result }
+    # An Edge that already holds this profile (StreamHub's own, from an earlier start) would take
+    # the new window and skip Edge's sign-in: close it first.
+    $use = & $GetUse $ProfileDir $Port
+    if ($use -and $use.state -ne 'none') { $null = & $StopEdge $use.pids }
+    $null = New-Item -ItemType Directory -Force -Path $ProfileDir
+    $null = & $StartEdge $ProfileDir
+    $result.started = $true
+    Write-CCBLog info cdp 'Started Edge without the debug port for its own browser sign-in (BrowserSignin = 2)'
+    if ($OnWait) { $null = & $OnWait }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+        if ((& $GetAccount $ProfileDir) -eq 'work') {
+            $use = & $GetUse $ProfileDir $Port
+            if ($use -and $use.state -ne 'none') { $null = & $StopEdge $use.pids }
+            Write-CCBLog info cdp "Edge profile signed in with a work account after $([int]$sw.Elapsed.TotalSeconds) s"
+            $result.ok = $true
+            $result.detail = 'Edge profile signed in with your work account'
+            return $result
+        }
+        Start-Sleep -Milliseconds $PollMs
+    }
+    Write-CCBLog info cdp "Edge profile not signed in within $TimeoutSec s"
+    $result.detail = "Edge was not signed in within $TimeoutSec s. In StreamHub's Edge window, sign in with your work account (Edge's own sign-in, or the profile picture at the top left), then start StreamHub again."
+    $result
+}
+
 function Get-CdpPageTarget {
     <# Returns the first page target, preferring one whose URL matches $UrlLike. #>
     param([int]$Port = 9333, [string]$UrlLike = '*')
@@ -194,4 +349,7 @@ function Disconnect-Cdp {
 }
 
 Export-ModuleMember -Function Get-EdgePath, Test-CdpEndpoint, Start-CdpEdge, Get-CdpPageTarget,
-    Connect-Cdp, Receive-CdpMessage, Receive-CdpEvent, Invoke-Cdp, Invoke-CdpEval, Disconnect-Cdp
+    Connect-Cdp, Receive-CdpMessage, Receive-CdpEvent, Invoke-Cdp, Invoke-CdpEval, Disconnect-Cdp,
+    Get-EdgePolicyValue, Test-EdgeForcedSignIn, Get-EdgeProfileAccount, Get-EdgeBrowserProcesses, Get-EdgeProfileUse,
+    Get-ProfileInUseMessage, Get-ForcedSignInMessage, Get-WebPageCount, Test-ForcedSignInBlock, Test-CopilotNavigateAllowed,
+    Invoke-EdgeProfileSignIn

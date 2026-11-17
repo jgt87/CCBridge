@@ -26,6 +26,17 @@ function Test-CopilotUrl([string]$Url, $Selectors) {
     $false
 }
 
+function ConvertTo-CopilotChatAddress([string]$Url, $Selectors) {
+    <# A chat's address to open it again later: https on a Copilot host, scheme, host and path only
+       (no query or fragment, which can hold sign-in state). $null for anything else, so a read-back
+       never opens another site. #>
+    if (-not "$Url".Trim()) { return $null }
+    $u = $null
+    if (-not [uri]::TryCreate("$Url".Trim(), [UriKind]::Absolute, [ref]$u)) { return $null }
+    if ($u.Scheme -ne 'https' -or -not (Test-CopilotUrl $u.AbsoluteUri $Selectors)) { return $null }
+    'https://' + $u.Host.ToLowerInvariant() + $u.AbsolutePath
+}
+
 function Get-CopilotTarget {
     <# The Edge tab with Copilot (on any of its hosts), else the first tab that is not a local page
        (sign-in pages lead back to Copilot). The StreamHub app may be a tab in the same window: it
@@ -116,7 +127,9 @@ function Connect-Copilot {
             $session = Connect-Cdp $target.webSocketDebuggerUrl
             $bridge = [pscustomobject]@{ Session = $session; Selectors = $sel; Port = $Port; HubSockets = @{}; AttachErrors = @(); SaveFrames = $SaveReplyFrames
         Pacing = (Get-CopilotPacing); LastReplyAt = $null; SignInPending = $false }
-            if (-not (Test-CopilotUrl $target.url $sel)) { $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl } }
+            # Never send a sign-in page (Microsoft's, or a later page of the organisation's own) back to
+            # Copilot: that restarted the sign-in and closed the tab's connection (Cdp Test-CopilotNavigateAllowed).
+            if (Test-CopilotNavigateAllowed -Url $target.url -IsCopilot:(Test-CopilotUrl $target.url $sel) -FirstAttempt:($attempt -eq 1)) { $null = Invoke-Cdp $session 'Page.navigate' @{ url = $sel.chatUrl } }
             $null = Invoke-Cdp $session 'Network.enable'
             # Edge throttles a page in a background or minimised window so hard that Copilot's reply
             # stream stalls halfway. Keep the Copilot tab "visible, focused and active" while attached.
@@ -148,6 +161,11 @@ function Connect-Copilot {
             if ($why -like '*never appeared*') {
                 Write-CCBLog info bridge 'Message box never appeared (not signed in, or the page changed: check selectors.editor)'
                 throw
+            }
+            # Edge policy BrowserSignin = 2: Edge closes the window until the profile signs in to Edge itself.
+            if ($why -match 'Lost the connection|no page targets|Could not connect to the Copilot tab' -and (Test-ForcedSignInBlock -Port $Port)) {
+                Write-CCBLog info bridge 'Edge closed the Copilot window: the profile must sign in to Edge first (BrowserSignin = 2)'
+                throw (Get-ForcedSignInMessage)
             }
             if ((Get-Date) -gt $deadline -or $attempt -ge 15) { Write-CCBLog info bridge "Giving up connecting to Copilot after $attempt attempts: $why"; throw }
             Write-CCBLog info bridge "Copilot tab changed while connecting; reconnecting (attempt $attempt): $why"
@@ -446,6 +464,56 @@ function Set-CopilotWorkIq {
     $state = Use-CopilotLock { Invoke-CdpEval $Bridge.Session $js }
     Write-CCBLog verbose bridge "Work IQ requested $(if ($On) { 'on' } else { 'off' }), page reports $state"
     $state
+}
+
+function Get-WorkIqToggleCandidates {
+    <# The controls that could be the Work IQ switch, from two control snapshots of
+       tools\capture-copilot.ps1 (Work IQ on, then off): those whose aria-checked, aria-pressed or
+       aria-selected flipped. Each gives what selectors.json's workIq block needs (toggle selector,
+       stateAttribute, onValue) and a label; a label naming work or IQ comes first. A fixed rule on
+       the snapshots: the person still confirms the choice before it is written. #>
+    param([object[]]$On, [object[]]$Off)
+    # A JSON array read in a pipeline arrives as one item in 5.1: unroll one level.
+    $On = @($On | ForEach-Object { $_ }); $Off = @($Off | ForEach-Object { $_ })
+    $field = { param($c, [string]$n) if ($c -and $c.PSObject.Properties[$n] -and $null -ne $c.$n) { [string]$c.$n } else { '' } }
+    $quote = { param([string]$v) "'" + $v.Replace('\', '\\').Replace("'", "\'") + "'" }
+    # The same control in both snapshots: by test id, a stable id (no digits: generated ids change),
+    # label or title, else tag, role and short text.
+    $key = {
+        param($c)
+        foreach ($n in 'testid', 'id', 'aria', 'title') {
+            $v = & $field $c $n
+            if ($v -and -not ($n -eq 'id' -and $v -match '\d')) { return "${n}:$v" }
+        }
+        'other:' + (& $field $c 'tag') + '|' + (& $field $c 'role') + '|' + (& $field $c 'text')
+    }
+    $offByKey = @{}
+    foreach ($c in @($Off)) { if ($c) { $offByKey[(& $key $c)] = $c } }
+    $states = @(@('checked', 'aria-checked'), @('pressed', 'aria-pressed'), @('selected', 'aria-selected'))
+    $found = New-Object System.Collections.Generic.List[object]
+    foreach ($c in @($On)) {
+        if (-not $c) { continue }
+        $k = & $key $c
+        if (-not $offByKey.ContainsKey($k)) { continue }
+        $o = $offByKey[$k]
+        foreach ($s in $states) {
+            $onValue = & $field $c $s[0]
+            if (-not $onValue -or $onValue -eq (& $field $o $s[0])) { continue }
+            $tag = & $field $c 'tag'
+            $selector = switch -Regex ($k) {
+                '^testid:' { "[data-testid=$(& $quote (& $field $c 'testid'))]"; break }
+                '^id:' { '#' + (& $field $c 'id'); break }
+                '^aria:' { "$tag[aria-label=$(& $quote (& $field $c 'aria'))]"; break }
+                '^title:' { "$tag[title=$(& $quote (& $field $c 'title'))]"; break }
+                default { '' }
+            }
+            if (-not $selector) { break }   # no attribute to find it by again
+            $label = @((& $field $c 'aria'), (& $field $c 'title'), (& $field $c 'text'), (& $field $c 'testid')) | Where-Object { $_ } | Select-Object -First 1
+            $found.Add([pscustomobject]@{ toggle = $selector; stateAttribute = $s[1]; onValue = $onValue; label = "$label"; named = [bool]("$label $k" -match '(?i)work|\biq\b') })
+            break
+        }
+    }
+    @($found.ToArray() | Sort-Object @{ Expression = { -not $_.named } }, @{ Expression = { $_.toggle } } | Select-Object toggle, stateAttribute, onValue, label)
 }
 
 # Shared by the response-mode functions: the menu's items (menuitem roles), each item's title (its
@@ -1757,8 +1825,51 @@ function Send-CopilotPromptUnlocked {
     Write-CCBLog info bridge "No complete reply within $TimeoutSec s" @{ partialChars = $merger.Text.Length; frames = $frames.Count; invocation = $myInvocation; sent = @($sentTargets | Select-Object -Unique) }
     Write-NetTrace $net 'timeout'
     if ($Bridge.SaveFrames -and $frames.Count) { Save-ReplyFrames $frames }
+    # Copilot still at work at the cap: never press Stop (it cancels long Microsoft 365 work). Leave
+    # it running and keep the chat's address, so its answer can be read later (Read-CopilotChatAnswer).
+    $busy = $false
+    try { $st = Get-PageReplyState $Bridge; $busy = [bool]($st -and ($st.stop -or $st.agentBusy)) } catch { }
+    if ($busy) {
+        $address = $null
+        try { $address = ConvertTo-CopilotChatAddress ([string](Invoke-CdpEval $Bridge.Session 'location.href')) $Bridge.Selectors } catch { }
+        $Bridge | Add-Member -NotePropertyName PendingChat -NotePropertyValue ([pscustomobject]@{ address = $address; since = $started.ToString('s'); waitedSec = $TimeoutSec }) -Force
+        Write-CCBLog info bridge "Copilot is still working after $TimeoutSec s: left running, not stopped" @{ hasAddress = [bool]$address }
+        throw "Copilot is still working after $([int][Math]::Max(1, [Math]::Round($TimeoutSec / 60))) min. StreamHub stopped waiting but left it running: use Read the answer when it is done."
+    }
     $null = Stop-CopilotReply $Bridge
     throw "No complete reply within $TimeoutSec s (partial: $($merger.Text.Length) chars)"
+}
+
+function Read-CopilotChatAnswer {
+    <# Opens a chat that was left running (its address from ConvertTo-CopilotChatAddress) and reads
+       its last answer from the page: @{ busy; text; how }. busy = Copilot still shows it is at work
+       after WaitSec; then text is empty. Only a Copilot address is opened. #>
+    param([Parameter(Mandatory)]$Bridge, [Parameter(Mandatory)][string]$Address, [int]$WaitSec = 60)
+    $target = ConvertTo-CopilotChatAddress $Address $Bridge.Selectors
+    if (-not $target) { throw "Not a Copilot chat address: $Address" }
+    Use-CopilotLock {
+        $here = $null
+        try { $here = ConvertTo-CopilotChatAddress ([string](Invoke-CdpEval $Bridge.Session 'location.href')) $Bridge.Selectors } catch { }
+        if ($here -ne $target) {
+            $null = Invoke-Cdp $Bridge.Session 'Page.navigate' @{ url = $target }
+            Start-Sleep -Milliseconds 500
+            $null = Wait-CopilotEditor $Bridge -TimeoutSec 30
+        }
+        $until = (Get-Date).AddSeconds([Math]::Max(0, $WaitSec))
+        do {
+            $busy = $false
+            try { $st = Get-PageReplyState $Bridge; $busy = [bool]($st -and ($st.stop -or $st.agentBusy)) } catch { }
+            if (-not $busy) { break }
+            Start-Sleep -Seconds 2
+        } while ((Get-Date) -lt $until)
+        if ($busy) {
+            Write-CCBLog info bridge 'Read the answer: Copilot is still working'
+            return @{ busy = $true; text = ''; how = '' }
+        }
+        $r = Get-PageReplyText $Bridge
+        Write-CCBLog info bridge 'Read the answer from the chat that was left running' @{ how = "$($r.how)"; chars = "$($r.text)".Length }
+        @{ busy = $false; text = "$($r.text)"; how = "$($r.how)" }
+    }
 }
 
 function Get-SelectorOrDefault($Bridge, [string]$Name, [string]$Default) {
@@ -2007,4 +2118,4 @@ function Disconnect-Copilot {
     Disconnect-Cdp $Bridge.Session
 }
 
-Export-ModuleMember -Function Get-CopilotResponseOptions, Get-ResponseModeClassic, Close-CopilotMenu, Test-DamagedTagText, Get-AlnumHead, Set-CopilotTheme, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Wait-CopilotEditor, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames, Get-TypedLength
+Export-ModuleMember -Function Get-CopilotResponseOptions, Get-ResponseModeClassic, Close-CopilotMenu, Test-DamagedTagText, Get-AlnumHead, Set-CopilotTheme, Get-WorkIqToggleCandidates, ConvertTo-CopilotChatAddress, Read-CopilotChatAnswer, Get-PageReplyState, Get-PageReplyText, Merge-LateReplyText, Get-ProgressLine, Add-CopilotAttachment, Get-CopilotCharts, Add-CopilotMention, Get-ReplyAgent, Get-AgentDisplayName, Get-PrivateCopilotTarget, Close-PrivateCopilotSessions, Set-CopilotResponseMode, Test-CopilotPage, Wait-CopilotSignIn, Wait-CopilotEditor, Get-CopilotTarget, Test-CopilotUrl, Get-ReplyTimelineSummary, New-StreamState, Add-StreamRecord, New-ReplyTimeline, Connect-Copilot, New-CopilotChat, Send-CopilotPrompt, Set-CopilotWorkIq, Disconnect-Copilot, Read-HubRecords, Get-BotReplyText, Get-ReplyFromFrames, Get-TypedLength

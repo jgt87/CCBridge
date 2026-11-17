@@ -4,6 +4,25 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+## [v0.1.167] - 2026-11-17
+
+### Added
+
+- When Copilot is still working at the time limit, StreamHub no longer presses Stop (which cancelled Copilot's work, such as a long Microsoft 365 task). It leaves Copilot running and shows a bar with **Read the answer**, which opens that chat and puts Copilot's answer in the conversation once it is done. A new request waits for that answer (it is read first) or is refused while Copilot still works; New chat leaves it running.
+- New runbook template **Summary of a Microsoft 365 or web link**: put a SharePoint, OneDrive, Teams or web link in its header, and Copilot opens it with your own access and answers with its title, place, summary, key facts and sensitivity label, or says plainly why it could not open it.
+- A file that opens in StreamHub has a **Copy web address** button when it is in a OneDrive or SharePoint folder synced to this PC, so you can give Copilot the file's real web address.
+- The system check spots when your organisation requires signing in to Edge itself, and says to sign StreamHub's Edge window in with your work account. When Edge closes the Copilot window for that reason, StreamHub says so instead of trying again and again, and it no longer sends a sign-in page back to Copilot while you sign in.
+- `tools\capture-copilot.ps1` now finds the Work IQ switch from the two steps where you turn it on and off, and offers to save it, so StreamHub can set Work IQ on that tenant.
+
+### Changed
+
+- The MCP tools say that `work_iq` only takes effect when the Work IQ switch is set up on the machine; otherwise the result says "unavailable" and Copilot keeps its own setting.
+
+### Fixed
+
+- A PowerShell project's tests failed one and all on a machine where a newer Pester (5) is installed beside the one Windows ships: Pester 5 does not read the older `Should Be` form. StreamHub's test command now loads Pester 4 or older for such tests, and leaves Pester 5 to tests written for it.
+- Tests no longer assume a OneDrive folder or release tags on the machine (GitHub's runners have neither).
+
 ## [v0.1.166] - 2026-11-17
 
 ### Changed

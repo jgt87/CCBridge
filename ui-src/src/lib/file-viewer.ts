@@ -14,6 +14,14 @@ export function viewerBody(path: string, hasChange: boolean, previewBase: string
   return "code";
 }
 
+/** The file's web address from /api/file-web-url, when it is an https address (the viewer's
+ *  Copy web address shows only then); null for no address, a reason only, or anything else. */
+export function webUrlOf(answer: unknown): string | null {
+  if (!answer || typeof answer !== "object") return null;
+  const url = (answer as { url?: unknown }).url;
+  return typeof url === "string" && /^https:\/\/[^\s/]+\/\S*$/i.test(url) ? url : null;
+}
+
 /** An image's address on the preview prefix, each path segment encoded. */
 export const previewImageSrc = (previewBase: string, path: string) =>
   previewBase + path.split("/").map(encodeURIComponent).join("/");

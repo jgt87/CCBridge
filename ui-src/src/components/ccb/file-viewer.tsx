@@ -1,9 +1,9 @@
-import { X } from "lucide-react";
+import { Check, Link2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { isImagePath } from "@/lib/app-view";
-import { isMarkdownPath, previewImageSrc, viewerBody } from "@/lib/file-viewer";
+import { isMarkdownPath, previewImageSrc, viewerBody, webUrlOf } from "@/lib/file-viewer";
 import { languageForPath } from "@/lib/highlight";
-import type { Preview } from "@/lib/api";
+import { api, type Preview } from "@/lib/api";
 import { CodeView, CopyButton } from "./code-block";
 import { DiffView } from "./diff-view";
 import { MarkdownView } from "./markdown-view";
@@ -49,6 +49,43 @@ function Toggle({
 function ViewerNote({ change, note }: { change?: ViewerChange; note?: string }) {
   if (!change && !note) return null;
   return <div className="border-(--kit-border) border-b px-4 py-1.5 text-muted-foreground text-xs">{change ? change.note : note}</div>;
+}
+
+/** Copy web address: the file's https address in the OneDrive / SharePoint folder that syncs it, so it
+ *  can be handed to Copilot by its real address. Shown only when the server finds one. Keyed by path. */
+function WebUrlButton({ path }: { path: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    let current = true;
+    api
+      .fileWebUrl(path)
+      .then((r) => current && setUrl(webUrlOf(r)))
+      .catch(() => current && setUrl(null));
+    return () => {
+      current = false;
+    };
+  }, [path]);
+  if (!url) return null;
+  return (
+    <button
+      className="kit-btn kit-btn--ghost kit-btn--sm"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* clipboard blocked: nothing to do */
+        }
+      }}
+      title={url}
+      type="button"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
+      <span aria-live="polite">{copied ? "Copied" : "Copy web address"}</span>
+    </button>
+  );
 }
 
 function ViewerContent({
@@ -129,6 +166,8 @@ export function FileViewer({
             />
           )}
           {md && !change && <Toggle first={!source} labels={["Rendered", "Source"]} onFirst={() => setSource(false)} onSecond={() => setSource(true)} />}
+          {/* keyed by path: another file starts with no address and nothing copied */}
+          <WebUrlButton key={file.path} path={file.path} />
           {!isImagePath(file.path) && <CopyButton text={file.text} />}
           <button className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" onClick={onClose} title="Close (Esc)" type="button">
             <X className="h-4 w-4" />

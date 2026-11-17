@@ -7,7 +7,20 @@ Describe 'Runbook templates' {
     $templates = @(Get-ChildItem (Join-Path $root 'templates\runbooks') -Filter '*.runbook.md')
     It 'ships the blank template and the ready-made ones' {
         $ids = @(Get-RunbookTemplates $root | ForEach-Object { $_.id })
-        foreach ($id in 'blank', 'meetings', 'email-followups', 'teams-actions', 'documents-recent', 'topic-digest') { $ids -contains $id | Should Be $true }
+        foreach ($id in 'blank', 'meetings', 'email-followups', 'teams-actions', 'documents-recent', 'topic-digest', 'link-summary') { $ids -contains $id | Should Be $true }
+    }
+    It 'link-summary: sends the link from its header and says how to report an item it cannot read' {
+        $rb = Read-Runbook ([IO.File]::ReadAllText((Join-Path $root 'templates\runbooks\link-summary.runbook.md')))
+        $rb.meta.link | Should Match '^https://'
+        $sent = Resolve-RunbookText $rb.body $rb.meta ([datetime]'2026-10-07 09:15')
+        $sent | Should Match ([regex]::Escape("Only the item at this link: $($rb.meta.link)"))
+        $sent | Should Not Match '\{\{link\}\}'
+        $sent | Should Match 'no-access \| not-found \| other'
+        # An answer for an item it could not open passes the checks, with no facts.
+        $denied = '{"generatedAt":"2026-10-07T09:15:00+02:00","link":"x","readable":false,"problem":"no-access","title":null,"where":null,"kind":null,"summary":null,"keyFacts":[],"useFor":null,"sensitivity":null}'
+        $check = Test-RunbookOutput $denied $rb.meta
+        ($check.errors -join '; ') | Should BeNullOrEmpty
+        $check.count | Should Be 0
     }
     foreach ($t in $templates) {
         It "$($t.Name): its example passes its own checks, and it is read-only and ASCII" {

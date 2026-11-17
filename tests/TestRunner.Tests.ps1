@@ -23,12 +23,25 @@ Describe 'Find-TestCommand' {
             $t.kind | Should Be 'pester'
             $t.scope | Should Be 'related'
             @($t.tests) -join ',' | Should Be 'tests/Calc.Tests.ps1'
-            $t.command | Should Match "Invoke-Pester -Path 'tests/Calc.Tests.ps1' -EnableExit"
+            $t.command | Should Match "Import-Module Pester -MaximumVersion 4.99 -ErrorAction SilentlyContinue; Invoke-Pester -Path 'tests/Calc.Tests.ps1' -EnableExit"
             @((Find-TestCommand $p @('src/Other.psm1')).tests) -join ',' | Should Be 'tests/Uses.Tests.ps1'   # mentions the file
             # Nothing related: all tests. Only non-code changes: no tests at all.
             $none = Join-Path $p 'src/New.psm1'; [IO.File]::WriteAllText($none, 'function New-X { }')
             (Find-TestCommand $p @('src/New.psm1')).scope | Should Be 'all'
             Find-TestCommand $p @('README.md') | Should Be $null
+        } finally { Remove-Item $p -Recurse -Force }
+    }
+    It 'loads Pester 4 or older for the older test form, and leaves the newest Pester to tests written for Pester 5' {
+        # A machine with Pester 5 beside the 3.4 Windows ships loads 5 first, which does not read `Should Be`.
+        $p = New-PsProject
+        try {
+            (Find-TestCommand $p @('src/Calc.psm1')).command | Should Match 'Import-Module Pester -MaximumVersion 4\.99'
+            foreach ($mark in @("BeforeDiscovery { `$cases = 1 }", "`$c = New-PesterConfiguration", "#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.5.0' }")) {
+                Add-File $p 'tests/Calc.Tests.ps1' "$mark`nDescribe 'Calc' { It 'adds two' { Add-Two 1 | Should -Be 3 } }`n"
+                $cmd = (Find-TestCommand $p @('src/Calc.psm1')).command
+                $cmd | Should Not Match 'MaximumVersion'
+                $cmd | Should Match "-Command `"Invoke-Pester -Path 'tests/Calc.Tests.ps1'"
+            }
         } finally { Remove-Item $p -Recurse -Force }
     }
     It 'runs, and a failing test gives a non-zero exit code' {

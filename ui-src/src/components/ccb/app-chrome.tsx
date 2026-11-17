@@ -3,8 +3,10 @@ import CommandButton from "@/components/kokonutui/command-button";
 import { CopilotStatus } from "@/components/ccb/copilot-status";
 import { LimitationsNote } from "@/components/ccb/limitations-note";
 import type { Notice } from "@/components/ccb/command-palette";
+import { useState } from "react";
 import { type AppState, api } from "@/lib/api";
 import { openExternal } from "@/lib/links";
+import { pendingChatText } from "@/lib/pending-chat";
 import { responseChoices } from "@/lib/response-modes";
 
 export type AgentChoice = "auto" | "copilot" | "researcher" | "analyst";
@@ -80,6 +82,28 @@ export function NoticeBar({ notice, onDismiss }: { notice: Notice; onDismiss: ()
           <X className="h-4 w-4" />
         </button>
       </span>
+    </div>
+  );
+}
+
+/** A chat Copilot was left running in at the time cap: Read the answer opens it and reads the answer. */
+export function PendingChatBar({ since }: { since: string }) {
+  const [asked, setAsked] = useState(false);
+  return (
+    <div className="flex items-center justify-between gap-3 bg-(--kit-surface-2) px-4 py-2 text-sm" role="status">
+      <span className="min-w-0">{pendingChatText(since)}</span>
+      <button
+        className="kit-btn kit-btn--sm shrink-0"
+        disabled={asked}
+        onClick={() => {
+          setAsked(true);
+          api.readAnswer().finally(() => window.setTimeout(() => setAsked(false), 3000));
+        }}
+        title="Open that Copilot chat and show its answer here when Copilot is done"
+        type="button"
+      >
+        {asked ? "Reading..." : "Read the answer"}
+      </button>
     </div>
   );
 }

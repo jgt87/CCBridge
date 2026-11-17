@@ -16,7 +16,7 @@ function New-AgentState {
         ProjectGate = New-Object object   # worker/project-open exclusion; never lock the shared state itself
         SwitchWanted = $false   # a project open waits for the worker: it stops getting the current project ready
         Progress = ''; Copilot = 'idle'; CopilotMessage = ''
-        Throttle = @{ used = 0; max = 0 }; Credits = $null; Todos = @(); ChatStarted = $false; NeedNewChat = $true; Summary = $null
+        Throttle = @{ used = 0; max = 0 }; Credits = $null; Todos = @(); ChatStarted = $false; NeedNewChat = $true; PendingChat = $null; Summary = $null
         # This run of the app: event numbers start over with it, so an open tab knows to start over too.
         Instance = [guid]::NewGuid().ToString('N').Substring(0, 12)
         # Headless (MCP): no person approves; 'auto' mode applies changes, commands only when AllowCommands.
@@ -439,8 +439,45 @@ function Reset-Bridge($State) {
     $State.CopilotThemeApplied = $null   # the override ends with the connection
 }
 
+function Resolve-PendingChat {
+    <# A chat Copilot was left running in ($State.PendingChat): reads its answer into the transcript
+       once Copilot is done. Still at work: from Read the answer (-FromButton) it says so; before
+       another send or a new chat it refuses (typing into that chat or leaving it could end Copilot's
+       work), unless the person starts a New chat, which leaves it (Start-NewChat -Force). #>
+    param($State, [int]$WaitSec = 0, [switch]$FromButton)
+    $p = $State.PendingChat
+    if (-not $p) {
+        if ($FromButton) { Add-AgentEvent $State 'status' @{ text = 'There is no answer left to read: Copilot''s last request was answered.' } }
+        return
+    }
+    $bridge = Get-Bridge $State
+    if ($p.address) { $r = Read-CopilotChatAnswer -Bridge $bridge -Address $p.address -WaitSec $WaitSec }
+    else {
+        # No address: the tab has not left that chat (only a new chat does, and it comes here first).
+        $st = $null; try { $st = Get-PageReplyState $bridge } catch { }
+        $r = if ($st -and ($st.stop -or $st.agentBusy)) { @{ busy = $true; text = '' } } else { $t = Get-PageReplyText $bridge; @{ busy = $false; text = "$($t.text)" } }
+    }
+    $since = try { ([datetime]$p.since).ToString('HH:mm') } catch { '' }
+    if ($r.busy) {
+        $msg = "Copilot is still working on the earlier request (sent at $since)."
+        if ($FromButton) { Add-AgentEvent $State 'status' @{ text = "$msg Try Read the answer again later." }; return }
+        throw "$msg Wait until it is done and use Read the answer, or start a New chat to leave it running."
+    }
+    $State.PendingChat = $null
+    if (-not "$($r.text)".Trim()) {
+        Add-AgentEvent $State 'status' @{ text = "Copilot finished the earlier request (sent at $since), but its chat shows no answer text." }
+        return
+    }
+    $note = "Copilot's answer to the earlier request (sent at $since), read from its chat."
+    if (@(Get-ActionBlocks $r.text).Count) { $note += ' Changes and commands in it were not carried out: ask again to apply them.' }
+    Add-AgentEvent $State 'status' @{ text = $note }
+    Add-AgentEvent $State 'assistant' @{ text = $r.text; uncertain = ($r.how -eq 'page'); used = $State.Throttle.used; max = $State.Throttle.max; references = @() }
+    if ($FromButton) { $State.NeedNewChat = $false; $State.ChatStarted = $true }   # the tab is on that chat now: continue it
+}
+
 function Send-ToCopilot {
     param($State, [string]$Message, [string]$Agent = '', [switch]$Long, [string[]]$Files = @(), [switch]$OptionalFiles)   # -Agent mentions Researcher/Analyst; -Long: agent runs take minutes; -Files are attached (-OptionalFiles: left out when they cannot be)
+    if ($State.PendingChat) { Resolve-PendingChat $State }   # a chat left running: its answer first, or refuse while Copilot works
     $bridge = Get-Bridge $State
     Update-CopilotTheme $State   # a theme chosen while a task ran
     if ($State.ResponseMode -in 'auto', 'quick', 'deep' -or "$($State.ResponseMode)" -like 'pick:*') {
@@ -490,6 +527,12 @@ function Send-ToCopilot {
             $r = Send-CopilotPrompt $bridge $Message -TimeoutSec $timeout -MaxTimeoutSec $(if ([int]$State.Config.agentTimeoutSec -gt 0) { [int]$State.Config.agentTimeoutSec } else { 1800 }) -OnProgress $progress -CancelCheck $cancel -StallSec $stall -Agent $Agent -Files $Files -OptionalFiles:$OptionalFiles -OnStatus $status
         }
     } catch {
+        # Copilot was still at work at the time cap and was left running (CopilotBridge): keep its
+        # chat so the answer can be read later; the next message goes to a new chat.
+        if ($bridge -and $bridge.PSObject.Properties['PendingChat'] -and $bridge.PendingChat) {
+            $State.PendingChat = $bridge.PendingChat
+            $State.NeedNewChat = $true
+        }
         if (Test-ConnectionLost $_) {
             # Later in a chat the conversation cannot be resumed: the next message starts a new chat.
             $State.NeedNewChat = $true
@@ -533,7 +576,7 @@ function Submit-AgentTask {
     if (-not $Title) {
         $Title = switch ($Task.kind) {
             'chat' { "$($Task.text)" } 'ask' { "$($Task.text)" } 'fetch' { "Runbook: $($Task.name)" } 'runbook' { "Runbook: $($Task.name)" } 'chain' { "Chain: $($Task.name)" } 'script' { "Script: $($Task.name)" } 'agent' { "$(Get-AgentDisplayName $Task.agent): $($Task.text)" } 'review' { 'Code review' }
-            'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } 'response-options' { 'Read Copilot''s response options' } default { "$($Task.kind)" }
+            'newchat' { 'New Copilot chat' } 'undo' { 'Undo last change set' } 'response-options' { 'Read Copilot''s response options' } 'read-answer' { 'Read Copilot''s answer' } default { "$($Task.kind)" }
         }
     }
     $Title = ($Title -replace '\s+', ' ').Trim(); if ($Title.Length -gt 160) { $Title = $Title.Substring(0, 157) + '...' }
@@ -3582,7 +3625,10 @@ function Add-ChatScopeFiles($State, [string]$Text) {
     } catch { Write-CCBLogError agent 'chat scope' $_ }
 }
 
-function Start-NewChat($State) {
+function Start-NewChat($State, [switch]$Force) {
+    # A chat left running: its answer first, or refuse while Copilot works. -Force (the person's
+    # New chat) leaves it running; Read the answer can still open it later.
+    if ($State.PendingChat -and -not $Force) { Resolve-PendingChat $State }
     $prev = Enter-Activity $State 'newchat' 'Opening a new Copilot chat'
     try { Start-NewChatCore $State } finally { Exit-Activity $State $prev }
 }
@@ -6520,7 +6566,7 @@ function Start-AgentWorker {
                 'newchat' {
                     # From New chat in the app the view already started over (background): only
                     # Copilot's page changes here, unless a message started a new chat meanwhile.
-                    if (-not $task.background -or $State.NeedNewChat) { Start-NewChat $State }
+                    if (-not $task.background -or $State.NeedNewChat) { Start-NewChat $State -Force }
                     if (-not $task.background) {
                         $State.Todos = @()
                         $State.Summary = $null
@@ -6529,6 +6575,7 @@ function Start-AgentWorker {
                 }
                 'undo' { Invoke-UndoTask $State "$($task.upTo)" }
                 'response-options' { Update-ResponseOptions $State (Get-Bridge $State) -Report }
+                'read-answer' { Resolve-PendingChat $State -WaitSec 60 -FromButton }
             }
         } catch {
             Write-CCBLogError agent "task $($task.kind) failed" $_

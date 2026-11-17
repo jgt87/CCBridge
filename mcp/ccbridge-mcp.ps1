@@ -146,11 +146,12 @@ function Limit([string]$Text, [int]$Max) { if (-not $Text -or $Text.Length -le $
 
 function Format-JobStatus($Job, [switch]$Full, $Events, $Info) {
     $events = if ($null -ne $Events) { @($Events) } else { Get-JobEvents $Job }
-    if (-not $Info) { $Info = @{ workIq = $State.WorkIq; workIqActual = $State.WorkIqActual; throttle = $State.Throttle; credits = $State.Credits } }
+    if (-not $Info) { $Info = @{ workIq = $State.WorkIq; workIqActual = $State.WorkIqActual; throttle = $State.Throttle; credits = $State.Credits; pendingChat = $(if ($State.PendingChat) { [string]$State.PendingChat.since } else { $null }) } }
     $sb = New-Object Text.StringBuilder
     $null = $sb.AppendLine("job: $($Job.id) ($($Job.kind)) status: $($Job.status)")
     if ($Job.project) { $null = $sb.AppendLine("project: $($Job.project)  mode: $($Job.mode)  commands allowed: $($Job.allowCommands)") }
     if ($Info.workIq -and $Info.workIq -ne 'leave') { $null = $sb.AppendLine("Work IQ: requested $($Info.workIq), actual $(if ($Info.workIqActual) { $Info.workIqActual } else { 'unknown' })") }
+    if ($Info.pendingChat) { $null = $sb.AppendLine("Copilot was still working at the time limit and was left running (since $($Info.pendingChat)); its answer can be read later with Read the answer in the web app. Until Copilot is done, a new task is refused unless a new chat is started (copilot_new_chat).") }
     $rounds = @($events | Where-Object { $_.type -eq 'assistant' }).Count
     $null = $sb.AppendLine("Copilot rounds: $rounds  chat messages: $($Info.throttle.used)/$($Info.throttle.max)")
     if ($Info.credits) { $null = $sb.AppendLine("Copilot credits left today: $($Info.credits.remaining)/$($Info.credits.total)") }
@@ -545,7 +546,7 @@ $tools = @(
            mode = @{ type = 'string'; enum = @('auto', 'plan', 'ask'); description = 'auto: Copilot changes files directly (default). plan: Copilot only reads and proposes. ask: every change waits for copilot_approve.' }
            allow_commands = @{ type = 'boolean'; description = 'true lets Copilot run commands such as builds and tests in the project folder. Default false.' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation (default false; a different project always starts fresh).' }
-           work_iq = @{ type = 'boolean'; description = 'true: Copilot may use the user''s Microsoft 365 data (Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files). Omit to keep the current setting.' }
+           work_iq = @{ type = 'boolean'; description = 'true: Copilot may use the user''s Microsoft 365 data (Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files). Only works when the Work IQ switch is set up on this machine (tools\capture-copilot.ps1); otherwise the result says "actual unavailable" and Copilot keeps its own setting. Omit to keep the current setting.' }
            think_deeper = @{ type = 'boolean'; description = 'true: use Copilot''s Think deeper mode for this request (slower, for hard problems). Default: the app''s setting.' }
            wait_sec = @{ type = 'integer'; description = 'How long to wait for the result (default 600, max 1800). If it is not finished by then, call copilot_task_status.' }
            copilot_review = @{ type = 'boolean'; description = 'true: after big changes Copilot also reviews its own work (costs extra Copilot messages). Default false: you review the diffs in the report yourself.' } } } }
@@ -554,7 +555,7 @@ $tools = @(
        inputSchema = @{ type = 'object'; required = @('prompt'); properties = @{
            prompt = @{ type = 'string'; description = 'The full prompt. Copilot sees nothing else, so include any code or context it needs (up to about 75,000 characters).' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation first (default false: continue the current one).' }
-           work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' }
+           work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Only works when the Work IQ switch is set up on this machine (tools\capture-copilot.ps1); otherwise the result says "actual unavailable" and Copilot keeps its own setting. Omit to keep the current setting.' }
            think_deeper = @{ type = 'boolean'; description = 'true: use Copilot''s Think deeper mode for this request (slower, for hard problems). Default: the app''s setting.' }
            timeout_sec = @{ type = 'integer'; description = 'Seconds to wait for the reply (default 240).' } } } }
     @{ name = 'copilot_start_task'
@@ -566,7 +567,7 @@ $tools = @(
            allow_commands = @{ type = 'boolean'; description = 'Allow Copilot to run shell commands (cmd.exe) in the project folder, e.g. builds and tests. Default false.' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation (default false; a different project always starts fresh).' }
            copilot_review = @{ type = 'boolean'; description = 'true: after big changes Copilot also reviews its own work (costs extra Copilot messages). Default false: you review the diffs in the report yourself.' }
-           work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Omit to keep the current setting.' }
+           work_iq = @{ type = 'boolean'; description = 'Turn Work IQ on (true: Copilot may use the user''s Microsoft 365 data - Outlook mail, Teams chats and meetings, calendar, OneDrive/SharePoint files, people) or off (false). Only works when the Work IQ switch is set up on this machine (tools\capture-copilot.ps1); otherwise the result says "actual unavailable" and Copilot keeps its own setting. Omit to keep the current setting.' }
            think_deeper = @{ type = 'boolean'; description = 'true: use Copilot''s Think deeper mode for this request (slower, for hard problems). Default: the app''s setting.' } } } }
     @{ name = 'copilot_review'
        description = 'Full code review by Copilot of a project folder (or chosen files/folders), read-only: the code goes to Copilot in batches, every finding must quote real lines from the file (findings that do not are left out), plus one pass across the whole project. Returns the checked findings with severity, file:line, problem and suggested fix; also saved as reviews/review-<date>.md in the project. Large projects take many Copilot messages. Review the findings yourself before fixing them.'
@@ -613,7 +614,7 @@ This server lets you hand work to a stronger model: Microsoft 365 Copilot (in th
 WHEN TO USE IT. Do it yourself only when the task is small and clear: one file, a few lines, and you know exactly what to change. Use Copilot for everything else:
 - copilot_run_task: any coding task that needs thinking (a bug you do not understand, a new feature, several files, a design, unfamiliar libraries). One call; it returns the full report when done.
 - copilot_ask: any question that needs reasoning (explain code or an error, find a root cause, review, plan, choose an approach, write longer text). Paste the code or error into the prompt.
-- With work_iq=true Copilot can also use the user's Outlook mail, Teams chats and meetings, calendar and OneDrive/SharePoint files (only read; it never sends or deletes anything).
+- With work_iq=true Copilot can also use the user's Outlook mail, Teams chats and meetings, calendar and OneDrive/SharePoint files (only read; it never sends or deletes anything). This needs the Work IQ switch set up on this machine: when the result says "Work IQ: ... actual unavailable", Copilot used its own setting.
 
 HOW. Give Copilot the whole task in plain words: the goal, the files if you know them, and how to check the result. Set allow_commands=true when Copilot should build or run tests. Copilot takes tens of seconds per step and has a daily limit, so send complete tasks, not tiny steps.
 

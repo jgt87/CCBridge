@@ -49,7 +49,30 @@ $controlsJs = @'
   return JSON.stringify(all.map(pick).filter(Boolean).slice(0, 200));
 })()
 '@
-function Get-Controls { (Invoke-CdpEval $s $controlsJs) | ConvertFrom-Json }
+# Assigned before it is returned (in a pipeline, ConvertFrom-Json passes a JSON array on as one item)
+# and returned plainly, so the caller's @() gets the controls themselves.
+function Get-Controls { $list = ConvertFrom-Json (Invoke-CdpEval $s $controlsJs); $list }
+
+# Offers the Work IQ switch found in the two snapshots and, on a yes, writes it to
+# config\selectors.local.json (merged over selectors.json; other entries there are kept).
+function Save-WorkIqToggle($On, $Off) {
+    $found = @(Get-WorkIqToggleCandidates -On $On -Off $Off)
+    if (-not $found.Count) { Write-Host 'No control changed state between steps 1 and 2: the Work IQ switch was not found.' -ForegroundColor Yellow; return }
+    Write-Host ''
+    Write-Host 'Controls that changed when Work IQ was switched:' -ForegroundColor White
+    for ($i = 0; $i -lt $found.Count; $i++) { Write-Host ("  {0}. {1}  ({2} = {3} when on)  {4}" -f ($i + 1), $found[$i].toggle, $found[$i].stateAttribute, $found[$i].onValue, $found[$i].label) }
+    $answer = Read-Host "Number of the Work IQ switch to save in config\selectors.local.json (Enter = none)"
+    $n = 0
+    if (-not [int]::TryParse("$answer", [ref]$n) -or $n -lt 1 -or $n -gt $found.Count) { Write-Host 'Nothing saved.'; return }
+    $pick = $found[$n - 1]
+    $file = Join-Path $root 'config\selectors.local.json'
+    $local = if (Test-Path $file) { Get-Content $file -Raw | ConvertFrom-Json } else { New-Object psobject }
+    if (-not $local) { $local = New-Object psobject }
+    $block = [pscustomobject]@{ toggle = $pick.toggle; stateAttribute = $pick.stateAttribute; onValue = $pick.onValue }
+    if ($local.PSObject.Properties['workIq']) { $local.workIq = $block } else { $local | Add-Member -NotePropertyName workIq -NotePropertyValue $block }
+    [IO.File]::WriteAllText($file, ($local | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+    Write-Host "Saved to $file. Restart StreamHub to use it." -ForegroundColor Green
+}
 
 # The open menus (the response picker and its submenus): option names and their menu attributes only.
 $menusJs = @'
@@ -70,6 +93,7 @@ $report.snapshots.workIqOn = @(Get-Controls)
 
 Pause-ForUser '2/5  Turn Work IQ OFF.'
 $report.snapshots.workIqOff = @(Get-Controls)
+Save-WorkIqToggle $report.snapshots.workIqOn $report.snapshots.workIqOff
 
 Pause-ForUser '3/5  Turn Work IQ ON again. Click into the message box and type a single "/" (do not send). Leave the picker that opens visible.'
 $report.snapshots.slashPicker = @(Get-Controls)

@@ -7,7 +7,6 @@
 
 $ErrorActionPreference = 'Stop'
 foreach ($m in 'Log', 'Cdp', 'Prereq', 'Config', 'CopilotBridge') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
-$script:MsaTenant = '9188040d-6c67-4c5b-b112-36a304b66dad'   # the tenant of personal Microsoft accounts
 
 $script:SettingsUrl = 'edge://settings/profiles/multiProfileSettings'
 # The switch's label in the languages seen so far (Edge's own text).
@@ -96,15 +95,7 @@ function Get-ProfileAccount {
     <# Which account StreamHub's Edge profile is signed in with: 'work' (work or school account),
        'personal' (Microsoft account), 'none' or 'unknown'. Only the account type is read. #>
     param([string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'))
-    try { $j = [IO.File]::ReadAllText((Join-Path $ProfileDir 'Local State')) | ConvertFrom-Json } catch { return 'unknown' }
-    $d = $j.profile.info_cache.Default
-    if (-not $d) { return 'unknown' }
-    $type = "$($d.edge_account_type)"
-    $tenant = "$($d.edge_account_tenant_id)"
-    if ($type -eq '2' -or ($tenant -and $tenant -ne $script:MsaTenant -and $type -ne '1' -and $type -ne '0')) { return 'work' }
-    if ($type -eq '1') { return 'personal' }
-    if ($type -in '', '0') { return 'none' }
-    'unknown'
+    Get-EdgeProfileAccount -ProfileDir $ProfileDir   # lib/Cdp.psm1: Test-ForcedSignInBlock needs it too
 }
 
 function Open-BackgroundTab([int]$Port, [string]$Url) {
