@@ -127,10 +127,22 @@ async function withBrowser(o, fn) {
   }
 }
 
+// True once the new page has loaded and shows a control: the old page carries a marker, so a revisit
+// of the same address is not taken for loaded before it is.
+const loadedSource = (selector) => `!window.__controlRowsOld && document.readyState === 'complete' && !!document.querySelector(${JSON.stringify(selector)})`;
+
 async function visit(page, url, width, o) {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 600 });
   await page.send('Page.enable');
+  await page.send('Runtime.evaluate', { expression: 'window.__controlRowsOld = true' });
   await page.send('Page.navigate', { url });
+  // A fixed pause alone scanned a page that had not loaded on GitHub's runner (no rows, so the
+  // self-test failed): wait for the page itself, up to 10 s, then the settle time.
+  for (let k = 0; k < 100; k++) {
+    const r = await page.send('Runtime.evaluate', { expression: loadedSource(o.selector), returnByValue: true }).catch(() => null);
+    if (r && r.result && r.result.value === true) break;
+    await page.wait(100);
+  }
   await page.wait(o.wait);
   const r = await page.send('Runtime.evaluate', { expression: scanSource(o.selector, o.ignore), returnByValue: true });
   if (r.exceptionDetails) throw new Error(`the scan failed on ${url}: ${r.exceptionDetails.text}`);

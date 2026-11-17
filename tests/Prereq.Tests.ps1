@@ -15,7 +15,9 @@ Describe 'Get-PrereqChecks' {
         $checks[0].name | Should Be 'StreamHub'
         # A copy with no version.txt and no release tag git can find (GitHub's checkout fetches the
         # commit alone) is honestly "dev"; with a tag, the version must be shown.
-        $tag = & git -C $root describe --tags --abbrev=0 2>$null | Select-Object -First 1
+        # Without a tag git writes "fatal: No names found" to stderr, which Pester's Stop preference
+        # turns into an error: that is the "no tag" answer here.
+        $tag = try { & git -C $root describe --tags --abbrev=0 2>$null | Select-Object -First 1 } catch { $null }
         if ($tag -or (Test-Path (Join-Path $root 'version.txt'))) {
             $checks[0].detail | Should Match '^v\d+\.\d+\.\d+( \(commit [0-9a-f]+\))?$'
         } else {

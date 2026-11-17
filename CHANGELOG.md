@@ -4,6 +4,13 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+## [v0.1.168] - 2026-11-17
+
+### Fixed
+
+- The row-height design check (`check-control-rows.mjs`) waits until a page has loaded before it measures, instead of a fixed pause; on a slow machine it measured an empty page and missed every problem.
+- Tests on GitHub: the version check no longer fails when the copy has no release tags.
+
 ## [v0.1.167] - 2026-11-17
 
 ### Added
