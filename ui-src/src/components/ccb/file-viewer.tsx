@@ -8,6 +8,7 @@ import { CodeView, CopyButton } from "./code-block";
 import { DiffView } from "./diff-view";
 import { MarkdownView } from "./markdown-view";
 import { ModalBackdrop } from "./modal-backdrop";
+import { BoldLabel } from "./text-parts";
 
 /** What a change set did to the file (opened from History): the diff and a line about what it compares. */
 export interface ViewerChange {
@@ -36,10 +37,10 @@ function Toggle({
   return (
     <div className="kit-segmented">
       <button aria-pressed={first} className={tab} onClick={onFirst} title={titles?.[0]} type="button">
-        {labels[0]}
+        <BoldLabel text={labels[0]} />
       </button>
       <button aria-pressed={!first} className={tab} onClick={onSecond} title={titles?.[1]} type="button">
-        {labels[1]}
+        <BoldLabel text={labels[1]} />
       </button>
     </div>
   );

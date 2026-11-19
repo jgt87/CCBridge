@@ -35,7 +35,7 @@ export function ScriptsPanel({
           </>
         }
       >
-        Your project's scripts, run with one click.
+        Your project’s scripts, run with one click.
       </InfoNote>
       {scripts.length === 0 && <p className="kit-empty py-3 text-xs">No scripts yet.</p>}
       {scripts.map((path) => (

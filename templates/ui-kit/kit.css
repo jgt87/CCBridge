@@ -41,7 +41,15 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 .kit-muted { color: var(--kit-text-muted); }
 .kit-small { font-size: var(--kit-text-sm); }
 .kit-mono { font-family: var(--kit-font-mono); font-size: 0.92em; }
-.kit-link { color: var(--kit-accent); text-decoration: underline; text-underline-offset: 2px; }
+/* Headings wrap into even lines; prose avoids a lone last word. */
+.kit-h1, .kit-h2, .kit-h3, .kit-band__title, .kit-panel__title { text-wrap: balance; }
+.kit-prose p { text-wrap: pretty; }
+/* Underlines sit 0.2em below the text, so they clear descenders at every size; sup and sub keep the
+   line height of the line they are in. */
+.kit-link { color: var(--kit-accent); text-decoration: underline; text-underline-offset: 0.2em; }
+.kit-page sup, .kit-page sub { position: relative; line-height: 0; vertical-align: baseline; }
+.kit-page sup { top: -0.4em; }
+.kit-page sub { top: 0.25em; }
 @media (hover: hover) and (pointer: fine) { .kit-link:hover { color: var(--kit-accent-hover); } }
 
 /* The gradient (light blue to blue, bottom left to top right): for a header band or a
@@ -94,7 +102,8 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   padding: var(--kit-space-4);
 }
 .kit-panel__head { display: flex; align-items: center; justify-content: space-between; gap: var(--kit-space-2); margin-bottom: var(--kit-space-3); }
-.kit-panel__title { font-size: var(--kit-text-md); font-weight: 600; line-height: 1.3; margin: 0; color: var(--kit-title); }
+/* A panel title stops at two lines; the rest of a long title goes in the panel's own text. */
+.kit-panel__title { font-size: var(--kit-text-md); font-weight: 600; line-height: 1.3; margin: 0; color: var(--kit-title); display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 /* A filter bar that stays at the top while the page scrolls. */
 .kit-panel--sticky { position: sticky; top: 0; z-index: var(--kit-z-sticky, 5); box-shadow: var(--kit-shadow); }
 
@@ -802,6 +811,10 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-drop input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .kit-drop__title { color: var(--kit-text); font-weight: 600; }
 .kit-drop__files { list-style: none; margin: 0; padding: 0; font-size: var(--kit-text-xs); color: var(--kit-text); }
+/* A file name truncates in the middle: the stem shrinks with an ellipsis, the extension stays. */
+.kit-drop__file { display: flex; min-width: 0; white-space: nowrap; }
+.kit-drop__stem { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.kit-drop__ext { flex-shrink: 0; }
 /* Bars in a track (progress and status bars, bar lists) are round at both ends; bars drawn against a chart axis are flat at the axis. */
 .kit-progress { width: 100%; height: 6px; border-radius: 999px; background: var(--kit-surface-2); overflow: hidden; }
 .kit-progress__bar { height: 100%; width: 0; border-radius: 999px; background: var(--kit-accent); transition: width var(--kit-speed) ease-out; }
@@ -817,14 +830,15 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-tabs__indicator {
   position: absolute; bottom: -1px; left: 0; height: 2px; width: 100px; background: var(--kit-accent);
   transform: scaleX(0); transform-origin: left;
-  transition: transform var(--kit-speed-slow) cubic-bezier(0.22, 1, 0.36, 1);
+  /* Already on screen and moving within it: ease-in-out (ease-out is for entering and leaving). */
+  transition: transform var(--kit-speed-slow) var(--kit-ease-in-out, cubic-bezier(0.65, 0, 0.35, 1));
 }
 .kit-segmented--animated button { position: relative; z-index: 1; }
 .kit-segmented--animated button[aria-pressed="true"] { background: none; }
 .kit-segmented__indicator {
   position: absolute; top: 2px; bottom: 2px; left: 0; width: 0; border-radius: calc(var(--kit-radius) - 2px);
   background: var(--kit-accent-soft);
-  transition: transform var(--kit-speed-slow) cubic-bezier(0.22, 1, 0.36, 1), width var(--kit-speed-slow) cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform var(--kit-speed-slow) var(--kit-ease-in-out, cubic-bezier(0.65, 0, 0.35, 1)), width var(--kit-speed-slow) var(--kit-ease-in-out, cubic-bezier(0.65, 0, 0.35, 1));
 }
 @media (prefers-reduced-motion: reduce) { .kit-tabs__indicator, .kit-segmented__indicator, .kit-btn--hold.is-holding::before { transition-duration: 0ms; } }
 
@@ -852,7 +866,7 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-switch { display: inline-flex; align-items: center; gap: var(--kit-space-2); cursor: pointer; font-size: var(--kit-text-sm); color: var(--kit-text); }
 .kit-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .kit-switch__track { position: relative; width: 2.25rem; height: 1.25rem; border-radius: 999px; background: var(--kit-border-strong); transition: background var(--kit-speed) ease-out; flex: 0 0 auto; }
-.kit-switch__track::after { content: ""; position: absolute; top: 2px; left: 2px; width: calc(1.25rem - 4px); height: calc(1.25rem - 4px); border-radius: 999px; background: var(--kit-surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform var(--kit-speed) ease-out; }
+.kit-switch__track::after { content: ""; position: absolute; top: 2px; left: 2px; width: calc(1.25rem - 4px); height: calc(1.25rem - 4px); border-radius: 999px; background: var(--kit-surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform var(--kit-speed) var(--kit-ease-in-out, cubic-bezier(0.65, 0, 0.35, 1)); }
 .kit-switch input:checked + .kit-switch__track { background: var(--kit-accent); }
 .kit-switch input:checked + .kit-switch__track::after { transform: translateX(1rem); }
 .kit-switch input:focus-visible + .kit-switch__track { box-shadow: var(--kit-focus); }

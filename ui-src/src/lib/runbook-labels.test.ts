@@ -3,8 +3,8 @@ import { attachTitle, kindBadge, lastRunLabel, resultTitle, runTitle } from "./r
 
 describe("runbook labels", () => {
   it("names the kind of answer a runbook saves", () => {
-    expect(kindBadge("json")).toEqual({ text: "JSON", title: "Saves JSON checked against the runbook's shape" });
-    expect(kindBadge("text")).toEqual({ text: "text", title: "Saves Copilot's answer as Markdown" });
+    expect(kindBadge("json")).toEqual({ text: "JSON", title: "Saves JSON checked against the runbook’s shape" });
+    expect(kindBadge("text")).toEqual({ text: "text", title: "Saves Copilot’s answer as Markdown" });
   });
   it("says when it last ran, in the fetch panel's words", () => {
     expect(lastRunLabel(null, () => "fetched 5 min ago")).toBe("never run");

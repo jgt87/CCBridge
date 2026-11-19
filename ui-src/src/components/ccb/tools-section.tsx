@@ -44,7 +44,7 @@ export function ToolsSection() {
           <SettingLine
             control={
               t.canInstall ? (
-                <button className={smallButtonClass} disabled={busy || pending} onClick={() => install(t.name)} title={pending ? "The tool is in use now; the update runs the next time StreamHub starts." : "For your user only, without admin rights. Installing accepts the tool's own licence."} type="button">
+                <button className={smallButtonClass} disabled={busy || pending} onClick={() => install(t.name)} title={pending ? "The tool is in use now; the update runs the next time StreamHub starts." : "For your user only, without admin rights. Installing accepts the tool’s own licence."} type="button">
                   {busy ? "Installing..." : pending ? "Updates at next start" : label}
                 </button>
               ) : (
@@ -92,7 +92,7 @@ function ProjectPackages() {
   return (
     <SettingLine
       control={
-        <button className={smallButtonClass} disabled={!state?.items.length || !state.npm} onClick={run} title={state && !state.npm ? "npm is not installed: install Node.js above first." : "Downloads the packages from npm's registry and runs their install steps."} type="button">
+        <button className={smallButtonClass} disabled={!state?.items.length || !state.npm} onClick={run} title={state && !state.npm ? "npm is not installed: install Node.js above first." : "Downloads the packages from npm’s registry and runs their install steps."} type="button">
           Run npm install
         </button>
       }

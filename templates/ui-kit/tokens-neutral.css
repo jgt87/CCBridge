@@ -77,6 +77,8 @@
   --kit-focus: 0 0 0 2px var(--kit-surface), 0 0 0 4px var(--kit-accent);
   --kit-speed: 140ms;
   --kit-speed-slow: 280ms;
+  /* Motion of a thing already on screen (a tab or segment indicator, a switch knob). */
+  --kit-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   /* Layers (z-index) of the parts that sit over the page, from low to high: the sticky filter bar,
      menus, list panels and popovers, info tips, toasts, the skip link. */
   --kit-z-sticky: 5;

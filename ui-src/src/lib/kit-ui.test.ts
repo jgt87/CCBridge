@@ -595,6 +595,53 @@ describe("kit.css pointer rules", () => {
     expect(coarse).toMatch(/width: max\(100%, 44px\); height: max\(100%, 44px\)/);
     expect(coarse).toMatch(/font-size: max\(16px, 1em\)/);
   });
+  // The shared typography and motion details (19 Nov 2026).
+  it("puts link underlines 0.2em below the text and keeps sup and sub out of the line height", () => {
+    expect(css).toMatch(/\.kit-link \{[^}]*text-underline-offset: 0\.2em/);
+    expect(css).toMatch(/\.kit-page sup, \.kit-page sub \{[^}]*line-height: 0/);
+  });
+  it("balances headings, keeps prose from a lone last word and stops panel titles at two lines", () => {
+    expect(css).toMatch(/\.kit-h1, \.kit-h2, \.kit-h3[^{]*\{ text-wrap: balance; \}/);
+    expect(css).toMatch(/\.kit-prose p \{ text-wrap: pretty; \}/);
+    expect(css).toMatch(/\.kit-panel__title \{[^}]*line-clamp: 2/);
+  });
+  it("moves indicators and the switch knob with ease-in-out, a token every theme sheet defines", () => {
+    for (const sel of [".kit-tabs__indicator", ".kit-segmented__indicator", ".kit-switch__track::after"]) {
+      const at = css.indexOf(sel + " {");
+      expect(at).toBeGreaterThan(-1);
+      expect(css.slice(at, css.indexOf("}", at))).toContain("var(--kit-ease-in-out");
+    }
+    for (const sheet of ["tokens.css", "tokens-neutral.css"]) {
+      expect(fs.readFileSync(path.resolve(import.meta.dirname, "../../../templates/ui-kit", sheet), "utf8")).toMatch(/--kit-ease-in-out: cubic-bezier\(/);
+    }
+  });
+});
+
+describe("kit.js drop zone file names", () => {
+  async function drop(names: string[]) {
+    document.body.innerHTML = `<label class="kit-drop" data-kit-drop><input type="file" multiple><ul class="kit-drop__files"></ul></label>`;
+    load(kitJs);
+    await tick();
+    const zone = document.querySelector(".kit-drop") as HTMLElement;
+    const files = names.map((n) => new File(["x"], n));
+    const ev = new Event("drop", { bubbles: true, cancelable: true }) as Event & { dataTransfer: unknown };
+    ev.dataTransfer = { files };
+    zone.dispatchEvent(ev);
+    return Array.from(document.querySelectorAll(".kit-drop__file"));
+  }
+  it("splits a name into a stem that shrinks and an extension that stays, with the full name as title", async () => {
+    const [row] = await drop(["quarterly-report-final.xlsx"]);
+    expect(row.getAttribute("title")).toBe("quarterly-report-final.xlsx");
+    expect(row.querySelector(".kit-drop__stem")!.textContent).toBe("quarterly-report-final");
+    expect(row.querySelector(".kit-drop__ext")!.textContent).toBe(".xlsx");
+  });
+  it("keeps a dot file or a name without a dot whole, and never turns a name into markup", async () => {
+    const rows = await drop([".env", "README", "<b>x</b>.txt"]);
+    expect(rows.map((r) => r.querySelector(".kit-drop__ext")?.textContent ?? null)).toEqual([null, null, ".txt"]);
+    expect(rows[0].textContent).toBe(".env");
+    expect(rows[2].querySelector("b")).toBeNull();
+    expect(rows[2].querySelector(".kit-drop__stem")!.textContent).toBe("<b>x</b>");
+  });
 });
 
 describe("page check: kit classes without a rule", () => {

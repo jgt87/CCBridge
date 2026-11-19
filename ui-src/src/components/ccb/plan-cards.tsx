@@ -135,7 +135,7 @@ export function ClarifyCard({
       </div>
       <div className="mt-3 flex flex-wrap justify-end gap-1">
         {planId && <span className="mr-auto"><PlanLink onOpenFile={onOpenFile} /></span>}
-        <button className={flatButton} disabled={sent} onClick={() => submit(false)} title="Plan with Copilot's own assumptions" type="button">
+        <button className={flatButton} disabled={sent} onClick={() => submit(false)} title="Plan with Copilot’s own assumptions" type="button">
           Skip questions
         </button>
         <GradientButton className={primary} disabled={sent} label={sent ? "Sent" : "Send answers and plan"} onClick={() => submit(true)} variant="neutral" />
@@ -150,7 +150,7 @@ export type { PlanVariant };
 
 const PLAN_TEXT: Record<PlanVariant, { title: string; build: string }> = {
   plan: { title: "Plan to approve", build: "Approve and build" },
-  proposal: { title: "Copilot's proposal", build: "Approve and build" },
+  proposal: { title: "Copilot’s proposal", build: "Approve and build" },
   unfinished: { title: "Copilot stopped before making the change", build: "Continue and build" },
 };
 

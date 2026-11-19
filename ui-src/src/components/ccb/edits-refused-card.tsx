@@ -11,7 +11,7 @@ export function EditsRefusedCard({ item, onSend }: { item: EditsRefusedItem; onS
     return (
       <div className="flex items-start gap-2 px-1 text-muted-foreground text-sm">
         <Info className="mt-0.5 h-4 w-4" />
-        <span>{chosen === "apply" ? "Applying Copilot's edits." : chosen === "change" ? "Sent again as a change." : editsRefusedText(item.count, item.files)}</span>
+        <span>{chosen === "apply" ? "Applying Copilot’s edits." : chosen === "change" ? "Sent again as a change." : editsRefusedText(item.count, item.files)}</span>
       </div>
     );
   }

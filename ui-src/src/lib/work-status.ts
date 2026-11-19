@@ -40,7 +40,7 @@ export function workView(w: WorkStatus, now: number = Date.now()): WorkView {
   const newSinceStep = phaseFor == null || quietMs < phaseFor - 2000;
   const sign = !newSinceStep ? "" : data != null && data <= quietMs + 1000 ? `Copilot wrote ${formatDuration(data)} ago` : `updated ${formatDuration(quietMs)} ago`;
   const quietText = w.waitSec
-    ? `StreamHub keeps waiting while Copilot's page shows it is at work, up to ${formatDuration(w.waitSec * 1000)} in all; with no sign at all it stops after ${formatDuration(w.stallSec * 1000)}.`
+    ? `StreamHub keeps waiting while Copilot’s page shows it is at work, up to ${formatDuration(w.waitSec * 1000)} in all; with no sign at all it stops after ${formatDuration(w.stallSec * 1000)}.`
     : "StreamHub is still on this step; it ends by itself when the step finishes or times out.";
   const steps = (Array.isArray(w.steps) ? w.steps : w.steps ? [w.steps] : []).filter((s) => s?.text);
   return {

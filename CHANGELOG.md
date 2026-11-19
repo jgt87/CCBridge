@@ -4,6 +4,27 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+## [v0.1.169] - 2026-11-19
+
+### Changed
+
+- The app's texts use typographic quotes and apostrophes (’ “ ”) instead of straight ones.
+- A choice that turns bold when selected (segmented switches, Settings sections, Changes / Rendered) no longer moves the choices beside it.
+- Long file names in the file list, the plan and the side panel are shortened in the middle, so the extension stays visible.
+- Link underlines in the app sit a little lower, clear of letters such as g and y.
+- UI kit for pages Copilot builds:
+  - link underlines sit a little lower, clear of letters such as g and y;
+  - headings wrap into even lines, and paragraphs avoid a lone last word;
+  - panel titles stop at two lines;
+  - superscripts and subscripts no longer push their lines apart;
+  - tab and segment indicators and the switch knob move with a smoother ease-in-out;
+  - in the file drop zone, a long file name is shortened in the middle, so its extension stays visible.
+
+### Fixed
+
+- The design check no longer mistakes opaque black for transparent. It also finds text cut off by a parent element, and reads a field's edge from the group around it. It now reports straight quotes in interface text, as a finding to judge rather than a failure.
+- The design checks delete their temporary browser profiles reliably; earlier runs could leave them behind in the temp folder.
+
 ## [v0.1.168] - 2026-11-17
 
 ### Fixed

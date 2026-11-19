@@ -294,8 +294,8 @@ function DownloadFields({ link, setLink, args, setArgs }: { link: string; setLin
   return (
     <>
       <input aria-label="Link to the file" className={smallField} onChange={(e) => setLink(e.target.value)} placeholder="Link to the file (SharePoint or OneDrive, https://...)" value={link} />
-      <input aria-label="Save as" className={smallField} onChange={(e) => setArgs(e.target.value)} placeholder="Save as, e.g. Downloads/sales.csv (empty: Downloads/ with the file's own name)" value={args} />
-      <p className="text-muted-foreground text-xs">StreamHub's Edge fetches it with your Microsoft 365 sign-in each time the chain runs. You approve each link once.</p>
+      <input aria-label="Save as" className={smallField} onChange={(e) => setArgs(e.target.value)} placeholder="Save as, e.g. Downloads/sales.csv (empty: Downloads/ with the file’s own name)" value={args} />
+      <p className="text-muted-foreground text-xs">StreamHub’s Edge fetches it with your Microsoft 365 sign-in each time the chain runs. You approve each link once.</p>
     </>
   );
 }

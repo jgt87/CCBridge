@@ -25,7 +25,7 @@ export function SandboxButtons({ files }: { files: string[] }) {
     <div className="mt-2 space-y-1">
       {files.map((f) => (
         <div className="flex flex-wrap items-center gap-2 text-xs" key={f}>
-          <span className="text-muted-foreground">{`${f} is in Copilot's own workspace, not in the project.`}</span>
+          <span className="text-muted-foreground">{`${f} is in Copilot’s own workspace, not in the project.`}</span>
           {said[f] ? (
             <span className="text-muted-foreground">{said[f]}</span>
           ) : (
@@ -67,7 +67,7 @@ export function SandboxFetchCard({ item }: { item: SandboxFetchItem }) {
     <div className="kit-panel space-y-2 text-sm">
       <div className="flex items-center gap-2 font-medium">
         <CloudDownload className="h-4 w-4 text-muted-foreground" />
-        {item.file ? `${item.file} from Copilot's workspace` : "A file from Copilot's workspace"}
+        {item.file ? `${item.file} from Copilot’s workspace` : "A file from Copilot’s workspace"}
       </div>
       {item.human && (
         <div className="kit-notice flex items-start gap-2 text-xs">
@@ -90,7 +90,7 @@ export function SandboxFetchCard({ item }: { item: SandboxFetchItem }) {
         </div>
       ) : (
         <div className="space-y-2 text-xs">
-          <div className="text-muted-foreground">{"Copilot's answer has no OneDrive or SharePoint link to fetch. For a deck, ask Copilot for a deck outline instead (Work/NAME.deck.json): StreamHub builds it on your template."}</div>
+          <div className="text-muted-foreground">{"Copilot’s answer has no OneDrive or SharePoint link to fetch. For a deck, ask Copilot for a deck outline instead (Work/NAME.deck.json): StreamHub builds it on your template."}</div>
           <button className="kit-btn kit-btn--sm" disabled={Boolean(done)} onClick={() => void outline()} type="button">
             Build a deck from an outline
           </button>

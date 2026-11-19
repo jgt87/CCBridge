@@ -18,7 +18,7 @@ describe("sign-in texts", () => {
   });
   it("describe the Copilot tab", () => {
     expect(copilotText("chat")).toBe("signed in");
-    expect(copilotText("sign-in page")).toBe("on Microsoft's sign-in page");
+    expect(copilotText("sign-in page")).toBe("on Microsoft’s sign-in page");
     expect(copilotText("other page", "sso.example.org")).toMatch(/^on sso.example.org: probably your organisation/);
     expect(copilotText(undefined)).toBe("-");
   });
@@ -32,7 +32,7 @@ describe("sign-in status list", () => {
       "Work account on this PC: yes",
       "Edge profile: signed in with a work account",
       "Copilot: signed in",
-      "Copilot session: StreamHub's Edge profile",
+      "Copilot session: StreamHub’s Edge profile",
     ]);
     expect(ssoStatusRows({ workAccount: false, profileSso: "unavailable", copilot: "no tab" })[2].value).toBe("unknown");
   });
@@ -50,7 +50,7 @@ describe("single sign-on off (private session)", () => {
 describe("sign-in switch and setup", () => {
   it("says what turning the switch did", () => {
     expect(switchNote(true, "")).toBe("Single sign-on on. Applies at the next StreamHub start.");
-    expect(switchNote(true, "turned on")).toBe("Single sign-on on (Edge's switch: turned on). Applies at the next StreamHub start.");
+    expect(switchNote(true, "turned on")).toBe("Single sign-on on (Edge’s switch: turned on). Applies at the next StreamHub start.");
     expect(switchNote(false, "")).toMatch(/^Single sign-on off: .*private session/);
   });
   it("shows the switch on after a setup that turned it on or found it on", () => {

@@ -64,7 +64,7 @@ export function notifyQueue(prev: Map<string, string>, queue: QueueEntry[], prev
     if (q.status === "done") notify("StreamHub: done", q.title);
     else if (q.status === "failed") notify("StreamHub: failed", `${q.title}${q.error ? ` - ${q.error}` : ""}`);
   }
-  if (!prevPause && pause) notify("StreamHub: queue paused", `Copilot's daily limit; it continues at ${new Date(pause).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`);
-  else if (prevPause && !pause) notify("StreamHub: queue continues", "Copilot's daily limit has reset.");
+  if (!prevPause && pause) notify("StreamHub: queue paused", `Copilot’s daily limit; it continues at ${new Date(pause).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`);
+  else if (prevPause && !pause) notify("StreamHub: queue continues", "Copilot’s daily limit has reset.");
   return next;
 }

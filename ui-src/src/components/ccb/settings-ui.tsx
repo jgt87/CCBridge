@@ -1,5 +1,6 @@
 import type React from "react";
 import { cn } from "@/lib/utils";
+import { BoldLabel } from "./text-parts";
 
 /**
  * The building blocks every Settings row uses, so labels, controls, the reset button and the
@@ -85,7 +86,7 @@ export function Segmented<T extends string>({
           type="button"
         >
           {o.icon}
-          {o.label}
+          <BoldLabel text={o.label} />
         </button>
       ))}
     </div>

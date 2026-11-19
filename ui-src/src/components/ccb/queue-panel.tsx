@@ -26,7 +26,7 @@ function PausedNotice({ until }: { until: string }) {
     <div className="kit-notice p-2 text-xs">
       <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <span className="flex-1">
-        Paused until {new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: Copilot's daily limit is reached. Tasks wait and continue then.
+        Paused until {new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: Copilot’s daily limit is reached. Tasks wait and continue then.
       </span>
       <button className="kit-btn kit-btn--ghost kit-btn--sm shrink-0" onClick={() => api.resumeQueue()} title="Try again now" type="button">
         Resume now

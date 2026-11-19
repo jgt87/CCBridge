@@ -7,6 +7,7 @@ import { ModalBackdrop } from "./modal-backdrop";
 import { SsoSection } from "./sso-section";
 import { ToolsSection } from "./tools-section";
 import { actionClass, fieldClass, Segmented, SettingLine, SettingsGroup } from "./settings-ui";
+import { BoldLabel } from "./text-parts";
 import { useEffect, useMemo, useState } from "react";
 import { api, type EdgeCacheInfo, type Setting } from "@/lib/api";
 import type { ResponseOption } from "@/lib/response-modes";
@@ -242,7 +243,7 @@ function ClearHistoryRow() {
           </button>
         )
       }
-      help="Removes the open project's kept conversation from this computer and empties the chat view. Change sets and the plans in .streamhub/PLAN.md stay."
+      help="Removes the open project’s kept conversation from this computer and empties the chat view. Change sets and the plans in .streamhub/PLAN.md stay."
       notes={note ? <div className="text-muted-foreground text-xs">{note}</div> : null}
       title="Clear chat history"
     />
@@ -295,7 +296,7 @@ function ResponseOptionsRow() {
       }
       help={responseOptionsHelp(read, options)}
       notes={note ? <div className="text-muted-foreground text-xs">{note}</div> : null}
-      title="Copilot's response options"
+      title="Copilot’s response options"
     />
   );
 }
@@ -335,9 +336,9 @@ function ClearEdgeCacheRow() {
           {busy ? "Clearing..." : "Clear"}
         </button>
       }
-      help={`Removes Edge's caches in StreamHub's own Edge profile: stored web files, compiled code, graphics caches and downloaded updates. Your Copilot sign-in, cookies and settings stay.${size ? ` Cache now: ${size} (the whole profile).` : ""}${info?.pending ? " A clear waits for the next start." : ""}`}
+      help={`Removes Edge’s caches in StreamHub’s own Edge profile: stored web files, compiled code, graphics caches and downloaded updates. Your Copilot sign-in, cookies and settings stay.${size ? ` Cache now: ${size} (the whole profile).` : ""}${info?.pending ? " A clear waits for the next start." : ""}`}
       notes={note ? <div className="text-muted-foreground text-xs">{note}</div> : null}
-      title="Clear Edge's cache"
+      title="Clear Edge’s cache"
     />
   );
 }
@@ -355,12 +356,12 @@ function NotificationSetting() {
   const change = async (want: "on" | "off") => {
     const result = await setNotifyEnabled(want === "on");
     setOn(result);
-    setNote(want === "on" && !result ? "The browser blocked notifications; allow them for this page in the browser's site settings." : "");
+    setNote(want === "on" && !result ? "The browser blocked notifications; allow them for this page in the browser’s site settings." : "");
   };
   return (
     <SettingLine
       control={<Segmented disabled={!notifySupported()} label="Desktop notifications" onChange={change} options={ON_OFF} value={on ? "on" : "off"} />}
-      help="While this tab is in the background: approvals needed, Copilot's questions, a plan to approve, tasks done or failed, and the daily-limit pause."
+      help="While this tab is in the background: approvals needed, Copilot’s questions, a plan to approve, tasks done or failed, and the daily-limit pause."
       notes={note ? <div className="kit-error-text">{note}</div> : null}
       title="Desktop notifications"
     />
@@ -431,7 +432,7 @@ function SectionNav({ sections, current, onChoose }: { sections: string[]; curre
         >
           <span className="inline-flex items-center gap-2">
             <SectionIcon name={name} />
-            {name}
+            <BoldLabel text={name} />
           </span>
         </button>
       ))}
@@ -553,7 +554,7 @@ function CardViewSetting() {
   return (
     <SettingLine
       control={<Segmented label="Cards" onChange={onChange} options={CARD_VIEWS} value={view} />}
-      help="How the cards of Copilot's steps (read, edit, run ...) show in the chat. Expanded: every card open, with the changed lines or the output at once. Auto-collapse: a card folds up to one line once its step is finished; cards waiting for your approval, running or failed stay open. You can open or close any card yourself. Default: Expanded."
+      help="How the cards of Copilot’s steps (read, edit, run ...) show in the chat. Expanded: every card open, with the changed lines or the output at once. Auto-collapse: a card folds up to one line once its step is finished; cards waiting for your approval, running or failed stay open. You can open or close any card yourself. Default: Expanded."
       title="Cards"
     />
   );

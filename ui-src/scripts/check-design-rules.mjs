@@ -21,7 +21,8 @@
 //   tight-inset      text 4 to 8px from its box's edge (the rule's minimum is 8, 12 preferred)
 //   card-in-card, border-and-shadow, near-tangent (edges 1 to 7px apart), heading-space (less room
 //   above a heading than below), control-text (button text off 12-14px, code under 13px),
-//   line-height (small wrapped text under 1.3), emoji, dark-panel (a panel darker than the page)
+//   line-height (small wrapped text under 1.3), emoji, straight-quote (' or " in UI copy, not in
+//   code or a text field), dark-panel (a panel darker than the page)
 // A finding that is right as it is gets a waiver in the config with a reason; more than five
 // waivers is itself a failure, and hiding the element to clear a finding is a bug (docs/19 §8).
 //
@@ -54,7 +55,7 @@
 // Exit 0 = every rule holds (findings to judge are listed); 1 = a rule is broken (view, rule, what
 // was measured); 2 = setup, or nothing was checked (an empty run is not a pass). No dependencies
 // (Node 22+). Writes nothing but a temp browser profile.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -143,7 +144,8 @@ const lintScan = (phone, coarse, ignore) => `(() => { ${visible}
   const tag = (e) => e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\\s+/)[0] : '');
   const say = (tier, rule, e, what) => { if (ignore && e.closest(ignore)) return; counts[rule] = (counts[rule] || 0) + 1; if (counts[rule] <= 6) out[tier].push('[' + rule + '] ' + tag(e) + ' ' + what); };
   const px = (v) => parseFloat(v) || 0;
-  const clear = (c) => !c || c === 'transparent' || /,\\s*0\\)$|\\/\\s*0\\)$/.test(c);
+  // Transparent: alpha 0 only (rgba(..., 0) or "/ 0"); opaque black rgb(0, 0, 0) is a colour.
+  const clear = (c) => !c || c === 'transparent' || /^rgba\\(.*,\\s*0(\\.0+)?\\)$|\\/\\s*0(\\.0+)?\\)$/.test(c);
   const CONTROL = 'button, [role=button], [role=tab], [role=menuitem], input, select, textarea, kbd';
   // The box a text sits in: the nearest ancestor with an edge or a fill of its own.
   const boxOf = (e) => { for (let p = e; p && p !== document.body; p = p.parentElement) { const s = getComputedStyle(p); if (s.display === 'inline') continue; if ((px(s.borderLeftWidth) > 0 && !clear(s.borderLeftColor)) || !clear(s.backgroundColor)) return p; } return null; };
@@ -164,12 +166,16 @@ const lintScan = (phone, coarse, ignore) => `(() => { ${visible}
       else if (${phone} && fs < 11) say('fail', 'tiny-text', e, fs + 'px at phone width: "' + n.nodeValue.trim().slice(0, 24) + '"');
       if (fs < 13 && b.height > fs * 2.2 && s.lineHeight !== 'normal' && px(s.lineHeight) / fs < 1.3) say('judge', 'line-height', e, (px(s.lineHeight) / fs).toFixed(2) + ' on ' + fs + 'px wrapped text');
       if (/\\p{Emoji_Presentation}/u.test(n.nodeValue)) say('judge', 'emoji', e, '"' + n.nodeValue.trim().slice(0, 24) + '"');
+      // UI copy uses curly quotes; code and what the user types keep straight ones (docs/01 §3).
+      if (/['"]/.test(n.nodeValue) && !e.closest('code, pre, kbd, samp, textarea')) say('judge', 'straight-quote', e, '"' + n.nodeValue.trim().slice(0, 32) + '"');
     }
     if (e.closest(CONTROL)) continue;
     const box = boxOf(e);
     if (!box || boxed.has(box)) continue;
     const bs = getComputedStyle(box); const br = box.getBoundingClientRect();
-    const clips = bs.overflowX !== 'visible';
+    // Clipped when the box or anything between it and the text clips (a label with an ellipsis).
+    let clips = bs.overflowX !== 'visible';
+    for (let p = e; p && p !== box && !clips; p = p.parentElement) clips = getComputedStyle(p).overflowX !== 'visible';
     const left = b.left - br.left - px(bs.borderLeftWidth); const right = br.right - px(bs.borderRightWidth) - b.right;
     const inset = Math.min(left, right);
     if (inset < -1) { if (!clips) { boxed.add(box); say('fail', 'spill', box, 'text sticks out by ' + Math.round(-inset) + 'px: "' + n.nodeValue.trim().slice(0, 24) + '"'); } }
@@ -191,17 +197,25 @@ const lintScan = (phone, coarse, ignore) => `(() => { ${visible}
   const paint = (layers) => { cx.globalCompositeOperation = 'copy'; cx.fillStyle = '#fff'; cx.fillRect(0, 0, 1, 1); cx.globalCompositeOperation = 'source-over'; for (const c of layers) { cx.fillStyle = '#000'; cx.fillStyle = c; cx.fillRect(0, 0, 1, 1); } const d = cx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2]]; };
   const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
   const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
-  for (const e of document.querySelectorAll('input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]):not([type=file]):not([type=color]), select, textarea')) {
-    if (!seen(e)) continue;
-    const s = getComputedStyle(e); const under = [];
-    for (let p = e.parentElement; p; p = p.parentElement) { const c = getComputedStyle(p).backgroundColor; if (!clear(c)) under.unshift(c); }
+  // The edge and fill of a box against the backgrounds behind it.
+  const strength = (box) => {
+    const s = getComputedStyle(box); const under = [];
+    for (let p = box.parentElement; p; p = p.parentElement) { const c = getComputedStyle(p).backgroundColor; if (!clear(c)) under.unshift(c); }
     const base = paint(under);
     // The strongest side: an underlined field has only a bottom edge, and a field joined to a tool row
     // below it has its edge on the top and sides (a PowerShell bridge's message box, 16 Nov 2026).
     const side = (n) => (px(s['border' + n + 'Width']) >= 1 && !clear(s['border' + n + 'Color']) ? contrast(paint([...under, s['border' + n + 'Color']]), base) : 0);
-    const edge = Math.max(side('Top'), side('Right'), side('Bottom'), side('Left'));
-    const fill = clear(s.backgroundColor) ? 0 : contrast(paint([...under, s.backgroundColor]), base);
-    if (Math.max(edge, fill) < 3) say('fail', 'field-edge', e, 'edge ' + edge.toFixed(2) + ':1, fill ' + fill.toFixed(2) + ':1 against what is behind it (3:1 needed)');
+    return { edge: Math.max(side('Top'), side('Right'), side('Bottom'), side('Left')), fill: clear(s.backgroundColor) ? 0 : contrast(paint([...under, s.backgroundColor]), base) };
+  };
+  // A bare field inside a group (an input with an affix, a tag input) shows the group's box: the
+  // nearest of its three closest ancestors that draws an edge (the kit gallery's input groups, 17 Nov 2026).
+  const wrapperOf = (e) => { let p = e.parentElement; for (let n = 0; p && n < 3; n++, p = p.parentElement) { const s = getComputedStyle(p); if (['Top', 'Right', 'Bottom', 'Left'].some((k) => px(s['border' + k + 'Width']) >= 1 && !clear(s['border' + k + 'Color']))) return p; } return null; };
+  for (const e of document.querySelectorAll('input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]):not([type=file]):not([type=color]), select, textarea')) {
+    if (!seen(e)) continue;
+    let { edge, fill } = strength(e), by = '';
+    const wrap = !edge && !fill ? wrapperOf(e) : null;
+    if (wrap) { ({ edge, fill } = strength(wrap)); by = ' (drawn by ' + tag(wrap) + ')'; }
+    if (Math.max(edge, fill) < 3) say('fail', 'field-edge', e, 'edge ' + edge.toFixed(2) + ':1, fill ' + fill.toFixed(2) + ':1 against what is behind it (3:1 needed)' + by);
   }
   for (const e of document.querySelectorAll('button, [role=button], [role=menuitem]')) {
     const f = px(getComputedStyle(e).fontSize);
@@ -248,9 +262,27 @@ async function closeBrowser(ws, wait) {
   await Promise.race([closed, wait(3000)]);
 }
 
+// Deletes the temp profile, retrying for up to 5 s while the closing browser releases its files;
+// after 1 s it stops any process still running with this profile (Windows). One try left a profile
+// of up to 17 MB behind on most runs (19 Nov 2026: 304 folders, 1.5 GB in TEMP). Says so when it stays.
+async function removeProfile(profile, wait) {
+  for (let k = 0; k < 20; k++) {
+    if (k === 4 && process.platform === 'win32') {
+      const p = profile.replace(/'/g, "''");
+      spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${p}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`], { stdio: 'ignore' });
+    }
+    try { rmSync(profile, { recursive: true, force: true }); } catch { /* still in use */ }
+    if (!existsSync(profile)) return;
+    await wait(250);
+  }
+  console.error(`Could not delete the temp browser profile ${profile}; delete it by hand.`);
+}
+
 async function withBrowser(o, cfg, fn) {
   const exe = o.browser || BROWSERS.find((p) => existsSync(p));
   if (!exe) { console.error('No Edge or Chrome found: pass --browser <path> or set CHROME_PATH.'); process.exit(2); }
+  if (!existsSync(exe)) { console.error(`No browser at ${exe}: pass --browser <path> or set CHROME_PATH.`); process.exit(2); }
   const profile = mkdtempSync(join(tmpdir(), 'design-rules-'));
   const proc = spawn(exe, ['--headless=new', `--remote-debugging-port=${o.port}`, `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -289,7 +321,7 @@ async function withBrowser(o, cfg, fn) {
     await closeBrowser(ws, wait);
     proc.kill();
     await wait(300);
-    try { rmSync(profile, { recursive: true, force: true }); } catch { /* the browser may still hold a file */ }
+    await removeProfile(profile, wait);
   }
 }
 
@@ -419,7 +451,7 @@ const selfPage = (ok) => 'data:text/html;charset=utf-8,' + encodeURIComponent(`<
 <div class="rail">side bar</div>
 <div class="main"><input class="box btn" placeholder="main control"><button class="btn btn--primary">Send</button>${ok ? '<button class="btn">Save</button>' : '<button class="btn btn--primary">Save</button>'}</div>
 <div class="stage"><span class="dot"></span><b class="name">Topic</b></div>
-<div class="wide"><p>Intro text of the section.</p><h2>A heading</h2><p class="off">Text under the heading${ok ? '' : ' \u{1F680}'}.</p></div>
+<div class="wide"><p>Intro text of the section.</p><h2>A heading</h2><p class="off">Text under the heading${ok ? '' : ' \u{1F680}'}.</p><p>${ok ? 'It doesn’t open “here”' : 'It doesn\'t open "here"'}; <code>"code" keeps its quotes</code></p></div>
 <div class="card"><span class="fine">Fine print in a card</span>${ok ? '' : '<div class="card">a card in a card</div>'}</div>
 <div class="long">Averyveryverylongwordwithoutspaces</div>
 <textarea class="note" aria-label="A note" autofocus></textarea>
@@ -430,7 +462,7 @@ async function selfTest(o) {
   const cfg = { ...DEFAULTS, wait: 250, views: [view(false), view(true)] };
   const { problems, judge } = await withBrowser(o, cfg, (page) => run(page, cfg));
   const fails = ['primary', 'label', 'page-scroll', 'first-screen', 'touch', 'tiny-text', 'touching-text', 'spill', 'sideways-scroll', 'input-zoom', 'field-edge', 'motion-hides'];
-  const judged = ['card-in-card', 'border-and-shadow', 'near-tangent', 'heading-space', 'emoji'];
+  const judged = ['card-in-card', 'border-and-shadow', 'near-tangent', 'heading-space', 'emoji', 'straight-quote'];
   const missed = [...fails.filter((r) => !problems.some((p) => p.startsWith('broken') && p.includes(`[${r}]`))), ...judged.filter((r) => !judge.some((p) => p.startsWith('broken') && p.includes(`[${r}]`)))];
   const wrong = [...problems, ...judge].filter((p) => p.startsWith('kept'));
   const good = !missed.length && !wrong.length;

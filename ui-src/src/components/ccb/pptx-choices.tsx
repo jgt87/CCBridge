@@ -47,7 +47,7 @@ export function ElementChoice({
         <span className="min-w-0 flex-1 truncate" title={element.label}>
           {element.label}
         </span>
-        <button className="kit-btn kit-btn--ghost kit-btn--sm shrink-0" disabled={disabled} onClick={onAsk} title="Copilot suggests one of these looks from the element's structure only (no slide text)" type="button">
+        <button className="kit-btn kit-btn--ghost kit-btn--sm shrink-0" disabled={disabled} onClick={onAsk} title="Copilot suggests one of these looks from the element’s structure only (no slide text)" type="button">
           <Sparkles className="h-3.5 w-3.5" />
           Ask Copilot
         </button>

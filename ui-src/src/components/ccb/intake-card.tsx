@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { IntakeGroup } from "@/lib/api";
 import { intakeFilesLine, intakeSavedText } from "@/lib/intake-card";
 import { cn } from "@/lib/utils";
+import { BoldLabel } from "./text-parts";
 
 const loadApi = () => import("@/lib/api").then((m) => m.api);
 
@@ -32,7 +33,7 @@ function IntakeGroupChoice({
             title={o.help}
             type="button"
           >
-            {o.label}
+            <BoldLabel text={o.label} />
           </button>
         ))}
       </div>

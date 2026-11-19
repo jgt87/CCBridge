@@ -134,6 +134,27 @@
     open(false);
   }
 
+  // A chosen file's row: the name truncates in the middle, so the stem shrinks with an ellipsis and
+  // the extension keeps its width (".env" or a name without a dot is all stem). Text nodes only, so
+  // a file name never becomes markup; the full name is the row's title.
+  function dropFileRow(name) {
+    var li = document.createElement("li");
+    var at = name.lastIndexOf(".");
+    var stem = document.createElement("span");
+    li.className = "kit-drop__file";
+    li.title = name;
+    stem.className = "kit-drop__stem";
+    stem.textContent = at > 0 ? name.slice(0, at) : name;
+    li.appendChild(stem);
+    if (at > 0) {
+      var ext = document.createElement("span");
+      ext.className = "kit-drop__ext";
+      ext.textContent = name.slice(at);
+      li.appendChild(ext);
+    }
+    return li;
+  }
+
   // File drop zone: <label class="kit-drop" data-kit-drop><input type="file" multiple> ...</label>
   // Highlights while a file is over it and lists the chosen files. Fires "kit:files" with { files }.
   function setupDrop(zone) {
@@ -142,7 +163,7 @@
     var input = zone.querySelector('input[type="file"]');
     var out = zone.querySelector(".kit-drop__files");
     function show(files) {
-      if (out) out.innerHTML = Array.prototype.map.call(files, function (f) { return "<li>" + f.name.replace(/[<>&]/g, "") + "</li>"; }).join("");
+      if (out) { out.textContent = ""; Array.prototype.forEach.call(files, function (f) { out.appendChild(dropFileRow(f.name)); }); }
       zone.dispatchEvent(new CustomEvent("kit:files", { bubbles: true, detail: { files: files } }));
     }
     ["dragenter", "dragover"].forEach(function (n) { zone.addEventListener(n, function (e) { e.preventDefault(); zone.classList.add("is-over"); }); });

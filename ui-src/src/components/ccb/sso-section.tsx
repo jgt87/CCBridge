@@ -55,7 +55,7 @@ function useSso() {
   const open = () =>
     run("Opening...", async () => {
       await api.openSsoSettings();
-      setNote("Edge's profile settings are open in StreamHub's Edge window.");
+      setNote("Edge’s profile settings are open in StreamHub’s Edge window.");
     });
 
   return { status, busy, note, error, check, switchTo, setup, open };
@@ -105,8 +105,8 @@ export function SsoSection() {
           <button className={smallButtonClass} disabled={!!busy || !status?.workAccount} onClick={setup} title="Runs the full check, turns single sign-on on and writes a log to C:\temp" type="button">
             Run setup
           </button>
-          <button className={smallButtonClass} disabled={!!busy} onClick={open} title="edge://settings/profiles/multiProfileSettings in StreamHub's Edge window" type="button">
-            Open Edge's profile settings
+          <button className={smallButtonClass} disabled={!!busy} onClick={open} title="edge://settings/profiles/multiProfileSettings in StreamHub’s Edge window" type="button">
+            Open Edge’s profile settings
           </button>
         </div>
       }
@@ -123,7 +123,7 @@ export function SsoSection() {
           value={status ? (on ? "on" : "off") : null}
         />
       }
-      help="Copilot signs in by itself after a restart, with the work account Windows already holds. No password is stored, and only StreamHub's own Edge profile is changed."
+      help="Copilot signs in by itself after a restart, with the work account Windows already holds. No password is stored, and only StreamHub’s own Edge profile is changed."
       notes={<SsoNotes busy={busy} error={error} note={note} status={status} />}
       title="Sign in with your Windows account (single sign-on)"
     />

@@ -4,7 +4,7 @@ type Kind = "text" | "json";
 
 /** The badge after the title: JSON checked against the runbook's shape, or the answer as Markdown. */
 export function kindBadge(kind: Kind): { text: string; title: string } {
-  return kind === "json" ? { text: "JSON", title: "Saves JSON checked against the runbook's shape" } : { text: "text", title: "Saves Copilot's answer as Markdown" };
+  return kind === "json" ? { text: "JSON", title: "Saves JSON checked against the runbook’s shape" } : { text: "text", title: "Saves Copilot’s answer as Markdown" };
 }
 
 /** "run 5 min ago" from the fetch panel's age text, or "never run". */

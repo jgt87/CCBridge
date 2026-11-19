@@ -260,7 +260,7 @@ function testRunCommands(ctx: CommandContext, show: (p: PaletteKind) => void, se
       onSelect: () =>
         api.testRuns().then(
           (r) => {
-            if (!r.items.length) { ctx.notice({ text: `No test runs saved yet. Use "Save this chat as a test run" first; they are kept in ${r.dir}.` }); return; }
+            if (!r.items.length) { ctx.notice({ text: `No test runs saved yet. Use “Save this chat as a test run” first; they are kept in ${r.dir}.` }); return; }
             setTestRuns(r.items);
             setTimeout(() => show("testruns"), 0);
           },

@@ -30,6 +30,7 @@ import { useIssueReport } from "@/lib/use-issue-report";
 import { IndexBar } from "./index-bar";
 import { PageCompareButton } from "./page-compare-button";
 import { comparePage } from "./page-report";
+import { FileName } from "./text-parts";
 
 interface TreeNode {
   name: string;
@@ -185,7 +186,7 @@ function issueIndex(report: IssueReport | null) {
 
 const TREE_ICON = "h-3.5 w-3.5 shrink-0 text-muted-foreground";
 const STREAMHUB_FOLDER_TITLE =
-  "StreamHub's own records: issues, imports, schedules, task reports, code reviews, earlier runbook results and plans. Not part of the project's code; Copilot does not see or change them.";
+  "StreamHub’s own records: issues, imports, schedules, task reports, code reviews, earlier runbook results and plans. Not part of the project’s code; Copilot does not see or change them.";
 
 /** Source/ is locked, .streamhub has StreamHub's own records, any other folder is plain. */
 function FolderIcon({ path }: { path: string }) {
@@ -222,7 +223,7 @@ function FileRow({ node: n, onOpen }: { node: TreeNode; onOpen: (p: string) => v
   return (
     <button className={ROW} onClick={() => onOpen(n.path)} title={`${n.path} (${n.size} bytes)${source ? " - source data, read-only for Copilot" : ""}`} type="button">
       {source ? <Lock className={TREE_ICON} /> : <File className={TREE_ICON} />}
-      <span className="truncate">{n.name}</span>
+      <FileName name={n.name} />
       <NewTag node={n} />
       <ChangeBadge node={n} />
       <IssueBadge path={n.path} />
@@ -470,7 +471,7 @@ function TasksPanel({
           </div>
         ))
       ) : (
-        <p className="text-muted-foreground text-sm">Copilot's checklist for the current task shows up here.</p>
+        <p className="text-muted-foreground text-sm">Copilot’s checklist for the current task shows up here.</p>
       )}
       </div>
       </PanelSection>
@@ -601,7 +602,7 @@ function ChangeSetCard({
 function ChangeSetFile({ path, count, showsChange, onOpen }: { path: string; count?: ChangeCount; showsChange: boolean; onOpen: () => void }) {
   return (
     <button className="kit-link flex w-full items-center gap-2 mb-px text-left font-mono last:mb-0 text-xs no-underline hover:underline" onClick={onOpen} title={showsChange ? `${path}: the lines this change set added and removed` : path} type="button">
-      <span className="min-w-0 flex-1 truncate">{path}</span>
+      <FileName className="flex-1" name={path} />
       {count && (count.deleted ? <span className="shrink-0 font-sans text-muted-foreground">deleted</span> : <ChangePill added={count.added} removed={count.removed} />)}
     </button>
   );

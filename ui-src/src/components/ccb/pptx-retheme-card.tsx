@@ -76,7 +76,7 @@ function PickStep({ plan }: { plan: PptxPlan }) {
 function SlideRow({ plan, slide, value, check, disabled, onChange }: { plan: PptxPlan; slide: PptxPlan["slides"][number]; value: string; check: boolean; disabled: boolean; onChange: (layout: string) => void }) {
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span className="min-w-0 flex-1 truncate" title={slide.from ? `Now on "${slide.from}"` : undefined}>
+      <span className="min-w-0 flex-1 truncate" title={slide.from ? `Now on “${slide.from}”` : undefined}>
         {slideLabel(slide)}
       </span>
       {check && (
@@ -111,7 +111,7 @@ function PlanStep({ plan }: { plan: PptxPlan }) {
   const askElement = async (key: string) => {
     try {
       await (await loadApi()).pptxAskElement(plan.template, plan.content, key);
-      setAsked("Copilot gets this element's structure (no slide text) and suggests a look; its answer comes as a line below.");
+      setAsked("Copilot gets this element’s structure (no slide text) and suggests a look; its answer comes as a line below.");
     } catch (e) {
       setAsked((e as Error).message);
     }
@@ -123,7 +123,7 @@ function PlanStep({ plan }: { plan: PptxPlan }) {
       const api = await loadApi();
       if (what === "ask") {
         await api.pptxAsk(plan.template, plan.content);
-        setDone("Copilot gets the slides' structure (no full text) and proposes layouts; a new card follows.");
+        setDone("Copilot gets the slides’ structure (no full text) and proposes layouts; a new card follows.");
       } else {
         const r = await api.pptxApply(buildApplyRequest(plan, changes, { start, end, templateStyles, keepBackgrounds, elements: elementChoices, kinds: kindChoices }));
         setDone(`Applying the template. The new deck goes to ${r.path}; the template and the content deck stay as they are.`);
@@ -193,13 +193,13 @@ function PlanStep({ plan }: { plan: PptxPlan }) {
         </label>
       </div>
       <div className="space-y-1">
-        <label className="kit-check text-xs" title="Fonts and colours typed into titles and text placeholders go; the template's text styles apply. Text boxes keep theirs.">
+        <label className="kit-check text-xs" title="Fonts and colours typed into titles and text placeholders go; the template’s text styles apply. Text boxes keep theirs.">
           <input checked={templateStyles} disabled={locked} onChange={(e) => setTemplateStyles(e.target.checked)} type="checkbox" />
-          {"Use the template's text styles"}
+          {"Use the template’s text styles"}
         </label>
-        <label className="kit-check text-xs" title="Off: a light background the deck paints itself is removed, so the template's background shows. Dark backgrounds always stay.">
+        <label className="kit-check text-xs" title="Off: a light background the deck paints itself is removed, so the template’s background shows. Dark backgrounds always stay.">
           <input checked={keepBackgrounds} disabled={locked} onChange={(e) => setKeepBackgrounds(e.target.checked)} type="checkbox" />
-          {"Keep the deck's own backgrounds"}
+          {"Keep the deck’s own backgrounds"}
         </label>
       </div>
       {done ? (
@@ -209,7 +209,7 @@ function PlanStep({ plan }: { plan: PptxPlan }) {
           <button className="kit-btn kit-btn--primary kit-btn--sm" disabled={busy} onClick={() => void run("apply")} type="button">
             Apply
           </button>
-          <button className="kit-btn kit-btn--ghost kit-btn--sm" disabled={busy} onClick={() => void run("ask")} title="Copilot proposes the layouts from the slides' structure: shape kinds, places and the first 60 characters of text" type="button">
+          <button className="kit-btn kit-btn--ghost kit-btn--sm" disabled={busy} onClick={() => void run("ask")} title="Copilot proposes the layouts from the slides’ structure: shape kinds, places and the first 60 characters of text" type="button">
             <Sparkles className="h-3.5 w-3.5" />
             Ask Copilot
           </button>

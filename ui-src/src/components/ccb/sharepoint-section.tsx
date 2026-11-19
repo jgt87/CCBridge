@@ -61,7 +61,7 @@ export function SharePointSection({ projectPath }: { projectPath: string }) {
               setNote(`Linked: ${r.source.label || r.source.fileName}. Copilot gets its LiveData entry with every task.`);
             })
           }
-          title="Looks the file or list up in SharePoint with your sign-in in StreamHub's Edge"
+          title="Looks the file or list up in SharePoint with your sign-in in StreamHub’s Edge"
           type="button"
         >
           Link

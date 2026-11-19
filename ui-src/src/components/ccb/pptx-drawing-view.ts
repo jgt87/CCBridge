@@ -148,7 +148,7 @@ export function fontFamily(font: string, available: (font: string) => boolean): 
 export function missingFontsNote(fonts: string[], available: (font: string) => boolean): string {
   const missing = fonts.filter((f) => f && !available(f));
   if (!missing.length) return "";
-  return `${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not installed here, so the previews draw with a stand-in font; the deck itself keeps the template's fonts.`;
+  return `${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not installed here, so the previews draw with a stand-in font; the deck itself keeps the template’s fonts.`;
 }
 
 const seen = new Map<string, boolean>();

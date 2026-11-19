@@ -4,7 +4,7 @@ import type { ResponseOption } from "./response-modes";
 export function responseOptionsHelp(read: string, options: ResponseOption[]): string {
   const when = read ? new Date(read).toLocaleString() : "never";
   const offered = options.map((o) => (o.parent ? `${o.title} (${o.parent})` : o.title)).join(", ");
-  return `Opens Copilot's response picker and reads what it offers, for the Response menu next to New chat. Last read: ${when}.${
+  return `Opens Copilot’s response picker and reads what it offers, for the Response menu next to New chat. Last read: ${when}.${
     options.length ? ` Offered: ${offered}.` : ""
   }`;
 }

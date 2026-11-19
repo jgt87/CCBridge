@@ -7,21 +7,21 @@ export function ssoStateText(s: SsoStatus | null): string {
     return "Off: Copilot opens in a private session, where you sign in yourself once per Edge start; your Windows account is not used. Turn it on to sign in with your Windows account again. Applies at the next StreamHub start.";
   switch (s.profileSso) {
     case "on":
-      return "On in StreamHub's Edge profile.";
+      return "On in StreamHub’s Edge profile.";
     case "off":
-      return "Off in StreamHub's Edge profile.";
+      return "Off in StreamHub’s Edge profile.";
     case "on-auto":
-      return "On: Edge turned single sign-on for work sites on by itself for StreamHub's profile, so there is nothing to change. If Copilot still asks after a restart, sign in once and choose \"Stay signed in\".";
+      return "On: Edge turned single sign-on for work sites on by itself for StreamHub’s profile, so there is nothing to change. If Copilot still asks after a restart, sign in once and choose “Stay signed in”.";
     case "signed-in-work":
-      return "Not needed: StreamHub's Edge profile is signed in with your work account, so work sites sign in with it already. If Copilot still asks after a restart, sign in once and choose \"Stay signed in\".";
+      return "Not needed: StreamHub’s Edge profile is signed in with your work account, so work sites sign in with it already. If Copilot still asks after a restart, sign in once and choose “Stay signed in”.";
     case "managed":
       return "Set by your organisation (policy); it cannot be changed here.";
     case "not-found":
-      return "Edge does not offer the switch for this profile. Open Edge's profile settings to look, or sign in once and choose \"Stay signed in\".";
+      return "Edge does not offer the switch for this profile. Open Edge’s profile settings to look, or sign in once and choose “Stay signed in”.";
     case "unavailable":
-      return "No work account on this PC, so there is nothing to sign in with. Sign in once in StreamHub's Edge window and choose \"Stay signed in\".";
+      return "No work account on this PC, so there is nothing to sign in with. Sign in once in StreamHub’s Edge window and choose “Stay signed in”.";
     case "edge-not-running":
-      return "StreamHub's Edge is not running.";
+      return "StreamHub’s Edge is not running.";
     default:
       return "Unknown.";
   }
@@ -30,8 +30,8 @@ export function ssoStateText(s: SsoStatus | null): string {
 /** Where the Copilot tab is, in words. */
 export function copilotText(c: SsoStatus["copilot"] | undefined, host?: string | null): string {
   if (c === "chat") return "signed in";
-  if (c === "sign-in page") return "on Microsoft's sign-in page";
-  if (c === "other page") return `on ${host || "another site"}: probably your organisation's sign-in page, so single sign-on did not sign in`;
+  if (c === "sign-in page") return "on Microsoft’s sign-in page";
+  if (c === "other page") return `on ${host || "another site"}: probably your organisation’s sign-in page, so single sign-on did not sign in`;
   if (c === "no tab") return "no Copilot tab open";
   if (c === "edge not running") return "Edge not running";
   return "-";
@@ -73,7 +73,7 @@ export function accountText(a: SsoStatus["profileAccount"]): string {
 /** The note after the switch was turned on or off; `edge`: what Edge's own switch did, when it was changed. */
 export function switchNote(on: boolean, edge: string): string {
   return on
-    ? `Single sign-on on${edge ? ` (Edge's switch: ${edge})` : ""}. Applies at the next StreamHub start.`
+    ? `Single sign-on on${edge ? ` (Edge’s switch: ${edge})` : ""}. Applies at the next StreamHub start.`
     : "Single sign-on off: from the next StreamHub start, Copilot opens in a private session where you sign in yourself.";
 }
 
@@ -90,6 +90,6 @@ export function ssoStatusRows(s: SsoStatus): { label: string; value: string }[] 
     { label: "Work account on this PC", value: s.workAccount ? "yes" : "no" },
     { label: "Edge profile", value: accountText(s.profileAccount) },
     { label: "Copilot", value: copilotText(s.copilot, s.copilotHost) },
-    { label: "Copilot session", value: s.signIn === "private" ? "private, you sign in yourself" : "StreamHub's Edge profile" },
+    { label: "Copilot session", value: s.signIn === "private" ? "private, you sign in yourself" : "StreamHub’s Edge profile" },
   ];
 }

@@ -132,12 +132,12 @@ export function VersionLine({ state }: { state: AppState }) {
         <>
           <span aria-hidden className="h-3 w-px bg-(--kit-border-strong)" />
           <a
-            className="font-mono underline-offset-2 hover:text-foreground hover:underline"
+            className="font-mono underline-offset-[0.2em] hover:text-foreground hover:underline"
             href={changelogUrl()}
             onClick={openExternal}
             rel="noopener noreferrer"
             target="_blank"
-            title="What changed: the changelog on GitHub (this build's commit shown)"
+            title="What changed: the changelog on GitHub (this build’s commit shown)"
           >
             {state.commit}
           </a>
@@ -190,7 +190,7 @@ export function PromptHeaderLeft({ state, agent, onAgent, queuedNote, fail }: { 
         aria-label="Who answers"
         className="kit-btn kit-btn--sm shrink-0"
         onChange={(e) => onAgent(e.target.value as AgentChoice)}
-        title="Who answers the next message: Copilot (with StreamHub's instructions), or one of Copilot's agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat. Auto: StreamHub picks by fixed words - Analyst when you ask for analysis, a chart or a trend of a data file (csv, xlsx, json) you attach or name; Researcher when you ask to research, investigate, compare competitors or the market, or for sources; Copilot itself for everything else, including all work on code."
+        title="Who answers the next message: Copilot (with StreamHub’s instructions), or one of Copilot’s agents. Researcher researches a question for several minutes (web and your Microsoft 365 data) and may first ask about its plan; Analyst analyses data, for example an attached file, and can make charts. An agent gets your message as typed, in a new Copilot chat. Auto: StreamHub picks by fixed words - Analyst when you ask for analysis, a chart or a trend of a data file (csv, xlsx, json) you attach or name; Researcher when you ask to research, investigate, compare competitors or the market, or for sources; Copilot itself for everything else, including all work on code."
         value={agent}
       >
         <option value="auto">Agent: Auto</option>
@@ -201,7 +201,7 @@ export function PromptHeaderLeft({ state, agent, onAgent, queuedNote, fail }: { 
       <select
         className="kit-btn kit-btn--sm shrink-0"
         onChange={(e) => api.setResponseMode(e.target.value).catch((err) => fail((err as Error).message))}
-        title={`Copilot's response mode: Auto, Quick response, Think deeper, or any other option Copilot's own picker offers here (read when StreamHub connects, such as Advanced reasoning or a model)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
+        title={`Copilot’s response mode: Auto, Quick response, Think deeper, or any other option Copilot’s own picker offers here (read when StreamHub connects, such as Advanced reasoning or a model)${state.responseModeActual ? `; the page shows: ${state.responseModeActual}` : ""}`}
         value={state.responseMode ?? "leave"}
       >
         {responseChoices(state.responseOptions, state.responseMode).map((c) => (

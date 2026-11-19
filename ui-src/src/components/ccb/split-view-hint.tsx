@@ -20,7 +20,7 @@ function SplitViewSteps() {
   return (
     <ol className="list-decimal space-y-1.5 pl-5 text-xs">
       <li>
-        Open Edge's menu: the <span className="font-medium">…</span> button at the top right of Edge, where this card points.
+        Open Edge’s menu: the <span className="font-medium">…</span> button at the top right of Edge, where this card points.
       </li>
       <li>
         Choose <span className="font-medium">Split screen</span>. The window splits into two halves.

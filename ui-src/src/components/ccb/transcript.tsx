@@ -318,7 +318,7 @@ function UserMessage({ text, taskKind, agent, onResendAsCoding }: { text: string
       {label && onResendAsCoding && (
         <div className="flex items-center gap-2 text-muted-foreground text-xs">
           <span>{label}</span>
-          <button className="rounded-md px-1.5 py-0.5 hover:bg-(--kit-surface-2) hover:text-foreground" onClick={() => onResendAsCoding(text)} title="Send it again with the coding instructions and the project's files" type="button">
+          <button className="rounded-md px-1.5 py-0.5 hover:bg-(--kit-surface-2) hover:text-foreground" onClick={() => onResendAsCoding(text)} title="Send it again with the coding instructions and the project’s files" type="button">
             Send again as a coding task
           </button>
         </div>
@@ -333,7 +333,7 @@ function AssistantMessage({ text, references, agent, sandboxFiles: files }: { te
   return (
     <div className="px-1">
       {agent && (
-        <span className="mb-1 inline-block rounded-full border border-(--kit-border-strong) px-2 py-0.5 text-muted-foreground text-xs" title={`Answered by Copilot's ${agent} agent (from Copilot's reply)`}>
+        <span className="mb-1 inline-block rounded-full border border-(--kit-border-strong) px-2 py-0.5 text-muted-foreground text-xs" title={`Answered by Copilot’s ${agent} agent (from Copilot’s reply)`}>
           {agent}
         </span>
       )}
@@ -347,7 +347,7 @@ function AssistantMessage({ text, references, agent, sandboxFiles: files }: { te
 /** A message named a runbook without saying to run it: run it, or send the message to Copilot. */
 function RunbookChoiceCard({ item, onSend }: { item: Extract<TranscriptItem, { kind: "runbookChoice" }>; onSend?: (text: string, opts: ChatOptions) => void }) {
   const [chosen, setChosen] = useState<"" | "run" | "copilot">("");
-  const label = item.title ? `'${item.title}' (${item.name})` : item.name;
+  const label = item.title ? `‘${item.title}’ (${item.name})` : item.name;
   if (item.restored || chosen) {
     return (
       <div className="flex items-start gap-2 px-1 text-muted-foreground text-sm">
@@ -425,7 +425,7 @@ function PackagesCard({ item }: { item: Extract<TranscriptItem, { kind: "package
   };
   return (
     <div className="kit-panel space-y-2 px-3 py-2 text-sm">
-      <div>This project needs its packages: {item.text}. Install them with npm now? It downloads them from npm's registry and runs their install steps.</div>
+      <div>This project needs its packages: {item.text}. Install them with npm now? It downloads them from npm’s registry and runs their install steps.</div>
       {packagesNotes(npm, node, nodeMessage, state === "failed").map((n) => (
         <div className={n.error ? "kit-error-text" : "text-muted-foreground text-xs"} key={n.text}>
           {n.text}
@@ -701,7 +701,7 @@ function QuietWarning({
             Stop
           </button>
         )}
-        {missing && <span className="text-muted-foreground">Copilot's tab was not found in StreamHub's Edge.</span>}
+        {missing && <span className="text-muted-foreground">Copilot’s tab was not found in StreamHub’s Edge.</span>}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { highlightLines, languageForPath } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
 import { CodeView } from "./code-block";
 import { MarkdownView } from "./markdown-view";
+import { BoldLabel } from "./text-parts";
 
 const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path);
 
@@ -57,10 +58,10 @@ function DiffHeader({ path, markdown, rendered, onRendered, isNew }: { path: str
         {markdown && (
           <span className="kit-segmented">
             <button aria-pressed={!rendered} className={tab} onClick={() => onRendered(false)} type="button">
-              Changes
+              <BoldLabel text="Changes" />
             </button>
             <button aria-pressed={rendered} className={tab} onClick={() => onRendered(true)} title="The file as it will look" type="button">
-              Rendered
+              <BoldLabel text="Rendered" />
             </button>
           </span>
         )}

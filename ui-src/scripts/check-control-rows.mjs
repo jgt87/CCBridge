@@ -15,7 +15,7 @@
 // in `visit()` (open, click, then scan), as the origin project did for its graph, list and dialogs.
 // Exit 0 = every row has one height; 1 = a row mixes heights (named with its heights); 2 = setup.
 // No dependencies (Node 22+: global WebSocket and fetch). Writes nothing but a temp browser profile.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -93,9 +93,27 @@ async function closeBrowser(ws, wait) {
   await Promise.race([closed, wait(3000)]);
 }
 
+// Deletes the temp profile, retrying for up to 5 s while the closing browser releases its files;
+// after 1 s it stops any process still running with this profile (Windows). One try left a profile
+// of up to 17 MB behind on most runs (19 Nov 2026: 304 folders, 1.5 GB in TEMP). Says so when it stays.
+async function removeProfile(profile, wait) {
+  for (let k = 0; k < 20; k++) {
+    if (k === 4 && process.platform === 'win32') {
+      const p = profile.replace(/'/g, "''");
+      spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${p}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`], { stdio: 'ignore' });
+    }
+    try { rmSync(profile, { recursive: true, force: true }); } catch { /* still in use */ }
+    if (!existsSync(profile)) return;
+    await wait(250);
+  }
+  console.error(`Could not delete the temp browser profile ${profile}; delete it by hand.`);
+}
+
 async function withBrowser(o, fn) {
   const exe = o.browser || BROWSERS.find((p) => existsSync(p));
   if (!exe) { console.error('No Edge or Chrome found: pass --browser <path> or set CHROME_PATH.'); process.exit(2); }
+  if (!existsSync(exe)) { console.error(`No browser at ${exe}: pass --browser <path> or set CHROME_PATH.`); process.exit(2); }
   const profile = mkdtempSync(join(tmpdir(), 'control-rows-'));
   const proc = spawn(exe, ['--headless=new', `--remote-debugging-port=${o.port}`, `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -123,7 +141,7 @@ async function withBrowser(o, fn) {
     await closeBrowser(ws, wait);
     proc.kill();
     await wait(300);
-    try { rmSync(profile, { recursive: true, force: true }); } catch { /* the browser may still hold a file */ }
+    await removeProfile(profile, wait);
   }
 }
 
