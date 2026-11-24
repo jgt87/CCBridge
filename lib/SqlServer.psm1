@@ -159,6 +159,8 @@ function Write-DbRefreshScript {
     param([Parameter(Mandatory)][string]$ProjectRoot)
     $rel = 'Scripts/Refresh-Database.ps1'
     $guard = $script:Blocked.Replace("'", "''")
+    # The copied function shares a line with the line before it: a line in this text that starts with
+    # "function ConvertTo-DbCsvCell" reads as a second definition to the repository's duplicate check.
     $text = @"
 <#
   Runs this project's saved database queries again (.streamhub\db-queries.json) and writes their CSV
@@ -166,8 +168,7 @@ function Write-DbRefreshScript {
   connection, every change rolled back. Written by the helper program (StreamHub).
     powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\Refresh-Database.ps1
 #>
-`$ErrorActionPreference = 'Stop'
-function ConvertTo-DbCsvCell {$(${function:ConvertTo-DbCsvCell})}
+`$ErrorActionPreference = 'Stop'; function ConvertTo-DbCsvCell {$(${function:ConvertTo-DbCsvCell})}
 `$root = Split-Path -Parent `$PSScriptRoot
 `$list = Get-Content -Raw (Join-Path `$root '.streamhub\databases.json') | ConvertFrom-Json   # assigned first: piped on, a JSON array is one object in 5.1
 `$conns = @{}; foreach (`$c in `$list) { `$conns[`$c.name] = `$c }

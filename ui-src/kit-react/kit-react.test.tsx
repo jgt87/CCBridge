@@ -902,7 +902,7 @@ describe("element specs: names, fallbacks and keys", () => {
 
   it("gives the focus back to the button that asked once the confirm box closes", async () => {
     let api: ReturnType<typeof useConfirm> | null = null;
-    function Harness() {
+    function AskHarness() {
       const c = useConfirm();
       useEffect(() => {
         api = c;
@@ -916,7 +916,7 @@ describe("element specs: names, fallbacks and keys", () => {
         </>
       );
     }
-    render(<Harness />);
+    render(<AskHarness />);
     $<HTMLButtonElement>("#ask").focus();
     let answer: Promise<boolean> | undefined;
     act(() => {

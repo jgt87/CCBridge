@@ -35,8 +35,8 @@ function Invoke-NativeLines {
        end the caller's try block early, so one failing call (git describe with no tags) emptied the
        next one too. Here the preference is Continue and the result decided by the exit code. #>
     param([Parameter(Mandatory)][string]$Exe, [string[]]$Arguments = @())
-    $ErrorActionPreference = 'Continue'
     try {
+        $ErrorActionPreference = 'Continue'
         $out = @(& $Exe @Arguments 2>&1 | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
         if ($LASTEXITCODE -ne 0) { return @() }
         $out
