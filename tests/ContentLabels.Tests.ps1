@@ -31,7 +31,7 @@ Describe 'Working rules in the prompts' {
         $m | Should Match 'what you did not test or run'
         $m | Should Match 'no apology needed'
         $m | Should Match 'check the project \(package\.json, installed modules'
-        $m | Should Not Match '(?i)ccbridge|streamhub(?!/)'   # .streamhub/ is a folder name
+        $m | Should Not Match '(?i)streamhub(?!/)'   # .streamhub/ is a folder name
     }
     It 'gives assistant and project work the change-only-that-part and one-question rules' {
         $a = New-PromptMessage -AppRoot $root -Kind 'assistant' -Text 'What meetings do I have?' -Sent (New-Sent) -Context $ctx

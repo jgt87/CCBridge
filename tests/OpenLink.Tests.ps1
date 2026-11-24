@@ -5,7 +5,7 @@ Import-Module (Join-Path $root 'lib\AppWindow.psm1') -Force
 
 Describe 'Test-ExternalLink' {
     It 'accepts web links to other sites only' {
-        Test-ExternalLink 'https://github.com/jgt87/CCBridge/blob/abc1234/CHANGELOG.md' | Should Be $true
+        Test-ExternalLink 'https://github.com/jgt87/StreamHub/blob/abc1234/CHANGELOG.md' | Should Be $true
         Test-ExternalLink 'http://example.org/page?a=1#x' | Should Be $true
         Test-ExternalLink 'http://localhost:8765/' | Should Be $false
         Test-ExternalLink 'javascript:alert(1)' | Should Be $false
@@ -25,10 +25,10 @@ Describe 'Open-LinkInEdgeTab' {
             if ("$Uri" -like '*json/list') { return @([pscustomobject]@{ type = 'page'; url = 'https://m365.cloud.microsoft/chat' }, [pscustomobject]@{ type = 'page'; url = 'http://localhost:8765/' }) }
             [pscustomobject]@{ webSocketDebuggerUrl = 'ws://127.0.0.1:9333/devtools/browser/x' }
         }
-        Open-LinkInEdgeTab 'https://github.com/jgt87/CCBridge/blob/abc/CHANGELOG.md' 8765 9333 | Should Be 'new-tab'
+        Open-LinkInEdgeTab 'https://github.com/jgt87/StreamHub/blob/abc/CHANGELOG.md' 8765 9333 | Should Be 'new-tab'
         $global:ccbOpened.Count | Should Be 1
         $global:ccbOpened[0].method | Should Be 'Target.createTarget'
-        $global:ccbOpened[0].url | Should Be 'https://github.com/jgt87/CCBridge/blob/abc/CHANGELOG.md'
+        $global:ccbOpened[0].url | Should Be 'https://github.com/jgt87/StreamHub/blob/abc/CHANGELOG.md'
     }
     It 'leaves the link to the browser when the app is elsewhere, and refuses other addresses' {
         $global:ccbOpened = @()

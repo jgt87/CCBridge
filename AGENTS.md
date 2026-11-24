@@ -1,10 +1,10 @@
-# CCBridge - instructions for coding agents
+# StreamHub - instructions for coding agents
 
-> Product name shown to people: **StreamHub** (UI, messages, README, releases). The code, scripts, data folder (`%LOCALAPPDATA%\CCBridge`), projects folder (`OneDrive\CCBridge`), MCP id (`ccbridge`) and the repository keep the name CCBridge. In visible texts and logs, Microsoft's own reply endpoint (`m365Copilot/StreamHub`) is called the "Copilot stream connection" so the two never get confused.
+> One name everywhere: **StreamHub** (UI, code, scripts, data folder `%LOCALAPPDATA%\StreamHub`, projects folder `OneDrive\StreamHub`, MCP id `streamhub`, repository `jgt87/StreamHub`). Until 2026-11-24 the code name was CCBridge: the old name stays only in the CHANGELOG history, `lib/AppPaths.psm1` (moves the old folders once, at start), the update fallbacks and lines marked `pre-rename` (`tests/OldName.Tests.ps1`). Microsoft's own reply endpoint `m365Copilot/StreamHub` is not the app: call it the "Copilot stream connection" in texts, logs and comments so the two never get confused.
 
-CCBridge is a zero-install coding harness that uses Microsoft 365 Copilot Chat (in Edge) as its model. It ships two front ends over one engine:
-- **Web app**: `ccbridge.ps1` / `start.cmd` serves `ui/` on http://localhost:8765 (projects must be under OneDrive).
-- **MCP server**: `mcp/ccbridge-mcp.ps1` (stdio), so MCP clients can offload work to Copilot (any project folder).
+StreamHub is a zero-install coding harness that uses Microsoft 365 Copilot Chat (in Edge) as its model. It ships two front ends over one engine:
+- **Web app**: `streamhub.ps1` / `start.cmd` serves `ui/` on http://localhost:8765 (projects must be under OneDrive).
+- **MCP server**: `mcp/streamhub-mcp.ps1` (stdio), so MCP clients can offload work to Copilot (any project folder).
 
 Target machines have only what ships with Windows: **Windows PowerShell 5.1 + Edge, nothing installed.** Node is only needed on a dev machine to rebuild the UI.
 
@@ -15,7 +15,7 @@ Short index; each module's functions, settings, files and tests are in `docs/arc
 | Path | Role |
 |---|---|
 | `lib/Cdp.psm1` | Minimal Chrome DevTools Protocol client (Edge with a debug port, WebSocket, events) |
-| `lib/CopilotBridge.psm1` | Types into Copilot Chat, reads the reply (Chathub / StreamHub / page), rebuilds damaged replies, machine-wide send lock `Use-CopilotLock` |
+| `lib/CopilotBridge.psm1` | Types into Copilot Chat, reads the reply (Chathub / Copilot stream connection / page), rebuilds damaged replies, machine-wide send lock `Use-CopilotLock` |
 | `lib/Workspace.psm1` | OneDrive projects, path confinement (`Resolve-ProjectPath`), file listing, read-only `Source/` vault, shared library `.streamhub` beside the projects |
 | `lib/Protocol.psm1` | Parses `ACTION NAME` blocks from replies; edit markers `####### SEARCH/REPLACE/END` |
 | `lib/Fetch.psm1`, `lib/Runbook.psm1`, `lib/RunbookFromChat.psm1` | Runbooks (text and checked JSON), their jobs, saving a request as a runbook |
@@ -51,8 +51,9 @@ Short index; each module's functions, settings, files and tests are in `docs/arc
 | `lib/Agent.psm1`, `lib/WorkStatus.psm1` | Agent loop and worker runspace (`$State`), round check, done gates, waiting status |
 | `lib/Server.psm1` | HTTP server and JSON API, origins and the preview sandbox |
 | `lib/Prompts.psm1`, `lib/TaskGuidance.psm1`, `prompts/` | Task kind and prompt parts assembled per request; `Format-TaskMessage` |
+| `lib/AppPaths.psm1` | The data and projects folders (`Get-AppDataDir`; every path is built from it) and the one-time move from the old name at start |
 | `lib/Config.psm1`, `lib/Log.psm1` | Settings (`config/*.json` + `.local.json`, `$script:SettingDefs`), logging (`Write-CCBLog`) |
-| `mcp/ccbridge-mcp.ps1` | MCP stdio server; hands tasks to the running web app |
+| `mcp/streamhub-mcp.ps1` | MCP stdio server; hands tasks to the running web app |
 | `config/` | `harness.json` (ports, budgets), `selectors.json` (Copilot page selectors) |
 | `ui-src/` | React + Vite + Tailwind source, builds into `ui/` (committed); controls drawn with the UI kit |
 | `tests/` | Pester 3.4 tests; `tests/fixtures` = recorded Copilot traffic |
@@ -91,11 +92,13 @@ cd ui-src; npm run smoke
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1 -Version v0.1.0 -NotesFile NOTES.md
 # Run the web app / one prompt / the MCP server
 .\start.cmd
-powershell -NoProfile -ExecutionPolicy Bypass -File ccbridge.ps1 -Ping "say hi" -NewChat
-powershell -NoProfile -ExecutionPolicy Bypass -File mcp\ccbridge-mcp.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File streamhub.ps1 -Ping "say hi" -NewChat
+powershell -NoProfile -ExecutionPolicy Bypass -File mcp\streamhub-mcp.ps1
 ```
 
 The running web server holds `lib/*.psm1` in memory: restart it after backend changes (the UI files are read fresh from disk).
+
+Data-folder paths come from `Get-AppDataPath 'name'` / `Get-AppDataDir` (`lib/AppPaths.psm1`) at call time, never `Join-Path $env:LOCALAPPDATA ...` or a value kept at import: the start may move the folder, and until it could, the old folder is the one in use. Projects-folder paths come from `Get-ProjectsRoot`. Test runs never move real folders (`STREAMHUB_NO_MIGRATE`, set by `tools/run-tests.ps1`).
 
 A new script parameter or launcher gets its line in `docs/architecture.md` "Script parameters" (`tests/DocsInStep.Tests.ps1`). A speed test bounds a ratio with `tests/Scaling.ps1` (`Measure-Growth`), never seconds (`tests/SpeedRules.Tests.ps1`).
 
@@ -116,8 +119,8 @@ Project routing: `Submit-AgentTask` captures the project in every project task's
 - Don't name functions like built-in cmdlets (`Wait-Job`, `New-Job`).
 - `[IO.Path]::IsPathRooted` (and other `[IO.Path]` methods) throw "Illegal characters in path" on `"`, `<`, `>`, `|` in 5.1: use Workspace `Test-RootedPath`, `Get-PathLeaf` (the file name) and `Test-PathChars` on text that may not be a path (quoted strings from scripts, pasted paths, a script src a template writes, a path Copilot names); `Resolve-ProjectPath` refuses such characters in plain words.
 - In strings, `"$name: ..."` parses as a scope-qualified variable; write `"${name}: ..."`.
-- Log with `Write-CCBLog info|verbose|trace <component> <message> [data]` (lib/Log.psm1). Each process starts every log file it writes to with `Get-LogHeader` (version and commit from `Initialize-CCBLog -Build (Format-CCBBuild (Get-CCBridgeBuild $root)) -Role`, kept in `$env:CCBRIDGE_LOG_BUILD`/`_ROLE`/`_HEADER` so worker runspaces share it; without -Build, version.txt/commit.txt or dev). Never put prompt/reply text or file contents below `trace`.
-- Tests that create a temporary project set `$env:CCBRIDGE_STATE_ROOT` to a temporary folder at the top and delete it at the end (see `tests/Undo.Tests.ps1`): `Get-ProjectStateDir` then keeps their backups and chat history out of `%LOCALAPPDATA%\CCBridge\projects`. The log does this by itself: with Pester loaded, `Log.psm1` (`Get-DefaultLogDir`) writes to `%TEMP%\CCBridge-test-logs` (`$env:CCBRIDGE_LOG_DIR`, inherited by worker runspaces and child processes), so tests never add lines to the person's real log, which the session report and Export diagnostics read. Read the log folder through `Get-CCBLogDir`, never a path of its own.
+- Log with `Write-CCBLog info|verbose|trace <component> <message> [data]` (lib/Log.psm1). Each process starts every log file it writes to with `Get-LogHeader` (version and commit from `Initialize-CCBLog -Build (Format-CCBBuild (Get-StreamHubBuild $root)) -Role`, kept in `$env:STREAMHUB_LOG_BUILD`/`_ROLE`/`_HEADER` so worker runspaces share it; without -Build, version.txt/commit.txt or dev). Never put prompt/reply text or file contents below `trace`.
+- Tests that create a temporary project set `$env:STREAMHUB_STATE_ROOT` to a temporary folder at the top and delete it at the end (see `tests/Undo.Tests.ps1`): `Get-ProjectStateDir` then keeps their backups and chat history out of `%LOCALAPPDATA%\StreamHub\projects`. The log does this by itself: with Pester loaded, `Log.psm1` (`Get-DefaultLogDir`) writes to `%TEMP%\StreamHub-test-logs` (`$env:STREAMHUB_LOG_DIR`, inherited by worker runspaces and child processes), so tests never add lines to the person's real log, which the session report and Export diagnostics read. Read the log folder through `Get-CCBLogDir`, never a path of its own.
 - Coding agents editing this repo: never put a regex or Windows path in a Bash heredoc, in `python -c`, or in a Python string that is not raw. The shell or Python turns `\b` into a backspace byte (0x08), and a doubled quote inside `r"..."` ends the raw string early, so the rest is read as a normal string. Write patch scripts to a file with the editor tool, use `r"""..."""` for patterns, refuse to write text that holds `chr(8)`, and check afterwards with `grep -rlP '\x08' lib tests tools templates AGENTS.md`.
 - In the MCP server, stdout is the protocol channel: never let pipeline output or `Write-Host` reach it; log to stderr.
 
@@ -128,24 +131,24 @@ Project routing: `Submit-AgentTask` captures the project in every project task's
 - Copilot's **link/citation filter damages code** in snapshots and the final text (`[name]:`, `[guid]::`, `[x](...)` vanish). The reply is rebuilt from raw `writeAtCursor` chunks (`Add-ReplySnapshot`). Never use the server's final text for code.
 - Copilot's page escapes a bracket that looks like a Markdown link definition, so `[regex]::Match` can arrive as `[regex\]::Match`: `Repair-EscapedTypeName` (Executor) puts a .NET type name directly before `::` back, in `.ps1/.psm1/.psd1` files (`Repair-CodeText`) and run commands (`Repair-RunCommand`, also `&lt;`/`&gt;`). `Test-LongPowerShellCommand` refuses `powershell -Command` scripts over 300 characters (write a script and run it with `-File`: one-off scripts in `Work/`, scripts to keep in `Scripts/`; `prompts/rules/folders.md`, `prompts/actions-run.md`). Tests: `tests/RunCommandRepair.Tests.ps1`.
 - The page escapes `<` and `>` in prompts to `&lt;`/`&gt;`, so Copilot may copy entities into SEARCH text or code; Executor repairs this except in markup files, where only a page part written as entities throughout (tags like `&lt;div&gt;` and not one real `<` or `>`; not Markdown) is turned back into tags (`Repair-CodeText`, tests in `tests/DamagedHtml.Tests.ps1`), since the browser would show it as text.
-- Some tenants deliver the reply over **StreamHub** (`substrate.svc.cloud.microsoft/m365Copilot/StreamHub`): SignalR type-2 stream items. `Add-StreamRecord` finds chunks (`writeAtCursor`), snapshots (`messages`) and the end (`result`, a final flag such as `isLastUpdate` or a final state, or a type-3 completion) by field name; `Complete-StreamReply` returns at that end, taking the text from the stream or, if none is recognised, straight from the page state. Sockets are classified per request id in `$Bridge.HubSockets` (`chat` / `stream`) by URL or traffic shape (`Get-SocketKind`).
-- Some tenants do not deliver the reply over Chathub. `Send-CopilotPromptUnlocked` also watches the page (`Get-PageReplyState`: Stop gone, new reply with a Copy button) and then reads the raw markdown from the page's React state (`Get-PageReplyText`: `response.text` / `legacyReplyMessage`); such replies carry `Source = 'page'` and no throttling/metering. The Copy button gives plain text only. `CCBRIDGE_TEST_IGNORE_HUB=1` forces this route for testing.
-- Pacing over speed: `harness.json` `pacing` (newChatSettleSec, beforeSendSec, betweenPromptsSec) adds pauses around each send. A request with no reply records (pings and handshakes do not count) within 25 s returns `Lost` from `Send-CopilotPromptUnlocked`, and `Send-CopilotPrompt` resends it once in the same chat; never while the page shows Copilot at work (`$pageBusyAt`, Stop or agentBusy within 5 s, and one more page look before deciding), since that would send the prompt twice (`tests/BusyCopilot.Tests.ps1`). On some tenants the page opens its StreamHub connection only at the first send, which loses that first request.
+- Some tenants deliver the reply over the **Copilot stream connection** (`substrate.svc.cloud.microsoft/m365Copilot/StreamHub`): SignalR type-2 stream items. `Add-StreamRecord` finds chunks (`writeAtCursor`), snapshots (`messages`) and the end (`result`, a final flag such as `isLastUpdate` or a final state, or a type-3 completion) by field name; `Complete-StreamReply` returns at that end, taking the text from the stream or, if none is recognised, straight from the page state. Sockets are classified per request id in `$Bridge.HubSockets` (`chat` / `stream`) by URL or traffic shape (`Get-SocketKind`).
+- Some tenants do not deliver the reply over Chathub. `Send-CopilotPromptUnlocked` also watches the page (`Get-PageReplyState`: Stop gone, new reply with a Copy button) and then reads the raw markdown from the page's React state (`Get-PageReplyText`: `response.text` / `legacyReplyMessage`); such replies carry `Source = 'page'` and no throttling/metering. The Copy button gives plain text only. `STREAMHUB_TEST_IGNORE_HUB=1` forces this route for testing.
+- Pacing over speed: `harness.json` `pacing` (newChatSettleSec, beforeSendSec, betweenPromptsSec) adds pauses around each send. A request with no reply records (pings and handshakes do not count) within 25 s returns `Lost` from `Send-CopilotPromptUnlocked`, and `Send-CopilotPrompt` resends it once in the same chat; never while the page shows Copilot at work (`$pageBusyAt`, Stop or agentBusy within 5 s, and one more page look before deciding), since that would send the prompt twice (`tests/BusyCopilot.Tests.ps1`). On some tenants the page opens its stream connection only at the first send, which loses that first request.
 - Damaged tags in received replies: some tenants deliver `<script src="PATH.js"></script>` as `PATH.jsscript>` while the page shows it intact. `Update-LateReply` (CopilotBridge) swaps in the page's fresh state copy when `Test-DamagedTagText` finds damage in the received text but not in the page copy (same start, similar length; `TagRepaired` on the reply); Executor `Repair-StrippedScriptTag` (via `Repair-CodeText`, page files only, never SEARCH text) puts back what is left, and also rebuilds a `<link rel="stylesheet">` or `<script src>` tag from a stylesheet or script path left alone on a line (`$script:BareAssetLine`: another route strips the whole tag to its address; `Test-DamagedTagText` counts such a line as damage, Lint `Find-LeakedMarkup` reports it in a page as kind `bare-path` and AutoFix writes the tag); an edit whose REPLACE equals its SEARCH (the tags lost the same way) is an error that says so, never "already applied"; `Find-DamagedHtmlLine` refuses anything else (also a link stripped down to its address glued to its text with a closing tag and no opener, `#mainSkip to content</a>`). Copilot's own output can be damaged too (seen on its page): `Get-EditMarker` (Protocol) takes a damaged start marker (`SEARCH`/`EARCH` alone; a block with no start marker and one `=======` is one pair, `Get-EditPairs`) and a damaged end marker (`</EPLACE`, `REPLACE` alone, `>>>`; upper case only) as REPLACE, and `Repair-StrippedScriptTag` closes a lone `<script src="...">` line. Tests: `tests/DamagedHtml.Tests.ps1`.
 - Never press Stop on a busy Copilot: `Send-CopilotPromptUnlocked -MaxTimeoutSec` (Agent passes `agentTimeoutSec`) keeps waiting at `TimeoutSec` while `Get-PageReplyState` shows `stop` or `agentBusy`, a minute at a time up to the cap (OnStatus line "Copilot is still working"); the stall check (`StallSec`) still ends a silent reply. Pressing Stop cancels Copilot's work, including its background tasks for long Microsoft 365 requests. Still busy at the cap: no Stop either; the bridge keeps the chat's address (`ConvertTo-CopilotChatAddress`: https, Copilot host, path only) in `$Bridge.PendingChat` and throws "Copilot is still working"; Agent keeps it in `$State.PendingChat`, and `Resolve-PendingChat` (Read the answer, and before any later send or new chat) reads the answer with `Read-CopilotChatAnswer` or refuses while Copilot works (New chat, `Start-NewChat -Force`, leaves it). Tests: `tests/BusyCopilot.Tests.ps1`, `tests/PendingChat.Tests.ps1`.
 - In a long chat the page keeps only the recent messages, so a count of replies on the page says nothing: replies are told apart by the ids already seen (`Set-PageReplyBaseline`, `window.__ccbSeen`). Reading a SharePoint source can keep Copilot silent for minutes.
-- Raw frames of the last 30 replies are kept in `%LOCALAPPDATA%\CCBridge\replies` for replay with `Get-ReplyFromFrames`.
+- Raw frames of the last 30 replies are kept in `%LOCALAPPDATA%\StreamHub\replies` for replay with `Get-ReplyFromFrames`.
 
 ## Product rules
 
 The rules below hold for every change; their mechanisms, the rest of the product rules and their tests are in `docs/architecture.md` (Product rules).
 
-- **CCBridge has no language model of its own.** Copilot is the only intelligence; everything CCBridge decides is a fixed, testable rule on text and page state, covered by a Pester test. Never write code that assumes CCBridge understands a request.
+- **StreamHub has no language model of its own.** Copilot is the only intelligence; everything StreamHub decides is a fixed, testable rule on text and page state, covered by a Pester test. Never write code that assumes StreamHub understands a request.
 - **The person's request comes first**, over earlier choices of Copilot or StreamHub.
-- **Human in the loop for Microsoft 365 (non-negotiable)**: CCBridge never confirms a Microsoft 365 action; risky commands always need a person in the web app and are refused headless. Do not add an auto-approve path around this.
+- **Human in the loop for Microsoft 365 (non-negotiable)**: StreamHub never confirms a Microsoft 365 action; risky commands always need a person in the web app and are refused headless. Do not add an auto-approve path around this.
 - **Deleting and moving stay inside the project** (hard boundary, no approval overrides it): `Test-DeleteScope`, `Resolve-ProjectPath` (`tests/DeleteScope.Tests.ps1`).
 - **User source data is read-only**: files in a project's `Source/` are never edited, moved or deleted; links are never followed.
-- Keep prompts minimal; text sent to Copilot never mentions the name CCBridge ("the helper program").
+- Keep prompts minimal; text sent to Copilot never mentions the name StreamHub ("the helper program").
 - Project instruction files are named `AGENTS.md` (sent to Copilot at the start of each chat).
 - UI: monochrome white/grey, flat buttons, no blue/green accents; side panel on the left.
 - Every task goes through `Submit-AgentTask`; every agent turn is one checkpoint (backups in `%LOCALAPPDATA%`, never OneDrive).
@@ -153,14 +156,14 @@ The rules below hold for every change; their mechanisms, the rest of the product
 ## Decisions (operator, 2026-11-24)
 
 - MCP contract unchanged: the tool descriptions already point to the job tools (`copilot_run_task`, `copilot_ask`); no tool is added, renamed or removed for this.
-- Starting the web app stops an older instance with `Stop-Process` on that one process, never `taskkill /T`: the tree holds the commands it opened in visible run windows, which belong to the person (`ccbridge.ps1`).
+- Starting the web app stops an older instance with `Stop-Process` on that one process, never `taskkill /T`: the tree holds the commands it opened in visible run windows, which belong to the person (`streamhub.ps1`).
 - `Set-StrictMode -Version 2.0` goes in one module at a time where tests cover it (so far SyncedFiles, RepoMap, ChatScope, SecretFiles); the rest is on the Later list in `tasks/todo.md`, with the other deferred items.
 
 ## Repository
 
-- Public: https://github.com/jgt87/CCBridge. Commit with the repo-local GitHub noreply email; never with a personal address.
+- Public: https://github.com/jgt87/StreamHub. Commit with the repo-local GitHub noreply email; never with a personal address.
 - New test fixtures are recorded Copilot traffic: scrub GUIDs, IDs, names and `locationInfo` before committing.
-- No links to other GitHub repositories anywhere in the repo or the built `ui/` (only `jgt87/CCBridge`): `tests/Repository.Tests.ps1` checks it. The UI build turns such links in bundled libraries into plain words (`ui-src/vite.config.ts`); third-party components keep their author, licence and website lines. `ui-src/package-lock.json` (written by npm, not shipped) is the exception.
+- No links to other GitHub repositories anywhere in the repo or the built `ui/` (only `jgt87/StreamHub`, and its pre-rename name as the installer's fallback): `tests/Repository.Tests.ps1` checks it. The UI build turns such links in bundled libraries into plain words (`ui-src/vite.config.ts`); third-party components keep their author, licence and website lines. `ui-src/package-lock.json` (written by npm, not shipped) is the exception.
 
 <!-- REPOWISE_DISTILL:START — Do not edit below this line. Auto-generated by Repowise. -->
 ### Output Distillation

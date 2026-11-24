@@ -64,7 +64,7 @@ Describe 'Session report' {
     }
     It 'writes the report file' {
         $dir = Join-Path $env:TEMP ('ccb-rep-' + [guid]::NewGuid().ToString('N'))
-        $f = Join-Path $dir 'ccbridge-20260105.log'; New-Item -ItemType Directory $dir | Out-Null
+        $f = Join-Path $dir 'streamhub-20260105.log'; New-Item -ItemType Directory $dir | Out-Null
         try {
             [IO.File]::WriteAllText($f, $log)
             $p = New-SessionReportFile -LogFile $f -OutDir $dir

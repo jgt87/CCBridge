@@ -12,10 +12,10 @@ $script:Team = @{ path = 'C:\Users\someone\Contoso\Team Site - Shared Documents'
 Describe 'Get-SyncedWebUrl' {
     $roots = @($script:Personal, $script:Work, $script:Team)
     It 'gives a personal OneDrive file its address under the account id' {
-        Get-SyncedWebUrl -Path 'C:\Users\someone\OneDrive\CCBridge\Site\index.html' -Roots $roots | Should Be 'https://d.docs.live.net/0123456789abcdef/CCBridge/Site/index.html'
+        Get-SyncedWebUrl -Path 'C:\Users\someone\OneDrive\StreamHub\Site\index.html' -Roots $roots | Should Be 'https://d.docs.live.net/0123456789abcdef/StreamHub/Site/index.html'
     }
     It 'gives a work OneDrive file its address' {
-        Get-SyncedWebUrl -Path 'C:\Users\someone\OneDrive - Contoso\CCBridge\Report\Source\sales.xlsx' -Roots $roots | Should Be 'https://contoso-my.sharepoint.com/personal/someone_contoso_example/Documents/CCBridge/Report/Source/sales.xlsx'
+        Get-SyncedWebUrl -Path 'C:\Users\someone\OneDrive - Contoso\StreamHub\Report\Source\sales.xlsx' -Roots $roots | Should Be 'https://contoso-my.sharepoint.com/personal/someone_contoso_example/Documents/StreamHub/Report/Source/sales.xlsx'
     }
     It 'gives a SharePoint / Teams library file its address, the library''s own space escaped' {
         Get-SyncedWebUrl -Path 'C:\Users\someone\Contoso\Team Site - Shared Documents\Plans\Q3.docx' -Roots $roots | Should Be 'https://contoso.sharepoint.com/sites/Team/Shared%20Documents/Plans/Q3.docx'

@@ -2,7 +2,7 @@
 # Executor, allowed by Agent only for lines read in this task while the file is still as read; the
 # stale note on a failed edit; the whole-file fallback after the second failed edit. Made-up files.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'Protocol', 'Executor', 'Agent') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 $fence = '````'
 
@@ -46,7 +46,7 @@ Describe 'When a line-range edit is allowed (Agent)' {
     $p = Join-Path $env:TEMP ('ccb-rangea-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
     $text = "function a() {`n  return 1;`n}`nfunction b() {`n  return 2;`n}`n"
     [IO.File]::WriteAllText((Join-Path $p 'app.js'), $text)
-    $config = Get-CCBridgeConfig harness $root; $config.pageCheck = 'off'
+    $config = Get-StreamHubConfig harness $root; $config.pageCheck = 'off'
     $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
     $act = { param($type, $arg, $edits, $body) [pscustomobject]@{ type = $type; arg = $arg; edits = $edits; body = "$body"; closed = $true } }
     $run = { param($st, $a) & (Get-Module Agent) { param($st, $a) Invoke-AgentAction $st $a 'a1' $null 0 } $st $a }
@@ -93,4 +93,4 @@ Describe 'When a line-range edit is allowed (Agent)' {
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

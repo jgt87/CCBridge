@@ -2,7 +2,7 @@
 # the ones the kit's catalogue has get their rules in the project's kit.css (Repair-KitPageClasses),
 # kept for the next kit.css too; a class the kit does not have comes back as unknown.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'UiKit', 'CheckPolicy') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 Describe 'Kit classes the page shows without a rule' {
@@ -49,4 +49,4 @@ Describe 'Kit classes the page shows without a rule' {
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

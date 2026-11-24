@@ -1,6 +1,6 @@
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $base = Join-Path $env:TEMP ('ccb-guidance-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_STATE_ROOT = Join-Path $base 'state'
+$env:STREAMHUB_STATE_ROOT = Join-Path $base 'state'
 foreach ($m in 'Config', 'Agent', 'TaskGuidance', 'Prompts', 'Handoff') { Import-Module (Join-Path $root "lib/$m.psm1") -Force }
 $null = New-Item -ItemType Directory -Force -Path $base
 
@@ -90,7 +90,7 @@ Describe 'Instructions before mutations in the real turn loop' {
         $write = '````text' + "`nACTION write src/note.md`nA note.`n" + '````'
         $done = '```text' + "`nACTION done`nFinished.`n" + '```'
         $global:guidanceReplies = @($write, $write, $done); $global:guidanceSent = @()
-        $c = Get-CCBridgeConfig harness $root; $c.pageCheck = 'off'; $c.reviewAfterChanges = 'off'
+        $c = Get-StreamHubConfig harness $root; $c.pageCheck = 'off'; $c.reviewAfterChanges = 'off'
         $s = New-AgentState -Config $c -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         Invoke-AgentTurn $s 'Write a note'
         $global:guidanceSent[1] | Should Match 'No actions in this reply were executed'
@@ -100,7 +100,7 @@ Describe 'Instructions before mutations in the real turn loop' {
     }
     It 'accepts an investigation answer without retrying it into edits' {
         $global:guidanceReplies = @("- Parser reads the file.`n- Validation checks the result."); $global:guidanceSent = @()
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = Join-Path $base 'project'; $s.Mode = 'auto'
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = Join-Path $base 'project'; $s.Mode = 'auto'
         Invoke-AgentTurn $s 'Explain how the parser works'
         $global:guidanceSent.Count | Should Be 1
         $global:guidanceSent[0] | Should Match 'Task intent: answer'
@@ -110,12 +110,12 @@ Describe 'Instructions before mutations in the real turn loop' {
         $text = "Write a runbook for this request:`n---`nList the files, do not change anything`n---"
         Get-TaskIntent $text | Should Be 'investigate'
         $global:guidanceReplies = @('Noted.'); $global:guidanceSent = @()
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = Join-Path $base 'project'; $s.Mode = 'auto'
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = Join-Path $base 'project'; $s.Mode = 'auto'
         Invoke-AgentTurn $s $text -Intent 'change'
         $global:guidanceSent[0] | Should Match 'Task intent: change'
         $s.TaskIntent | Should Be 'change'
         $global:guidanceReplies = @('Noted.'); $global:guidanceSent = @()
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = Join-Path $base 'project'; $s.Mode = 'plan'
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = Join-Path $base 'project'; $s.Mode = 'plan'
         Invoke-AgentTurn $s $text -Intent 'change'
         $s.TaskIntent | Should Be 'investigate'
     }
@@ -123,4 +123,4 @@ Describe 'Instructions before mutations in the real turn loop' {
 
 $resolved = [IO.Path]::GetFullPath($base)
 if ($resolved.StartsWith([IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\ccb-guidance-', [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $resolved -Recurse -Force }
-$env:CCBRIDGE_STATE_ROOT = $null
+$env:STREAMHUB_STATE_ROOT = $null

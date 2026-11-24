@@ -12,7 +12,7 @@ import { responseChoices } from "@/lib/response-modes";
 export type AgentChoice = "auto" | "copilot" | "researcher" | "analyst";
 
 /** The changelog on GitHub, always the current one on main (newer entries than this build included). */
-const changelogUrl = () => "https://github.com/jgt87/CCBridge/blob/main/CHANGELOG.md";
+const changelogUrl = () => "https://github.com/jgt87/StreamHub/blob/main/CHANGELOG.md";
 
 /** The id of the side panel (app-layout SideDrawer), named by the header's button that opens it (aria-controls). */
 export const SIDE_PANEL_ID = "side-panel";

@@ -1,29 +1,37 @@
-# Diagnostic log: %LOCALAPPDATA%\CCBridge\logs\ccbridge-yyyyMMdd.log (14 days kept).
+# Diagnostic log: %LOCALAPPDATA%\StreamHub\logs\streamhub-yyyyMMdd.log (14 days kept).
 # Levels: off < info (default) < verbose < trace. Only 'trace' records prompt/reply text; every
 # line is masked for user name, profile/OneDrive paths, email addresses and GUIDs, so logs can be shared.
 # Several processes (web app, MCP server) and runspaces append to the same file under a mutex.
 # Each process starts every log file it writes to with a line naming its version and commit, so
 # every file shows which build wrote its lines (also after midnight, and with several processes).
 
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
+
 $script:Levels = @{ off = 0; info = 1; verbose = 2; trace = 3 }
 $script:Level = 1
 function Get-DefaultLogDir {
-    <# Where this process logs: $env:CCBRIDGE_LOG_DIR when set; under a test run (Pester loaded) a
+    <# Where this process logs: $env:STREAMHUB_LOG_DIR when set; under a test run (Pester loaded) a
        test-log folder in TEMP, so tests never write into the person's real log (the session report
-       and Export diagnostics read it); else %LOCALAPPDATA%\CCBridge\logs. The choice goes into the
+       and Export diagnostics read it); else %LOCALAPPDATA%\StreamHub\logs. The choice goes into the
        process environment, so worker runspaces and the processes a test starts log to the same place. #>
-    if ($env:CCBRIDGE_LOG_DIR) { return $env:CCBRIDGE_LOG_DIR }
+    if ($env:STREAMHUB_LOG_DIR) { return $env:STREAMHUB_LOG_DIR }
     if (Get-Module Pester) {
-        $env:CCBRIDGE_LOG_DIR = Join-Path ([IO.Path]::GetTempPath()) 'CCBridge-test-logs'
-        return $env:CCBRIDGE_LOG_DIR
+        $env:STREAMHUB_LOG_DIR = Join-Path ([IO.Path]::GetTempPath()) 'StreamHub-test-logs'
+        return $env:STREAMHUB_LOG_DIR
     }
-    Join-Path $env:LOCALAPPDATA 'CCBridge\logs'
+    Get-AppDataPath 'logs'
 }
-$script:Dir = Get-DefaultLogDir
+# Fixed when STREAMHUB_LOG_DIR is set or under a test run. Otherwise empty: the data folder's logs
+# folder at each write, so the log follows the data folder when the start moves it to its new name.
+$script:Dir = if ($env:STREAMHUB_LOG_DIR -or (Get-Module Pester)) { Get-DefaultLogDir } else { $null }
 $script:Masks = $null
 $script:Context = ''
 
-function Get-CCBLogDir { $script:Dir }
+function Get-CCBLogDir {
+    if ($script:Dir) { return $script:Dir }
+    if ($env:STREAMHUB_LOG_DIR) { return $env:STREAMHUB_LOG_DIR }
+    Get-AppDataPath 'logs'
+}
 function Get-CCBLogLevel { ($script:Levels.GetEnumerator() | Where-Object { $_.Value -eq $script:Level } | Select-Object -First 1).Key }
 function Get-CCBLogContext { $script:Context }
 function Set-CCBLogContext([string]$Context) { $script:Context = if ($Context) { "$Context" } else { '' } }
@@ -35,18 +43,19 @@ function Set-CCBLogLevel([string]$Level) {
 }
 
 function Initialize-CCBLog {
-    <# Level precedence: explicit -Level, then $env:CCBRIDGE_LOG, then the config value, then info.
+    <# Level precedence: explicit -Level, then $env:STREAMHUB_LOG, then the config value, then info.
        -Build (version and commit) and -Role (web app, MCP server, ping) go into the line that
        starts each log file per process; kept in the process environment, so the worker runspaces
        write the same. #>
     param([string]$Level, $Config, [string]$Build, [string]$Role)
-    if ($Build) { $env:CCBRIDGE_LOG_BUILD = $Build }
-    if ($Role) { $env:CCBRIDGE_LOG_ROLE = $Role }
-    $chosen = if ($Level) { $Level } elseif ($env:CCBRIDGE_LOG) { $env:CCBRIDGE_LOG } elseif ($Config -and $Config.PSObject.Properties['logLevel']) { [string]$Config.logLevel } else { 'info' }
+    if ($Build) { $env:STREAMHUB_LOG_BUILD = $Build }
+    if ($Role) { $env:STREAMHUB_LOG_ROLE = $Role }
+    $chosen = if ($Level) { $Level } elseif ($env:STREAMHUB_LOG) { $env:STREAMHUB_LOG } elseif ($Config -and $Config.PSObject.Properties['logLevel']) { [string]$Config.logLevel } else { 'info' }
     Set-CCBLogLevel $chosen
-    if ($script:Level -gt 0 -and -not (Test-Path $script:Dir)) { $null = New-Item -ItemType Directory -Force -Path $script:Dir }
+    $dir = Get-CCBLogDir
+    if ($script:Level -gt 0 -and -not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Force -Path $dir }
     # Old logs: keep 14 days.
-    try { Get-ChildItem $script:Dir -Filter 'ccbridge-*.log' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-14) } | ForEach-Object { [IO.File]::Delete($_.FullName) } } catch { }
+    try { Get-ChildItem $dir -Filter 'streamhub-*.log' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-14) } | ForEach-Object { [IO.File]::Delete($_.FullName) } } catch { }
 }
 
 function Test-CCBLog([string]$Level) { $script:Level -ge $script:Levels[$Level] -and $script:Level -gt 0 }
@@ -75,7 +84,7 @@ function Protect-LogText([string]$Text) {
 function Get-LogHeader {
     <# The line that starts a log file for this process: StreamHub's version and commit, what runs,
        and PowerShell's version. #>
-    $build = $env:CCBRIDGE_LOG_BUILD
+    $build = $env:STREAMHUB_LOG_BUILD
     if (-not $build) {
         # Started without -Build (a tool, a test run): the release files of the app folder, else dev.
         $app = Split-Path -Parent $PSScriptRoot
@@ -83,12 +92,12 @@ function Get-LogHeader {
         $build = if (Test-Path -LiteralPath $v) { ([IO.File]::ReadAllText($v)).Trim() } else { 'dev' }
         if (Test-Path -LiteralPath $c) { $build += " (commit $(([IO.File]::ReadAllText($c)).Trim()))" }
     }
-    $role = if ($env:CCBRIDGE_LOG_ROLE) { " ($($env:CCBRIDGE_LOG_ROLE))" } else { '' }
+    $role = if ($env:STREAMHUB_LOG_ROLE) { " ($($env:STREAMHUB_LOG_ROLE))" } else { '' }
     '{0} [{1,5}] {2,-7} {3,-8} {4}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff'), $PID, 'INFO', 'log', "StreamHub $build$role, PowerShell $($PSVersionTable.PSVersion): lines with process $PID come from this build"
 }
 
 function Format-CCBBuild($Build) {
-    # "v0.1.101 (commit 9528564)" from Get-CCBridgeBuild.
+    # "v0.1.101 (commit 9528564)" from Get-StreamHubBuild.
     if (-not $Build) { return '' }
     "$($Build.version)$(if ($Build.commit) { " (commit $($Build.commit))" })"
 }
@@ -107,13 +116,13 @@ function Write-CCBLog {
         if ($script:Context) { $line += " [cid:$($script:Context)]" }
         if ($null -ne $Data) { $line += ' ' + (ConvertTo-Json -InputObject $Data -Depth 6 -Compress) }
         $line = Protect-LogText $line
-        $file = Join-Path $script:Dir ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
+        $file = Join-Path (Get-CCBLogDir) ('streamhub-' + (Get-Date).ToString('yyyyMMdd') + '.log')
         # The first line this process writes to a file says which build it is.
-        if ($env:CCBRIDGE_LOG_HEADER -ne $file) {
-            $env:CCBRIDGE_LOG_HEADER = $file
+        if ($env:STREAMHUB_LOG_HEADER -ne $file) {
+            $env:STREAMHUB_LOG_HEADER = $file
             $line = (Get-LogHeader) + "`r`n" + $line
         }
-        $mutex = New-Object Threading.Mutex($false, 'Local\CCBridgeLog')
+        $mutex = New-Object Threading.Mutex($false, 'Local\StreamHubLog')
         $owned = $false
         try {
             try { $owned = $mutex.WaitOne(2000) } catch [Threading.AbandonedMutexException] { $owned = $true }
@@ -122,7 +131,7 @@ function Write-CCBLog {
             # preferable to corrupting the shared file; the caller continues normally.
             if ($owned) { [IO.File]::AppendAllText($file, $line + "`r`n", (New-Object Text.UTF8Encoding($false))) }
         } finally { if ($owned) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
-    } catch { }   # logging must never break CCBridge
+    } catch { }   # logging must never break StreamHub
 }
 
 function Write-CCBLogError {

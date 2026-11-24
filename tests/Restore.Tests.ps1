@@ -1,6 +1,6 @@
 # History > Undo to here: undo a chosen change set and every newer one (Invoke-UndoTask in Agent.psm1).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
@@ -33,4 +33,4 @@ Describe 'Undo to before a change set' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

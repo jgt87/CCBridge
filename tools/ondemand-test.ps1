@@ -7,7 +7,7 @@
 .DESCRIPTION
     What it does:
       1. Checks that the app answers on its port (config\harness.json, harness.local.json) with the
-         session token in %LOCALAPPDATA%\CCBridge\session-token.txt; stops with a message if not.
+         session token in %LOCALAPPDATA%\StreamHub\session-token.txt; stops with a message if not.
       2. Creates a new project "On-demand test STAMP" through the app (in the projects folder in
          OneDrive) and writes invented test files into it: a UI kit page, data\sales.csv, files
          nothing uses, a .env with a made-up value. Invented data only.
@@ -57,6 +57,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'OnDemandTest.psm1') -Force
+Import-Module (Join-Path $root 'lib\AppPaths.psm1')
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $allSteps = @('coding', 'runbook', 'overview', 'page-report', 'page-compare', 'data-profile', 'share-package', 'theme', 'tidy', 'pptx', 'pptx-ask')
@@ -67,12 +68,12 @@ try { $selected = @(Resolve-OnlySteps $allSteps $Only) } catch { Write-Host $_.E
 if (-not $Port) {
     try {
         Import-Module (Join-Path $root 'lib\Config.psm1') -Force
-        $Port = [int](Get-CCBridgeConfig harness $root).port
+        $Port = [int](Get-StreamHubConfig harness $root).port
     } catch { $Port = 0 }
     if (-not $Port) { $Port = 8765 }
 }
 $script:Base = "http://localhost:$Port"
-$tokenFile = Join-Path $env:LOCALAPPDATA 'CCBridge\session-token.txt'
+$tokenFile = Get-AppDataPath 'session-token.txt'
 $script:Token = if (Test-Path -LiteralPath $tokenFile) { [IO.File]::ReadAllText($tokenFile).Trim() } else { '' }
 
 function Get-WebError($ErrorRecord) {

@@ -6,6 +6,7 @@
 # and by the project's Scripts/Build-App.ps1 while StreamHub is closed. Setting webBuild.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 foreach ($m in 'Log', 'Cdp', 'Config') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:BuildEntries = @('src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/main.js', 'src/index.tsx', 'src/index.jsx', 'src/index.ts')
@@ -14,7 +15,7 @@ $script:BuildBinary = '(?i)\.(svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf)$'
 
 function Test-WebBuildOn([string]$AppRoot) {
     # Setting webBuild (on unless turned off). Read from disk, so every runspace sees a change.
-    try { $v = (Get-CCBridgeConfig harness $AppRoot).webBuild; ($null -eq $v) -or [bool]$v } catch { $true }
+    try { $v = (Get-StreamHubConfig harness $AppRoot).webBuild; ($null -eq $v) -or [bool]$v } catch { $true }
 }
 
 function Get-WebBuildEntry([string]$ProjectRoot) {
@@ -74,7 +75,7 @@ function Invoke-WebBuild {
     try {
         if (-not $port -or -not (Test-CdpEndpoint $port)) {
             $port = Get-FreePort
-            $own = Start-CdpEdge -Port $port -ProfileDir (Join-Path $env:LOCALAPPDATA 'CCBridge\build-edge') -Headless
+            $own = Start-CdpEdge -Port $port -ProfileDir (Get-AppDataPath 'build-edge') -Headless
         }
         $target = Invoke-RestMethod -Method Put "http://127.0.0.1:$port/json/new?about:blank"
         $s = Connect-Cdp $target.webSocketDebuggerUrl
@@ -93,7 +94,7 @@ function Invoke-WebBuild {
         if ($s) { try { Disconnect-Cdp $s } catch { } }
         if ($target) { try { $null = Invoke-RestMethod "http://127.0.0.1:$port/json/close/$($target.id)" } catch { } }
         if ($own) {
-            $prof = Join-Path $env:LOCALAPPDATA 'CCBridge\build-edge'
+            $prof = Get-AppDataPath 'build-edge'
             Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" -ErrorAction SilentlyContinue | Where-Object { "$($_.CommandLine)" -like "*$prof*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         }
     }

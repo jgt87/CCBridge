@@ -40,7 +40,7 @@ Describe 'Account type of an Edge profile (Get-EdgeProfileAccount)' {
 }
 
 Describe 'Edge holding the profile without the debug port (Get-EdgeProfileUse)' {
-    $dir = 'C:\Data\CCBridge\edge-profile'
+    $dir = 'C:\Data\StreamHub\edge-profile'
     $p = { param($cmd, $id = 100) [pscustomobject]@{ ProcessId = $id; CommandLine = $cmd } }
     It 'finds no Edge for the profile' {
         (Get-EdgeProfileUse -ProfileDir $dir -Port 9333 -Processes @()).state | Should Be 'none'

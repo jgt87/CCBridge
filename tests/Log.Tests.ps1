@@ -2,41 +2,43 @@
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Log.psm1') -Force
 
-Describe 'CCBridge log' {
-    $today = Join-Path (Get-CCBLogDir) ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
+Describe 'StreamHub log' {
+    $today = Join-Path (Get-CCBLogDir) ('streamhub-' + (Get-Date).ToString('yyyyMMdd') + '.log')
     $marker = 'pester-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     function Get-MarkerLines { if (Test-Path $today) { @(Get-Content $today | Where-Object { $_ -match $marker }) } else { @() } }
 
     It 'starts each log file a process writes to with its version, commit and role' {
         $dir = Join-Path $env:TEMP ('ccb-log-' + [guid]::NewGuid().ToString('N'))
-        $was = Get-CCBLogDir; $wasHeader = $env:CCBRIDGE_LOG_HEADER; $wasBuild = $env:CCBRIDGE_LOG_BUILD; $wasRole = $env:CCBRIDGE_LOG_ROLE
+        $was = Get-CCBLogDir; $wasHeader = $env:STREAMHUB_LOG_HEADER; $wasBuild = $env:STREAMHUB_LOG_BUILD; $wasRole = $env:STREAMHUB_LOG_ROLE
         & (Get-Module Log) { param($d) $script:Dir = $d } $dir
         try {
             Initialize-CCBLog -Level info -Build (Format-CCBBuild ([pscustomobject]@{ version = 'v9.9.9'; commit = 'abc1234' })) -Role 'web app'
             Write-CCBLog info test "$marker first"
             Write-CCBLog info test "$marker second"
-            $lines = @(Get-Content (Join-Path $dir ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')))
+            $lines = @(Get-Content (Join-Path $dir ('streamhub-' + (Get-Date).ToString('yyyyMMdd') + '.log')))
             $lines.Count | Should Be 3
             $lines[0] | Should Match "INFO\s+log\s+StreamHub v9\.9\.9 \(commit abc1234\) \(web app\), PowerShell [\d.]+: lines with process $PID come from this build"
             $lines[1] | Should Match "$marker first"
             Format-CCBBuild ([pscustomobject]@{ version = 'dev'; commit = '' }) | Should Be 'dev'
         } finally {
             & (Get-Module Log) { param($d) $script:Dir = $d } $was
-            $env:CCBRIDGE_LOG_HEADER = $wasHeader; $env:CCBRIDGE_LOG_BUILD = $wasBuild; $env:CCBRIDGE_LOG_ROLE = $wasRole
+            $env:STREAMHUB_LOG_HEADER = $wasHeader; $env:STREAMHUB_LOG_BUILD = $wasBuild; $env:STREAMHUB_LOG_ROLE = $wasRole
             Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
-    It 'logs a test run outside the real log folder, and follows CCBRIDGE_LOG_DIR' {
-        # Pester is loaded here: the log goes to the test-log folder, never %LOCALAPPDATA%\CCBridge\logs.
-        Get-CCBLogDir | Should Not Be (Join-Path $env:LOCALAPPDATA 'CCBridge\logs')
-        $env:CCBRIDGE_LOG_DIR | Should Be (Get-CCBLogDir)
+    It 'logs a test run outside the real log folder, and follows STREAMHUB_LOG_DIR' {
+        # Pester is loaded here: the log goes to the test-log folder, never %LOCALAPPDATA%\StreamHub\logs.
+        Import-Module (Join-Path $root 'lib\AppPaths.psm1')
+        $realDir = Join-Path (Get-AppDataDir) 'logs'   # the data folder, also under its old name until moved
+        Get-CCBLogDir | Should Not Be $realDir
+        $env:STREAMHUB_LOG_DIR | Should Be (Get-CCBLogDir)
         # A process started by a test inherits the folder through its environment.
         $child = powershell -NoProfile -Command "Import-Module '$root\lib\Log.psm1'; Get-CCBLogDir"
         "$child".Trim() | Should Be (Get-CCBLogDir)
         # Outside a test run, with the variable unset, it is the real folder.
-        $real = powershell -NoProfile -Command "`$env:CCBRIDGE_LOG_DIR = ''; Import-Module '$root\lib\Log.psm1'; Get-CCBLogDir"
-        "$real".Trim() | Should Be (Join-Path $env:LOCALAPPDATA 'CCBridge\logs')
+        $real = powershell -NoProfile -Command "`$env:STREAMHUB_LOG_DIR = ''; Import-Module '$root\lib\Log.psm1'; Get-CCBLogDir"
+        "$real".Trim() | Should Be $realDir
     }
 
     It 'writes info, skips verbose at the default level' {

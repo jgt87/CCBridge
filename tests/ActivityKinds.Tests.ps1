@@ -6,7 +6,7 @@ Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Server.psm1') -Force
 
 Describe 'Activity kinds' {
-    $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+    $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
     It 'sets a kind and label for a step and puts back what was there before' {
         $outer = & (Get-Module Agent) { param($st) Enter-Activity $st 'tests' 'Running the tests' } $s
         $inner = & (Get-Module Agent) { param($st) Enter-Activity $st 'page' 'Checking index.html in a browser tab' } $s

@@ -3,7 +3,7 @@ import { reportClientError } from "@/lib/api";
 
 /**
  * Catches render errors so the page never goes blank: shows what went wrong, reports it to the
- * CCBridge log (so diagnostics include it) and offers to continue or reload.
+ * StreamHub log (so diagnostics include it) and offers to continue or reload.
  */
 export class ErrorBoundary extends Component<{ children: ReactNode; area: string; context?: () => Record<string, unknown> }, { error: Error | null }> {
   state = { error: null as Error | null };

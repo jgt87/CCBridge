@@ -2,7 +2,7 @@
 # PowerShell window apps: the WPF theme (UiKit Get-WpfThemeText, Update-KitWpf), the checks (Lint
 # Find-PsGuiIssues) and the rule (Prompts rules:psgui). Edge and WPF are not started here.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'UiKit', 'Lint', 'Prompts', 'WebBuild', 'GuiTest', 'CheckPolicy') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 function New-TempProject { $p = Join-Path $env:TEMP ('ccb-wapp-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p -Force | Out-Null; $p }
 function Add-File($p, $rel, $text) { $full = Join-Path $p $rel; New-Item -ItemType Directory -Force -Path (Split-Path $full) | Out-Null; [IO.File]::WriteAllText($full, $text) }
@@ -53,7 +53,7 @@ Describe 'The built-in builder' {
 Describe 'SQL and Python in the page' {
     It 'has both parts, SQL on and Python off by default, with their rule lines' {
         foreach ($f in 'kit-sql.js', 'kit-python.js', 'vendor\sqljs\sql-asm.js', 'vendor\pyodide\pyodide.js', 'vendor\pyodide\pyodide.asm.wasm') { Test-Path (Join-Path $root "templates\ui-kit\$f") | Should Be $true }
-        Mock -ModuleName Config Get-CCBridgeConfig { [pscustomobject]@{ uiKitParts = [pscustomobject]@{} } }
+        Mock -ModuleName Config Get-StreamHubConfig { [pscustomobject]@{ uiKitParts = [pscustomobject]@{} } }
         Test-UiKitPart 'sql' $root | Should Be $true
         Test-UiKitPart 'python' $root | Should Be $false
         $rule = [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\uikit.md'))
@@ -111,7 +111,7 @@ Describe 'PowerShell window apps' {
         @(Get-PromptModules 'Write a script that copies files' @{ Traits = @('powershell'); Paths = @() }) -contains 'rules:psgui' | Should Be $false
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
 
 Describe 'Window app helpers, tests and checks' {
     It 'writes the helpers for every window app, and the theme only with the UI kit' {

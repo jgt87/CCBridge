@@ -1,5 +1,5 @@
 # Installs one optional tool for the current user (started by StreamHub's Settings > This computer,
-# or by check.cmd -Install NAME). The result goes to %LOCALAPPDATA%\CCBridge\tool-install-NAME.json.
+# or by check.cmd -Install NAME). The result goes to %LOCALAPPDATA%\StreamHub\tool-install-NAME.json.
 param([Parameter(Mandatory)][ValidateSet('python', 'pytest', 'node', 'dotnet', 'git')][string]$Name)
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell's own module paths: a process started from PowerShell 7 passes on its paths,

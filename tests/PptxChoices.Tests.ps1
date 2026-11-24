@@ -438,7 +438,7 @@ Describe 'Asking Copilot about one element' {
             $ask = New-PptxElementAsk $e $look
             $ask | Should Not Match 'SECRET-BODY-TEXT'
             $ask | Should Not Match 'GO-SHAPE'
-            $ask | Should Not Match 'CCBridge'
+            $ask | Should Not Match '(?<![.\w])StreamHub'
             $ask | Should Match '```json'
             foreach ($o in @($e.all)) { $ask.Contains("- $($o.id): ") | Should Be $true }
         }

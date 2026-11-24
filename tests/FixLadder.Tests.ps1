@@ -2,7 +2,7 @@
 # Invoke-IssueCycle; Lint Get-OpenBlocks; Executor Format-LineChange): 1 the problems, 2 a diagnosis
 # with evidence in Think deeper, 3 fresh eyes in a new chat from the last good version.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Lint.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Issues.psm1') -Force
@@ -76,7 +76,7 @@ Describe 'Fix attempts' {
         $m | Should Not Match 'What the previous attempt changed'
     }
     It 'queues attempt 2 in Think deeper and attempt 3 in a new chat' {
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s.ProjectRoot = $p
         Mock -ModuleName Agent Set-IssueState { }
         Mock -ModuleName Agent Submit-AgentTask { @{ task = $Task } }
@@ -92,14 +92,14 @@ Describe 'Fix attempts' {
         (Submit-IssueFix $s 'app.js' @(@{ id = 'i1' }) 4 @('error') $p @{}) | Should BeNullOrEmpty   # past 3 attempts (the default)
     }
     It 'reads Copilot''s diagnosis from its reply' {
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         Add-AgentEvent $s 'assistant' @{ text = "Cause: the arrow function's block closes the if,`nso the function's brace closes the if instead.`n`nHere is the fix:`n``````text`nACTION edit app.js`n``````" }
         & (Get-Module Agent) { param($st) Get-FixDiagnosis $st 0 } $s | Should Be "the arrow function's block closes the if, so the function's brace closes the if instead."
-        $s2 = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s2 = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         Add-AgentEvent $s2 'assistant' @{ text = '**Cause:** a missing } after the map call.' }
         & (Get-Module Agent) { param($st) Get-FixDiagnosis $st 0 } $s2 | Should Be 'a missing } after the map call.'
     }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

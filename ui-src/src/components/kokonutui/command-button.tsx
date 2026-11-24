@@ -18,14 +18,14 @@ export default function CommandButton({
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   children?: React.ReactNode;
-  /** CCBridge: icon shown instead of the Command glyph. */
+  /** StreamHub: icon shown instead of the Command glyph. */
   icon?: React.ComponentType<{ className?: string }>;
 }) {
   return (
     <Button
       {...props}
       className={cn(
-        // CCBridge: flat design (no gradient, border or shimmer).
+        // StreamHub: flat design (no gradient, border or shimmer).
         "relative px-3 py-2",
         "rounded-md shadow-none",
         "bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15",

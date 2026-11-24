@@ -198,6 +198,45 @@ function Get-RobocopyFailures([string[]]$Lines) {
     @($Lines | ForEach-Object { $m = [regex]::Match("$_", 'ERROR \d+ \(0x[0-9A-Fa-f]+\) \w+(?: \w+)* (?:File|Directory) (.+)$'); if ($m.Success) { $m.Groups[1].Value.Trim() } } | Select-Object -Unique)
 }
 
+# --- Where releases come from ------------------------------------------------------------------
+# The repository is jgt87/StreamHub. A request there that fails (not found, no network) is tried
+# once more on the repository's name from before the rename, and a release from before the rename
+# names its zip CCBridge-vX.Y.Z.zip (pre-rename): both keep updates working across the rename (tools/update.ps1).
+
+$script:ReleaseRepo = 'jgt87/StreamHub'
+$script:OldReleaseRepo = 'jgt87/CCBridge'   # pre-rename repository name
+
+function Get-ReleaseRepo { $script:ReleaseRepo }
+
+function Get-OldRepoUrl([string]$Url) {
+    <# The same address on the repository's old name; '' when $Url is not an address of the repository. #>
+    $re = '(?i)(?<=/)' + [regex]::Escape($script:ReleaseRepo) + '(?=[/?#]|$)'
+    if ($Url -notmatch $re) { return '' }
+    [regex]::Replace($Url, $re, $script:OldReleaseRepo)
+}
+
+function Invoke-WithRepoFallback {
+    <# & $Request $Url; when that throws, once more with the same address on the old repository name
+       ($OnFallback gets the first error's message). Throws the last error when both fail. #>
+    param([Parameter(Mandatory)][string]$Url, [Parameter(Mandatory)][scriptblock]$Request, [scriptblock]$OnFallback)
+    try { return (& $Request $Url) }
+    catch {
+        $old = Get-OldRepoUrl $Url
+        if (-not $old) { throw }
+        if ($OnFallback) { & $OnFallback "$($_.Exception.Message)" }
+    }
+    & $Request $old
+}
+
+function Select-ReleaseAsset($Release) {
+    <# The release zip: StreamHub-vX.Y.Z.zip, or CCBridge-vX.Y.Z.zip (pre-rename) in a release from before the
+       rename (going back with update.cmd -To, a release list that still has only old ones). #>
+    $assets = @($Release.assets | Where-Object { $_ })
+    $a = @($assets | Where-Object { "$($_.name)" -like 'StreamHub-*.zip' }) | Select-Object -First 1
+    if (-not $a) { $a = @($assets | Where-Object { "$($_.name)" -like 'CCBridge-*.zip' }) | Select-Object -First 1 }   # pre-rename asset name
+    $a
+}
+
 # --- Going back to an earlier release (update.cmd -To vX.Y.Z) ------------------------------------
 # The release gone back from (and every one up to it) is skipped by automatic updates, which take the
 # next newer release again; the skip list is the setting skipUpdates in config\harness.local.json.
@@ -254,4 +293,4 @@ function Set-LocalHarnessValue([string]$AppRoot, [string]$Key, $Value) {
     [IO.File]::WriteAllText($file, ($obj | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
 }
 
-Export-ModuleMember -Function ConvertTo-ReleaseVersion, Test-ReleaseSkipped, Get-RollbackSkip, Test-UpdaterSkipsReleases, Get-LocalHarnessValue, Set-LocalHarnessValue, New-InstallManifest, New-ReleaseChecksums, Test-InstallIntegrity, Format-InstallProblem, Get-UpdateNewFiles, Save-UpdateBackup, Restore-UpdateBackup, Test-FileLocked, Get-FileHashShared, Get-UpdateTouchedFiles, Get-LockedUpdateFiles, Format-LockedUpdateFiles, Get-RobocopyFailures
+Export-ModuleMember -Function ConvertTo-ReleaseVersion, Test-ReleaseSkipped, Get-RollbackSkip, Test-UpdaterSkipsReleases, Get-LocalHarnessValue, Set-LocalHarnessValue, New-InstallManifest, New-ReleaseChecksums, Test-InstallIntegrity, Format-InstallProblem, Get-UpdateNewFiles, Save-UpdateBackup, Restore-UpdateBackup, Test-FileLocked, Get-FileHashShared, Get-UpdateTouchedFiles, Get-LockedUpdateFiles, Format-LockedUpdateFiles, Get-RobocopyFailures, Get-ReleaseRepo, Get-OldRepoUrl, Invoke-WithRepoFallback, Select-ReleaseAsset

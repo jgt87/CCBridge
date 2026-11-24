@@ -1,4 +1,4 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4. Run: Invoke-Pester .\tests
 # The half-block guard: only real block braces count, and the refusal says where.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force

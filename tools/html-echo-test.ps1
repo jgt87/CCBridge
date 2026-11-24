@@ -11,7 +11,7 @@ param([ValidateSet('both', 'normal', 'page')][string]$Route = 'both', [string]$O
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 foreach ($m in 'Log', 'Config', 'Cdp', 'CopilotBridge') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
-$cfg = Get-CCBridgeConfig harness $root
+$cfg = Get-StreamHubConfig harness $root
 Initialize-CCBLog -Level info -Config $cfg
 
 # Made-up lines covering the tags and characters that get damaged.
@@ -56,7 +56,7 @@ try {
     foreach ($rt in $routes) {
         Say ''
         Say "== Route: $rt"
-        $env:CCBRIDGE_TEST_IGNORE_HUB = $(if ($rt -eq 'page') { '1' } else { '' })
+        $env:STREAMHUB_TEST_IGNORE_HUB = $(if ($rt -eq 'page') { '1' } else { '' })
         try {
             New-CopilotChat $bridge
             $r = Send-CopilotPrompt $bridge $prompt -TimeoutSec 180
@@ -78,7 +78,7 @@ try {
         } catch { Say "   Error: $($_.Exception.Message)" 'Yellow' }
     }
 } finally {
-    $env:CCBRIDGE_TEST_IGNORE_HUB = ''
+    $env:STREAMHUB_TEST_IGNORE_HUB = ''
     Disconnect-Copilot $bridge
 }
 [IO.File]::WriteAllLines($out, $lines)

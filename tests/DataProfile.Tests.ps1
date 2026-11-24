@@ -1,8 +1,8 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests\DataProfile.Tests.ps1
+# Pester 3.4. Run: Invoke-Pester .\tests\DataProfile.Tests.ps1
 # The data profile report: for one converted data file, a page and a workbook for the person.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 # Project state (backups of the data conversion) goes to a temporary folder, deleted below.
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\DataImport.psm1') -Force
 Import-Module (Join-Path $root 'lib\Office.psm1') -Force
 Import-Module (Join-Path $root 'lib\DataProfile.psm1') -Force
@@ -164,5 +164,5 @@ Describe 'Data profile report' {
     Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item -LiteralPath $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
-$env:CCBRIDGE_STATE_ROOT = $null
+Remove-Item -LiteralPath $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+$env:STREAMHUB_STATE_ROOT = $null

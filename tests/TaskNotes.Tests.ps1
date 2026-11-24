@@ -162,7 +162,7 @@ Describe 'To-do and plan lists are changed without approval' {
         $p = Join-Path $env:TEMP ('ccb-todoauto-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
         try {
             [IO.File]::WriteAllText((Join-Path $p 'TODO.md'), "- [ ] First`n- [ ] Second`n")
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'ask'
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'ask'
             # Answers ready, so a wrong approval card cannot hang the test; the check is that none was shown.
             $s.Approvals['t1'] = @{ decision = 'approve'; note = ''; by = 'user' }; $s.Approvals['t2'] = @{ decision = 'approve'; note = ''; by = 'user' }
             $edit = [pscustomobject]@{ type = 'write'; arg = 'TODO.md'; body = "- [x] First`n- [ ] Second`n"; content = "- [x] First`n- [ ] Second`n"; closed = $true }

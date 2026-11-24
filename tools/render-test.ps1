@@ -10,7 +10,7 @@ param([string]$Labels = 'read,text read,plaintext read,text,plaintext,(none)', [
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 foreach ($m in 'Log', 'Config', 'Cdp', 'CopilotBridge') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
-$cfg = Get-CCBridgeConfig harness $root
+$cfg = Get-StreamHubConfig harness $root
 Initialize-CCBLog -Level info -Config $cfg
 $list = @($Labels.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $null = New-Item -ItemType Directory -Force -Path $OutRoot

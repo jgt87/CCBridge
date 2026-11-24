@@ -1,7 +1,7 @@
 # Office files (lib/Office.psm1): .docx/.pptx/.xlsx read as Markdown, .docx written from Markdown,
 # and the write rules (only .docx, an existing one only when written here).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Office.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
@@ -138,7 +138,7 @@ Describe 'Which Office files are written' {
 }
 
 Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
 
 Describe 'Outlines of XML and YAML files' {
     It 'lists the first levels with line numbers, names and ids' {
@@ -161,7 +161,7 @@ Describe 'PDF files go to Copilot as an attachment' {
         { Assert-Writable $p2 'out.pdf' } | Should Throw 'Write a .docx'
         @(Get-PromptModules 'Summarise the PDF in Docs' @{ Traits = @(); Paths = @() }) -contains 'rules:office' | Should Be $true
         Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p2
         $res = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'read'; arg = 'report.pdf'; body = '' }) 'a1' $null 0 } $s
         @($res.attach).Count | Should Be 1

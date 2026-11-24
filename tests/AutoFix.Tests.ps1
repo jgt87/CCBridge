@@ -1,8 +1,8 @@
 # Mechanical fixes (lib/AutoFix.psm1) and rolling back a fix that made a file worse (Agent.psm1).
 # Non-ASCII characters are made with [char] so this file stays ASCII.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
 Import-Module (Join-Path $root 'lib\AutoFix.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
@@ -27,7 +27,7 @@ Describe 'Repair-MechanicalIssues' {
 
 Describe 'Rolling back a fix that made a file worse (Copilot mocked)' {
     $p = Join-Path $env:TEMP ('ccb-rollback-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $config.pageCheck = 'off'                                   # no Edge in the tests
     Mock -ModuleName Agent Start-NewChat { }
     Mock -ModuleName Agent Send-ToCopilot {
@@ -56,6 +56,6 @@ Describe 'Rolling back a fix that made a file worse (Copilot mocked)' {
     }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
-Remove-Item -LiteralPath $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
-$env:CCBRIDGE_ISSUE_INDEX = $null
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
+$env:STREAMHUB_ISSUE_INDEX = $null
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

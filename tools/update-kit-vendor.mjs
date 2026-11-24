@@ -12,7 +12,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const [sqlDir, pyDir] = process.argv.slice(2);
 if (!sqlDir || !pyDir) { console.error('usage: node tools/update-kit-vendor.mjs <sql.js folder> <pyodide folder>'); process.exit(1); }
 const vendor = path.join(repo, 'templates', 'ui-kit', 'vendor');
-const unlink = (t) => t.replace(/https?:\/\/(?:www\.)?(?:github\.com|raw\.githubusercontent\.com|gist\.github\.com)\/(?!jgt87\/CCBridge\b)[\w.\-/#?=&%~]*/g, 'the library documentation');
+const unlink = (t) => t.replace(/https?:\/\/(?:www\.)?(?:github\.com|raw\.githubusercontent\.com|gist\.github\.com)\/(?!jgt87\/StreamHub\b)[\w.\-/#?=&%~]*/g, 'the library documentation');
 const copyText = (from, to) => { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.writeFileSync(to, unlink(fs.readFileSync(from, 'utf8'))); };
 const copyBin = (from, to) => { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.copyFileSync(from, to); };
 const version = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version;

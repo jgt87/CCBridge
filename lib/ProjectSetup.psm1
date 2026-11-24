@@ -1,6 +1,6 @@
 <#
   Project setup: choices the user makes once for a project, asked by StreamHub itself before the
-  first request goes to Copilot (CCBridge has no model: when to ask is a fixed rule on the request
+  first request goes to Copilot (StreamHub has no model: when to ask is a fixed rule on the request
   and the project's files). Kept in <project>\.streamhub\project.json and named to Copilot in every
   task (Agent Get-ProjectContext, Prompts rules:build-*).
 

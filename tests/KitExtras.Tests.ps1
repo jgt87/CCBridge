@@ -1,7 +1,7 @@
 # More components in the UI kit (uiKitParts.extras), Tailwind CSS (uiKitParts.tailwind), dark mode
 # (uiKitDarkMode) and a look the person asks for (Test-LookRequest, rules/userlook.md).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'UiKit', 'Prompts', 'Guardrails') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 $kitCss = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
@@ -246,4 +246,4 @@ Describe 'Tooltips, error states, toast buttons, context menus and the command p
         @($errs).Count | Should Be 0
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

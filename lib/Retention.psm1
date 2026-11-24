@@ -8,13 +8,14 @@
 #                       with the screenshot numbers
 #   Runbooks/Exports/   charts saved from agent answers (NAME-chart-yyyyMMdd-HHmmss[-N].png), per
 #                       runbook, fetch prompt or agent; the exports themselves are never touched
-#   undo backups        change sets in %LOCALAPPDATA%\CCBridge\projects\...\backups (the newest
+#   undo backups        change sets in %LOCALAPPDATA%\StreamHub\projects\...\backups (the newest
 #                       one always stays, so "Undo last change set" keeps working)
 # Per item: keep the newest COUNT and nothing older than DAYS (0 = no limit). Runs when a project
 # opens and after each task. Only these generated files are ever removed: never Source/, Logs/ or
 # any other file of the project.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 foreach ($m in 'Log', 'Workspace', 'Layout') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Defaults = [ordered]@{
@@ -146,7 +147,7 @@ function Invoke-StateRetention {
        are not opened any more): undo change sets (count and days; the newest stays) and the chat
        history (the newest chatEvents events). Returns @{ backups; chatEvents }. $StateRoot is for tests. #>
     param($Config, [string]$StateRoot = '', [datetime]$Now = (Get-Date))
-    $base = if ($StateRoot) { $StateRoot } elseif ($env:CCBRIDGE_STATE_ROOT) { $env:CCBRIDGE_STATE_ROOT } else { Join-Path $env:LOCALAPPDATA 'CCBridge\projects' }
+    $base = if ($StateRoot) { $StateRoot } elseif ($env:STREAMHUB_STATE_ROOT) { $env:STREAMHUB_STATE_ROOT } else { Get-AppDataPath 'projects' }
     $r = Get-RetentionSettings $Config
     $keepEvents = 1500
     if ($Config -and $Config.retention) { $v = if ($Config.retention -is [hashtable]) { $Config.retention['chatEvents'] } else { $Config.retention.chatEvents }; if ("$v" -match '^\d+$' -and [int]$v -ge 100) { $keepEvents = [int]$v } }

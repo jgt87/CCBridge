@@ -35,7 +35,7 @@ interface FileUploadProps {
   uploadDelay?: number;
   validateFile?: (file: File) => FileError | null;
   className?: string;
-  /** CCBridge: performs the real upload; reports progress 0-100. Replaces the simulated upload. */
+  /** StreamHub: performs the real upload; reports progress 0-100. Replaces the simulated upload. */
   upload?: (file: File, onProgress: (percent: number) => void) => Promise<void>;
   title?: string;
   hint?: string;
@@ -230,7 +230,7 @@ type UploadOptions = Required<
   >
 > & { initialFile: File | null; upload?: FileUploadProps["upload"] };
 
-// CCBridge: the upload box's state and handlers, apart from its markup.
+// StreamHub: the upload box's state and handlers, apart from its markup.
 function useFileUpload({
   onUploadSuccess,
   onUploadError,
@@ -352,7 +352,7 @@ function useFileUpload({
     ]
   );
 
-  // CCBridge: several files are uploaded one after another.
+  // StreamHub: several files are uploaded one after another.
   const queueRef = useRef<File[]>([]);
   const queueFiles = useCallback(
     (files: File[]) => {

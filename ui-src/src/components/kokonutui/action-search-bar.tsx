@@ -23,7 +23,7 @@ export interface Action {
   description?: string;
   short?: string;
   end?: string;
-  /** CCBridge: runs when the action is chosen. */
+  /** StreamHub: runs when the action is chosen. */
   onSelect?: () => void;
 }
 
@@ -36,7 +36,7 @@ const ANIMATION_VARIANTS = {
     show: {
       opacity: 1,
       height: "auto",
-      // CCBridge: quick, so the whole list is there in about a quarter of a second.
+      // StreamHub: quick, so the whole list is there in about a quarter of a second.
       transition: {
         height: { duration: 0.15 },
         staggerChildren: 0.015,
@@ -66,7 +66,7 @@ const ANIMATION_VARIANTS = {
   },
 } as const;
 
-// CCBridge: the query, the matching actions, the highlighted row and the keys, apart from the markup.
+// StreamHub: the query, the matching actions, the highlighted row and the keys, apart from the markup.
 function useActionSearch(actions: Action[], maxResults: number, onClose?: () => void) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -99,7 +99,7 @@ function useActionSearch(actions: Action[], maxResults: number, onClose?: () => 
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      // CCBridge: keys that end an IME composition (Enter, Esc) belong to the composition.
+      // StreamHub: keys that end an IME composition (Enter, Esc) belong to the composition.
       if (e.nativeEvent.isComposing) return;
       switch (e.key) {
         case "ArrowDown":
@@ -115,7 +115,7 @@ function useActionSearch(actions: Action[], maxResults: number, onClose?: () => 
           choose(result.actions[activeIndex]);
           break;
         case "Escape":
-          // CCBridge: Esc clears the query first, and closes when there is none.
+          // StreamHub: Esc clears the query first, and closes when there is none.
           e.preventDefault();
           if (query) setQuery("");
           else onClose?.();
@@ -177,7 +177,7 @@ const ActionRow = ({
     id={`action-${action.id}`}
     layout
     onClick={onChoose}
-    // CCBridge: a press on a row keeps the focus in the field.
+    // StreamHub: a press on a row keeps the focus in the field.
     onMouseDown={(e) => e.preventDefault()}
     onMouseEnter={onHover}
     role="option"
@@ -218,7 +218,7 @@ const ActionRow = ({
 );
 
 /**
- * CCBridge: used as the Ctrl+K command palette in a modal. It opens focused, filters on
+ * StreamHub: used as the Ctrl+K command palette in a modal. It opens focused, filters on
  * label + description, runs action.onSelect on Enter/click and calls onClose afterwards.
  */
 function ActionSearchBar({
@@ -231,7 +231,7 @@ function ActionSearchBar({
 }: {
   actions: Action[];
   label?: string;
-  /** CCBridge: an id for the visible label, so the dialog around it can be named by it. */
+  /** StreamHub: an id for the visible label, so the dialog around it can be named by it. */
   labelId?: string;
   placeholder?: string;
   onClose?: () => void;
@@ -287,7 +287,7 @@ function ActionSearchBar({
               initial="hidden"
               variants={ANIMATION_VARIANTS.container}
             >
-              {/* CCBridge: the list itself is the listbox (only options inside), and says when nothing matched. */}
+              {/* StreamHub: the list itself is the listbox (only options inside), and says when nothing matched. */}
               {result.actions.length === 0 && (
                 <p className="px-3 py-2 text-muted-foreground text-sm">
                   {query ? `No matches for \u201c${query}\u201d` : "No matches"}

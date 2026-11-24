@@ -3,7 +3,7 @@ import type { ProjectInfo } from "@/lib/api";
 import { type ProjectList, projectRowStatus, projectsWatch } from "./projects-watch";
 
 const project = (path: string, modified: string) => ({ name: path, path, modified }) as ProjectInfo;
-const list = (...projects: ProjectInfo[]): ProjectList => ({ root: "C:/OneDrive/CCBridge", projects });
+const list = (...projects: ProjectInfo[]): ProjectList => ({ root: "C:/OneDrive/StreamHub", projects });
 
 /** A source whose lists the test sets, counting the calls. */
 function fakeSource(start: ProjectList) {

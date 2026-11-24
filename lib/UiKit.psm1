@@ -4,6 +4,7 @@
 
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')   # Get-SharedRoot: the library beside the projects
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Resolve-ProjectsDir: the projects folder (also under its old name until moved)
 
 # The files of each part (Settings > UI kit). The base is always there with the kit.
 $script:KitParts = [ordered]@{
@@ -22,14 +23,14 @@ $script:ReactFiles = @{ base = @('Popover.tsx', 'Tree.tsx', 'Confirm.tsx', 'Tool
 
 function Get-UiKitColors([string]$AppRoot) {
     <# Setting uiKitColors: blue (default), neutral, or none (no colours set for the project). #>
-    try { $v = "$((Get-CCBridgeConfig harness $AppRoot).uiKitColors)" } catch { $v = '' }
+    try { $v = "$((Get-StreamHubConfig harness $AppRoot).uiKitColors)" } catch { $v = '' }
     if ($v -in 'neutral', 'none') { $v } else { 'blue' }
 }
 
 function Get-UiKitDarkMode([string]$AppRoot) {
     <# Setting uiKitDarkMode: light-only (default: no dark mode and no switch unless asked for),
        follow-system (dark when the computer is), switch (that plus a light/dark button). #>
-    try { $v = "$((Get-CCBridgeConfig harness $AppRoot).uiKitDarkMode)" } catch { $v = '' }
+    try { $v = "$((Get-StreamHubConfig harness $AppRoot).uiKitDarkMode)" } catch { $v = '' }
     if ($v -in 'follow-system', 'switch') { $v } else { 'light-only' }
 }
 
@@ -439,12 +440,12 @@ function Get-UiKitStatus {
     $missing = @('tokens.css', 'kit.css', 'kit.js', 'kit-charts.js', 'kit-examples.html') | Where-Object { -not (Test-Path -LiteralPath (Join-Path $tpl $_)) }
     if (-not $ProjectsRoot) {
         $od = foreach ($p in $env:OneDriveCommercial, $env:OneDrive, $env:OneDriveConsumer) { if ($p -and (Test-Path -LiteralPath $p)) { $p; break } }
-        $folder = try { "$((Get-CCBridgeConfig harness $AppRoot).projectsFolder)" } catch { '' }
-        if ($od) { $ProjectsRoot = Join-Path $od $(if ($folder) { $folder } else { 'CCBridge' }) }
+        $folder = try { "$((Get-StreamHubConfig harness $AppRoot).projectsFolder)" } catch { '' }
+        if ($od) { $ProjectsRoot = Resolve-ProjectsDir -OneDriveRoot $od -FolderName $folder }
     }
     $cat = if ($ProjectsRoot) { Join-Path $ProjectsRoot '.streamhub\ui-kit' } else { '' }
     $hasCat = $cat -and (Test-Path -LiteralPath (Join-Path $cat 'kit.css'))
-    $version = try { (Get-CCBridgeBuild $AppRoot).version } catch { '' }
+    $version = try { (Get-StreamHubBuild $AppRoot).version } catch { '' }
     @{
         on = [bool](Test-UiKitOn $AppRoot); revision = $script:KitRevision; version = "$version"
         parts = @(Get-UiKitParts $AppRoot | Where-Object { $_ -notin 'base', 'palette', 'themeswitch' })
@@ -464,7 +465,7 @@ function Get-KitCatalogRevision([string]$Catalog) {
 }
 
 function Write-KitCatalogVersion([string]$Catalog, [string]$AppRoot, [string]$Verb) {
-    $v = try { Get-CCBridgeVersion $AppRoot } catch { '' }
+    $v = try { Get-StreamHubVersion $AppRoot } catch { '' }
     [IO.File]::WriteAllText((Join-Path $Catalog 'VERSION.txt'), "UI kit from StreamHub $v, $Verb $((Get-Date).ToString('yyyy-MM-dd')). Kit revision $($script:KitRevision). The helper program takes what the pages use from here into styles/kit/.`n")
 }
 
@@ -1090,7 +1091,7 @@ function Get-KitSettingsCss {
        and the paper orientation for printing (@page; setting uiKitPrintOrientation, with print
        styles on). '' when none applies. #>
     param([string]$AppRoot, $Usage)
-    $cfg = try { Get-CCBridgeConfig harness $AppRoot } catch { $null }
+    $cfg = try { Get-StreamHubConfig harness $AppRoot } catch { $null }
     $out = New-Object System.Collections.Generic.List[string]
     if ($Usage -and $Usage.classes -and $Usage.classes.Contains('kit-range')) {
         $week = if ("$($cfg.uiKitWeekStart)" -eq 'sunday') { 0 } else { 1 }

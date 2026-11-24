@@ -1,7 +1,7 @@
 # How file-check findings are handled (lib/CheckPolicy.psm1, Issues ignores, the dispute action).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
 Import-Module (Join-Path $root 'lib\CheckPolicy.psm1') -Force
 Import-Module (Join-Path $root 'lib\Issues.psm1') -Force
 Import-Module (Join-Path $root 'lib\Protocol.psm1') -Force
@@ -71,6 +71,6 @@ Describe 'Disputes and ignores' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
-Remove-Item -LiteralPath $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
-$env:CCBRIDGE_ISSUE_INDEX = $null
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
+$env:STREAMHUB_ISSUE_INDEX = $null
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

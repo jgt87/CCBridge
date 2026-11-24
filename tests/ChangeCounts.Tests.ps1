@@ -1,6 +1,6 @@
 # Line counts in the Files tab: for the whole session, or only for the last change set.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 
 Describe 'Line counts per change' {
@@ -99,4 +99,4 @@ Describe 'Change set events' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

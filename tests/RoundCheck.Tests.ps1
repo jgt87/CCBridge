@@ -3,12 +3,12 @@
 # a "done", and what the turn keeps across rounds in its $Turn hashtable. The file checks themselves
 # (Lint, Guardrails) are stood in where they would need a real project.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 
 function New-RoundState {
-    $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+    $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
     $s.ProjectRoot = Join-Path $env:TEMP ('ccb-round-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory $s.ProjectRoot -Force | Out-Null
     $s.Mode = 'auto'
@@ -134,4 +134,4 @@ Describe 'Round check: auto-fix and rollbacks' {
     }
 }
 
-Remove-Item -LiteralPath $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

@@ -31,15 +31,15 @@ Describe 'The screenshot hint and a page name that is not a page' {
         $h | Should Not MatchExactly 'ACTION screenshot PAGE[ ,]'
     }
     It 'uses the page of the last screenshot when the action names no page file' {
-        $env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+        $env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
         $p = Join-Path $env:TEMP ('ccb-shotp-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
         [IO.File]::WriteAllText((Join-Path $p 'home.html'), '<p>x</p>')
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
         $s.PreviewPort = 1; $s.PreviewToken = 'none'; $s.LastShotPage = 'home.html'   # nothing listens: no picture, but the page is chosen
         $null = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'screenshot'; arg = 'PAGE'; body = 'click text=Week' }) 'a1' $null 0 } $s
         (@($s.Events | Where-Object type -eq 'action'))[0].target | Should Match '^home\.html'
         # The tab it opened is closed again (a click step once overwrote the tab it had to close).
-        try { @((Invoke-RestMethod "http://127.0.0.1:$((Get-CCBridgeConfig harness $root).cdpPort)/json/list" -TimeoutSec 3) | Where-Object { $_.url -match '^http://localhost:1/preview/' }).Count | Should Be 0 } catch [System.Net.WebException] { }
-        Remove-Item $p, $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+        try { @((Invoke-RestMethod "http://127.0.0.1:$((Get-StreamHubConfig harness $root).cdpPort)/json/list" -TimeoutSec 3) | Where-Object { $_.url -match '^http://localhost:1/preview/' }).Count | Should Be 0 } catch [System.Net.WebException] { }
+        Remove-Item $p, $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

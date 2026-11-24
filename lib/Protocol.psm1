@@ -1,4 +1,4 @@
-# Parses CCBridge action blocks out of Copilot's markdown replies.
+# Parses StreamHub action blocks out of Copilot's markdown replies.
 
 $ErrorActionPreference = 'Stop'
 
@@ -219,7 +219,7 @@ function Test-ProposalText([AllowEmptyString()][string]$Text) {
     <# Whether a reply (its done summary or last text) proposes work instead of doing it: a heading
        line such as "Proposed Month view:" or "Suggested approach:", or words such as "I propose",
        "Would you like me to implement", "Voorstel", together with a list of at least 3 points.
-       A fixed text rule (CCBridge has no language model). #>
+       A fixed text rule (StreamHub has no language model). #>
     $t = ($Text -replace '(?s)`{3,}.*?`{3,}', '')
     if (-not $t.Trim()) { return $false }
     $items = [regex]::Matches($t, '(?m)^\s*(?:[-*+]|\d+[.)])\s+\S').Count
@@ -254,7 +254,7 @@ function Test-UnfinishedText([AllowEmptyString()][string]$Text) {
 function Get-NextSteps {
     <# Suggested follow-ups in a reply, as prompts the user can send: the list under a heading such as
        "Next steps", "Remaining steps", "Follow-ups", "What's next" or "Volgende stappen", and
-       sentences like "The next step is to ...". Fixed patterns (CCBridge has no language model);
+       sentences like "The next step is to ...". Fixed patterns (StreamHub has no language model);
        code blocks are skipped. At most $Max, each at most 300 characters. #>
     param([AllowEmptyString()][string]$Text, [int]$Max = 5)
     $steps = New-Object System.Collections.Generic.List[string]

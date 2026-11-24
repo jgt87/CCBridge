@@ -2,7 +2,7 @@
 # OneDrive file into the project through StreamHub's Edge. No network here: the Edge part is
 # mocked; addresses, places, contents and the chain lines are checked.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Download.psm1') -Force
 Import-Module (Join-Path $root 'lib\Chain.psm1') -Force
 
@@ -93,7 +93,7 @@ Describe 'Running a download step' {
     Import-Module (Join-Path $root 'lib\Config.psm1')
     It 'needs a person to approve a link once, and is refused without one' {
         $p = New-TestProject
-        $state = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $state = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $state.ProjectRoot = $p; $state.Headless = $true
         $r = & (Get-Module Agent) { param($s, $u) Invoke-ChainDownload $s @{ title = 'Refresh' } ([pscustomobject]@{ target = $u; args = 'Downloads/sales.csv' }) ([pscustomobject]@{ Value = $null }) } $state $site
         $r.ok | Should Be $false
@@ -104,7 +104,7 @@ Describe 'Running a download step' {
         $p = New-TestProject
         Import-Module (Join-Path $root 'lib\Chain.psm1')
         Add-ApprovedScript $p "download: $site to Downloads/sales.csv" 'download'
-        $state = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $state = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $state.ProjectRoot = $p
         Mock -ModuleName Agent Get-Bridge { $null }
         Mock -ModuleName Agent Invoke-EdgeDownload { $f = Join-Path $Folder 'g1'; [IO.File]::WriteAllText($f, "Date,Amount`n2024-01-31,5"); @{ path = $f; name = 'Sales Q1.csv' } }
@@ -122,4 +122,4 @@ Describe 'Running a download step' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

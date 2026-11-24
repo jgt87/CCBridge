@@ -122,7 +122,7 @@ Describe 'The report and the fix list' {
         $r.fixRequest | Should Match "`n1\. \[Page and console errors\] JavaScript error"
         $r.fixRequest | Should Match '\[Contrast \(WCAG AA\), light\] text'
         $r.fixRequest | Should Match '\[Parts a keyboard cannot reach\] has 1 clickable'
-        $r.fixRequest | Should Not Match 'StreamHub|CCBridge'
+        $r.fixRequest | Should Not Match '(?<![.\w])StreamHub'
         $short = Get-PageReportFixRequest 'index.html' $r.findings -Max 2
         $short | Should Match '\(6 more of the same kinds'
     }

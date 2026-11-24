@@ -33,7 +33,7 @@ interface GradientButtonProps
 }
 
 const gradientColors: Record<Exclude<ColorVariant, "subtle">, GradientColors> = {
-  // CCBridge: monochrome white/grey variant used throughout the app.
+  // StreamHub: monochrome white/grey variant used throughout the app.
   neutral: {
     dark: {
       border: "from-[#71717A] via-[#141414] to-[#52525B]",
@@ -118,7 +118,7 @@ const gradientColors: Record<Exclude<ColorVariant, "subtle">, GradientColors> = 
 
 type ButtonRest = Omit<GradientButtonProps, "label" | "className" | "variant">;
 
-// CCBridge: flat design. "neutral" is a solid primary button, "subtle" a flat secondary one.
+// StreamHub: flat design. "neutral" is a solid primary button, "subtle" a flat secondary one.
 function FlatButton({
   label,
   className,

@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-  Builds dist\CCBridge-<version>.zip: everything needed to run CCBridge on a target machine
-  (no UI source, tests or git data). The zip contains one folder, CCBridge\, with version.txt.
+  Builds dist\StreamHub-<version>.zip: everything needed to run StreamHub on a target machine
+  (no UI source, tests or git data). The zip contains one folder, StreamHub\, with version.txt.
   Then publishes the version: an annotated git tag with the same name on the current commit
   (created locally and pushed), and a GitHub Release "StreamHub <version>" on that tag with
-  the zip and SHA256SUMS (its checksum, also in dist\SHA256SUMS-<version>\). A version always has
+  the zip, the same zip under its name from before the rename (for the updaters of older installs),
+  and SHA256SUMS (their checksums, also in dist\SHA256SUMS-<version>\). A version always has
   its tag and its release; -NoPublish only builds the zip and SHA256SUMS.
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1 -Version v0.1.0 -NotesFile notes.md
@@ -72,11 +73,11 @@ if (-not $NoPublish) {
 }
 
 $dist = Join-Path $root 'dist'
-$stage = Join-Path $env:TEMP ('ccbridge-release-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-$app = Join-Path $stage 'CCBridge'
+$stage = Join-Path $env:TEMP ('streamhub-release-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$app = Join-Path $stage 'StreamHub'
 $null = New-Item -ItemType Directory -Force -Path $app, $dist
 
-$include = @('ccbridge.ps1', 'start.cmd', 'install.ps1', 'check.cmd', 'diagnostics.cmd', 'update.cmd', 'sso-setup.cmd', 'README.md', 'AGENTS.md',
+$include = @('streamhub.ps1', 'start.cmd', 'install.ps1', 'check.cmd', 'diagnostics.cmd', 'update.cmd', 'sso-setup.cmd', 'README.md', 'AGENTS.md',
              'config', 'lib', 'mcp', 'prompts', 'templates', 'test-tools', 'tools', 'ui')
 foreach ($item in $include) {
     $src = Join-Path $root $item
@@ -95,7 +96,7 @@ Import-Module (Join-Path $root 'lib\Update.psm1') -Force
 $listed = New-InstallManifest -AppFolder $app -Version $Version
 Write-Host "manifest.json: $listed files"
 
-$zip = Join-Path $dist "CCBridge-$Version.zip"
+$zip = Join-Path $dist "StreamHub-$Version.zip"
 if (Test-Path $zip) { [IO.File]::Delete($zip) }
 # Entries are written one by one with "/" separators: .NET Framework's CreateFromDirectory
 # stores "\" in entry names, which some unzip tools turn into odd file names.
@@ -111,12 +112,17 @@ try {
 [IO.Directory]::Delete($stage, $true)
 $size = (Get-Item $zip).Length
 "Built $zip ($([Math]::Round($size / 1KB)) KB)"
-# The zip's checksum, published beside it so a download can be checked (sha256sum -c SHA256SUMS).
+# The same zip under the name from before the rename: the updater of an install from before the
+# rename looks only for that name (lib/Update.psm1 Select-ReleaseAsset accepts both), so without it
+# such an install would never update to a release made after the rename.
+$oldZip = Join-Path $dist "CCBridge-$Version.zip"   # pre-rename asset name
+[IO.File]::Copy($zip, $oldZip, $true)
+# The zips' checksums, published beside them so a download can be checked (sha256sum -c SHA256SUMS).
 # One file per version in dist\, uploaded under the name SHA256SUMS.
 $sumsDir = Join-Path $dist "SHA256SUMS-$Version"
 $null = New-Item -ItemType Directory -Force -Path $sumsDir
 $sums = Join-Path $sumsDir 'SHA256SUMS'
-$null = New-ReleaseChecksums -Files @($zip) -OutFile $sums
+$null = New-ReleaseChecksums -Files @($zip, $oldZip) -OutFile $sums
 "Wrote $sums"
 if ($NoPublish) { return }
 
@@ -125,8 +131,8 @@ if (-not @(Invoke-Git tag --list $Version).Count) { $null = Invoke-Git tag -a $V
 $null = Invoke-Git push origin "refs/tags/$Version"
 "Tagged $Version at $commit and pushed the tag"
 
-# The release on that tag, with the zip and its SHA256SUMS.
-$ghArgs = @('release', 'create', $Version, $zip, $sums, '--verify-tag', '--title', "StreamHub $Version")
+# The release on that tag, with the zip (under both names) and its SHA256SUMS.
+$ghArgs = @('release', 'create', $Version, $zip, $oldZip, $sums, '--verify-tag', '--title', "StreamHub $Version")
 if ($NotesFile) { $ghArgs += @('--notes-file', $NotesFile) } else { $ghArgs += '--generate-notes' }
 # gh finds the repository from the current folder (git has -C): run it from the app folder, since
 # the script may be started from anywhere (v0.1.158 was started from C:\Windows\system32).

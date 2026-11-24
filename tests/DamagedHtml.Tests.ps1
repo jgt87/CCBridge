@@ -2,7 +2,7 @@
 # the edit is refused and Copilot is asked to send it again (Executor Find-DamagedHtmlLine, Agent).
 # The damaged lines are the shapes seen in a real reply; the file names are made up.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
@@ -48,7 +48,7 @@ Describe 'A damaged HTML edit is refused before it is written' {
         $file = Join-Path $p 'index.html'
         $orig = "<html>`n<head>`n  <link rel=`"stylesheet`" href=`"styles.css`">`n</head>`n<body></body>`n</html>`n"
         [IO.File]::WriteAllText($file, $orig)
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         $edits = @(@{ search = "  <link rel=`"stylesheet`" href=`"styles.css`">`n</head>"; replace = "  <link rel=`"stylesheet`" href=`"styles.css`">`n  <script src=`"data/example-manifest.jsd>`n</head>" })
         $r = & (Get-Module Agent) { param($st, $e) Invoke-AgentAction $st ([pscustomobject]@{ type = 'edit'; arg = 'index.html'; edits = $e; body = ''; closed = $true }) 'a1' $null 0 } $s $edits
@@ -81,7 +81,7 @@ Describe 'A script tag stripped to PATH.jsscript> is put back' {
         $p = Join-Path $env:TEMP ('ccb-strip-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
         $file = Join-Path $p 'index.html'
         [IO.File]::WriteAllText($file, "<html>`n<head>`n  data/example-manifest.jsscript>`n</head>`n<body></body>`n</html>`n")
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         $edits = @(@{ search = "  data/example-manifest.jsscript>`n</head>"; replace = "  ./data/example-manifest.jsscript>`n</head>" })
         $r = & (Get-Module Agent) { param($st, $e) Invoke-AgentAction $st ([pscustomobject]@{ type = 'edit'; arg = 'index.html'; edits = $e; body = ''; closed = $true }) 'a1' $null 0 } $s $edits
@@ -92,7 +92,7 @@ Describe 'A script tag stripped to PATH.jsscript> is put back' {
     }
     It 'writes a whole page whose script tag arrived stripped, with the tag put back (not refused)' {
         $p = Join-Path $env:TEMP ('ccb-strip-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         $page = "<!doctype html>`n<html>`n<head>`n  <meta charset=`"utf-8`">`n  <title>Usage</title>`n</head>`n<body>`n  <p>Usage</p>`n  data/data-tools.jsscript>`n</body>`n</html>`n"
         $r = & (Get-Module Agent) { param($st, $b) Invoke-AgentAction $st ([pscustomobject]@{ type = 'write'; arg = 'index.html'; body = $b; closed = $true }) 'a1' $null 0 } $s $page
@@ -204,4 +204,4 @@ Describe 'Stylesheet and script tags stripped to their bare paths' {
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

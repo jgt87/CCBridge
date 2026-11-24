@@ -2,6 +2,7 @@
 # reply from the Chathub SignalR WebSocket, which carries the raw markdown.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 Import-Module (Join-Path $PSScriptRoot 'Cdp.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Log.psm1')
@@ -109,7 +110,7 @@ function Connect-Copilot {
         # and the caller looks for the message box itself (Agent Update-PendingSignIn), so its thread is free.
         [switch]$NoSignInWait
     )
-    $sel = if ($SelectorsPath) { Get-Content $SelectorsPath -Raw | ConvertFrom-Json } else { Get-CCBridgeConfig selectors (Split-Path -Parent $script:ModuleDir) }
+    $sel = if ($SelectorsPath) { Get-Content $SelectorsPath -Raw | ConvertFrom-Json } else { Get-StreamHubConfig selectors (Split-Path -Parent $script:ModuleDir) }
     # The Copilot tab is recognised by its host (chatUrl and chatHosts in selectors.json).
     $deadline = (Get-Date).AddSeconds($SignInTimeoutSec + 30)
     $signInAnnounced = $false
@@ -178,7 +179,7 @@ function Get-CopilotPacing {
     <# Pauses from harness.json "pacing" (defaults when missing). #>
     $p = @{ newChatSettleSec = 3.0; beforeSendSec = 1.0; betweenPromptsSec = 5.0; lateReplySec = 2.0 }
     try {
-        $cfg = Get-CCBridgeConfig harness (Split-Path -Parent $script:ModuleDir)
+        $cfg = Get-StreamHubConfig harness (Split-Path -Parent $script:ModuleDir)
         if ($cfg.pacing) { foreach ($k in @($p.Keys)) { if ($null -ne $cfg.pacing.$k) { $p[$k] = [double]$cfg.pacing.$k } } }
     } catch { }
     $p
@@ -224,7 +225,7 @@ function Wait-CopilotEditor {
 function Get-CopilotPageSnapshot {
     <# What the Copilot tab shows when the message box is missing: address, title, a short excerpt of
        the visible text, whether a human-verification check or sign-in page is showing, and a
-       screenshot in %LOCALAPPDATA%\CCBridge\screens (newest 20 kept). For diagnosis only. #>
+       screenshot in %LOCALAPPDATA%\StreamHub\screens (newest 20 kept). For diagnosis only. #>
     param([Parameter(Mandatory)]$Bridge)
     $snap = $null
     $editorSel = ConvertTo-JsString $Bridge.Selectors.editor
@@ -240,7 +241,7 @@ function Get-CopilotPageSnapshot {
     } catch { $snap = [pscustomobject]@{ host = '?'; path = ''; title = ''; text = "page not readable: $($_.Exception.Message)"; challenge = $false; editor = $false } }
     $file = $null
     try {
-        $dir = Join-Path $env:LOCALAPPDATA 'CCBridge\screens'
+        $dir = Get-AppDataPath 'screens'
         if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir }
         $shot = Invoke-Cdp $Bridge.Session 'Page.captureScreenshot' @{ format = 'png' } -TimeoutMs 15000
         $file = Join-Path $dir ((Get-Date).ToString('yyyyMMdd-HHmmss-fff') + '.png')
@@ -254,7 +255,7 @@ function Get-CopilotPageSnapshot {
 }
 
 function Test-CopilotPage {
-    <# Checks that the parts of Copilot's page CCBridge relies on are where selectors.json says:
+    <# Checks that the parts of Copilot's page StreamHub relies on are where selectors.json says:
        the message box, the Send button, the New chat button, and (when the chat has replies) the
        reply container and its Copy button. Returns one entry per part: @{ part; ok; setting; note }.
        When Microsoft changes the page, this names the setting to fix instead of failing later. #>
@@ -299,15 +300,17 @@ function Format-PageSnapshot($Snap) {
 # The web app and the MCP server may run at the same time and drive the same Copilot tab;
 # this machine-wide lock lets only one of them type and wait for a reply at a time.
 function Get-CopilotLockFile {
-    $dir = if ($env:CCBRIDGE_STATE_ROOT) { $env:CCBRIDGE_STATE_ROOT } else { Join-Path $env:LOCALAPPDATA 'CCBridge' }
+    $dir = if ($env:STREAMHUB_STATE_ROOT) { $env:STREAMHUB_STATE_ROOT } else { Get-AppDataDir }
     Join-Path $dir 'copilot-lock.json'
 }
 
 function Get-LockHolderName([string]$CommandLine) {
     <# Which StreamHub program a command line is: the MCP server, a test tool, or the app. #>
-    if ($CommandLine -match '(?i)ccbridge-mcp\.ps1') { return 'the MCP server' }
+    # The file names before the rename too: an MCP client registered with the old script name, or
+    # an older release still running.
+    if ($CommandLine -match '(?i)(streamhub|ccbridge)-mcp\.ps1') { return 'the MCP server' }   # pre-rename name too
     if ($CommandLine -match '(?i)[\\/]tools[\\/]([\w-]+)\.ps1') { return "the test tool $($Matches[1])" }
-    if ($CommandLine -match '(?i)ccbridge\.ps1') { return 'another StreamHub window' }
+    if ($CommandLine -match '(?i)(streamhub|ccbridge)\.ps1') { return 'another StreamHub window' }   # pre-rename name too
     'another StreamHub program'
 }
 
@@ -324,7 +327,9 @@ function Use-CopilotLock([scriptblock]$Body, [scriptblock]$OnWait, [scriptblock]
     <# One program talks to Copilot at a time (a machine-wide lock). While another holds it, the
        wait is said ($OnWait gets a line naming who holds it, and $null when the wait is over) and
        logged, and $CancelCheck (Stop) ends it. At most 15 minutes. #>
-    $mutex = New-Object Threading.Mutex($false, 'Local\CCBridgeCopilot')
+    # The lock keeps its name from before the rename: an MCP server of an older release that is
+    # still running must wait for this one, and this one for it.
+    $mutex = New-Object Threading.Mutex($false, 'Local\CCBridgeCopilot')   # pre-rename lock name
     $owned = $false
     try {
         try { $owned = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
@@ -411,7 +416,7 @@ function New-CopilotChatUnlocked {
 
 function Wait-CopilotReady {
     <# Waits until the page has finished its own start-up work: no requests in flight (telemetry
-       excluded) for a moment and every newly opened StreamHub/Chathub connection has answered.
+       excluded) for a moment and every newly opened Chathub or stream connection has answered.
        Gives up after $MaxSec and sends anyway. Returns what it saw, for the log. #>
     param([Parameter(Mandatory)]$Bridge, [double]$MinSec = 1.0, [double]$QuietSec = 0.7, [double]$MaxSec = 10)
     $s = $Bridge.Session
@@ -973,7 +978,7 @@ function Add-HubRecord {
     }
 }
 
-# --- StreamHub ---------------------------------------------------------------------------
+# --- The Copilot stream connection (m365Copilot/StreamHub) -----------------------------------
 # Some tenants deliver the reply over substrate.svc.cloud.microsoft/m365Copilot/StreamHub: a SignalR
 # stream whose type-2 records each carry an item. The item layout is looked up by field name (chunks
 # in writeAtCursor, snapshots in messages[], the end in result / a final flag / a type-3 completion),
@@ -1013,7 +1018,7 @@ function Find-StreamSignals($Node, $Sig, [int]$Depth = 0, [string]$Path = '') {
 }
 
 function Add-StreamRecord {
-    <# Feeds one StreamHub record into the stream state; sets Done when the reply has ended. #>
+    <# Feeds one record of the Copilot stream connection into the stream state; sets Done when the reply has ended. #>
     param($S, $Rec)
     if ($Rec.type -eq 3) {
         if ($Rec.error) { throw "Copilot stream error: $($Rec.error)" }
@@ -1037,8 +1042,8 @@ function Add-StreamRecord {
 }
 
 function Get-SocketKind($Bridge, [string]$Id, [string]$Payload) {
-    <# chat (Chathub), stream (StreamHub) or $null, by the socket's address or, for a socket opened
-       before CCBridge connected, by the shape of its traffic. #>
+    <# chat (Chathub), stream (the Copilot stream connection, m365Copilot/StreamHub) or $null, by the
+       socket's address or, for a socket opened before the app connected, by the shape of its traffic. #>
     if ($Bridge.HubSockets.ContainsKey($Id)) { return $Bridge.HubSockets[$Id] }
     $kind = $null
     if ($Payload -match '"target":"update"') { $kind = 'chat' }
@@ -1068,7 +1073,7 @@ function Get-ReplyReferences($BotMessage) {
 
 # --- Human in the loop: Microsoft 365 actions -------------------------------------------
 # With Work IQ, Copilot can offer to act in Microsoft 365 (send mail, change meetings, ...),
-# normally as a card with buttons that the user must click. CCBridge never clicks anything in a
+# normally as a card with buttons that the user must click. StreamHub never clicks anything in a
 # reply; these functions only detect such proposals and claims so the agent can stop and hand
 # them to a person.
 
@@ -1169,10 +1174,10 @@ function Write-ReplyLog($Reply, $Item, $Frames, [long]$Ms) {
 }
 
 function Save-ReplyFrames($Frames) {
-    <# Writes the raw Chathub frames of each reply to %LOCALAPPDATA%\CCBridge\replies\ (newest 30 kept),
+    <# Writes the raw Chathub frames of each reply to %LOCALAPPDATA%\StreamHub\replies\ (newest 30 kept),
        so a damaged reply can be replayed with Get-ReplyFromFrames. #>
     try {
-        $dir = Join-Path $env:LOCALAPPDATA 'CCBridge\replies'
+        $dir = Get-AppDataPath 'replies'
         if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir }
         $file = Join-Path $dir ((Get-Date).ToString('yyyyMMdd-HHmmss-fff') + '.jsonl')
         [IO.File]::WriteAllLines($file, [string[]]$Frames, (New-Object Text.UTF8Encoding($false)))
@@ -1299,8 +1304,8 @@ function Add-TimelineNet($Bridge, $M) {
 }
 
 function Complete-StreamReply {
-    <# The reply once StreamHub has signalled its end: the text from the stream, or, when the stream
-       carries no text CCBridge recognises, the exact reply text from the page (read straight away,
+    <# The reply once the stream connection has signalled its end: the text from the stream, or, when the stream
+       carries no text the app recognises, the exact reply text from the page (read straight away,
        after the page confirms Copilot finished). $null when the page does not confirm the end. #>
     param($Bridge, $S, $PageBefore, [string]$SentPrompt, [long]$Ms)
     $text = $S.Merger.Text; $how = 'stream text'
@@ -1620,7 +1625,7 @@ function Send-CopilotPromptUnlocked {
             $was = Stop-CopilotReply $Bridge
             $keep = $merger.Text; $finished = $false
             if ($was -eq 'idle' -and $pageBefore) {
-                # Copilot had already finished; only CCBridge was still waiting. Keep its reply.
+                # Copilot had already finished; only the app was still waiting. Keep its reply.
                 try {
                     $pt = Get-PageReplyText $Bridge -Fresh
                     $ptext = "$($pt.text)"
@@ -1661,7 +1666,7 @@ function Send-CopilotPromptUnlocked {
                 $quietDone = $pageQuietSince -and ((Get-Date) - $pageQuietSince).TotalSeconds -ge 8
                 $finished = -not $st.stop -and -not $st.agentBusy -and $st.lastFresh -and ($st.lastHasCopy -or $st.copies -gt $pageBefore.copies -or $quietDone) -and $st.lastLen -gt 0 -and
                     ($sawStop -or $sendWatch.Elapsed.TotalSeconds -ge 6)
-                # When StreamHub carried this reply and has been quiet for a moment, the page need not settle.
+                # When the stream connection carried this reply and has been quiet for a moment, the page need not settle.
                 $stableNeeded = if ($stream.Items -and $stream.LastAt -and ((Get-Date) - $stream.LastAt).TotalMilliseconds -ge 300) { 0 } else { $pageStableSec }
                 if (-not $finished) { $pageDoneSince = $null }
                 elseif (-not $pageDoneSince) { $pageDoneSince = Get-Date }
@@ -1712,7 +1717,7 @@ function Send-CopilotPromptUnlocked {
             $gaveUp = Test-CopilotGaveUp $Bridge
             if ($gaveUp -and $pageBefore) {
                 # Copilot also shows Regenerate under a finished reply. If this turn has a real reply on
-                # the page, it finished without CCBridge noticing: read it rather than give up.
+                # the page, it finished without the app noticing: read it rather than give up.
                 $st = Get-PageReplyState $Bridge
                 if ($st -and -not $st.stop -and $st.fresh -gt 0) {
                     $pt = Get-PageReplyText $Bridge -Fresh
@@ -1762,7 +1767,7 @@ function Send-CopilotPromptUnlocked {
             continue
         }
         if ($m.method -ne 'Network.webSocketFrameReceived') { continue }
-        if ($env:CCBRIDGE_TEST_IGNORE_HUB -eq '1') { continue }   # test switch: rely on the page only
+        if ($env:STREAMHUB_TEST_IGNORE_HUB -eq '1') { continue }   # test switch: rely on the page only
         # Frames from a socket opened before Network.enable have no webSocketCreated; they are
         # classified by the shape of their traffic.
         $payload = $m.params.response.payloadData
@@ -1770,7 +1775,7 @@ function Send-CopilotPromptUnlocked {
         if (-not $kind) { continue }
         $frames.Add($payload)
         if ($kind -eq 'stream') {
-            # StreamHub (primary where the tenant uses it): its end-of-reply ends the wait at once.
+            # The stream connection (primary where the tenant uses it): its end-of-reply ends the wait at once.
             if ($frames.Count -eq 1 -or $stream.Items -eq 0) { Add-TimelineEvent $Bridge 'first stream connection frame' $null $(if (Test-Timeline $Bridge) { Get-BrowserTime $Bridge.Timeline $m }) }
             foreach ($rec in Read-HubRecords $payload) {
                 if ($myInvocation -and $null -ne $rec.invocationId -and [string]$rec.invocationId -ne $myInvocation) { continue }

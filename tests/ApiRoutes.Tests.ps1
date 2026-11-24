@@ -2,7 +2,7 @@
 # through Invoke-ApiRequest with a request as HttpListener gives it. /api/chat and
 # /api/project-setup are tested in ProjectSetup.Tests.ps1. Made-up data; nothing reaches Copilot.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'Agent', 'Server') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 function New-FakeCtx([string]$Method, [string]$Path, $Body) {
@@ -16,7 +16,7 @@ function New-FakeCtx([string]$Method, [string]$Path, $Body) {
 }
 function Invoke-FakeApi($Ctx, $State) { & (Get-Module Server) { param($c, $st) Invoke-ApiRequest $c $st } $Ctx $State }
 function Get-FakeJson($Ctx) { [Text.Encoding]::UTF8.GetString($Ctx.Response.OutputStream.ToArray()) | ConvertFrom-Json }
-function New-TestState { $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.Config.port = 8765; $s }
+function New-TestState { $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.Config.port = 8765; $s }
 function Get-QueuedTask($State) { $t = $null; $null = $State.Tasks.TryDequeue([ref]$t); $t }
 
 Describe 'POST /api/jobs' {
@@ -140,7 +140,7 @@ Describe 'GET /api/file-web-url' {
     # A made-up synced folder in %TEMP% stands in for OneDrive (lib/SyncedFiles.psm1); the mock
     # reads it from an environment variable, since a Mock body cannot see the Describe's variables.
     $sync = Join-Path $env:TEMP ('ccb-weburl-' + [guid]::NewGuid().ToString('N'))
-    $p = Join-Path $sync 'CCBridge\My site'
+    $p = Join-Path $sync 'StreamHub\My site'
     New-Item -ItemType Directory (Join-Path $p 'Source') -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $p 'Source\sales data.xlsx'), 'x')
     $env:CCB_TEST_SYNC_ROOT = $sync
@@ -153,7 +153,7 @@ Describe 'GET /api/file-web-url' {
     }
     It 'gives a project file its web address in the synced folder' {
         $s = New-TestState; $s.ProjectRoot = $p
-        (Get-WebUrl $s 'Source/sales data.xlsx').url | Should Be 'https://contoso.sharepoint.com/sites/Team/Shared%20Documents/CCBridge/My%20site/Source/sales%20data.xlsx'
+        (Get-WebUrl $s 'Source/sales data.xlsx').url | Should Be 'https://contoso.sharepoint.com/sites/Team/Shared%20Documents/StreamHub/My%20site/Source/sales%20data.xlsx'
     }
     It 'gives no address, with the reason, for a missing file or a project outside the synced folders' {
         $s = New-TestState; $s.ProjectRoot = $p
@@ -175,4 +175,4 @@ Describe 'GET /api/file-web-url' {
     Remove-Item -LiteralPath $sync -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item -LiteralPath $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

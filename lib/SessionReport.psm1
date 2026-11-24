@@ -7,6 +7,8 @@
 # instead of a folder of logs. Command menu > Session report (Server POST /api/session-report) and
 # Export diagnostics. ASCII only (Windows PowerShell 5.1).
 
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
+
 $script:LinePattern = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[\s*(\d+)\] (\w+)\s+(\S+)\s+(.*)$'
 # Status lines that are the helper program correcting Copilot (with a short name for the count).
 $script:NudgePatterns = [ordered]@{
@@ -70,7 +72,7 @@ function Get-SessionReport {
     $typing = @(); $noAnswer = @(); $lost = @(); $errors = @(); $slowSends = @(); $slowApi = @{}; $gets = @{}; $attach = @()
     foreach ($x in $e) {
         if (-not $Build -and $x.msg -match '^StreamHub v\S+ \(commit \w+\)') { $Build = ($x.msg -replace ': lines with process.*$', '') }
-        if (-not $Build -and $x.msg -match '^Web app started on ') { $v = Get-LogValue $x.data 'ccbridge'; if ($v) { $Build = "StreamHub $v" } }
+        if (-not $Build -and $x.msg -match '^Web app started on ') { $v = Get-LogValue $x.data 'streamhub'; if (-not $v) { $v = Get-LogValue $x.data 'ccbridge' }; if ($v) { $Build = "StreamHub $v" } }   # pre-rename log lines name the version ccbridge
         if ($x.comp -eq 'server') {
             $m = [regex]::Match($x.msg, '^(GET|POST) (\S+) \((\d+) ms\)')
             if ($m.Success) {
@@ -192,13 +194,13 @@ function Get-SessionReport {
 }
 
 function New-SessionReportFile {
-    <# Writes the report of one run to %LOCALAPPDATA%\CCBridge\reports\session-<stamp>.md (and returns
+    <# Writes the report of one run to %LOCALAPPDATA%\StreamHub\reports\session-<stamp>.md (and returns
        its path). $ProcessId 0 = the last run in the log; $LogFile defaults to today's log. #>
-    param([string]$LogFile = '', [int]$ProcessId = 0, [string]$OutDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\reports'))
+    param([string]$LogFile = '', [int]$ProcessId = 0, [string]$OutDir = (Get-AppDataPath 'reports'))
     if (-not $LogFile) {
         # The folder the log module writes to (a test run logs elsewhere: Log Get-DefaultLogDir).
-        $logDir = if (Get-Command Get-CCBLogDir -ErrorAction SilentlyContinue) { Get-CCBLogDir } else { Join-Path $env:LOCALAPPDATA 'CCBridge\logs' }
-        $LogFile = Join-Path $logDir ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
+        $logDir = if (Get-Command Get-CCBLogDir -ErrorAction SilentlyContinue) { Get-CCBLogDir } else { Get-AppDataPath 'logs' }
+        $LogFile = Join-Path $logDir ('streamhub-' + (Get-Date).ToString('yyyyMMdd') + '.log')
     }
     if (-not (Test-Path -LiteralPath $LogFile)) { throw "No log file at $LogFile" }
     $lines = [IO.File]::ReadAllLines($LogFile)

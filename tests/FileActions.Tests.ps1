@@ -3,7 +3,7 @@
 # them back) and keep the paths that lead to moved files working; refs lists the uses of a name;
 # changes shows the message's change set; test runs the project's tests by the helper's own command.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-fa-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-fa-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Workspace.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Protocol.psm1') -Force
@@ -252,5 +252,5 @@ Describe 'The actions in the agent' {
 }
 
 Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
-$env:CCBRIDGE_STATE_ROOT = $null
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+$env:STREAMHUB_STATE_ROOT = $null

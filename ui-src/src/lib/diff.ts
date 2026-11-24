@@ -103,7 +103,7 @@ const ACTION_LINE = new RegExp(`^\\s*action\\s+(${[...ACTION_TYPES].join("|")})\
 const ACTION_LINE_ONLY = new Set(["refs", "changes", "move", "delete", "test"]);
 const BARE_ACTION_LINE = /^\s*(read|glob|grep|web|write|edit|run|todo|done)\b/;
 
-/** Removes CCBridge action blocks from a reply; they are shown as cards instead. */
+/** Removes StreamHub action blocks from a reply; they are shown as cards instead. */
 export function stripActionBlocks(text: string): string {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];

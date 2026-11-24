@@ -4,6 +4,13 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+### Changed
+
+- The code name CCBridge is gone: everything is called StreamHub now. The start script is `streamhub.ps1`, the MCP server `mcp/streamhub-mcp.ps1` with the server id `streamhub`, the data folder `%LOCALAPPDATA%\StreamHub`, the projects folder `OneDrive\StreamHub`, the log files `streamhub-yyyyMMdd.log`, the environment variables `STREAMHUB_*`, and the repository `jgt87/StreamHub`. The release zip is `StreamHub-vX.Y.Z.zip`; each release also carries the same zip under its old name, so installs from before the rename still find their update.
+- An install from before the rename moves its data folder and its projects folder to the new name by itself, at a start, before anything opens them: one rename each (the Edge profile moves along, so Copilot stays signed in; OneDrive syncs the projects folder as one rename), and the paths saved inside (last project, queue, issue index, chat history, each project's undo and history folder) follow. While a folder is in use (the Edge window StreamHub opened, another StreamHub, a file open in a project) it keeps its old name and StreamHub goes on using it; the start says so, and the next start tries again. When both folders exist, the new one is used and the old one is left as it is. The install folder keeps its name, since StreamHub runs from it and MCP clients point at it; new installs go to `Programs\StreamHub`.
+- Updates and the installer ask the renamed repository first and, when that fails, the old name once more; a release zip of either name is taken.
+- An MCP client registered before the rename keeps working: the old `mcp/ccbridge-mcp.ps1` starts the new server. `tools/rebrand-check.ps1` shows on an installed PC where the folders are, whether they were moved, the install folder and the shortcuts, and prints the commands to register the MCP server again as `streamhub`, in a masked log on the Desktop (steps in `docs/runbooks/rebrand-check.md`).
+
 ## [v0.1.170] - 2026-11-24
 
 ### Added

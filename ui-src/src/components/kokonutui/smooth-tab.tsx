@@ -136,7 +136,7 @@ interface SmoothTabProps {
   className?: string;
   activeColor?: string;
   onChange?: (tabId: string) => void;
-  /** CCBridge: switch to a tab from outside; a new `n` switches again (also to the same tab). */
+  /** StreamHub: switch to a tab from outside; a new `n` switches again (also to the same tab). */
   request?: { id: string; n: number } | null;
 }
 
@@ -170,7 +170,7 @@ const transition = {
 };
 
 /**
- * CCBridge: the icons of the tabs in the grid line up. Each tab's icon + title gets the width of
+ * StreamHub: the icons of the tabs in the grid line up. Each tab's icon + title gets the width of
  * the widest one (measured), centred in its button and left-aligned inside, so every icon sits as
  * far from its button's left edge as the widest tab's icon. A tab spanning a row keeps its own.
  */
@@ -211,7 +211,7 @@ function watchResize(el: HTMLElement | null, update: () => void): () => void {
 
 /**
  * Where the sliding background goes: the selected button's box inside the tab bar, measured again
- * on every change of tab and resize. CCBridge: the first placement (page load) is instant and the
+ * on every change of tab and resize. StreamHub: the first placement (page load) is instant and the
  * highlight stays hidden until the selected tab is measured, so a refresh shows the tab already
  * selected instead of sliding in.
  */
@@ -279,7 +279,7 @@ function TabLabelParts({ item }: { item: TabItem }) {
   );
 }
 
-// CCBridge: the arrow keys move between the tabs (only the selected one is a Tab stop), Home and End
+// StreamHub: the arrow keys move between the tabs (only the selected one is a Tab stop), Home and End
 // jump to the first and last; the tab reached is selected.
 const TAB_KEYS: Record<string, (i: number, n: number) => number> = {
   ArrowRight: (i, n) => (i + 1) % n,
@@ -328,7 +328,7 @@ function TabButton({
   };
   return (
     <motion.button
-      // CCBridge: only the selected tab's panel exists, so only that tab names it.
+      // StreamHub: only the selected tab's panel exists, so only that tab names it.
       aria-controls={isSelected ? `panel-${item.id}` : undefined}
       aria-selected={isSelected}
       className={cn(
@@ -412,7 +412,7 @@ export default function SmoothTab({
 }: SmoothTabProps & { columns?: number }) {
   const [selected, setSelected] = React.useState<string>(defaultTabId);
   const [direction, setDirection] = React.useState(0);
-  // CCBridge: tabs can wrap into a grid (e.g. 2 x 2), so the highlight follows both axes.
+  // StreamHub: tabs can wrap into a grid (e.g. 2 x 2), so the highlight follows both axes.
   const cols = gridColumns(columns, items.length);
 
   const { labelRef, labelWidth } = useLabelWidth(items);
@@ -431,7 +431,7 @@ export default function SmoothTab({
 
   const selectedItem = items.find((item) => item.id === selected);
 
-  // CCBridge: tab bar on top, panel fills the remaining height and scrolls; the
+  // StreamHub: tab bar on top, panel fills the remaining height and scrolls; the
   // panel shows item.content (the decorative card stays as the fallback).
   return (
     <div className="flex h-full min-h-0 flex-col">

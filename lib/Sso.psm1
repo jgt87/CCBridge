@@ -6,6 +6,7 @@
 # (Server.psm1, /api/sso) and by sso-setup.cmd.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 foreach ($m in 'Log', 'Cdp', 'Prereq', 'Config', 'CopilotBridge') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:SettingsUrl = 'edge://settings/profiles/multiProfileSettings'
@@ -50,7 +51,7 @@ function Get-CopilotSignInState {
     }
     $urls = @($Pages | ForEach-Object { "$($_.url)" })
     if (@($urls | Where-Object { $_ -match '^(?i)https://(login\.microsoftonline\.com|login\.live\.com|login\.microsoft\.com|login\.windows\.net)/' }).Count) { return 'sign-in page' }
-    $sel = try { Get-CCBridgeConfig selectors (Split-Path -Parent $PSScriptRoot) } catch { $null }
+    $sel = try { Get-StreamHubConfig selectors (Split-Path -Parent $PSScriptRoot) } catch { $null }
     $onCopilot = @($urls | Where-Object { if ($sel) { Test-CopilotUrl $_ $sel } else { $_ -match '^(?i)https://([a-z0-9-]+\.)*(microsoft365\.com|m365\.cloud\.microsoft|office\.com)/' } })
     if ($onCopilot.Count) { return 'chat' }
     if (Get-OtherPageHost -Pages $Pages) { return 'other page' }
@@ -86,7 +87,7 @@ function Test-ProfileSsoAuto {
     <# Whether Edge turned single sign-on for work sites on by itself for StreamHub's profile:
        Preferences edge.profile_sso_info.aad_sso_algo_state = 2 ("intelligent enablement" for a
        single profile on a PC joined to Microsoft Entra ID; 1 = off). Read only. #>
-    param([string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'))
+    param([string]$ProfileDir = (Get-AppDataPath 'edge-profile'))
     try { $p = [IO.File]::ReadAllText((Join-Path $ProfileDir 'Default\Preferences')) | ConvertFrom-Json } catch { return $false }
     "$($p.edge.profile_sso_info.aad_sso_algo_state)" -eq '2'
 }
@@ -94,7 +95,7 @@ function Test-ProfileSsoAuto {
 function Get-ProfileAccount {
     <# Which account StreamHub's Edge profile is signed in with: 'work' (work or school account),
        'personal' (Microsoft account), 'none' or 'unknown'. Only the account type is read. #>
-    param([string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'))
+    param([string]$ProfileDir = (Get-AppDataPath 'edge-profile'))
     Get-EdgeProfileAccount -ProfileDir $ProfileDir   # lib/Cdp.psm1: Test-ForcedSignInBlock needs it too
 }
 
@@ -210,7 +211,7 @@ function Invoke-SsoSetup {
        which of Edge's settings changed. Writes <OutRoot>\StreamHub-sso-<date>.txt (names and
        yes/no values only). $Confirm (scriptblock returning $true) asks before changing. #>
     param([int]$Port = 9333, [bool]$On = $true, [scriptblock]$Confirm, [string]$OutRoot = 'C:\temp',
-        [string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'))
+        [string]$ProfileDir = (Get-AppDataPath 'edge-profile'))
     $log = New-Object System.Collections.Generic.List[string]
     $log.Add("StreamHub single sign-on setup $(Get-Date -Format 'yyyy-MM-dd HH:mm'). Names and yes/no values only.")
     $join = Get-DeviceJoinStatus

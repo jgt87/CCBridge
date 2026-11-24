@@ -1,7 +1,7 @@
 # Data files made ready for Copilot (lib/DataImport.psm1): CSV, TSV and Excel files (and JSON in
 # Source/) converted to data/NAME.json with typed values plus a data/NAME.js copy and data-tools.js.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\DataImport.psm1') -Force
 Import-Module (Join-Path $root 'lib\DataMirror.psm1') -Force
 Add-Type -AssemblyName System.IO.Compression
@@ -279,4 +279,4 @@ Describe 'Data profile' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

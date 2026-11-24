@@ -1,4 +1,4 @@
-# Version and commit of a git copy (lib/Config.psm1 Get-CCBridgeBuild): native commands run under
+# Version and commit of a git copy (lib/Config.psm1 Get-StreamHubBuild): native commands run under
 # $ErrorActionPreference = 'Stop', where Windows PowerShell 5.1 turns a failing command's stderr into
 # a terminating error. A copy without release tags (GitHub's runners) must still show its commit.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -16,10 +16,10 @@ Describe 'The build of a git copy' {
     It 'shows the commit when the copy has no release tags' {
         if (-not $haveGit) { Set-TestInconclusive 'git is not on this machine'; return }
         $ErrorActionPreference = 'Stop'
-        $b = Get-CCBridgeBuild $repo
+        $b = Get-StreamHubBuild $repo
         $b.version | Should Be 'dev'
         $b.commit | Should Match '^[0-9a-f]{7,}$'
-        Get-CCBridgeVersion $repo | Should Match '^git-[0-9a-f]{7,}$'
+        Get-StreamHubVersion $repo | Should Match '^git-[0-9a-f]{7,}$'
     }
 
     It 'keeps standard output, drops stderr and gives nothing for a failing command' {

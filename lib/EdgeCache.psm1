@@ -1,4 +1,4 @@
-# Edge's caches in StreamHub's own Edge profile (%LOCALAPPDATA%\CCBridge\edge-profile). Only caches:
+# Edge's caches in StreamHub's own Edge profile (%LOCALAPPDATA%\StreamHub\edge-profile). Only caches:
 # the web cache, compiled code, GPU and shader caches, service worker caches and Edge's component
 # download cache. Never cookies, Local Storage, IndexedDB, sessions or extensions, so the Copilot
 # sign-in stays. Edge locks these folders while it runs: the web cache is cleared at once through
@@ -6,6 +6,7 @@
 # (Start-CdpEdge calls Clear-EdgeCacheFolders when a clear was asked for).
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 foreach ($m in 'Log', 'Cdp') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:CacheFolders = @(
@@ -14,8 +15,8 @@ $script:CacheFolders = @(
     'GrShaderCache', 'ShaderCache', 'GraphiteDawnCache', 'component_crx_cache'
 )
 
-function Get-EdgeProfileDir { Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile' }
-function Get-EdgeCacheFlag { Join-Path $env:LOCALAPPDATA 'CCBridge\edge-cache-clear.flag' }
+function Get-EdgeProfileDir { Get-AppDataPath 'edge-profile' }
+function Get-EdgeCacheFlag { Get-AppDataPath 'edge-cache-clear.flag' }
 
 function Get-FolderBytes([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return [int64]0 }

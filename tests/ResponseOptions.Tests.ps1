@@ -1,11 +1,11 @@
 # Copilot's response picker options (Advanced reasoning, models...): read weekly or on request
 # (Agent Test-ResponseOptionsDue, Update-ResponseOptions; Copilot is mocked).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Agent', 'Config') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 Describe 'When the response options are read again' {
-    $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+    $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
     $now = [datetime]'2026-10-08T12:00:00'
     It 'reads them when never read, and again after the set number of days' {
         $s.ResponseOptionsRead = ''; $s.ResponseOptionsTried = $null; $s.Config.responseOptionsDays = 7
@@ -27,7 +27,7 @@ Describe 'Reading the response options' {
     $env:CCB_TEST_RO_FILE = Join-Path $env:TEMP ('ccb-ro-' + [guid]::NewGuid().ToString('N') + '.json')
     Mock -ModuleName Agent Get-ResponseOptionsFile { $env:CCB_TEST_RO_FILE }   # a mock runs in the module's scope
     It 'keeps what the picker offers in the state and the file, and says so when asked' {
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         Mock -ModuleName Agent Get-CopilotResponseOptions { @([pscustomobject]@{ path = 'Auto'; title = 'Auto'; description = 'Decides'; parent = '' }, [pscustomobject]@{ path = 'GPT > GPT-6.1 Sol'; title = 'GPT-6.1 Sol'; description = ''; parent = 'GPT' }) }
         Update-ResponseOptions $s ([pscustomobject]@{ Session = $null }) -Report
         @($s.ResponseOptions).Count | Should Be 2
@@ -37,7 +37,7 @@ Describe 'Reading the response options' {
         @(Get-AgentEvents $s 0 | Where-Object { $_.text -match "response picker offers: Auto, GPT > GPT-6\.1 Sol" }).Count | Should Be 1
     }
     It 'keeps the old list when the picker cannot be read' {
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s.ResponseOptions = @(@{ path = 'Auto' }); $s.ResponseOptionsRead = '2026-10-01T09:00:00'
         Mock -ModuleName Agent Get-CopilotResponseOptions { @() }
         Update-ResponseOptions $s ([pscustomobject]@{ Session = $null }) -Report
@@ -46,4 +46,4 @@ Describe 'Reading the response options' {
     }
     Remove-Item $env:CCB_TEST_RO_FILE -Force -ErrorAction SilentlyContinue; $env:CCB_TEST_RO_FILE = $null
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

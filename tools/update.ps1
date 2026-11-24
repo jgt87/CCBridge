@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Brings this CCBridge folder up to date with github.com/jgt87/CCBridge (branch main).
+  Brings this StreamHub folder up to date with github.com/jgt87/StreamHub (branch main).
 .DESCRIPTION
   - Git clone: git pull --ff-only (skipped when the folder has local changes or is not on main).
   - Installed from a release (no .git): compares version.txt with the latest GitHub Release and
@@ -10,12 +10,17 @@
   Set "autoUpdate": false in config\harness.local.json to turn automatic updates off.
   -To vX.Y.Z goes back to an earlier release (update.cmd -To v0.1.149): the release gone back from
   is added to "skipUpdates", so automatic updates leave it alone and take the next newer release.
+  Run by itself (update.cmd), it also moves the data and projects folders of the old name to the
+  new one (lib/AppPaths.psm1); the start script and the MCP server do that themselves (-NoMigrate).
+  A request to the repository that fails is tried once more on its name from before the rename,
+  and a release's zip may have either name (lib/Update.psm1 Invoke-WithRepoFallback, Select-ReleaseAsset).
 #>
 param(
     [switch]$Force,        # check even when automatic updates are turned off
     [switch]$Report,       # print the outcome (used by update.cmd)
     [switch]$Repair,       # install the installed version again (the start found files missing or different)
     [string]$To = '',      # go back (or forward) to this release, e.g. v0.1.149, and skip the newer ones
+    [switch]$NoMigrate,    # leave the folders of the old name to the caller (streamhub.ps1, the MCP server)
     # Handing over (the updater of the installed version starts the new release's updater, so a fix
     # to the updater applies at once): the app folder, the unpacked release and its version.
     [string]$AppRoot = '',
@@ -27,9 +32,9 @@ $ErrorActionPreference = 'Stop'
 # This updater's own folder (its modules: the new release's when handed over) and the app folder.
 $here = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $root = if ($AppRoot) { $AppRoot } else { $here }
-$repo = 'jgt87/CCBridge'
 $branch = 'main'
 Import-Module (Join-Path $here 'lib\Log.psm1')
+Import-Module (Join-Path $here 'lib\AppPaths.psm1')   # the data folder (update-backup), and the folder move
 function Say([string]$Message) { [Console]::Error.WriteLine("[StreamHub update] $Message"); Write-CCBLog info update $Message }
 
 function Invoke-Git([string[]]$GitArgs, [int]$TimeoutSec = 30) {
@@ -70,7 +75,7 @@ function Install-Release([string]$From, [string]$NewVersion) {
         while ($d) { if (-not (Test-Path -LiteralPath (Join-Path $From $d))) { $top = $d }; $d = Split-Path -Parent $d }
         if ($top) { $xdAll += (Join-Path $root $top) }
     }
-    $backup = Join-Path $env:LOCALAPPDATA 'CCBridge\update-backup'
+    $backup = Get-AppDataPath 'update-backup'
     Save-UpdateBackup -Target $root -Files $touched -BackupDir $backup
     $rc = @(& robocopy.exe $From $root /MIR /R:3 /W:2 /NFL /NDL /NJH /NJS /NP /XF $xfAll /XD $xdAll)
     if ($LASTEXITCODE -ge 8) {
@@ -105,8 +110,23 @@ function Complete-Rollback([string]$Target, [string]$From, [string]$Latest, [str
 
 try {
     # Handed over by the installed version's updater: install the release it unpacked, nothing else.
+    # (No folder move then: the start script of the release before is still running and keeps its
+    # old folders for this one start; the new start script moves them at the next start.)
     if ($FromFolder) { Install-Release $FromFolder $Version; return }
     Import-Module (Join-Path $here 'lib\Update.psm1') -Force
+    # Run by itself (update.cmd): the folders of the old name move to the new one here as well, so an
+    # install brought up to date this way has them moved even before its next start. Refused while
+    # StreamHub or its Edge uses them (lib/AppPaths.psm1).
+    if (-not $NoMigrate) {
+        try {
+            foreach ($m in @((Invoke-AppDataMigration -AppRoot $root).Messages)) { Say $m }
+        } catch { Say "the folder move did not run: $($_.Exception.Message)" }
+    }
+    # Requests to the repository, tried once more on its name from before the rename when they fail.
+    $onFallback = { param($why) Write-CCBLog info update "GitHub request failed ($why); trying the repository's old name" }
+    function Get-Release([string]$Which) {
+        Invoke-WithRepoFallback -Url "https://api.github.com/repos/$(Get-ReleaseRepo)/releases/$Which" -OnFallback $onFallback -Request { param($u) Invoke-RestMethod $u -TimeoutSec 15 -Headers $headers }
+    }
     if ($To) {
         if (-not (ConvertTo-ReleaseVersion $To)) { Say "'$To' is not a release; give one like v0.1.149 (see the Releases page on GitHub)."; return }
         $To = 'v' + (ConvertTo-ReleaseVersion $To)
@@ -115,7 +135,7 @@ try {
     $skipList = @()
     if (-not $Force -and -not $To) {
         Import-Module (Join-Path $root 'lib\Config.psm1') -Force
-        $cfg = Get-CCBridgeConfig harness $root
+        $cfg = Get-StreamHubConfig harness $root
         Initialize-CCBLog -Config $cfg
         Remove-Module Config -ErrorAction SilentlyContinue
         if ($cfg.PSObject.Properties['autoUpdate'] -and -not $cfg.autoUpdate) { return }
@@ -140,7 +160,8 @@ try {
     # Release install: first remove download folders that earlier updates could not delete (a
     # virus scanner still had the zip open, or the window closed mid-update); only ones older than
     # an hour, so an update running in another window is left alone.
-    foreach ($old in @(Get-ChildItem -LiteralPath $env:TEMP -Directory -Filter 'ccbridge-update-*' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-1) })) {
+    $leftover = @(foreach ($pattern in 'streamhub-update-*', 'ccbridge-update-*') { Get-ChildItem -LiteralPath $env:TEMP -Directory -Filter $pattern -ErrorAction SilentlyContinue })   # pre-rename folder name too
+    foreach ($old in @($leftover | Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-1) })) {
         try {
             Get-ChildItem -LiteralPath $old.FullName -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { try { $_.Attributes = 'Normal' } catch { } }
             [IO.Directory]::Delete($old.FullName, $true)
@@ -154,19 +175,19 @@ try {
     # -Repair: the release of the installed version (an incomplete install of the latest version
     # would otherwise count as up to date). -To: the release asked for.
     $which = if ($To) { "tags/$To" } elseif ($Repair -and $current) { "tags/$current" } else { 'latest' }
-    $headers = @{ 'User-Agent' = 'CCBridge-updater' }
+    $headers = @{ 'User-Agent' = 'StreamHub-updater' }
     if ($To) {
-        $newest = try { [string](Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -TimeoutSec 15 -Headers $headers).tag_name } catch { '' }
+        $newest = try { [string](Get-Release 'latest').tag_name } catch { '' }
         if ($To -eq $current) {
             # Already on it (unpacked by hand from GitHub, say): only keep the newer releases away.
             Say "$To is installed already."
             Complete-Rollback $To $current $newest (Join-Path $root 'tools\update.ps1')
             return
         }
-        try { $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/$which" -TimeoutSec 15 -Headers $headers }
+        try { $release = Get-Release $which }
         catch { Say "release $To was not found on GitHub ($($_.Exception.Message))."; return }
     } else {
-        $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/$which" -TimeoutSec 15 -Headers $headers
+        $release = Get-Release $which
     }
     $latest = [string]$release.tag_name
     # Automatic updates leave a release the person went back from alone (and every one before it).
@@ -182,14 +203,14 @@ try {
     if ($Repair -and $latest) { Say "repairing ${latest}: installing its files again" }
     elseif ($To) { Say "going from $(if ($current) { $current } else { '(unknown)' }) to $latest" }
     elseif (-not $latest -or $latest -eq $current) { Write-CCBLog verbose update "up to date ($current)"; if ($Report) { Say "Already up to date ($current)." }; return }
-    $asset = @($release.assets | Where-Object { $_.name -like 'CCBridge-*.zip' }) | Select-Object -First 1
+    $asset = Select-ReleaseAsset $release   # StreamHub-vX.Y.Z.zip, or the old name in a release from before the rename
     if (-not $asset) { Say "release $latest has no StreamHub zip"; return }
 
-    $tmp = Join-Path $env:TEMP ('ccbridge-update-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $tmp = Join-Path $env:TEMP ('streamhub-update-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     $null = New-Item -ItemType Directory -Path $tmp
     try {
-        $zip = Join-Path $tmp 'ccbridge.zip'
-        Invoke-WebRequest $asset.browser_download_url -OutFile $zip -UseBasicParsing -TimeoutSec 300
+        $zip = Join-Path $tmp 'streamhub.zip'
+        $null = Invoke-WithRepoFallback -Url "$($asset.browser_download_url)" -OnFallback $onFallback -Request { param($u) Invoke-WebRequest $u -OutFile $zip -UseBasicParsing -TimeoutSec 300 }
         Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
         $src = Get-ChildItem -Directory $tmp | Select-Object -First 1
         # The new release's updater does the install when it differs from this one, so a fix to the

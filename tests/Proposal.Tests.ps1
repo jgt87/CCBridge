@@ -1,7 +1,7 @@
 # A reply that proposes work instead of doing it becomes a plan to approve and build
 # (Protocol Test-ProposalText, Agent Publish-ProposalPlan). The texts are made up.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Protocol.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
@@ -32,7 +32,7 @@ Describe 'Test-ProposalText' {
 
 Describe 'Publish-ProposalPlan' {
     $p = Join-Path $env:TEMP ('ccb-prop-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     It 'offers a proposal from a turn that changed nothing as a plan, and writes it to PLAN.md' {
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p
         $from = [int]$s.Seq
@@ -70,14 +70,14 @@ Describe 'Test-UnfinishedText' {
         Test-UnfinishedText 'You need to restart the app after installing.' | Should Be $false
     }
     It 'offers an unfinished reply as a plan to continue' {
-        $env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+        $env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
         $p = Join-Path $env:TEMP ('ccb-unf-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
         Add-AgentEvent $s 'done' @{ text = 'Need to inspect the current CSS before making the height change.' }
         Publish-ProposalPlan $s @{ text = 'Make the calendars 700px high' } 0 | Should Be $true
         $ev = @($s.Events | Where-Object type -eq 'plan-ready')[0]
         $ev.unfinished | Should Be $true
-        Remove-Item $p, $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $p, $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

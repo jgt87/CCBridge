@@ -2,7 +2,7 @@
 # names a runbook without saying to run it, and Copilot can run one with ACTION runbook NAME when it
 # reads the request that way. Copilot is not called here; runbook contents are made-up test data.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Protocol.psm1') -Force
 Import-Module (Join-Path $root 'lib\Runbook.psm1') -Force
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
@@ -42,7 +42,7 @@ Describe 'ACTION runbook NAME (Copilot runs a runbook)' {
     $p = Join-Path $env:TEMP ('ccb-rbint-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path (Join-Path $p 'Runbooks') | Out-Null
     [IO.File]::WriteAllText((Join-Path $p 'Runbooks\day-01.runbook.md'), "---`ntitle: Example Calendar Export`noutput: Runbooks/Exports/day-01.json`nitemsKey: items`n---`nList the example items as JSON.")
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $act = { param($st, $arg) & (Get-Module Agent) { param($s2, $a2) Invoke-AgentAction $s2 ([pscustomobject]@{ type = 'runbook'; arg = $a2; body = '' }) 'a1' $null 0 } $st $arg }
     It 'queues the runbook to run after the reply (auto mode), and refuses unknown names' {
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
@@ -60,4 +60,4 @@ Describe 'ACTION runbook NAME (Copilot runs a runbook)' {
     }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

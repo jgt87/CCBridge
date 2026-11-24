@@ -39,8 +39,8 @@ if ($Agent) { $Label = $Agent; if (-not $AgentName) { $AgentName = $Agent }; $Ma
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 foreach ($m in 'Log', 'Cdp', 'Config', 'CopilotBridge') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
-$sel = Get-CCBridgeConfig selectors $root
-$cfg = Get-CCBridgeConfig harness $root
+$sel = Get-StreamHubConfig selectors $root
+$cfg = Get-StreamHubConfig harness $root
 $port = if ($cfg.cdpPort) { [int]$cfg.cdpPort } else { 9333 }
 $Label = ($Label.ToLowerInvariant() -replace '[^a-z0-9-]', '')
 if (-not $Label) { $Label = 'agent' }

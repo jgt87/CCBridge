@@ -1,7 +1,7 @@
 # Server-side code in a project that runs no server: reported as an error with where the data can come
 # from instead, and not taken for a new file that a page should load. Made-up code.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-srv-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-srv-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Lint.psm1') -Force
 Import-Module (Join-Path $root 'lib\Imports.psm1') -Force
 
@@ -41,4 +41,4 @@ Describe 'Server-side code' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

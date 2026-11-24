@@ -1,5 +1,5 @@
 # Names StreamHub and project code must not share: the UI kit's helpers that a window app dot-sources
-# (Lint Find-KitHelperClashes, the __kit variable names in the helpers) and StreamHub's own CCBRIDGE_*
+# (Lint Find-KitHelperClashes, the __kit variable names in the helpers) and StreamHub's own STREAMHUB_*
 # environment variables, which never reach project code (Executor Remove-OwnEnvironment, the run
 # window's batch).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -47,17 +47,17 @@ Describe 'StreamHub''s own environment variables stay out of project code' {
     $project = Join-Path $env:TEMP ('ccb-env-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory $project -Force | Out-Null
     It 'starts a command without them, and with the rest of the environment' {
-        $env:CCBRIDGE_OWN_PROBE = 'secret'; $env:OTHER_PROBE = 'kept'
-        try { $r = Invoke-RunAction $project 'echo [%CCBRIDGE_OWN_PROBE%] [%OTHER_PROBE%]' 30 }
-        finally { Remove-Item Env:CCBRIDGE_OWN_PROBE, Env:OTHER_PROBE -ErrorAction SilentlyContinue }
-        $r.output | Should Match '\[%CCBRIDGE_OWN_PROBE%\] \[kept\]'
-        $env:CCBRIDGE_OWN_PROBE | Should BeNullOrEmpty   # StreamHub's own process keeps its environment as it was
+        $env:STREAMHUB_OWN_PROBE = 'secret'; $env:OTHER_PROBE = 'kept'
+        try { $r = Invoke-RunAction $project 'echo [%STREAMHUB_OWN_PROBE%] [%OTHER_PROBE%]' 30 }
+        finally { Remove-Item Env:STREAMHUB_OWN_PROBE, Env:OTHER_PROBE -ErrorAction SilentlyContinue }
+        $r.output | Should Match '\[%STREAMHUB_OWN_PROBE%\] \[kept\]'
+        $env:STREAMHUB_OWN_PROBE | Should BeNullOrEmpty   # StreamHub's own process keeps its environment as it was
     }
     It 'clears them at the start of a run window''s batch' {
-        $env:CCBRIDGE_OWN_PROBE = 'secret'
-        try { $b = New-RunWindowBatch $project 'npm test' 'C:\x.code' } finally { Remove-Item Env:CCBRIDGE_OWN_PROBE -ErrorAction SilentlyContinue }
-        $b | Should Match '(?m)^set "CCBRIDGE_OWN_PROBE="\r?$'
-        $b.IndexOf('set "CCBRIDGE_OWN_PROBE="') | Should BeLessThan $b.IndexOf('cmd /d /s /c "npm test"')
+        $env:STREAMHUB_OWN_PROBE = 'secret'
+        try { $b = New-RunWindowBatch $project 'npm test' 'C:\x.code' } finally { Remove-Item Env:STREAMHUB_OWN_PROBE -ErrorAction SilentlyContinue }
+        $b | Should Match '(?m)^set "STREAMHUB_OWN_PROBE="\r?$'
+        $b.IndexOf('set "STREAMHUB_OWN_PROBE="') | Should BeLessThan $b.IndexOf('cmd /d /s /c "npm test"')
     }
     Remove-Item $project -Recurse -Force -ErrorAction SilentlyContinue
 }

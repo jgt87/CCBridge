@@ -1,6 +1,6 @@
 # A new Copilot chat when the work moves to another part of the project (lib/ChatScope.psm1).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\ChatScope.psm1') -Force
 Import-Module (Join-Path $root 'lib\Imports.psm1') -Force
 
@@ -60,4 +60,4 @@ Describe 'Test-ChatSwitch' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

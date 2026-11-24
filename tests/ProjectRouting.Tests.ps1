@@ -1,7 +1,7 @@
 # Project identity belongs to a queued task, and cannot change while it runs.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $base = Join-Path $env:TEMP ('ccb-routing-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_STATE_ROOT = Join-Path $base 'state'
+$env:STREAMHUB_STATE_ROOT = Join-Path $base 'state'
 foreach ($m in 'Agent', 'Server', 'Workspace', 'Executor') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 $a = Join-Path $base 'a'; $b = Join-Path $base 'b'
 $null = New-Item -ItemType Directory -Force -Path $a, $b
@@ -166,7 +166,7 @@ Describe 'Opening projects safely' {
         Mock -ModuleName Server Start-IssueIndexer { $true }
         $p = Join-Path $base 'migration'
         $local = Join-Path $base 'local'
-        $null = New-Item -ItemType Directory -Force -Path (Join-Path $p 'exports'), (Join-Path $p 'src'), (Join-Path $local 'CCBridge')
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $p 'exports'), (Join-Path $p 'src'), (Join-Path $local 'StreamHub')
         [IO.File]::WriteAllText((Join-Path $p 'exports\data.json'), '{}')
         [IO.File]::WriteAllText((Join-Path $p 'src\app.js'), "fetch('../exports/data.json');")
         $s = New-AgentState -Config @{} -AppRoot $root
@@ -184,4 +184,4 @@ Describe 'Opening projects safely' {
 
 $resolvedBase = [IO.Path]::GetFullPath($base)
 if ($resolvedBase.StartsWith([IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\ccb-routing-', [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $resolvedBase -Recurse -Force }
-$env:CCBRIDGE_STATE_ROOT = $null
+$env:STREAMHUB_STATE_ROOT = $null

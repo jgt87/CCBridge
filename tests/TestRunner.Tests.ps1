@@ -1,6 +1,6 @@
 # The project's own tests after a change (lib/TestRunner.psm1).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\TestRunner.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 
@@ -62,4 +62,4 @@ Describe 'Find-TestCommand' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

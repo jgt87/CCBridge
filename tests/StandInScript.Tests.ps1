@@ -1,8 +1,8 @@
 # A script that writes a page with stand-ins for its tags ([[LT]]html...) is refused when it is
 # written, and not run when it is already there (Copilot mocked): the page is written as itself.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
@@ -10,7 +10,7 @@ Describe 'Scripts that generate a page with stand-ins' {
     $p = Join-Path $env:TEMP ('ccb-standin-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Force -Path (Join-Path $p 'Work') | Out-Null
     $old = "`$html = @'`n[[LT]]!doctype html>`n[[LT]]html>[[LT]]body>Hi[[LT]]/body>[[LT]]/html>`n'@`n`$html = `$html.Replace('[[LT]]', '<')`nSet-Content index.html `$html`n"
     [IO.File]::WriteAllText((Join-Path $p 'Work\Old-Gen.ps1'), $old)
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $config.pageCheck = 'off'
     Mock -ModuleName Agent Start-NewChat { }
     Mock -ModuleName Agent Send-ToCopilot {
@@ -39,6 +39,6 @@ Describe 'Scripts that generate a page with stand-ins' {
     }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
-Remove-Item -LiteralPath $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
-$env:CCBRIDGE_ISSUE_INDEX = $null
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
+$env:STREAMHUB_ISSUE_INDEX = $null
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

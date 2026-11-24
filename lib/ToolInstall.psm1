@@ -7,6 +7,7 @@
 # reports in a status file, so the app stays responsive.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 foreach ($m in 'Log', 'Prereq') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Installable = [ordered]@{
@@ -17,8 +18,8 @@ $script:Installable = [ordered]@{
     git    = @{ label = 'Git'; winget = 'Git.Git' }
 }
 
-function Get-ToolsDir { Join-Path $env:LOCALAPPDATA 'CCBridge\tools' }
-function Get-ToolStatusFile([string]$Name) { Join-Path $env:LOCALAPPDATA "CCBridge\tool-install-$Name.json" }
+function Get-ToolsDir { Get-AppDataPath 'tools' }
+function Get-ToolStatusFile([string]$Name) { Get-AppDataPath "tool-install-$Name.json" }
 
 function Get-ExeVersion([string]$Path) {
     # A program's version from its file (no process started), or $null.
@@ -89,10 +90,10 @@ function Get-VersionNumber([string]$Text) {
 function Get-LatestToolVersions {
     <# The newest release of each tool from its official source: Python (python.org), Node.js LTS
        (nodejs.org), .NET SDK LTS (Microsoft's release index), pytest (PyPI), Git (winget). Kept for
-       12 hours in %LOCALAPPDATA%\CCBridge\tool-latest.json; a source that cannot be reached is left
+       12 hours in %LOCALAPPDATA%\StreamHub\tool-latest.json; a source that cannot be reached is left
        out (no update offer, never an error). -Force asks again. #>
     param([switch]$Force)
-    $file = Join-Path $env:LOCALAPPDATA 'CCBridge\tool-latest.json'
+    $file = Get-AppDataPath 'tool-latest.json'
     if (-not $Force -and (Test-Path -LiteralPath $file)) {
         try { $c = [IO.File]::ReadAllText($file) | ConvertFrom-Json; if (((Get-Date) - [datetime]$c.at).TotalHours -lt 12) { return $c.versions } } catch { }
     }
@@ -169,7 +170,7 @@ function Get-InstallableTools {
     }
 }
 
-function Get-PendingToolFile { Join-Path $env:LOCALAPPDATA 'CCBridge\tool-install-pending.json' }
+function Get-PendingToolFile { Get-AppDataPath 'tool-install-pending.json' }
 
 function Test-FolderInUse([string]$Folder) {
     <# Whether a program runs from this folder or its main program is locked (cannot be replaced now). #>

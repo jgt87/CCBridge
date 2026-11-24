@@ -3,12 +3,13 @@
 # again), with a status per issue: open, fixing, fixed (gone), gave up, ignored.
 # Two levels:
 #   - the details per project, inside its work tree: <project>\.streamhub\issues.json
-#   - the app index, one summary per project: %LOCALAPPDATA%\CCBridge\issue-index.json, filled by
+#   - the app index, one summary per project: %LOCALAPPDATA%\StreamHub\issue-index.json, filled by
 #     importing each project's details (Import-ProjectIssues) after every update.
 # The cycle: index, change, scan the changed files, queue fixes, apply, scan again (Agent.psm1).
 # A machine-wide mutex keeps the background indexer and the worker from writing at the same time.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 foreach ($m in 'Workspace', 'Executor', 'Lint', 'Health', 'OneFile') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:IssueExt = '(?i)\.(js|mjs|cjs|jsx|ts|mts|cts|tsx|vue|svelte|cs|java|kt|kts|go|rs|php|swift|dart|scala|c|cc|cpp|h|hpp|py|pyw|ps1|psm1|psd1|css|scss|less|json|jsonc|ya?ml|toml|sh|bash|cmd|bat|sql|html?|xml|csproj|config|xaml|svg|md|markdown|csv|tsv)$'
@@ -18,12 +19,12 @@ $script:Order = @{ error = 0; secret = 1; health = 2 }
 function Get-IssueIndexPath([string]$ProjectRoot) { Join-Path $ProjectRoot '.streamhub\issues.json' }
 
 function Get-AppIssueIndexPath {
-    if ($env:CCBRIDGE_ISSUE_INDEX) { return $env:CCBRIDGE_ISSUE_INDEX }   # tests
-    Join-Path $env:LOCALAPPDATA 'CCBridge\issue-index.json'
+    if ($env:STREAMHUB_ISSUE_INDEX) { return $env:STREAMHUB_ISSUE_INDEX }   # tests
+    Get-AppDataPath 'issue-index.json'
 }
 
 function Use-IssueLock([scriptblock]$Body) {
-    $mx = New-Object Threading.Mutex($false, 'Local\CCBridgeIssueIndex')
+    $mx = New-Object Threading.Mutex($false, 'Local\StreamHubIssueIndex')
     $got = $false
     try { $got = $mx.WaitOne(60000) } catch [Threading.AbandonedMutexException] { $got = $true }
     try { & $Body } finally { if ($got) { $mx.ReleaseMutex() }; $mx.Dispose() }

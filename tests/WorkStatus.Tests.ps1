@@ -1,7 +1,7 @@
 # Pester 3.4. The waiting card's status (WorkStatus.psm1): phase, signs of life, counts and the
 # activity log, fed by the worker and the chat's events.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\WorkStatus.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
@@ -40,7 +40,7 @@ Describe 'Work status' {
         (Get-WorkView $s).phase | Should Be 'Waiting for your approval: Run npm test'
     }
     It 'never shows hooks as running in a project without hooks' {
-        $p = Join-Path $env:CCBRIDGE_STATE_ROOT 'nohooks'
+        $p = Join-Path $env:STREAMHUB_STATE_ROOT 'nohooks'
         $null = New-Item -ItemType Directory -Force -Path $p
         $s = @{ Activity = @{ kind = ''; label = '' }; ProjectRoot = $p; Config = @{}; Mode = 'auto' }
         Start-WorkStatus $s 'chat'
@@ -66,7 +66,7 @@ Describe 'Work status' {
         ($v.steps | ForEach-Object { $_.text }) -join '|' | Should Match 'Edit app\.js\|Run npm test\|Waiting for your approval: Run npm test\|Rejected: Run npm test'
     }
     It 'sends the status with the chat''s events from the agent, and nothing without a task' {
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         Add-AgentEvent $s 'assistant' @{ text = 'hi' }
         Get-WorkView $s | Should BeNullOrEmpty
         Start-WorkStatus $s 'chat'
@@ -74,4 +74,4 @@ Describe 'Work status' {
         (Get-WorkView $s).steps[-1].text | Should Be 'Copilot replied'
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

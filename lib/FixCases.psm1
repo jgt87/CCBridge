@@ -23,7 +23,7 @@ function Write-FixCase {
     $null = New-Item -ItemType Directory -Force -Path $dir
     $leaf = ([IO.Path]::GetFileName("$($Case.path)") -replace '[^A-Za-z0-9._-]+', '-')
     $name = "case-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$leaf.md"
-    $build = try { Format-CCBBuild (Get-CCBridgeBuild (Split-Path -Parent $PSScriptRoot)) } catch { 'unknown' }
+    $build = try { Format-CCBBuild (Get-StreamHubBuild (Split-Path -Parent $PSScriptRoot)) } catch { 'unknown' }
     $fence = '```'
     $sb = New-Object Text.StringBuilder
     [void]$sb.AppendLine("# Fix case: $($Case.path) ($(if ($Case.fixed) { 'fixed' } else { 'not fixed' }))").AppendLine()

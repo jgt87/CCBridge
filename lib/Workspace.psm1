@@ -1,9 +1,11 @@
-# Project folders: they live under the user's OneDrive; CCBridge's own state does not.
+# Project folders: they live under the user's OneDrive; StreamHub's own state does not.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 
 $script:IgnoredDirs = @('.git', 'node_modules', 'bin', 'obj', 'dist', 'build', 'out', 'target', '.vs', '.vscode',
-                        '.idea', '__pycache__', '.venv', 'venv', '.next', '.ccbridge', '.streamhub', '.pytest_cache')
+                        '.idea', '__pycache__', '.venv', 'venv', '.next', '.streamhub', '.pytest_cache',
+                        '.ccbridge')   # pre-rename name of the .streamhub folder, still in older projects
 # Build output at the project's top that holds the built app the person opens (Open app looks there
 # first): the app's Files tree lists it (Get-ProjectFiles -BuiltApp), Copilot's file list does not.
 $script:BuiltAppDirs = @('dist', 'build', 'out')
@@ -16,8 +18,10 @@ function Get-OneDriveRoot {
 }
 
 function Get-ProjectsRoot {
-    param([string]$FolderName = 'CCBridge')
-    $root = Join-Path (Get-OneDriveRoot) $FolderName
+    <# The web app's projects folder (OneDrive\StreamHub; its old name while the start could not
+       move it yet: AppPaths Resolve-ProjectsDir), created when missing. #>
+    param([string]$FolderName = 'StreamHub')
+    $root = Resolve-ProjectsDir -OneDriveRoot (Get-OneDriveRoot) -FolderName $FolderName
     if (-not (Test-Path $root)) { $null = New-Item -ItemType Directory -Path $root }
     $root
 }
@@ -105,16 +109,16 @@ function Get-ProjectOverview {
     [pscustomobject]@{ files = $files.Count; bytes = $bytes; languages = $top; sourceFiles = $source; capped = ($files.Count -ge 5000) }
 }
 
-function Get-CCBridgeProjects {
-    param([string]$FolderName = 'CCBridge')
+function Get-StreamHubProjects {
+    param([string]$FolderName = 'StreamHub')
     $root = Get-ProjectsRoot $FolderName
     @(Get-ChildItem -Directory $root | Where-Object { -not $_.Name.StartsWith('.') } | Sort-Object LastWriteTime -Descending | ForEach-Object {
         [pscustomobject]@{ name = $_.Name; path = $_.FullName; modified = $_.LastWriteTime.ToString('s') }
     })
 }
 
-function New-CCBridgeProject {
-    param([Parameter(Mandatory)][string]$Name, [string]$FolderName = 'CCBridge')
+function New-StreamHubProject {
+    param([Parameter(Mandatory)][string]$Name, [string]$FolderName = 'StreamHub')
     if ($Name -notmatch '^[\w][\w .-]{0,63}$') { throw "Invalid project name '$Name' (letters, digits, space, . _ - only)" }
     $path = Join-Path (Get-ProjectsRoot $FolderName) $Name.Trim()
     if (Test-Path $path) { throw "A project named '$Name' already exists" }
@@ -125,7 +129,7 @@ function New-CCBridgeProject {
 }
 
 function Get-OneDriveLocation {
-    <# Where a folder lives in the user's OneDrive: a display path ("OneDrive > CCBridge > name") and,
+    <# Where a folder lives in the user's OneDrive: a display path ("OneDrive > StreamHub > name") and,
        for OneDrive for Business, the web address (from the OneDrive client's account settings).
        $null when the folder is not in a OneDrive folder. #>
     param([Parameter(Mandatory)][string]$Path)
@@ -153,11 +157,9 @@ function Get-OneDriveLocation {
 
 function Get-ProjectStateDir([string]$ProjectRoot) {
     <# Per-project state (backups, session) under %LOCALAPPDATA%, so OneDrive does not sync it.
-       CCBRIDGE_STATE_ROOT puts it elsewhere (the tests use a temporary folder they delete). #>
-    $sha = [Security.Cryptography.SHA1]::Create()
-    $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($ProjectRoot.ToLowerInvariant())) | Select-Object -First 6 | ForEach-Object { $_.ToString('x2') })
-    $base = if ($env:CCBRIDGE_STATE_ROOT) { $env:CCBRIDGE_STATE_ROOT } else { Join-Path $env:LOCALAPPDATA 'CCBridge\projects' }
-    $dir = Join-Path $base "$((Split-Path $ProjectRoot -Leaf) -replace '[^\w.-]', '_')-$hash"
+       STREAMHUB_STATE_ROOT puts it elsewhere (the tests use a temporary folder they delete). #>
+    $base = if ($env:STREAMHUB_STATE_ROOT) { $env:STREAMHUB_STATE_ROOT } else { Get-AppDataPath 'projects' }
+    $dir = Join-Path $base (Get-ProjectStateName $ProjectRoot)   # name and path hash (AppPaths: the migration renames them)
     if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir }
     $dir
 }
@@ -441,7 +443,7 @@ function Get-ProtectedPatterns {
     param([string]$AppRoot)
     try {
         Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
-        @(@((Get-CCBridgeConfig harness $AppRoot).protectedPaths) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().Replace('\', '/').TrimStart('/') })
+        @(@((Get-StreamHubConfig harness $AppRoot).protectedPaths) | Where-Object { "$_".Trim() } | ForEach-Object { "$_".Trim().Replace('\', '/').TrimStart('/') })
     } catch { @() }
 }
 
@@ -590,6 +592,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Get-FullRoot, Test-RootedPath, Get-PathLeaf, Test-PathChars,Move-TempFile, Write-AtomicText, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Get-FullRoot, Test-RootedPath, Get-PathLeaf, Test-PathChars,Move-TempFile, Write-AtomicText, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-StreamHubProjects, New-StreamHubProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile, Get-FileFingerprint, Get-SharedRoot, Get-SharedPrefix, Initialize-SharedRoot, Get-SharedNotes

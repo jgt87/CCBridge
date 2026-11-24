@@ -3,7 +3,7 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { cn } from "@/lib/utils"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 
-// CCBridge: a wheel turned outside the open menu closes it, as a scroll does (shared interaction
+// StreamHub: a wheel turned outside the open menu closes it, as a scroll does (shared interaction
 // rules); a wheel over the menu itself scrolls its list.
 function DropdownMenu({ open: openProp, defaultOpen, onOpenChange, ...props }: MenuPrimitive.Root.Props) {
   const [ownOpen, setOwnOpen] = React.useState(defaultOpen ?? false)

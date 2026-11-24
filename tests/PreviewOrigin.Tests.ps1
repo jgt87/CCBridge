@@ -4,7 +4,7 @@
 # nothing from the web (no remote images that could carry data out). What changes settings, the mode
 # or the machine is for the person at the app's page only (its Origin), not for any token holder.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-origin-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-origin-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'Agent', 'Server', 'CheckPolicy') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 function New-FakeCtx([string]$Method, [string]$Path, $Body = $null, [string]$Origin = '') {
@@ -31,7 +31,7 @@ Describe 'Preview pages are not the StreamHub page' {
     $p = Join-Path $env:TEMP ('ccb-prev-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     New-Item -ItemType Directory $p | Out-Null
     [IO.File]::WriteAllText((Join-Path $p 'index.html'), '<html><body>hi</body></html>')
-    $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+    $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
     It 'serves a project page in a sandbox without its own origin, readable by the page itself' {
         $c = New-FakeCtx 'GET' '/preview/x/index.html'
         & (Get-Module Server) { param($c, $st) Send-PreviewFile $c $st 'index.html' } $c $s
@@ -64,7 +64,7 @@ Describe 'Preview pages are not the StreamHub page' {
 }
 
 Describe 'Settings, mode, tools, links, undo and history change only from the app page' {
-    $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.Config.port = 8765
+    $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.Config.port = 8765
     $page = 'http://localhost:8765'
     $calls = @(
         @{ path = '/api/mode'; body = @{ mode = 'auto' } },
@@ -118,4 +118,4 @@ Describe 'Settings, mode, tools, links, undo and history change only from the ap
         $s.Mode | Should Be 'auto'
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

@@ -4,7 +4,7 @@
 ```
 
 ````write hello.ps1
-Write-Output "Hello from CCBridge"
+Write-Output "Hello from StreamHub"
 
 $date = Get-Date
 Write-Output ("Date: " + $date)

@@ -1,4 +1,4 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4. Run: Invoke-Pester .\tests
 # Clarify -> plan -> build, verification and evidence, project memory, find.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
@@ -67,7 +67,7 @@ Describe 'Get-ProjectVerify' {
 Describe 'Save-TaskEvidence' {
     It 'writes what was asked, what changed and the checks' {
         $p = New-Proj @{ 'a.txt' = 'x' }
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root
         $s.ProjectRoot = $p
         $rel = Save-TaskEvidence $s 'Fix the total' @([pscustomobject]@{ path = 'js/app.js'; added = 3; removed = 1; created = $false; deleted = $false }) @{ syntaxLast = @(); page = $null; reviewed = $true; verify = @{ command = 'npm test'; passed = $false; exit = 1; tail = 'FAIL total' } } 'Fixed the off-by-one.' 4
@@ -94,7 +94,7 @@ Describe 'find and remember instructions' {
 
 Describe 'Invoke-ClarifyStep (Copilot mocked)' {
     $p = New-Proj @{ 'index.html' = '<p>hi</p>' }
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     Mock -ModuleName Agent Start-NewChat { }
     Mock -ModuleName Agent Test-OtherSender { $false }
     Mock -ModuleName Agent Send-ToCopilot {
@@ -143,7 +143,7 @@ Describe 'Invoke-ClarifyStep (Copilot mocked)' {
 Describe 'remember action' {
     It 'adds to AGENTS.md only after approval, also in auto mode' {
         $p = New-Proj @{ 'AGENTS.md' = "# Notes`n" }
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root
         $s.ProjectRoot = $p; $s.Mode = 'auto'; $s.Cancel = $true   # nobody approves: rejected
         $a = [pscustomobject]@{ type = 'remember'; arg = ''; body = 'Prices include VAT'; closed = $true; edits = @() }
@@ -189,7 +189,7 @@ Describe 'PLAN.md' {
     }
     It 'keeps the steps and Done when checks of an ordinary build, and a Plan only answer, for later reference' {
         $p = New-Proj @{ 'a.txt' = 'x' }
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root
         $s.ProjectRoot = $p; $s.Mode = 'auto'
         $from = [int]$s.Seq
@@ -232,7 +232,7 @@ Build a page
         cmd /c "rmdir /s /q ""$p"" >nul 2>&1"
     }
     It 'builds an approved plan outside Plan only mode and tells Copilot planning is over' {
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root
         $s.Mode = 'plan'
         $t = @{ kind = 'chat'; text = 'Build this now, following the approved plan below.' }
@@ -248,7 +248,7 @@ Build a page
         Import-Module (Join-Path $root 'lib\ProjectSetup.psm1') -Force
         $p = New-Proj @{ 'index.html' = '<!doctype html><title>x</title>' }
         Save-ProjectSetup $p @{ answers = @{ bigtask = 'plan' } }
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root
         $s.ProjectRoot = $p
         $big = 'Build a dashboard of the items a web page lists. ' + ('Each item has a product, a period and an impact; filter on several products, show charts and a table, and assess every item. ' * 6)
@@ -270,7 +270,7 @@ Build a page
     }
     It 'writes the result of the build' {
         $p = New-Proj @{ 'a.txt' = 'x' }
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root
         $s.ProjectRoot = $p
         $id = New-PlanEntry $p 'Add dark mode'

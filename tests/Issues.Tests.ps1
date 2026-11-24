@@ -1,9 +1,9 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4. Run: Invoke-Pester .\tests
 # The issue cycle: code-health limits, the project's issue details (.streamhub\issues.json), the app
 # index that imports them, incremental re-indexing, statuses, and the fix cycle after a task.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 # Project state (backups, chat history) of the test projects goes to a temporary folder, deleted below.
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Issues.psm1') -Force
@@ -28,7 +28,7 @@ function Get-BigPsFunction([string]$Name) {
     "function $Name(`$x, `$y) {`n$body`n}`n"
 }
 
-$env:CCBRIDGE_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.json')
+$env:STREAMHUB_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.json')
 
 Describe 'Code health per language' {
     It 'measures PowerShell, JavaScript and Python functions' {
@@ -292,16 +292,16 @@ Describe 'The fix cycle cannot loop' {
     }
 }
 
-Describe 'Reset-CCBridgeSettings' {
+Describe 'Reset-StreamHubSettings' {
     $app = Join-Path $env:TEMP ('ccb-app-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     $null = New-Item -ItemType Directory -Force -Path (Join-Path $app 'config')
     Copy-Item (Join-Path $root 'config\harness.json') (Join-Path $app 'config\harness.json')
     [IO.File]::WriteAllText((Join-Path $app 'config\harness.local.json'), '{ "port": 9999, "maxRounds": 7, "pacing": { "beforeSendSec": 3 }, "issues": { "autoFix": "none" } }')
 
     It 'puts every adjustable setting back to the default and keeps other local values' {
-        $changed = @(Reset-CCBridgeSettings $app)
+        $changed = @(Reset-StreamHubSettings $app)
         ($changed | Sort-Object) -join ',' | Should Be 'issues.autoFix,maxRounds,pacing.beforeSendSec'
-        @(Get-CCBridgeSettings $app | Where-Object custom).Count | Should Be 0
+        @(Get-StreamHubSettings $app | Where-Object custom).Count | Should Be 0
         $local = [IO.File]::ReadAllText((Join-Path $app 'config\harness.local.json')) | ConvertFrom-Json
         $local.port | Should Be 9999
     }
@@ -359,8 +359,8 @@ Describe 'Ignored findings' {
     }
 }
 
-Remove-Item -LiteralPath $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
-$env:CCBRIDGE_ISSUE_INDEX = $null
+Remove-Item -LiteralPath $env:STREAMHUB_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
+$env:STREAMHUB_ISSUE_INDEX = $null
 
-if ($env:CCBRIDGE_STATE_ROOT -and (Test-Path -LiteralPath $env:CCBRIDGE_STATE_ROOT)) { [IO.Directory]::Delete($env:CCBRIDGE_STATE_ROOT, $true) }
-$env:CCBRIDGE_STATE_ROOT = $null
+if ($env:STREAMHUB_STATE_ROOT -and (Test-Path -LiteralPath $env:STREAMHUB_STATE_ROOT)) { [IO.Directory]::Delete($env:STREAMHUB_STATE_ROOT, $true) }
+$env:STREAMHUB_STATE_ROOT = $null

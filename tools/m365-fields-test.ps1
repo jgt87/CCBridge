@@ -16,7 +16,7 @@ param([string]$Topics = 'teams-channel,teams-group-chat,teams-1to1-chat,email,ca
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 foreach ($m in 'Log', 'Config', 'Cdp', 'CopilotBridge', 'Runbook') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
-$cfg = Get-CCBridgeConfig harness $root
+$cfg = Get-StreamHubConfig harness $root
 Initialize-CCBLog -Level info -Config $cfg
 
 # What each topic is called in the question to Copilot.

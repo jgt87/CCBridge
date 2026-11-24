@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  CCBridge Phase 0 feasibility probe. Read-only apart from a throwaway Edge
+  StreamHub Phase 0 feasibility probe. Read-only apart from a throwaway Edge
   profile in %TEMP% that is deleted afterwards.
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File probe.ps1
@@ -88,7 +88,7 @@ Add-Result 'Policy DeveloperToolsAvailability' $(if ($devTools -eq 2) { 'FAIL' }
 
 # --- Live CDP test ------------------------------------------------------------
 if ($edge -and -not $SkipCdp) {
-    $profileDir = Join-Path $env:TEMP ("ccbridge-probe-" + [guid]::NewGuid().ToString('N'))
+    $profileDir = Join-Path $env:TEMP ("streamhub-probe-" + [guid]::NewGuid().ToString('N'))
     $proc = $null
     try {
         $cdpPort = Get-FreePort
@@ -149,7 +149,7 @@ text (e.g. 20,000 characters) and note where Copilot cuts it off or refuses it.
 "@
 # The report is meant to be passed on: no account, computer or profile folder in it (Log Protect-LogText).
 Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\Log.psm1')
-$report = Protect-LogText "CCBridge probe - $(Get-Date -Format s)`r`n$table`r`n$footer"
+$report = Protect-LogText "StreamHub probe - $(Get-Date -Format s)`r`n$table`r`n$footer"
 $report
 [IO.File]::WriteAllText($ReportPath, $report, (New-Object Text.UTF8Encoding($false)))
 Write-Host "Report written to $ReportPath"

@@ -1,13 +1,13 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4. Run: Invoke-Pester .\tests
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 # Project state (backups, chat history) of the test projects goes to a temporary folder, deleted below.
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 
 Describe 'Submit-AgentTask' {
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $state = New-AgentState -Config $config -AppRoot $root
 
     It 'records the task in the queue and hands it to the worker' {
@@ -55,7 +55,7 @@ Describe 'Get-ChangeSetContents (review by the calling program)' {
 }
 
 Describe 'Queue across restarts (Save-AgentQueue / Restore-AgentQueue)' {
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $file = Join-Path $env:TEMP ('ccb-queue-' + [guid]::NewGuid().ToString('N') + '.json')
 
     It 'keeps history, queues waiting tasks again and fails the one that was running' {
@@ -96,5 +96,5 @@ Describe 'Queue across restarts (Save-AgentQueue / Restore-AgentQueue)' {
     Remove-Item $file -Force -ErrorAction SilentlyContinue
 }
 
-if ($env:CCBRIDGE_STATE_ROOT -and (Test-Path -LiteralPath $env:CCBRIDGE_STATE_ROOT)) { [IO.Directory]::Delete($env:CCBRIDGE_STATE_ROOT, $true) }
-$env:CCBRIDGE_STATE_ROOT = $null
+if ($env:STREAMHUB_STATE_ROOT -and (Test-Path -LiteralPath $env:STREAMHUB_STATE_ROOT)) { [IO.Directory]::Delete($env:STREAMHUB_STATE_ROOT, $true) }
+$env:STREAMHUB_STATE_ROOT = $null

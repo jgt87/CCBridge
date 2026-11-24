@@ -2,7 +2,7 @@
 # box groups, fieldsets, field types, input groups, form actions, lists, trees, popovers, confirm and alert
 # boxes, content pieces), named in the rule, shown in the examples and counted by the kit usage.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'UiKit') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 $kitCss = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
 $kitJs = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.js'))
@@ -80,4 +80,4 @@ Describe 'A page that uses the basics gets their CSS' {
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

@@ -1,7 +1,7 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4. Run: Invoke-Pester .\tests
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 # Project state (backups, chat history) of the test projects goes to a temporary folder, deleted below.
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Schedule.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
@@ -64,7 +64,7 @@ Describe "Copilot's daily limit" {
 }
 
 Describe 'Invoke-DueSchedules' {
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $file = Join-Path $env:TEMP ('ccb-sched-' + [guid]::NewGuid().ToString('N') + '.json')
 
     $proj = Join-Path $env:TEMP ('ccb-sched-proj-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -198,5 +198,5 @@ Describe 'Invoke-DueSchedules' {
     Remove-Item $file -Force -ErrorAction SilentlyContinue
 }
 
-if ($env:CCBRIDGE_STATE_ROOT -and (Test-Path -LiteralPath $env:CCBRIDGE_STATE_ROOT)) { [IO.Directory]::Delete($env:CCBRIDGE_STATE_ROOT, $true) }
-$env:CCBRIDGE_STATE_ROOT = $null
+if ($env:STREAMHUB_STATE_ROOT -and (Test-Path -LiteralPath $env:STREAMHUB_STATE_ROOT)) { [IO.Directory]::Delete($env:STREAMHUB_STATE_ROOT, $true) }
+$env:STREAMHUB_STATE_ROOT = $null

@@ -2,6 +2,7 @@
 # Launches Edge with a debug port and talks to a page target over a WebSocket.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 Import-Module (Join-Path $PSScriptRoot 'Log.psm1')
 
 function Get-EdgePath {
@@ -23,14 +24,14 @@ function Start-CdpEdge {
     <# Starts Edge with a debug port, or reuses one already listening on that port. #>
     param(
         [int]$Port = 9333,
-        [string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'),
+        [string]$ProfileDir = (Get-AppDataPath 'edge-profile'),
         [string]$Url = 'about:blank',
         [switch]$Headless
     )
     if (Test-CdpEndpoint $Port) { Write-CCBLog verbose cdp "Reusing Edge on debug port $Port"; return $null }
     $null = New-Item -ItemType Directory -Force -Path $ProfileDir
     # Settings > Privacy > Clear Edge's cache: the folders Edge locked are removed now, before it opens.
-    if (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-cache-clear.flag')) {
+    if (Test-Path -LiteralPath (Get-AppDataPath 'edge-cache-clear.flag')) {
         try { Import-Module (Join-Path $PSScriptRoot 'EdgeCache.psm1'); $null = Clear-EdgeCacheFolders $ProfileDir } catch { Write-CCBLog info cdp "Edge cache not cleared: $($_.Exception.Message)" }
     }
     $edgeArgs = @("--remote-debugging-port=$Port", "--user-data-dir=`"$ProfileDir`"",
@@ -128,7 +129,7 @@ function Test-ForcedSignInBlock {
        -GetForced, -GetAccount and -GetPageCount replace the real reads in tests. #>
     param(
         [int]$Port = 9333,
-        [string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'),
+        [string]$ProfileDir = (Get-AppDataPath 'edge-profile'),
         [scriptblock]$GetForced = { Test-EdgeForcedSignIn },
         [scriptblock]$GetAccount = { param($d) Get-EdgeProfileAccount -ProfileDir $d },
         [scriptblock]$GetPageCount = { param($p) Get-WebPageCount $p }
@@ -160,7 +161,7 @@ function Invoke-EdgeProfileSignIn {
        Start-CdpEdge can start it with the debug port. Returns @{ ok; started; detail }.
        -GetAccount, -GetUse, -StartEdge, -StopEdge and -OnWait replace the real calls in tests. #>
     param(
-        [string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'),
+        [string]$ProfileDir = (Get-AppDataPath 'edge-profile'),
         [int]$Port = 9333,
         [int]$TimeoutSec = 600,
         [int]$PollMs = 2000,

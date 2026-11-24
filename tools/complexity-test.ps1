@@ -3,10 +3,10 @@
   Sends a ladder of prompts, from simple to complex, to Microsoft 365 Copilot (each in a fresh chat)
   and reports per step how Copilot responded (answered, blocked, no answer, out of credits) and how
   fast: the exact time (HH:mm:ss.fff, +ms after Send) of each step of the reply, the route it came
-  by (StreamHub, Chathub or the page) and how long CCBridge waited after Copilot had finished.
+  by (the Copilot stream connection, Chathub or the page) and how long StreamHub waited after Copilot had finished.
   Use it to find where (if anywhere) Copilot starts to fail or refuse, and where time is lost.
 .DESCRIPTION
-  Every step costs one Copilot message. The report (text + JSON in a new folder C:\temp\CCBridge-test-<date>, see -OutRoot) contains no
+  Every step costs one Copilot message. The report (text + JSON in a new folder C:\temp\StreamHub-test-<date>, see -OutRoot) contains no
   Microsoft 365 data: for the Microsoft 365 steps only codes, sizes and timings are kept.
 .PARAMETER From
   First step to run (default 1).
@@ -22,8 +22,8 @@ param([int]$From = 1, [int]$To = 19, [int]$StepTimeoutSec = 300, [int]$PauseSec 
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-foreach ($m in 'Log', 'Config', 'CopilotBridge', 'Prompts', 'Protocol') { Import-Module (Join-Path $root "lib\$m.psm1") }
-$config = Get-CCBridgeConfig harness $root
+foreach ($m in 'AppPaths', 'Log', 'Config', 'CopilotBridge', 'Prompts', 'Protocol') { Import-Module (Join-Path $root "lib\$m.psm1") }
+$config = Get-StreamHubConfig harness $root
 Initialize-CCBLog -Config $config
 
 # --- Building blocks --------------------------------------------------------------------
@@ -75,7 +75,7 @@ function Get-Part${f}Value$i {
 }
 
 function New-AgentPrompt([string]$Kind, [string]$Task, [string]$Context = '') {
-    <# The same shape CCBridge sends as the first message of a chat (New-PromptMessage). #>
+    <# The same shape StreamHub sends as the first message of a chat (New-PromptMessage). #>
     $location = "Project folder: complexity-test on the user's computer; use the read action to see its files."
     $ctx = @{ Location = $location; Full = "$location`nThe folder is empty." }
     $text = if ($Context) { "$Task`n`nAttached files:`n$Context" } else { $Task }
@@ -116,7 +116,7 @@ Write-Host 'Copilot complexity and timing test: each step sends one prompt in a 
 $bridge = Connect-Copilot -Port $config.cdpPort -SaveReplyFrames $true
 $bridge | Add-Member -NotePropertyName PageCheckMs -NotePropertyValue $PageCheckMs -Force
 $results = New-Object System.Collections.Generic.List[object]
-$repliesDir = Join-Path $env:LOCALAPPDATA 'CCBridge\replies'
+$repliesDir = Get-AppDataPath 'replies'
 try {
     foreach ($step in $steps | Where-Object { $_.n -ge $From -and $_.n -le $To }) {
         $prompt = if ($step.prompt -is [scriptblock]) { & $step.prompt } else { $step.prompt }
@@ -214,21 +214,21 @@ try {
 
 $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
 # Each run gets its own folder under $OutRoot (default C:\temp).
-$outDir = Join-Path $OutRoot "CCBridge-test-$stamp"
+$outDir = Join-Path $OutRoot "StreamHub-test-$stamp"
 $null = New-Item -ItemType Directory -Force -Path $outDir
-# Screenshots CCBridge took when the page lost its message box go with the report.
+# Screenshots StreamHub took when the page lost its message box go with the report.
 foreach ($r in $results) {
     if ("$($r.resultMessage)" -match 'screenshot: (.+?\.png)') {
         $shot = $Matches[1]
         if (Test-Path -LiteralPath $shot) { Copy-Item -LiteralPath $shot -Destination (Join-Path $outDir ("step$($r.step)-" + (Split-Path $shot -Leaf))) }
     }
 }
-$jsonFile = Join-Path $outDir "CCBridge-complexity-$stamp.json"
-$txtFile = Join-Path $outDir "CCBridge-complexity-$stamp.txt"
-$envInfo = Get-CCBridgeEnvironment $root
+$jsonFile = Join-Path $outDir "StreamHub-complexity-$stamp.json"
+$txtFile = Join-Path $outDir "StreamHub-complexity-$stamp.txt"
+$envInfo = Get-StreamHubEnvironment $root
 [IO.File]::WriteAllText($jsonFile, (Protect-LogText (@{ environment = $envInfo; steps = $results } | ConvertTo-Json -Depth 6)), (New-Object Text.UTF8Encoding($false)))
 $lines = New-Object System.Collections.Generic.List[string]
-$lines.Add("CCBridge complexity and timing test $stamp (CCBridge $($envInfo.ccbridge)), page checked every $PageCheckMs ms")
+$lines.Add("StreamHub complexity and timing test $stamp (StreamHub $($envInfo.streamhub)), page checked every $PageCheckMs ms")
 $lines.Add('Times: ms after Send was clicked; network times are Edge''s own. Names, sizes and times only.')
 $lines.Add('')
 $lines.Add(('{0,-4} {1,-38} {2,8} {3,-12} {4,7} {5,8} {6}' -f 'Step', 'Name', 'Prompt', 'Result', 'Seconds', 'Reply', 'Actions / first words'))

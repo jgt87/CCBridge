@@ -1,4 +1,4 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4. Run: Invoke-Pester .\tests
 # Safeguards around Copilot's changes: left-out code, cut-off replies, the view after an edit,
 # and syntax checks of changed files.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -88,7 +88,7 @@ Describe 'Get-ChangedView widens a change that cuts into blocks' {
 Describe 'Invoke-AgentAction safeguards' {
     Import-Module (Join-Path $root 'lib\Config.psm1') -Force
     Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $proj = Join-Path $env:TEMP ('ccb-act-' + [guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Path $proj
     $big = ((1..200 | ForEach-Object { "function f$_() {`n  return $_;`n}" }) -join "`n") + "`n"

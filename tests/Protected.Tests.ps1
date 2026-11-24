@@ -1,6 +1,6 @@
 # Protected files (setting protectedPaths): read-only like Source/ (lib/Workspace.psm1, Executor).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Workspace.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
@@ -47,10 +47,10 @@ Describe 'Protected files' {
         New-Item -ItemType Directory -Force -Path (Join-Path $app 'config') | Out-Null
         Copy-Item (Join-Path $root 'config\harness.json') (Join-Path $app 'config\harness.json')
         try {
-            $v = Set-CCBridgeSetting 'protectedPaths' "config/prod.json`n docs/ `n`n*.env" $app
+            $v = Set-StreamHubSetting 'protectedPaths' "config/prod.json`n docs/ `n`n*.env" $app
             @($v) -join '|' | Should Be 'config/prod.json|docs/|*.env'
-            (Get-CCBridgeSettings $app | Where-Object key -eq 'protectedPaths').type | Should Be 'list'
+            (Get-StreamHubSettings $app | Where-Object key -eq 'protectedPaths').type | Should Be 'list'
         } finally { Remove-Item $app -Recurse -Force }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

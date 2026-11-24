@@ -6,7 +6,7 @@ Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
 function New-Sent { New-Object 'System.Collections.Generic.HashSet[string]' }
-$ctx = @{ Location = 'Project folder: OneDrive > CCBridge > budget tracker.'; Full = "Project folder: OneDrive > CCBridge > budget tracker.`nThe folder is empty." }
+$ctx = @{ Location = 'Project folder: OneDrive > StreamHub > budget tracker.'; Full = "Project folder: OneDrive > StreamHub > budget tracker.`nThe folder is empty." }
 
 Describe 'Get-TaskKind' {
     It 'treats greetings and general questions as plain chat' {
@@ -35,9 +35,9 @@ Describe 'New-PromptMessage' {
         $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Fix the build' -Sent (New-Sent) -Context $ctx
         $m | Should Match '^You are an expert software developer'
         $m | Should Match 'PATH'
-        $m | Should Match 'OneDrive > CCBridge > budget tracker'
+        $m | Should Match 'OneDrive > StreamHub > budget tracker'
         $m | Should Match 'Request: Fix the build$'
-        $m | Should Not Match 'app\.py|hello\.py|dotnet build|CCBridge sends'
+        $m | Should Not Match 'app\.py|hello\.py|dotnet build|StreamHub sends'
         $m.Length -lt 6500 | Should Be $true     # includes the person-first rule, the folder rules, the work method (read before answering, honest done, no apology, check the installed version) and WHAT CAN RUN HERE (tools, installs, commands, web, checks, what to suggest)
     }
 
@@ -67,7 +67,7 @@ Describe 'New-PromptMessage' {
 
     It 'never mentions the tool''s name' {
         foreach ($k in 'assistant', 'project', 'coding', 'mixed') {
-            New-PromptMessage -AppRoot $root -Kind $k -Text 'x' -Sent (New-Sent) -Context $ctx | Should Not Match 'CCBridge sends|helper program called|CCBridge,'
+            New-PromptMessage -AppRoot $root -Kind $k -Text 'x' -Sent (New-Sent) -Context $ctx | Should Not Match 'StreamHub sends|helper program called|StreamHub,'
         }
     }
 }
@@ -76,7 +76,7 @@ Describe 'Project notes (AGENTS.md)' {
     It 'leaves out an AGENTS.md that only has the template text' {
         $dir = Join-Path $env:TEMP ('ccb-notes-' + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory $dir | Out-Null
-        [IO.File]::WriteAllText((Join-Path $dir 'AGENTS.md'), "# budget tracker`n`nInstructions for coding agents (CCBridge and others). CCBridge sends this file to Copilot at the start of each chat.`nDescribe the goal, tech stack, build/run commands and conventions here.`n")
+        [IO.File]::WriteAllText((Join-Path $dir 'AGENTS.md'), "# budget tracker`n`nInstructions for coding agents (StreamHub and others). StreamHub sends this file to Copilot at the start of each chat.`nDescribe the goal, tech stack, build/run commands and conventions here.`n")
         (& (Get-Module Agent) { param($d) Get-ProjectNotes $d } $dir) | Should Be ''
         [IO.File]::WriteAllText((Join-Path $dir 'AGENTS.md'), "# budget tracker`n`nInstructions for coding assistants. This file is sent to the assistant at the start of each chat.`nTrack monthly spending per category in CSV files.`n")
         $notes = & (Get-Module Agent) { param($d) Get-ProjectNotes $d } $dir
@@ -116,7 +116,7 @@ Describe 'New-ActionRetryMessage' {
         $msg | Should Match 'RULES'
         $msg | Should Match 'nothing has been changed yet'
         $msg | Should Match 'Task: Update index\.html to use styles\.css$'
-        $msg | Should Not Match 'CCBridge'
+        $msg | Should Not Match '(?<![.\w])StreamHub'
         $set.Contains('actions') | Should Be $true
     }
 }
@@ -209,21 +209,21 @@ Describe 'Settings' {
     New-Item -ItemType Directory "$app\config" | Out-Null
     Copy-Item (Join-Path $root 'config\harness.json') "$app\config\harness.json"
     It 'lists the settings with value, default and limits' {
-        $s = @(Get-CCBridgeSettings $app)
+        $s = @(Get-StreamHubSettings $app)
         ($s | Where-Object key -eq 'pacing.beforeSendSec').default | Should Be 1
         ($s | Where-Object key -eq 'reviewAfterChanges').options -contains 'off' | Should Be $true
         ($s | Where-Object key -eq 'stallSec').custom | Should Be $false
     }
     It 'saves a value (also inside pacing), validates it, and resets it' {
-        Set-CCBridgeSetting 'pacing.beforeSendSec' 2.5 $app | Should Be 2.5
-        Set-CCBridgeSetting 'stallSec' '120' $app | Should Be 120
-        (Get-CCBridgeConfig harness $app).pacing.newChatSettleSec | Should Be 3   # untouched fields keep their default
-        { Set-CCBridgeSetting 'stallSec' 5 $app } | Should Throw 'between 30 and 600'
-        { Set-CCBridgeSetting 'pageCheck' 'maybe' $app } | Should Throw 'one of: on, off'
-        { Set-CCBridgeSetting 'nope' 1 $app } | Should Throw 'Unknown setting'
-        Set-CCBridgeSetting 'pacing.beforeSendSec' $null $app | Should Be 1
+        Set-StreamHubSetting 'pacing.beforeSendSec' 2.5 $app | Should Be 2.5
+        Set-StreamHubSetting 'stallSec' '120' $app | Should Be 120
+        (Get-StreamHubConfig harness $app).pacing.newChatSettleSec | Should Be 3   # untouched fields keep their default
+        { Set-StreamHubSetting 'stallSec' 5 $app } | Should Throw 'between 30 and 600'
+        { Set-StreamHubSetting 'pageCheck' 'maybe' $app } | Should Throw 'one of: on, off'
+        { Set-StreamHubSetting 'nope' 1 $app } | Should Throw 'Unknown setting'
+        Set-StreamHubSetting 'pacing.beforeSendSec' $null $app | Should Be 1
         (Get-Content "$app\config\harness.local.json" -Raw) | Should Not Match 'pacing'
-        (@(Get-CCBridgeSettings $app) | Where-Object key -eq 'stallSec').custom | Should Be $true
+        (@(Get-StreamHubSettings $app) | Where-Object key -eq 'stallSec').custom | Should Be $true
     }
     Remove-Item $app -Recurse -Force
 }
@@ -255,7 +255,7 @@ Describe 'Case-specific prompt modules' {
         $envText | Should Match 'ACTION web source'
         $envText | Should Match 'Never tell the user to install software'
         $envText | Should Match 'helper program'
-        $envText | Should Not Match '(?i)ccbridge|streamhub'
+        $envText | Should Not Match '(?i)(?<![.\w])streamhub'
     }
     It 'adds the question, data, bigger task, script, UI, web service, C#, React and privacy rules only when they apply' {
         $none = @{ Traits = @() }
@@ -335,7 +335,7 @@ Describe 'Get-TaskKind in a project with code' {
 }
 
 Describe 'Get-TurnKind forced kinds' {
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $s = New-AgentState -Config $config -AppRoot $root
     It 'sends again as coding, and keeps Microsoft 365 rules as mixed' {
         & (Get-Module Agent) { param($a, $b, $f) Get-TurnKind $a $b @{ Traits = @(); Paths = @() } $f } $s 'hello there' 'coding' | Should Be 'coding'
@@ -355,7 +355,7 @@ Describe 'Code quality rules' {
         (Get-PromptModules 'Why does the test fail?' @{ Traits = @('code'); Paths = @('a.js') }) -contains 'rules:quality' | Should Be $false
         $part = Get-PromptPart $root 'rules:quality' @{}
         $part | Should Match 'never an empty catch'
-        $part | Should Not Match '(?i)ccbridge|streamhub'
+        $part | Should Not Match '(?i)(?<![.\w])streamhub'
         $part.Length -lt 900 | Should Be $true
     }
 }
@@ -397,6 +397,6 @@ Describe 'React instructions follow what this computer can build' {
         $t | Should Match "base: './'"
         $t | Should Match 'npm run build'
         $t | Should Match 'Do not start a development server'
-        $t | Should Not Match 'CCBridge|StreamHub'
+        $t | Should Not Match '(?<![.\w])StreamHub'
     }
 }

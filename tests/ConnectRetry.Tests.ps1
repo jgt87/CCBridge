@@ -2,7 +2,7 @@
 # waiting longer each time, and stops by itself after about an hour; a success or a Retry in the app
 # starts the count over.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Agent', 'Config') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 Describe 'Retrying the Copilot connection' {
@@ -13,7 +13,7 @@ Describe 'Retrying the Copilot connection' {
     }
     It 'counts failures, schedules the next try, and after the last says how to try again' {
         Mock -ModuleName Agent Connect-Copilot { throw 'Could not connect to the Copilot tab.' }
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $before = Get-Date
         { & (Get-Module Agent) { param($st) Get-Bridge $st } $s } | Should Throw 'Could not connect'
         $s.ConnectFailures | Should Be 1
@@ -32,7 +32,7 @@ Describe 'Retrying the Copilot connection' {
         Mock -ModuleName Agent Update-CopilotTheme { }
         Mock -ModuleName Agent Test-ResponseOptionsDue { $false }
         Mock -ModuleName Agent Test-CopilotPage { @() }
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s.ConnectFailures = 5
         $null = & (Get-Module Agent) { param($st) $script:Bridge = $null; Get-Bridge $st } $s
         $s.Copilot | Should Be 'ready'
@@ -48,7 +48,7 @@ Describe 'Signing in to Copilot while the worker goes on' {
         Mock -ModuleName Agent Test-ResponseOptionsDue { $false }
         Mock -ModuleName Agent Test-CopilotPage { @() }
         Mock -ModuleName Agent Disconnect-Copilot { }
-        $st = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $st = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         & (Get-Module Agent) { $script:Bridge = $null; $script:PendingBridge = $null }
         $st
     }
@@ -123,4 +123,4 @@ Describe 'Signing in to Copilot while the worker goes on' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

@@ -1,7 +1,7 @@
 # Chains: runbooks, fetch prompts and project scripts one after another (lib/Chain.psm1,
 # Invoke-ChainJob / Invoke-ChainScript in Agent.psm1).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Chain.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Schedule.psm1') -Force
@@ -258,7 +258,7 @@ Describe 'Running a chain' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
 
 Describe 'A chain step Copilot gave no answer to' {
     It 'is recognised by its error text, unlike other errors' {

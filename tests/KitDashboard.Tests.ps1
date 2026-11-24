@@ -1,7 +1,7 @@
 # The UI kit's dashboard parts and print styles (templates/ui-kit), their settings (uiKitParts.dashboard,
 # uiKitParts.print, uiKitPrintOrientation, uiKitWeekStart) and how they reach a project and Copilot.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'UiKit', 'Prompts', 'ProjectSetup') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 $kitCss = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
@@ -57,7 +57,7 @@ Describe 'Settings for the dashboard parts and printing' {
         $ex | Should Match 'kit-part:charts|data-kit-chart'
     }
     It 'puts the week start and the paper orientation into kit.css, only where they apply' {
-        Mock -ModuleName UiKit Get-CCBridgeConfig { [pscustomobject]@{ uiKitWeekStart = 'sunday'; uiKitPrintOrientation = 'landscape' } }
+        Mock -ModuleName UiKit Get-StreamHubConfig { [pscustomobject]@{ uiKitWeekStart = 'sunday'; uiKitPrintOrientation = 'landscape' } }
         Mock -ModuleName UiKit Test-UiKitPart { $true }
         $usage = Get-KitTextUsage @('<div class="kit-range" data-kit-range></div>')
         $css = Get-KitSettingsCss $root $usage
@@ -65,7 +65,7 @@ Describe 'Settings for the dashboard parts and printing' {
         $css | Should Match '@page \{ size: landscape; margin: 12mm; \}'
         $plain = Get-KitSettingsCss $root (Get-KitTextUsage @('<div class="kit-panel"></div>'))
         $plain | Should Not Match 'kit-week-start'
-        Mock -ModuleName UiKit Get-CCBridgeConfig { [pscustomobject]@{ uiKitWeekStart = 'monday'; uiKitPrintOrientation = 'auto' } }
+        Mock -ModuleName UiKit Get-StreamHubConfig { [pscustomobject]@{ uiKitWeekStart = 'monday'; uiKitPrintOrientation = 'auto' } }
         $css = Get-KitSettingsCss $root $usage
         $css | Should Match '--kit-week-start: 1;'
         $css | Should Not Match '@page'
@@ -91,4 +91,4 @@ Describe 'The data stamp of a one-file page' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

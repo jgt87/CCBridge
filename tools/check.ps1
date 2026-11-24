@@ -2,7 +2,7 @@
 .SYNOPSIS
     Checks whether this computer has everything StreamHub needs, and shows the status of each part.
 .DESCRIPTION
-    Runs by itself (check.cmd), after installing (install.ps1) and at every start (ccbridge.ps1,
+    Runs by itself (check.cmd), after installing (install.ps1) and at every start (streamhub.ps1,
     without the online checks). Repairs what is safe (a busy port, OneDrive sign-in; -NoFix only
     reports) and names where to download what is missing. Exit code 1 when a check failed.
 .EXAMPLE
@@ -19,7 +19,7 @@ Add-ToolPaths   # tools StreamHub installed for this user count too
 $port = 8765; $cdp = 9333
 try {
     Import-Module (Join-Path $root 'lib\Config.psm1') -Force
-    $cfg = Get-CCBridgeConfig harness $root
+    $cfg = Get-StreamHubConfig harness $root
     if ($cfg.port) { $port = [int]$cfg.port }; if ($cfg.cdpPort) { $cdp = [int]$cfg.cdpPort }
 } catch { }
 $checks = Get-PrereqChecks -WebPort $port -CdpPort $cdp -Online:(-not $Offline) -Tools

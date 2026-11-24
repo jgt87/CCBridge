@@ -436,8 +436,8 @@ Describe 'Asking Copilot for the mapping' {
         $ask | Should Match 'id 2, text box at 30,13 size 40x13: "Free Heading"'
         $ask | Should Match 'id 3, picture'
         $ask | Should Match '"slides"'
-        $ask | Should Not Match 'CCBridge'
-        $ask | Should Not Match 'StreamHub'
+        $ask | Should Not Match '(?<![.\w])StreamHub'
+        $ask | Should Not Match '(?<![.\w])StreamHub'
     }
 
     It 'cuts long text at 60 characters' {

@@ -1,4 +1,4 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests\RunbookFromChat.Tests.ps1
+# Pester 3.4. Run: Invoke-Pester .\tests\RunbookFromChat.Tests.ps1
 # Save a request as a runbook: the last request of the chat, whether it can become a runbook, and
 # the fixed text that asks Copilot to write one (routed as a request to create a runbook).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -84,7 +84,7 @@ Describe 'The request that asks Copilot for the runbook' {
         $text | Should Match 'Runbooks/list-my-meetings-for-next-week\.runbook\.md'
         $text | Should Match 'output: Runbooks/Exports/list-my-meetings-for-next-week\.json'
         $text | Should Match 'Do not run the runbook now'
-        $text | Should Not Match 'CCBridge'
+        $text | Should Not Match '(?<![.\w])StreamHub'
         $text | Should Not Match '(?m)^>'
     }
 

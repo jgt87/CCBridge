@@ -1,4 +1,4 @@
-# Settings: config\<name>.json ships with CCBridge; config\<name>.local.json holds this machine's
+# Settings: config\<name>.json ships with StreamHub; config\<name>.local.json holds this machine's
 # overrides (for example the Work IQ selector) and is never touched by updates.
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +14,7 @@ function Merge-JsonObject($Base, $Override) {
     }
 }
 
-function Get-CCBridgeConfig {
+function Get-StreamHubConfig {
     <# Returns config\<Name>.json merged with config\<Name>.local.json (if present). #>
     param([Parameter(Mandatory)][ValidateSet('harness', 'selectors')][string]$Name, [string]$AppRoot)
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
@@ -43,7 +43,7 @@ function Invoke-NativeLines {
     } catch { @() }
 }
 
-function Get-CCBridgeVersion([string]$AppRoot) {
+function Get-StreamHubVersion([string]$AppRoot) {
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
     $v = Join-Path $AppRoot 'version.txt'
     if (Test-Path $v) { return ([IO.File]::ReadAllText($v)).Trim() }
@@ -52,7 +52,7 @@ function Get-CCBridgeVersion([string]$AppRoot) {
     'dev'
 }
 
-function Get-CCBridgeBuild {
+function Get-StreamHubBuild {
     <# Release version and commit, shown in the web app. A release copy has version.txt and
        commit.txt (written by build-release.ps1); a git copy uses its latest release tag and HEAD. #>
     param([string]$AppRoot)
@@ -70,7 +70,7 @@ function Get-CCBridgeBuild {
     [pscustomobject]@{ version = $(if ($version) { "$version" } else { 'dev' }); commit = $(if ($commit) { "$commit" } else { '' }) }
 }
 
-function Set-CCBridgeLocalSetting {
+function Set-StreamHubLocalSetting {
     <# Writes one setting into config\<Name>.local.json (kept across updates). #>
     param([Parameter(Mandatory)][ValidateSet('harness', 'selectors')][string]$Name, [Parameter(Mandatory)][string]$Key, $Value, [string]$AppRoot)
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
@@ -148,7 +148,7 @@ $script:SettingDefs = @(
     @{ key = 'issues.autoFix'; group = 'Checks and issues'; label = 'Fix automatically'; help = 'Problems a task adds that StreamHub sends back to Copilot to fix, one file at a time: error (broken syntax, missing files, typos), secret (keys and passwords in code), health (functions that are too complex). The rest is only reported.'; type = 'select'; options = @('error', 'error,secret', 'error,secret,health', 'none') }
     @{ key = 'issues.maxAttempts'; group = 'Checks and issues'; label = 'Fix attempts per file'; help = 'Fix tasks per file before its remaining problems are marked "gave up". Each attempt goes further: 1 the problems; 2 Copilot finds the cause first, with the file as it is now, a map of open brackets and what the last attempt changed (Think deeper); 3 fresh eyes in a new chat, from the last version without the problem (Think deeper). Copilot''s diagnosis is kept with a problem it gave up on.'; type = 'number'; min = 1; max = 5 }
     @{ key = 'chatHistory'; group = 'Privacy and retention'; label = 'Keep chat history'; help = 'Keep each project''s conversation on this computer (not in OneDrive), so it is back after a restart.'; type = 'toggle' }
-    @{ key = 'saveReplyFrames'; group = 'Privacy and retention'; label = 'Keep raw Copilot replies'; help = 'The raw data of the last 30 replies, for diagnostics (in %LOCALAPPDATA%\CCBridge\replies). They can contain Microsoft 365 data.'; type = 'toggle' }
+    @{ key = 'saveReplyFrames'; group = 'Privacy and retention'; label = 'Keep raw Copilot replies'; help = 'The raw data of the last 30 replies, for diagnostics (in %LOCALAPPDATA%\StreamHub\replies). They can contain Microsoft 365 data.'; type = 'toggle' }
     @{ key = 'retention.historyCount'; group = 'Privacy and retention'; label = 'Earlier runbook results: kept'; help = 'Earlier results of each runbook in .streamhub/History/, kept per runbook (the latest is in Runbooks/Exports/). 0 = no limit.'; type = 'number'; min = 0; max = 1000 }
     @{ key = 'retention.historyDays'; group = 'Privacy and retention'; label = 'Earlier runbook results: days kept'; help = 'Earlier results older than this are removed. 0 = no limit.'; type = 'number'; min = 0; max = 3650 }
     @{ key = 'retention.evidenceCount'; group = 'Privacy and retention'; label = 'Task reports: kept'; help = 'Task reports (evidence) in .streamhub/Evidence/: what was asked, what changed, which checks passed. 0 = no limit.'; type = 'number'; min = 0; max = 10000 }
@@ -188,12 +188,12 @@ function ConvertFrom-CommandPattern([string]$Pattern) {
     if ($m.Success) { [regex]::Unescape($m.Groups[1].Value) } else { $Pattern }
 }
 
-function Get-CCBridgeSettings {
+function Get-StreamHubSettings {
     <# The adjustable settings with their current value, default and whether this machine changed it. #>
     param([string]$AppRoot)
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
     $defaults = Get-Content (Join-Path $AppRoot 'config\harness.json') -Raw | ConvertFrom-Json
-    $current = Get-CCBridgeConfig harness $AppRoot
+    $current = Get-StreamHubConfig harness $AppRoot
     foreach ($d in $script:SettingDefs) {
         $def = Get-SettingValue $defaults $d.key; $cur = Get-SettingValue $current $d.key
         if ($d.type -eq 'commands') {
@@ -210,7 +210,7 @@ function Get-CCBridgeSettings {
     }
 }
 
-function Set-CCBridgeSetting {
+function Set-StreamHubSetting {
     <# Validates and saves one adjustable setting in harness.local.json; $null resets it to the default.
        Returns the value now in effect. #>
     param([Parameter(Mandatory)][string]$Key, $Value, [string]$AppRoot)
@@ -253,18 +253,18 @@ function Set-CCBridgeSetting {
     else { $parent | Add-Member -Force -NotePropertyName $leaf -NotePropertyValue $Value }
     if ($parts.Count -eq 2 -and -not @($parent.PSObject.Properties).Count) { $obj.PSObject.Properties.Remove($parts[0]) }
     [IO.File]::WriteAllText($file, ($obj | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
-    Get-SettingValue (Get-CCBridgeConfig harness $AppRoot) $Key
+    Get-SettingValue (Get-StreamHubConfig harness $AppRoot) $Key
 }
 
 function Test-DataCopiesOn([string]$AppRoot) {
     <# Setting dataCopies (on unless turned off): data copies follow their JSON (DataMirror.psm1).
        Read from disk, so every runspace sees a change at once. #>
-    try { $v = (Get-CCBridgeConfig harness $AppRoot).dataCopies; ($null -eq $v) -or [bool]$v } catch { $true }
+    try { $v = (Get-StreamHubConfig harness $AppRoot).dataCopies; ($null -eq $v) -or [bool]$v } catch { $true }
 }
 
 function Test-DataImportOn([string]$AppRoot) {
     <# Setting dataImport (on unless turned off): data files are converted for Copilot (DataImport.psm1). #>
-    try { $v = (Get-CCBridgeConfig harness $AppRoot).dataImport; ($null -eq $v) -or [bool]$v } catch { $true }
+    try { $v = (Get-StreamHubConfig harness $AppRoot).dataImport; ($null -eq $v) -or [bool]$v } catch { $true }
 }
 
 $script:ScriptLanguage = @{}
@@ -298,13 +298,13 @@ function Test-UiKitPart([string]$Name, [string]$AppRoot) {
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
     # Python in the page is off unless switched on (13 MB); the other parts are on unless switched off.
     $default = $Name -ne 'python'
-    try { $p = (Get-CCBridgeConfig harness $AppRoot).uiKitParts; $v = if ($p) { $p.$Name } else { $null }; if ($null -eq $v) { $default } else { [bool]$v } } catch { $default }
+    try { $p = (Get-StreamHubConfig harness $AppRoot).uiKitParts; $v = if ($p) { $p.$Name } else { $null }; if ($null -eq $v) { $default } else { [bool]$v } } catch { $default }
 }
 
 function Test-UiKitOn([string]$AppRoot) {
     <# Setting uiKit (on unless turned off): interface work uses the UI kit (templates/ui-kit). Read
        from disk, so every runspace sees a change at once. #>
-    try { $v = (Get-CCBridgeConfig harness $AppRoot).uiKit; ($null -eq $v) -or [bool]$v } catch { $true }
+    try { $v = (Get-StreamHubConfig harness $AppRoot).uiKit; ($null -eq $v) -or [bool]$v } catch { $true }
 }
 
 $script:CheckSwitchNames = @('generated', 'tools', 'powershell7', 'quality', 'contrast')
@@ -327,33 +327,33 @@ function Test-CheckSwitch([string]$Name, [string]$AppRoot) {
     $stamp = ''
     foreach ($f in 'harness.json', 'harness.local.json') { $p = Join-Path $AppRoot "config\$f"; if (Test-Path -LiteralPath $p) { $stamp += "$((Get-Item -LiteralPath $p).LastWriteTimeUtc.Ticks);" } }
     if ($script:CheckSwitchStamp -ne $stamp) {
-        $script:CheckSwitches = try { (Get-CCBridgeConfig harness $AppRoot).checks } catch { $null }
+        $script:CheckSwitches = try { (Get-StreamHubConfig harness $AppRoot).checks } catch { $null }
         $script:CheckSwitchStamp = $stamp
     }
     $v = if ($script:CheckSwitches) { $script:CheckSwitches.$Name } else { $null }
     ($null -eq $v) -or ([bool]$v -and "$v" -ne 'off')
 }
 
-function Reset-CCBridgeSettings {
+function Reset-StreamHubSettings {
     <# Puts every adjustable setting back to the app default (removes them from harness.local.json;
        other local values, such as the ports, stay). Returns the keys that were changed. #>
     param([string]$AppRoot)
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
-    $changed = @(Get-CCBridgeSettings $AppRoot | Where-Object custom | ForEach-Object { $_.key })
+    $changed = @(Get-StreamHubSettings $AppRoot | Where-Object custom | ForEach-Object { $_.key })
     # Ports are set by StreamHub itself (moved away from other programs): a reset keeps them.
-    foreach ($d in @($script:SettingDefs | Where-Object { $_.type -ne 'info' })) { $null = Set-CCBridgeSetting $d.key $null $AppRoot }
+    foreach ($d in @($script:SettingDefs | Where-Object { $_.type -ne 'info' })) { $null = Set-StreamHubSetting $d.key $null $AppRoot }
     $changed
 }
 
-function Get-CCBridgeEnvironment {
+function Get-StreamHubEnvironment {
     <# Facts that help diagnose a machine; no personal data. #>
     param([string]$AppRoot)
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
     $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-    $harness = Get-CCBridgeConfig harness $AppRoot
-    $sel = Get-CCBridgeConfig selectors $AppRoot
+    $harness = Get-StreamHubConfig harness $AppRoot
+    $sel = Get-StreamHubConfig selectors $AppRoot
     [ordered]@{
-        ccbridge = Get-CCBridgeVersion $AppRoot
+        streamhub = Get-StreamHubVersion $AppRoot
         installKind = $(if (Test-Path (Join-Path $AppRoot '.git')) { 'git' } elseif (Test-Path (Join-Path $AppRoot 'version.txt')) { 'release' } else { 'copy' })
         powershell = $PSVersionTable.PSVersion.ToString()
         languageMode = $ExecutionContext.SessionState.LanguageMode.ToString()
@@ -368,4 +368,12 @@ function Get-CCBridgeEnvironment {
     }
 }
 
-Export-ModuleMember -Function Get-ScriptLanguageMode, Test-DataImportOn, Test-UiKitPart, Test-UiKitOn, Test-CheckSwitch, Set-CheckSwitchOverride, Get-CheckSwitchNames, Test-DataCopiesOn, Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Set-CCBridgeLocalSetting, Get-CCBridgeEnvironment, Get-CCBridgeSettings, Set-CCBridgeSetting, Reset-CCBridgeSettings
+# The names from before the rename, for one start only: a start script or MCP server of an older
+# release keeps running right after it updated itself, and loads these modules under the old names.
+# Its next start runs the new scripts, which never use them.
+Set-Alias -Name Get-CCBridgeConfig -Value Get-StreamHubConfig        # pre-rename name
+Set-Alias -Name Get-CCBridgeVersion -Value Get-StreamHubVersion      # pre-rename name
+Set-Alias -Name Get-CCBridgeBuild -Value Get-StreamHubBuild          # pre-rename name
+Set-Alias -Name Get-CCBridgeEnvironment -Value Get-StreamHubEnvironment   # pre-rename name
+
+Export-ModuleMember -Function Get-ScriptLanguageMode, Test-DataImportOn, Test-UiKitPart, Test-UiKitOn, Test-CheckSwitch, Set-CheckSwitchOverride, Get-CheckSwitchNames, Test-DataCopiesOn, Get-StreamHubConfig, Get-StreamHubVersion, Get-StreamHubBuild, Set-StreamHubLocalSetting, Get-StreamHubEnvironment, Get-StreamHubSettings, Set-StreamHubSetting, Reset-StreamHubSettings -Alias Get-CCBridgeConfig, Get-CCBridgeVersion, Get-CCBridgeBuild, Get-CCBridgeEnvironment   # pre-rename names

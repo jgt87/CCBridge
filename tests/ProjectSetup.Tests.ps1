@@ -3,7 +3,7 @@
 # choice, one-file pages whose UI kit and data blocks the helper program fills (and Copilot never
 # sees or edits), and a live data file outside the project copied in when it changes. Made-up data.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'UiKit', 'DataImport', 'OneFile', 'ProjectSetup', 'Executor', 'Lint', 'Guardrails', 'Prompts') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 function New-SetupProject([switch]$WithData) {
@@ -339,7 +339,7 @@ Describe 'Asking in the chat (Agent Publish-SetupQuestions, Save-SetupAnswer)' {
     It 'asks before the first request of a new project, then saves the answer' {
         $p = New-SetupProject -WithData
         try {
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
             Publish-SetupQuestions $s @{ kind = 'chat'; text = 'Build a dashboard from the sales CSV'; clarify = $true } | Should Be $true
             $card = @(@($s.Events) | Where-Object { $_.type -eq 'setup-choice' })[0]
             $card.request | Should Be 'Build a dashboard from the sales CSV'
@@ -354,7 +354,7 @@ Describe 'Asking in the chat (Agent Publish-SetupQuestions, Save-SetupAnswer)' {
     It 'saves a form the request names without asking, and refuses a live path that is not there' {
         $p = New-SetupProject -WithData
         try {
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
             # The build form is saved from the request itself; other questions the data triggers (personal details) may still come, never the build one.
             $asked = Publish-SetupQuestions $s @{ kind = 'chat'; text = 'Build a dashboard as a single html file' }
             (Get-ProjectSetup $p).build | Should Be 'single'
@@ -384,7 +384,7 @@ Describe 'The setup in the API (Server /api/chat setup, /api/project-setup)' {
     It 'takes the setup answer with a chat message only from the StreamHub page' {
         $p = New-SetupProject -WithData
         try {
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Config.port = 8765
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Config.port = 8765
             Invoke-FakeApi (New-FakeCtx 'POST' '/api/chat' @{ text = 'Build a dashboard'; setup = @{ build = 'single'; liveSource = 'C:\Data\x.csv' } } $page) $s
             $t = $null; $null = $s.Tasks.TryDequeue([ref]$t)
             $t.setup.build | Should Be 'single'
@@ -397,7 +397,7 @@ Describe 'The setup in the API (Server /api/chat setup, /api/project-setup)' {
     It 'records a plan first chosen on the setup card in PLAN.md, and builds it on approval' {
         $p = New-SetupProject
         try {
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Config.port = 8765
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Config.port = 8765
             Invoke-FakeApi (New-FakeCtx 'POST' '/api/chat' @{ text = 'Build a dashboard of the releases'; planFirst = $true; request = 'Build a dashboard of the releases'; setup = @{ answers = @{ bigtask = 'plan' } } } 'http://localhost:8765') $s
             $t = $null; $null = $s.Tasks.TryDequeue([ref]$t)
             $t.planFirst | Should Be $true
@@ -413,7 +413,7 @@ Describe 'The setup in the API (Server /api/chat setup, /api/project-setup)' {
         $out = Join-Path $env:TEMP ('ccb-live-' + [guid]::NewGuid().ToString('N') + '.csv')
         try {
             [IO.File]::WriteAllText($out, "name`nAnn`n")
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
             $null = Save-ProjectSetup $p @{ build = 'modular'; liveSource = $out }
             $rel = 'Source/Live/' + [IO.Path]::GetFileName($out)
             $serve = { $c = New-FakeCtx 'GET' "/preview/x/$rel" $null $page; & (Get-Module Server) { param($c, $st, $r) Send-PreviewFile $c $st $r } $c $s $rel; [Text.Encoding]::UTF8.GetString($c.Response.OutputStream.ToArray()) }
@@ -429,7 +429,7 @@ Describe 'The setup in the API (Server /api/chat setup, /api/project-setup)' {
         $out = Join-Path $env:TEMP ('ccb-live-' + [guid]::NewGuid().ToString('N') + '.csv')
         try {
             [IO.File]::WriteAllText($out, "a,b`n1,2`n")
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Config.port = 8765
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Config.port = 8765
             $c = New-FakeCtx 'GET' '/api/project-setup' $null $page; Invoke-FakeApi $c $s
             (Get-FakeJson $c).setup.build | Should Be ''
             $c = New-FakeCtx 'POST' '/api/project-setup' @{ build = 'modular' } 'http://elsewhere.example'; Invoke-FakeApi $c $s
@@ -448,4 +448,4 @@ Describe 'The setup in the API (Server /api/chat setup, /api/project-setup)' {
         } finally { Remove-Item $p -Recurse -Force; Remove-Item $out -Force -ErrorAction SilentlyContinue }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

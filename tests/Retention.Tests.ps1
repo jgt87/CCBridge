@@ -1,7 +1,7 @@
 # Retention: History/, evidence/, reviews/ and undo backups keep the newest N and nothing older
 # than D days (0 = no limit); the newest change set always stays; other files are never touched.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Retention.psm1') -Force
 Import-Module (Join-Path $root 'lib\Workspace.psm1') -Force
 
@@ -146,4 +146,4 @@ Describe 'Invoke-ProjectRetention' {
         (Get-RetentionSettings @{ retention = @{ historyCount = 5 } }).historyCount | Should Be 5
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

@@ -140,6 +140,6 @@ Describe 'Prisma rules for Copilot' {
         $ids -contains 'rules:prisma' | Should Be $false
         $rules = [IO.File]::ReadAllText((Join-Path $root 'prompts\rules\prisma.md'))
         $rules | Should Match 'Never prisma migrate dev or prisma studio'
-        $rules | Should Not Match 'CCBridge|StreamHub'
+        $rules | Should Not Match '(?<![.\w])StreamHub'
     }
 }

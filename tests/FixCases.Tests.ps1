@@ -1,7 +1,7 @@
 # Fix case logs (lib/FixCases.psm1, Agent Invoke-IssueCycle): a problem that needed more than one try
 # gets a case file, fixed or not, with the change that brought it, every try and the outcome.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'FixCases', 'Executor', 'Issues', 'Agent', 'Config') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 Describe 'A fix case file' {
@@ -27,7 +27,7 @@ Describe 'Fix cases from a task (Copilot mocked)' {
     It 'keeps the change of a file in a subfolder: the backup is found by its path' {
         $p = Join-Path $env:TEMP ('ccb-fc-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'js') | Out-Null
         [IO.File]::WriteAllText((Join-Path $p 'js\app.js'), "function a() {`n  return 0;`n}`n")
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $config.pageCheck = 'off'
         Mock -ModuleName Agent Start-NewChat { }
         Mock -ModuleName Agent Send-ToCopilot {
@@ -56,7 +56,7 @@ Describe 'Fix cases from a task (Copilot mocked)' {
 Describe 'Fix cases from the issue cycle' {
     $mk = {
         $p = Join-Path $env:TEMP ('ccb-fc-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s.ProjectRoot = $p
         @{ p = $p; s = $s }
     }
@@ -94,4 +94,4 @@ Describe 'Fix cases from the issue cycle' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

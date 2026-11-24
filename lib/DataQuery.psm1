@@ -7,6 +7,7 @@
 
 Import-Module (Join-Path $PSScriptRoot 'Cdp.psm1')
 Import-Module (Join-Path $PSScriptRoot 'DataImport.psm1')
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 
 function Get-QueryTableName([string]$Output, [string]$Sheet = '') {
     # data/sales-2026.json -> sales_2026; a sheet of a workbook -> sales_2026_SHEET (letters, digits, _).
@@ -52,7 +53,7 @@ function Invoke-InEdgePage {
        one's value. The tab, and an Edge it started, are closed afterwards. #>
     param([Parameter(Mandatory)][string]$PageFile, [Parameter(Mandatory)][string]$ReadyJs, [string[]]$Steps, [int]$CdpPort = 0, [int]$TimeoutMs = 120000)
     $own = $null; $port = $CdpPort; $target = $null; $s = $null
-    $prof = Join-Path $env:LOCALAPPDATA 'CCBridge\query-edge'
+    $prof = Get-AppDataPath 'query-edge'
     try {
         if (-not $port -or -not (Test-CdpEndpoint $port)) {
             $l = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0); $l.Start(); $port = $l.LocalEndpoint.Port; $l.Stop()

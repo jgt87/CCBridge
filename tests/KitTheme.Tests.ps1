@@ -1,8 +1,8 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests\KitTheme.Tests.ps1
+# Pester 3.4. Run: Invoke-Pester .\tests\KitTheme.Tests.ps1
 # Theme from your colours: the kit's colour tokens derived from an accent (and a second colour and a
 # neutral tint), readable in light and dark, written into the project's tokens.css and nothing else.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\KitTheme.psm1') -Force
 Import-Module (Join-Path $root 'lib\Contrast.psm1') -Force
 Import-Module (Join-Path $root 'lib\UiKit.psm1') -Force
@@ -142,4 +142,4 @@ Describe 'Writing the theme' {
     Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item -LiteralPath $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

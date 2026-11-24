@@ -2,7 +2,7 @@
 # that are not met, and what the session report finds. No internet: the fetch is stood in for.
 # Made-up sites and records.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-ws-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-ws-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'WebFetch', 'DataImport', 'TaskNotes', 'SessionReport', 'Agent') { Import-Module (Join-Path $root "lib\$m.psm1") -Force -DisableNameChecking }
 
 $global:wsFeed = ConvertTo-Json -Depth 6 -Compress -InputObject ([ordered]@{ updated = '2026-01-05'; items = @(1..300 | ForEach-Object { [ordered]@{ id = "A$_"; title = "Item $_"; products = @('Alpha', 'Beta'); score = $_ * 2; flags = [ordered]@{ user = $true } } }) })
@@ -22,7 +22,7 @@ Describe 'Saving web data into the project' {
         $p = Join-Path $env:TEMP ('ccb-ws-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
         try {
             Mock -ModuleName Agent Invoke-WebFetch { [pscustomobject]@{ ok = $true; url = 'https://data.example.com/api/items'; type = 'application/json; charset=utf-8'; text = $global:wsFeed; chars = $global:wsFeed.Length; truncated = $false } }
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'; $s.TurnText = 'Use the data of https://data.example.com/api/items'
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'; $s.TurnText = 'Use the data of https://data.example.com/api/items'
             $r = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'web'; arg = 'save:items'; body = 'https://data.example.com/api/items' }) 'w1' $null 0 } $s
             $r.output | Should Match '^Saved'
             $r.ok | Should Be $true
@@ -100,4 +100,4 @@ Describe 'What the session report finds' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

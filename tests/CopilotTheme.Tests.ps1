@@ -28,7 +28,7 @@ Describe 'Set-CopilotTheme' {
 Describe 'Update-CopilotTheme (the worker applies the app''s theme once per connection)' {
     Mock -ModuleName Agent Set-CopilotTheme { param($Bridge, $Theme) $global:ccbThemes += , $Theme }
     Mock -ModuleName Agent Disconnect-Copilot { }
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $setBridge = { param($b) & (Get-Module Agent) { param($x) $script:Bridge = $x } $b }
 
     It 'does nothing before the app said which theme it shows, or without a connection' {

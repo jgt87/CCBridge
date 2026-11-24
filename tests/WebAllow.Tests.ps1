@@ -1,7 +1,7 @@
 # Allowing a part of a web site for a project when approving a read: later reads under it need no
 # approval. No internet: the fetch and the approval are stood in for. Made-up sites.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-wa-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-wa-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'WebFetch', 'Agent') { Import-Module (Join-Path $root "lib\$m.psm1") -Force -DisableNameChecking }
 
 Describe 'Which part of a site can be allowed' {
@@ -24,7 +24,7 @@ Describe 'Which part of a site can be allowed' {
 
 Describe 'A read approved for a part of a site' {
     $p = Join-Path $env:TEMP ('ccb-wa-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     Mock -ModuleName Agent Invoke-WebFetch { param($Url) [pscustomobject]@{ ok = $true; url = $Url; type = 'text/html'; title = 'Page'; text = 'Some text'; chars = 9 } }
     It 'asks once, keeps the chosen part when the person picks it, and reads under it without asking' {
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'; $s.TurnText = 'Make a page of the guide'
@@ -52,4 +52,4 @@ Describe 'A read approved for a part of a site' {
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

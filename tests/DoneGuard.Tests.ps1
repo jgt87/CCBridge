@@ -1,15 +1,15 @@
 # A "done" in the same reply as a write, edit or run step that failed does not end the task: the
 # failure goes back to Copilot and done is taken again in a reply of its own (Copilot mocked).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
 Describe 'Done next to a failed step' {
     $p = Join-Path $env:TEMP ('ccb-done-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
     [IO.File]::WriteAllText((Join-Path $p 'app.js'), "function a() {`n  return 1;`n}`n")
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $config.pageCheck = 'off'
     Mock -ModuleName Agent Start-NewChat { }
     Mock -ModuleName Agent Send-ToCopilot {
@@ -48,6 +48,6 @@ Describe 'Done next to a failed step' {
     }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
-Remove-Item -LiteralPath $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
-$env:CCBRIDGE_ISSUE_INDEX = $null
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
+$env:STREAMHUB_ISSUE_INDEX = $null
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

@@ -4,7 +4,7 @@
 # at once, the AGENTS.md of a file's folder, and a long SEARCH matched by its first and last lines.
 # Made-up files.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-rs-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-rs-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Log', 'Config', 'Workspace', 'Executor', 'Handoff', 'LoopGuard', 'Agent') { Import-Module (Join-Path $root "lib\$m.psm1") -Force -DisableNameChecking }
 
 function New-TestProject { $p = Join-Path $env:TEMP ('ccb-rs-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null; $p }
@@ -13,7 +13,7 @@ function Set-TestFile([string]$P, [string]$Rel, [string]$Text) { $f = Join-Path 
 Describe 'The handoff at a chat rollover' {
     It 'asks for fixed headings and finds the ones missing' {
         Get-HandoffAsk | Should Match 'Objective: Requirements: Decisions: Done: Active: Blocked: Next steps: Relevant files:'
-        Get-HandoffAsk | Should Not Match '(?i)ccbridge|streamhub'
+        Get-HandoffAsk | Should Not Match '(?i)(?<![.\w])streamhub'
         @(Get-HandoffMissing "**Objective:** a page`n## Requirements: totals`nDecisions: none`nDone: x`nActive: y`nBlocked: none`nNext steps: z`nRelevant files: src/app.js").Count | Should Be 0
         (Get-HandoffMissing "We built the page and the next step is the chart.") -join ',' | Should Be 'Objective,Requirements,Decisions,Done,Active,Blocked,Next steps,Relevant files'
     }
@@ -49,7 +49,7 @@ Describe 'The handoff at a chat rollover' {
             $global:rsSent = New-Object System.Collections.Generic.List[string]
             Mock -ModuleName Agent Send-ToCopilot { param($State, $Message) $global:rsSent.Add($Message); if ($global:rsSent.Count -eq 1) { @{ Text = 'We made the page.' } } else { @{ Text = "Objective: a page`nRequirements: totals`nDecisions: none`nDone: render`nActive: chart`nBlocked: none`nNext steps: chart`nRelevant files: src/app.js" } } }
             Mock -ModuleName Agent Start-NewChat { }
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Throttle = @{ used = 9; max = 10 }; $s.TurnText = 'Build a sales page'
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Throttle = @{ used = 9; max = 10 }; $s.TurnText = 'Build a sales page'
             & (Get-Module Agent) { param($st) Invoke-RolloverIfNeeded $st @{ changed = @('src/app.js'); doneWhen = @('The page shows totals') } } $s | Should Be $true
             $global:rsSent.Count | Should Be 2
             $global:rsSent[1] | Should Match '^Your handoff lacks these headings: Objective'
@@ -88,7 +88,7 @@ Describe 'Going in circles' {
     It 'tells Copilot to decide, without the program name' {
         Get-LoopNote flip @('src/a.js') | Should Match '^src/a\.js is back to a version it had earlier'
         Get-LoopNote alternate | Should Match 'alternate between the same two sets of steps'
-        (Get-LoopNote flip @('a', 'b')) + (Get-LoopNote alternate) | Should Not Match '(?i)ccbridge|streamhub'
+        (Get-LoopNote flip @('a', 'b')) + (Get-LoopNote alternate) | Should Not Match '(?i)(?<![.\w])streamhub'
     }
 }
 
@@ -155,7 +155,7 @@ Describe 'Folder notes and the code around a new error' {
         try {
             $lines = @('// top') + @(1..20 | ForEach-Object { "// filler $_" }) + @('function broken() {', '  const a = 1;', '  return a +;', '}', '// end')
             Set-TestFile $p 'src\b.js' ($lines -join "`n")
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
             $res = New-Object System.Collections.Generic.List[object]
             & (Get-Module Agent) { param($st, $r) Add-ErrorView $st $r @([pscustomobject]@{ path = 'src/b.js'; line = 24; level = 'error' }) } $s $res
             $res.Count | Should Be 1
@@ -167,4 +167,4 @@ Describe 'Folder notes and the code around a new error' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

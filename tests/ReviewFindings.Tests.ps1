@@ -3,7 +3,7 @@
 # HTML tags written escaped in scripts, helper scripts that write a whole copy of a page, disputes
 # without a reason, and the final checks when a task ends without "done".
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Lint', 'Imports', 'UiKit', 'AutoFix', 'Guardrails', 'Executor', 'Agent', 'Config') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 function New-WebProject {
@@ -105,7 +105,7 @@ Describe 'Helper scripts that write a whole page' {
 
 Describe 'Disputes' {
     $p = New-WebProject
-    $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+    $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
     $s.ProjectRoot = $p
     $run = { param($body) & (Get-Module Agent) { param($st, $b) Invoke-AgentAction $st ([pscustomobject]@{ type = 'dispute'; arg = 'js/app.js'; body = $b }) 'd1' $null 0 } $s $body }
     It 'needs a reason, and does not accept one against a measurement' {
@@ -133,7 +133,7 @@ Describe 'Disputes' {
 Describe 'Checks when a task ends without done' {
     It 'checks the changed files, reports new files nothing loads, and offers Continue' {
         $p = New-WebProject
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s.ProjectRoot = $p
         $cp = New-Checkpoint $p 'test'
         $new = Join-Path $p 'js\cache.js'
@@ -156,4 +156,4 @@ Describe 'Checks when a task ends without done' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

@@ -15,7 +15,7 @@ param([int]$Count = 40, [double]$GapSec = 0, [int]$NewChatEvery = 0, [int]$StopA
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 foreach ($m in 'Log', 'Config', 'Cdp', 'CopilotBridge', 'Schedule') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
-$cfg = Get-CCBridgeConfig harness $root
+$cfg = Get-StreamHubConfig harness $root
 Initialize-CCBLog -Level info -Config $cfg
 
 $null = New-Item -ItemType Directory -Force -Path $OutRoot

@@ -7,6 +7,7 @@
 # company policy (a busy port, OneDrive sign-in). Policies always stay "ask IT".
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 
 # Official pages to get what is missing (all from Microsoft).
 $script:Links = @{
@@ -30,17 +31,17 @@ function Get-DeviceJoinStatus {
 }
 
 function Rename-AppShortcuts {
-    <# Shortcuts made before the rename (CCBridge.lnk on the desktop and in the Start menu) become
+    <# Shortcuts made before the rename (pre-rename CCBridge.lnk on the desktop and in the Start menu) become
        StreamHub.lnk. Only shortcuts that start StreamHub's own start.cmd are touched; when a
        StreamHub.lnk is already there, the old one is removed. Returns the new paths. $Folders and
        $Target are for tests. #>
     param([string[]]$Folders = @([Environment]::GetFolderPath('Programs'), [Environment]::GetFolderPath('Desktop')), [string]$Target = '')
     $shell = New-Object -ComObject WScript.Shell
     foreach ($dir in @($Folders | Where-Object { $_ })) {
-        $old = Join-Path $dir 'CCBridge.lnk'
+        $old = Join-Path $dir 'CCBridge.lnk'   # pre-rename shortcut name
         if (-not (Test-Path -LiteralPath $old -PathType Leaf)) { continue }
         $points = "$($shell.CreateShortcut($old).TargetPath)"
-        $ours = if ($Target) { $points -ieq $Target } else { $points -match '(?i)\\CCBridge\\start\.cmd$' }
+        $ours = if ($Target) { $points -ieq $Target } else { $points -match '(?i)\\(StreamHub|CCBridge)\\start\.cmd$' }   # install folder, also its pre-rename name
         if (-not $ours) { continue }
         $new = Join-Path $dir 'StreamHub.lnk'
         if (Test-Path -LiteralPath $new) { [IO.File]::Delete($old) } else { [IO.File]::Move($old, $new) }
@@ -239,13 +240,13 @@ function Get-PrereqChecks {
     <# The checks, in order. -Online adds GitHub and Copilot reachability (a few seconds at most).
        Each check runs in its own guard (Invoke-SafeCheck): one that breaks is a WARN, never fatal. #>
     param([int]$WebPort = 8765, [int]$CdpPort = 9333, [switch]$Online, [switch]$Tools,
-        [string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'))
+        [string]$ProfileDir = (Get-AppDataPath 'edge-profile'))
     $out = New-Object System.Collections.Generic.List[object]
 
     # The installed StreamHub version first, so a pasted report says which release it came from.
     $out.Add((Invoke-SafeCheck 'StreamHub' {
         Import-Module (Join-Path $PSScriptRoot 'Config.psm1')
-        $b = Get-CCBridgeBuild (Split-Path -Parent $PSScriptRoot)
+        $b = Get-StreamHubBuild (Split-Path -Parent $PSScriptRoot)
         $text = "$($b.version)$(if ($b.commit) { " (commit $($b.commit))" })"
         if ($b.version -eq 'dev') { New-Check 'StreamHub' 'WARN' $text 'No release version found (a development copy without version.txt or a release tag): update.cmd installs the latest release.' }
         else { New-Check 'StreamHub' 'OK' $text }
@@ -313,7 +314,7 @@ function Get-PrereqChecks {
     }))
 
     $out.Add((Invoke-SafeCheck "Port $WebPort (web app)" {
-        $pidFile = Join-Path $env:LOCALAPPDATA 'CCBridge\server.pid'
+        $pidFile = Get-AppDataPath 'server.pid'
         $ours = $false
         if (Test-Path -LiteralPath $pidFile) {
             $id = [int](([IO.File]::ReadAllText($pidFile) -split '\|')[0])
@@ -350,12 +351,12 @@ function Get-PrereqChecks {
 
     $out.Add((Invoke-SafeCheck 'Data folder' {
         try {
-            $dataDir = Join-Path $env:LOCALAPPDATA 'CCBridge'
+            $dataDir = Get-AppDataDir
             $null = New-Item -ItemType Directory -Force -Path $dataDir
             $probe = Join-Path $dataDir ('.write-test-' + [guid]::NewGuid().ToString('N'))
             [IO.File]::WriteAllText($probe, 'x'); [IO.File]::Delete($probe)
             New-Check 'Data folder' 'OK' $dataDir
-        } catch { New-Check 'Data folder' 'FAIL' $_.Exception.Message.Split("`n")[0] "StreamHub keeps its state in %LOCALAPPDATA%\CCBridge; it must be writable." }
+        } catch { New-Check 'Data folder' 'FAIL' $_.Exception.Message.Split("`n")[0] "StreamHub keeps its state in %LOCALAPPDATA%\StreamHub; it must be writable." }
     }))
 
     # Optional tools (Python, Node.js...): check.cmd and the installer show them; not at every start.
@@ -366,7 +367,7 @@ function Get-PrereqChecks {
 
     if ($Online) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        foreach ($t in @(@('GitHub (updates)', 'https://api.github.com/repos/jgt87/CCBridge', 'Updates are skipped while GitHub cannot be reached; StreamHub still runs.'),
+        foreach ($t in @(@('GitHub (updates)', 'https://api.github.com/repos/jgt87/StreamHub', 'Updates are skipped while GitHub cannot be reached; StreamHub still runs.'),
                          @('Copilot site', 'https://www.microsoft365.com/', 'Copilot must be reachable from this computer (proxy or firewall?).'))) {
             $out.Add((Invoke-SafeCheck $t[0] {
                 try {
@@ -399,13 +400,13 @@ function Repair-PrereqChecks {
                     if ($KeepWebPort) { $c; break }
                     $free = Find-FreePort ($WebPort + 1) ($WebPort + 40) @($CdpPort)
                     if (-not $free) { $c; break }
-                    Set-CCBridgeLocalSetting harness port $free $AppRoot
+                    Set-StreamHubLocalSetting harness port $free $AppRoot
                     New-Check $c.name 'OK' "fixed: was in use by another program; StreamHub now uses port $free (saved in config\harness.local.json)"
                 }
                 'cdpPort' {
                     $free = Find-FreePort ($CdpPort + 1) ($CdpPort + 40) @($WebPort)
                     if (-not $free) { $c; break }
-                    Set-CCBridgeLocalSetting harness cdpPort $free $AppRoot
+                    Set-StreamHubLocalSetting harness cdpPort $free $AppRoot
                     New-Check $c.name 'OK' "fixed: was in use by another program; Edge for Copilot now uses port $free (saved in config\harness.local.json)"
                 }
                 'onedrive' {

@@ -116,7 +116,7 @@ Describe 'Folder rules sent to Copilot' {
         $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'add a button' -Sent (New-Object 'System.Collections.Generic.HashSet[string]') -Context @{ Location = 'L'; Full = 'F'; Traits = @('web') }
         $m | Should Match 'public/ for files served'
         $m | Should Match 'src/components/'
-        $m | Should Not Match 'CCBridge'
+        $m | Should Not Match '(?<![.\w])StreamHub'
         $m -cmatch 'StreamHub' | Should Be $false     # only the folder name .streamhub
     }
 }

@@ -1,6 +1,6 @@
 # Hooks: the user's own commands at fixed moments (lib/Hooks.psm1, Invoke-ProjectHooks in Agent.psm1).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Hooks.psm1') -Force
 Import-Module (Join-Path $root 'lib\Chain.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
@@ -82,7 +82,7 @@ Describe 'Invoke-ProjectHooks' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
 
 Describe 'Hook file names' {
     It 'never puts a file name with shell characters into an approved command' {

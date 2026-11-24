@@ -2,7 +2,7 @@
 # Get-EditPairs, Agent read ranges): SEARCH all, SEARCH line N, the next match after the previous
 # change, the only match in the lines Copilot read, else a soft stop that says how to point.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Protocol.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
@@ -61,7 +61,7 @@ Describe 'Editing a file with repeated text' {
     }
     It 'uses the lines Copilot read in this task (agent)' {
         [IO.File]::WriteAllText($f, $text)
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         $null = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'read'; arg = ''; body = 'page.html:4-6' }) 'r1' $null 0 } $s
         $edits = @(@{ search = "<div>`n</div>"; replace = '<section></section>' })
         $r = & (Get-Module Agent) { param($st, $e) Invoke-AgentAction $st ([pscustomobject]@{ type = 'edit'; arg = 'page.html'; edits = $e; body = ''; closed = $true }) 'e1' $null 0 } $s $edits
@@ -70,11 +70,11 @@ Describe 'Editing a file with repeated text' {
     }
     It 'shows a stop as needing a more exact SEARCH, not as failed' {
         [IO.File]::WriteAllText($f, $text)
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         $edits = @(@{ search = "<div>`n</div>"; replace = 'z' })
         $null = & (Get-Module Agent) { param($st, $e) Invoke-AgentAction $st ([pscustomobject]@{ type = 'edit'; arg = 'page.html'; edits = $e; body = ''; closed = $true }) 'e2' $null 0 } $s $edits
         (@($s.Events | Where-Object { $_.type -eq 'action' }) | Select-Object -Last 1).status | Should Be 'ambiguous'
     }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

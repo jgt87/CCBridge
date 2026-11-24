@@ -1,9 +1,9 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests\ProjectOverviewFile.Tests.ps1
+# Pester 3.4. Run: Invoke-Pester .\tests\ProjectOverviewFile.Tests.ps1
 # The project overview for a colleague (lib/ProjectOverview.psm1): the facts by fixed rules, the file
 # with its sections for Copilot, the replace-or-keep rule and the request that fills it.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 # Project state (progress) of the test projects goes to a temporary folder, deleted below.
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 foreach ($m in 'ProjectOverview', 'Progress', 'Executor', 'Prompts') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 Describe 'The app entry page' {
@@ -21,7 +21,7 @@ Describe 'The app entry page' {
 
 Describe 'Project overview facts' {
     $proj = Join-Path $env:TEMP ('ccb-overview-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-    $state = Join-Path $env:CCBRIDGE_STATE_ROOT 'overview-state'
+    $state = Join-Path $env:STREAMHUB_STATE_ROOT 'overview-state'
     $null = New-Item -ItemType Directory -Force -Path (Join-Path $proj 'src'), (Join-Path $proj 'dist'), (Join-Path $proj 'Scripts'), (Join-Path $proj 'Runbooks'), (Join-Path $proj '.streamhub'), (Join-Path $proj 'Source'), $state
     $enc = New-Object Text.UTF8Encoding($false)
     $write = { param($rel, $text) $p = Join-Path $proj $rel; $null = New-Item -ItemType Directory -Force -Path (Split-Path $p); [IO.File]::WriteAllText($p, $text, $enc) }
@@ -93,7 +93,7 @@ Describe 'Project overview facts' {
 
 Describe 'The overview file' {
     $proj = Join-Path $env:TEMP ('ccb-overview-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-    $state = Join-Path $env:CCBRIDGE_STATE_ROOT 'overview-file-state'
+    $state = Join-Path $env:STREAMHUB_STATE_ROOT 'overview-file-state'
     $null = New-Item -ItemType Directory -Force -Path $proj, $state
     [IO.File]::WriteAllText((Join-Path $proj 'index.html'), '<!doctype html><title>x</title>')
     $now = [datetime]'2026-10-25T09:30:00'
@@ -107,7 +107,7 @@ Describe 'The overview file' {
         $t | Should Match '^<!-- streamhub:project-overview'
         foreach ($s in Get-OverviewSections) { $t | Should Match ([regex]::Escape("## $($s.heading)`n`n$($s.placeholder)")) }
         $t.IndexOf('## Facts') | Should BeGreaterThan $t.IndexOf('TO BE WRITTEN: things to know')
-        $t | Should Not Match 'CCBridge'
+        $t | Should Not Match 'CCBridge'   # pre-rename name never leaks into the file
     }
     It 'has placeholder lines an ordinary edit replaces' {
         $edits = @(Get-OverviewSections | ForEach-Object { @{ search = $_.placeholder; replace = "Filled: $($_.heading)." } })
@@ -152,7 +152,7 @@ Describe 'The request that fills the overview' {
         $req | Should Match 'Runbooks/Exports/project-overview\.md'
         foreach ($s in Get-OverviewSections) { $req | Should Match ([regex]::Escape($s.placeholder)) }
         $req | Should Match 'Facts section stay'
-        $req | Should Not Match 'CCBridge'
+        $req | Should Not Match '(?<![.\w])StreamHub'
     }
     It 'is never taken as a runbook to run' {
         Import-Module (Join-Path $root 'lib\Runbook.psm1') -Force
@@ -160,4 +160,4 @@ Describe 'The request that fills the overview' {
     }
 }
 
-Remove-Item -Recurse -Force $env:CCBRIDGE_STATE_ROOT -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $env:STREAMHUB_STATE_ROOT -ErrorAction SilentlyContinue

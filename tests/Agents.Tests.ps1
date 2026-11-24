@@ -1,7 +1,7 @@
 # Copilot's agents (Researcher, Analyst): who answered, Researcher's plan, and the agent run job.
 # The frames below follow the shape recorded from a tenant with the agents (ids replaced).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
@@ -48,7 +48,7 @@ Describe 'Agent progress lines' {
 
 Describe 'Invoke-AgentRun (Copilot mocked)' {
     $p = Join-Path $env:TEMP ('ccb-agent-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     Mock -ModuleName Agent Start-NewChat { $global:ccbNewChats++ }
     Mock -ModuleName Agent Save-AgentCharts { @() }   # needs the Copilot page
     Mock -ModuleName Agent Send-ToCopilot {
@@ -112,4 +112,4 @@ Describe 'Invoke-AgentRun (Copilot mocked)' {
     }
     Remove-Item $p -Recurse -Force
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

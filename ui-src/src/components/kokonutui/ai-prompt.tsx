@@ -8,7 +8,7 @@
  * @license: MIT
  * @website: https://kokonutui.com
  *
- * CCBridge: the model selector became the agent mode selector (ask / auto / plan),
+ * StreamHub: the model selector became the agent mode selector (ask / auto / plan),
  * the paperclip attaches a project file as @path, and the value is controlled by the parent.
  */
 
@@ -42,9 +42,9 @@ interface AIPromptProps {
   onValueChange: (value: string) => void;
   onSubmit: (value: string) => void;
   onAttach?: () => void;
-  /** CCBridge: schedule the typed message instead of sending it now. */
+  /** StreamHub: schedule the typed message instead of sending it now. */
   onSchedule?: (value: string) => void;
-  /** CCBridge: "Clarify first" (Copilot asks questions, then plans, before building). */
+  /** StreamHub: "Clarify first" (Copilot asks questions, then plans, before building). */
   clarify?: boolean;
   onToggleClarify?: () => void;
   onStop?: () => void;
@@ -63,7 +63,7 @@ interface AIPromptProps {
 const BAR_BUTTON = "hover:bg-black/10 focus-visible:ring-1 focus-visible:ring-zinc-400 focus-visible:ring-offset-0 dark:hover:bg-white/10";
 const TOOL_IDLE = "bg-black/5 text-black/40 hover:text-black dark:bg-white/5 dark:text-white/65 dark:hover:text-white";
 
-// --- Message history (CCBridge): Arrow Up / Down like a terminal ---------------------------
+// --- Message history (StreamHub): Arrow Up / Down like a terminal ---------------------------
 
 /**
  * Message history like a terminal. -1 = the text being typed (kept in `draftRef`);
@@ -152,7 +152,7 @@ function ToolButton({
   title: string;
   onClick?: () => void;
   pressed?: boolean;
-  /** CCBridge: an option that is on stands out: filled, with its name next to the icon. */
+  /** StreamHub: an option that is on stands out: filled, with its name next to the icon. */
   showLabelWhenOn?: boolean;
   children: React.ReactNode;
 }) {
@@ -295,7 +295,7 @@ export default function AI_Prompt({
     maxHeight: 300,
   });
   const selected = modes.find((m) => m.id === mode) ?? modes[0];
-  // CCBridge: while Copilot is busy, sending adds the message to the queue.
+  // StreamHub: while Copilot is busy, sending adds the message to the queue.
   const canSend = !disabled && value.trim().length > 0;
 
   useEffect(() => {
@@ -312,7 +312,7 @@ export default function AI_Prompt({
     adjustHeight(true);
   };
 
-  // CCBridge: message history like a terminal.
+  // StreamHub: message history like a terminal.
   const messageHistory = usePromptHistory(history, onValueChange, textareaRef);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -351,7 +351,7 @@ export default function AI_Prompt({
               />
             </div>
 
-            {/* CCBridge: the field and this tool row are one box with one edge (DESIGN.md "Edge"): the
+            {/* StreamHub: the field and this tool row are one box with one edge (DESIGN.md "Edge"): the
                 field draws the top and sides, this row the sides and bottom. */}
             <div className="flex h-14 items-center rounded-b-xl border border-t-0 border-(--input) bg-white dark:bg-white/5">
               <div className="absolute right-3 bottom-3 left-3 flex w-[calc(100%-24px)] items-center justify-between">
@@ -364,7 +364,7 @@ export default function AI_Prompt({
                   onToggleClarify={onToggleClarify}
                   selected={selected}
                 />
-                {/* CCBridge: Queue (while busy) sits right next to Stop / Send. */}
+                {/* StreamHub: Queue (while busy) sits right next to Stop / Send. */}
                 <SendControls busy={busy} canSend={canSend} onStop={onStop} onSubmit={submit} />
               </div>
             </div>

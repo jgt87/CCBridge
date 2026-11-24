@@ -2,8 +2,8 @@
 # (Get-TaskIntent -Proposal), the card's "Apply these edits" applies the refused edits as written
 # (Invoke-AgentTurn -Replay), and "Send again as a change" sends the request as a change (Copilot mocked).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
@@ -25,7 +25,7 @@ Describe 'A reply to a proposal' {
 Describe 'Edits refused in an answer-only task' {
     $p = Join-Path $env:TEMP ('ccb-refused-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
     [IO.File]::WriteAllText((Join-Path $p 'app.js'), "function a() {`n  return 1;`n}`n")
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $config.pageCheck = 'off'
     Mock -ModuleName Agent Start-NewChat { }
     Mock -ModuleName Agent Send-ToCopilot {
@@ -69,6 +69,6 @@ Describe 'Edits refused in an answer-only task' {
     }
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
-Remove-Item -LiteralPath $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
-$env:CCBRIDGE_ISSUE_INDEX = $null
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
+$env:STREAMHUB_ISSUE_INDEX = $null
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

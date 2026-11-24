@@ -1,4 +1,4 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4. Run: Invoke-Pester .\tests
 # Where the StreamHub app opens, and that its tab is never taken for Copilot.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\AppWindow.psm1') -Force
@@ -37,7 +37,7 @@ Describe 'Select-AppWindows and Get-HalfRects' {
 }
 
 Describe 'Get-CopilotTarget never takes the StreamHub tab' {
-    $sel = Get-CCBridgeConfig selectors $root
+    $sel = Get-StreamHubConfig selectors $root
     It 'prefers the Copilot tab' {
         Mock -ModuleName CopilotBridge Invoke-RestMethod { @([pscustomobject]@{ type = 'page'; id = 'app'; url = 'http://localhost:8765/' }, [pscustomobject]@{ type = 'page'; id = 'cp'; url = 'https://m365.cloud.microsoft/chat' }) }
         (Get-CopilotTarget 9333 $sel).id | Should Be 'cp'

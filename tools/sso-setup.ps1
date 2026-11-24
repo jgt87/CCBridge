@@ -20,8 +20,8 @@ param([switch]$Yes, [switch]$Off, [string]$OutRoot = 'C:\temp')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 foreach ($m in 'Log', 'Cdp', 'Config', 'Sso') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
-$sel = Get-CCBridgeConfig selectors $root
-$cfg = Get-CCBridgeConfig harness $root
+$sel = Get-StreamHubConfig selectors $root
+$cfg = Get-StreamHubConfig harness $root
 $port = if ($cfg.cdpPort) { [int]$cfg.cdpPort } else { 9333 }
 $null = Start-CdpEdge -Port $port -Url $sel.chatUrl
 $word = if ($Off) { 'off' } else { 'on' }

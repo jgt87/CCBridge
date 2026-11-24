@@ -8,7 +8,7 @@ import { defineConfig, type Plugin } from 'vite'
  * app refers to no repository but its own, so those links become plain words in the build output.
  */
 export function stripOtherRepoLinks(code: string): string {
-  return code.replace(/https?:\/\/(?:www\.)?(?:github\.com|raw\.githubusercontent\.com)\/(?!jgt87\/CCBridge\b)[\w.\-/#?=&%~]*/g, 'the library documentation')
+  return code.replace(/https?:\/\/(?:www\.)?(?:github\.com|raw\.githubusercontent\.com)\/(?!jgt87\/StreamHub\b)[\w.\-/#?=&%~]*/g, 'the library documentation')
 }
 
 const noOtherRepoLinks: Plugin = {
@@ -22,7 +22,7 @@ const noOtherRepoLinks: Plugin = {
   },
 }
 
-// Built files go to ../ui, which ccbridge.ps1 serves; target machines never run Node.
+// Built files go to ../ui, which streamhub.ps1 serves; target machines never run Node.
 export default defineConfig({
   plugins: [react(), tailwindcss(), noOtherRepoLinks],
   base: './',

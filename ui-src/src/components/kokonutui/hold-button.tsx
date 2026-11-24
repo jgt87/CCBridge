@@ -50,7 +50,7 @@ const holdButtonVariants = cva("relative min-w-40 touch-manipulation select-none
         "text-orange-500 dark:text-orange-600",
         "border border-orange-200 dark:border-orange-300",
       ],
-      // CCBridge: flat grey (no border), like the other buttons.
+      // StreamHub: flat grey (no border), like the other buttons.
       grey: [
         "bg-black/5 dark:bg-white/10",
         "hover:bg-black/10 dark:hover:bg-white/15",
@@ -67,7 +67,7 @@ interface HoldButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof holdButtonVariants> {
   holdDuration?: number;
-  /** CCBridge: text shown while idle / while holding, and the action fired once the hold completes. */
+  /** StreamHub: text shown while idle / while holding, and the action fired once the hold completes. */
   label?: string;
   holdingLabel?: string;
   icon?: React.ReactNode;
@@ -84,7 +84,7 @@ const VARIANT_ICON: Record<HoldVariant, typeof Trash2Icon> = {
   grey: BanIcon,
 };
 
-// CCBridge: the hold itself: the fill animation, and onHoldComplete once it was held the whole time.
+// StreamHub: the hold itself: the fill animation, and onHoldComplete once it was held the whole time.
 function useHold(holdDuration: number, disabled: boolean | undefined, onHoldComplete?: () => void) {
   const [isHolding, setIsHolding] = useState(false);
   const holdingRef = useRef(false);
@@ -93,7 +93,7 @@ function useHold(holdDuration: number, disabled: boolean | undefined, onHoldComp
   const [done, setDone] = useState(false);
 
   async function handleHoldStart() {
-    // CCBridge: one hold at a time (a held key repeats; a second pointer does not restart it).
+    // StreamHub: one hold at a time (a held key repeats; a second pointer does not restart it).
     if (disabled || holdingRef.current) return;
     setDone(false);
     setIsHolding(true);
@@ -149,7 +149,7 @@ export default function HoldButton({
       aria-describedby={helpId}
       className={cn(holdButtonVariants({ variant, className }))}
       onBlur={handleHoldEnd}
-      // CCBridge: the hold is the action, never a click (Space and Enter would click on their own).
+      // StreamHub: the hold is the action, never a click (Space and Enter would click on their own).
       onClick={(e) => e.preventDefault()}
       onKeyDown={(e) => {
         // Space and Enter hold too, as with the kit's hold button; a held key repeats and does not restart it.

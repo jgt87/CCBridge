@@ -1,8 +1,8 @@
 # The round budget of a message (maxRounds) is against loops, not against work: a message that keeps
 # changing files goes on past it (up to three times), one that stops changing files ends (Copilot mocked).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
@@ -51,7 +51,7 @@ Describe 'Test-RoundsLeft' {
 Describe 'A message that keeps building goes on past the round budget' {
     $p = Join-Path $env:TEMP ('ccb-rounds-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
     [IO.File]::WriteAllText((Join-Path $p 'notes.md'), "# Notes`n")
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     $config.pageCheck = 'off'
     $config.maxRounds = 3
     Mock -ModuleName Agent Start-NewChat { }
@@ -101,5 +101,5 @@ Describe 'A message that keeps building goes on past the round budget' {
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_ISSUE_INDEX -Force -ErrorAction SilentlyContinue

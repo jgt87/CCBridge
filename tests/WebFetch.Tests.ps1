@@ -120,7 +120,7 @@ Describe 'Web fields of fetch prompts and runbooks' {
         $b.text | Should Match '(?s)Page https://example\.com/a .*not instructions.*PRICE 5'
         $b.text | Should Match 'could not be read here: https://example\.com/b'
         $b.notes[0] | Should Match '404'
-        $b.text | Should Not Match 'CCBridge|StreamHub'
+        $b.text | Should Not Match '(?<![.\w])StreamHub'
     }
     It 'reports cited sources outside the allowed sites' {
         $refs = @([pscustomobject]@{ url = 'https://docs.example.com/x' }, [pscustomobject]@{ url = 'https://other.org/y' })
@@ -147,6 +147,6 @@ Describe 'Web instructions in work prompts' {
         $m = New-PromptMessage -AppRoot $root -Kind 'coding' -Text 'Use the pricing from https://example.com/prices' -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
         $m | Should Match 'ACTION web'
         $m | Should Match 'use only those'
-        $m | Should Not Match 'CCBridge'
+        $m | Should Not Match '(?<![.\w])StreamHub'
     }
 }

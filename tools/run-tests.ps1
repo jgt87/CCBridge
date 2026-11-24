@@ -6,7 +6,7 @@
 .DESCRIPTION
     The test files run in parallel Windows PowerShell processes (-Workers, default: the number of
     processors, at most 8), each taking a share of the files balanced by how long each file took the
-    last time (kept in %TEMP%\CCBridge-test-timings.json; file size the first time). Files that use
+    last time (kept in %TEMP%\StreamHub-test-timings.json; file size the first time). Files that use
     something machine-wide (a window on the screen, the Copilot lock, the real last-project file) run
     after that in one process of their own. -Workers 1 runs everything in one process, as before.
     A file that runs longer than -FileTimeoutSec (default 300; not with -Workers 1) is stopped with its worker: the run
@@ -28,6 +28,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')
+# Never move the person's real data or projects folder to its new name from a test (the MCP server a
+# test starts would otherwise do it): lib/AppPaths.psm1 Invoke-AppDataMigration. Workers inherit it.
+$env:STREAMHUB_NO_MIGRATE = '1'
 # TEMP in its long form: GitHub's Windows runners give an 8.3 short path (a user folder named RUNNER~1), the
 # tests make their projects under it, and paths the code reads back from the disk come in the long
 # form, so 171 tests failed there and one hung (2026-11-16). The workers inherit the long form.
@@ -86,7 +89,7 @@ if ($Workers -eq 1) {
 }
 
 $all = @(Get-ChildItem -LiteralPath $Path -Filter '*.Tests.ps1' -Recurse | Sort-Object FullName)
-$timingFile = Join-Path ([IO.Path]::GetTempPath()) 'CCBridge-test-timings.json'
+$timingFile = Join-Path ([IO.Path]::GetTempPath()) 'StreamHub-test-timings.json'
 $timings = @{}
 if (Test-Path -LiteralPath $timingFile) {
     try { (Get-Content -LiteralPath $timingFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $timings[$_.Name] = [double]$_.Value } } catch { }

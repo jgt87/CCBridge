@@ -3,13 +3,13 @@ import type { ProjectOpenAnswer } from "./project-open";
 import type { RunLive, RunWindowState } from "./run-live";
 import type { ResponseOption } from "./response-modes";
 
-// Client for the CCBridge PowerShell server. Every call carries the session token that
+// Client for the StreamHub PowerShell server. Every call carries the session token that
 // the server injects into index.html, so other pages cannot use the API.
 
 const token =
   document.querySelector<HTMLMetaElement>('meta[name="ccb-token"]')?.content ?? "";
 
-/** The page holds a stale session token (older CCBridge install): reload once (not again within 10 s) to get the current one. */
+/** The page holds a stale session token (older StreamHub install): reload once (not again within 10 s) to get the current one. */
 function reloadOnStaleToken() {
   const last = Number(sessionStorage.getItem("ccb-reload") ?? 0);
   if (Date.now() - last > 10_000) {
@@ -236,7 +236,7 @@ export interface AgentEvent {
   steps?: string[];
   /** A "checks" event: the round's file-check findings. */
   findings?: CheckFinding[];
-  /** error: id also written to the log, category, what to do, technical detail, CCBridge version. */
+  /** error: id also written to the log, category, what to do, technical detail, StreamHub version. */
   errId?: string;
   code?: string;
   hint?: string;
@@ -280,7 +280,7 @@ export interface AgentEvent {
 }
 
 export interface AppState {
-  /** location: the folders the project sits in, e.g. ["OneDrive", "CCBridge", "budget tracker"]. */
+  /** location: the folders the project sits in, e.g. ["OneDrive", "StreamHub", "budget tracker"]. */
   project: { name: string; path: string; location?: string[] } | null;
   mode: Mode;
   busy: boolean;
@@ -299,7 +299,7 @@ export interface AppState {
   /** A chat Copilot was left running in at the time cap: Read the answer opens it later. */
   pendingChat?: { since: string } | null;
   logLevel: "off" | "info" | "verbose" | "trace";
-  /** Installed CCBridge version (version.txt), or git-<sha> for a development copy. */
+  /** Installed StreamHub version (version.txt), or git-<sha> for a development copy. */
   version: string;
   /** This run of the app: a new value after a restart, when event numbers start over. */
   instance?: string;
@@ -770,7 +770,7 @@ export function normalizeEvent(raw: AgentEvent): AgentEvent {
   return e as unknown as AgentEvent;
 }
 
-/** Reports a page error to the CCBridge log (best effort). */
+/** Reports a page error to the StreamHub log (best effort). */
 export function reportClientError(message: string, detail: Record<string, unknown> = {}) {
   fetch("/api/clientlog", {
     method: "POST",

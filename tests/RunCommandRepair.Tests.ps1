@@ -2,7 +2,7 @@
 # that look like a Markdown link definition), and scripts packed into one powershell -Command line are
 # not run but written as a script file. The command below is the shape a real failing one had.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
@@ -33,7 +33,7 @@ Describe 'Scripts packed into one powershell -Command line' {
     }
     It 'are not run; Copilot is asked for a script file instead' {
         $p = Join-Path $env:TEMP ('ccb-runrep-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         $r = & (Get-Module Agent) { param($st, $cmd) Invoke-AgentAction $st ([pscustomobject]@{ type = 'run'; arg = ''; body = $cmd }) 'a1' $null 0 } $s $long
         $r.ok | Should Be $false
@@ -87,7 +87,7 @@ Describe 'Web pages read by a command go to the web action' {
     }
     It 'is not run; Copilot is pointed to ACTION web and ACTION web source' {
         $p = Join-Path $env:TEMP ('ccb-webdl2-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         $r = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'run'; arg = ''; body = 'curl.exe -sS https://items.example.com/ -o Work\home.html' }) 'a1' $null 0 } $s
         $r.ok | Should Be $false
@@ -100,7 +100,7 @@ Describe 'Web pages read by a command go to the web action' {
 Describe 'Working folders a command writes into' {
     It 'are made before the command runs' {
         $p = Join-Path $env:TEMP ('ccb-workdir-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         $s.Config.autoApproveCommands = @('^echo(\s|$)')
         $r = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'run'; arg = ''; body = 'echo made> Work\out.txt' }) 'a1' $null 0 } $s
@@ -122,7 +122,7 @@ Describe 'A type name the chat removed in front of ::' {
     }
     It 'stops a PowerShell command or file change before it runs or is written' {
         $p = Join-Path $env:TEMP ('ccb-rmtype-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p; $s.Mode = 'auto'
         $r = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'run'; arg = ''; body = 'powershell -NoProfile -Command "$m = :Match(''day-01'',''\d+''); $m.Value"' }) 'a1' $null 0 } $s
         $r.ok | Should Be $false
@@ -141,4 +141,4 @@ Describe 'Where scripts go' {
         Get-PromptPart $root 'rules:web' | Should Match 'text block, not ```html'
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

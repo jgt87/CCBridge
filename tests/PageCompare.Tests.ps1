@@ -3,7 +3,7 @@
 # real, and Edge is stood in for by -Shoot (a picture drawn from the page's text). Made-up pages.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 # Project state (backups) of the test project goes to a temporary folder, deleted below.
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $root 'lib\PageCompare.psm1') -Force -DisableNameChecking
 Add-Type -AssemblyName System.Drawing
@@ -145,4 +145,4 @@ Describe 'PageCompare module text' {
 }
 
 Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

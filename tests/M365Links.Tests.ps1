@@ -1,7 +1,7 @@
 # Microsoft 365 file links (SharePoint, OneDrive) in a request: Copilot opens them itself with the
 # user's access; the web action never fetches them (it only gets a sign-in page). Made-up addresses.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\WebFetch.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Prompts.psm1') -Force
@@ -26,11 +26,11 @@ Describe 'Microsoft 365 links' {
         $ids -contains 'rules:m365links' | Should Be $true
     }
     It 'does not fetch such a link with the web action, and tells Copilot to open it itself' {
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $r = & (Get-Module Agent) { param($st, $u) Invoke-AgentAction $st ([pscustomobject]@{ type = 'web'; arg = $u; body = '' }) 'w1' $null 0 } $s $link
         $r.ok | Should Be $false
         $r.output | Should Match 'open it yourself'
         $r.output | Should Match 'data/NAME\.csv'
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

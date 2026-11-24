@@ -47,7 +47,7 @@ Describe 'Format-FetchResult and Save-FetchResult' {
         $content | Should Match '^# meetings-today'
         $content | Should Match '_Fetched 2026-10-02 08:15'
         $content | Should Match '- \[Agenda\]\(https://example.com/a\)'
-        $content | Should Not Match 'CCBridge'
+        $content | Should Not Match '(?<![.\w])StreamHub'
         Save-FetchResult $p 'meetings-today' $content | Should BeExactly 'Runbooks/Exports/meetings-today.md'
         $item = Get-FetchPrompts $p | Select-Object -First 1
         $item.fetchedAt | Should BeExactly '2026-10-02T08:15:00'
@@ -71,7 +71,7 @@ Describe 'Fetch prompts sent to Copilot' {
         $m = New-PromptMessage -AppRoot $root -Kind 'fetch' -Text 'Latest PowerShell 7 version?' -Sent (New-Object 'System.Collections.Generic.HashSet[string]')
         $m | Should Match 'saved as a file'
         $m | Should Match 'Request: Latest PowerShell 7 version\?$'
-        $m | Should Not Match 'SEARCH|CCBridge'
+        $m | Should Not Match 'SEARCH|StreamHub'
     }
     It 'adds the assistant role and the read-only rule to a Microsoft 365 fetch' {
         $m = New-PromptMessage -AppRoot $root -Kind 'fetch-m365' -Text 'My meetings today' -Sent (New-Object 'System.Collections.Generic.HashSet[string]')

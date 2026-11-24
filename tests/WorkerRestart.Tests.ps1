@@ -1,12 +1,12 @@
 # The task worker stopping unexpectedly (Server restarts it): the running task is marked failed,
 # the busy state and live views are cleared, and an error card says what happened.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Agent', 'Config', 'Server') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 Describe 'After the task worker stopped' {
     It 'marks the running task failed, clears the busy state and says so' {
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $null = Submit-AgentTask $s @{ kind = 'chat'; text = 'Make the header sticky' } 'user' 'Make the header sticky'
         $null = Submit-AgentTask $s @{ kind = 'chat'; text = 'Next one' } 'user' 'Next one'
         $s.Queue[0].status = 'running'
@@ -31,4 +31,4 @@ Describe 'After the task worker stopped' {
         $ps.Dispose()
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

@@ -1,8 +1,8 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests\TidyUp.Tests.ps1
+# Pester 3.4. Run: Invoke-Pester .\tests\TidyUp.Tests.ps1
 # Tidy-up list: what a project likely no longer uses, never StreamHub's or the person's protected
 # files, removed only when still unused at that moment, and all of it back with one Undo.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\TidyUp.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 
@@ -103,4 +103,4 @@ Describe 'Removing ticked items' {
 $null = cmd /c "rmdir `"$(Join-Path $proj 'linked')`" >nul 2>&1"
 Remove-Item -LiteralPath $proj -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $outside -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

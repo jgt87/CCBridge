@@ -30,7 +30,7 @@ Describe 'Runbook templates' {
             $rb.meta.itemsKey | Should Not BeNullOrEmpty
             $rb.body | Should Not Match '<!--'                   # notes for the person are not sent
             $rb.body | Should Match '(?i)read-only'
-            $rb.body | Should Not Match 'StreamHub|CCBridge'
+            $rb.body | Should Not Match '(?<![.\w])StreamHub'
             $example = [regex]::Matches($rb.body, '(?s)```json\n(.*?)\n```') | Select-Object -Last 1
             $check = Test-RunbookOutput $example.Groups[1].Value $rb.meta
             ($check.errors -join '; ') | Should BeNullOrEmpty
@@ -142,7 +142,7 @@ Describe 'The runbook instructions for Copilot' {
         $m = Get-PromptPart $root 'rules:runbook' @{}
         $m | Should Match 'Runbooks/NAME\.runbook\.md'
         $m | Should Match '(?s)RUNBOOK TEMPLATE\n````\n---\ntitle:'
-        $m | Should Not Match 'CCBridge'
+        $m | Should Not Match '(?<![.\w])StreamHub'
     }
 }
 Describe 'Get-RunbookRunRequest (running a runbook from the chat)' {

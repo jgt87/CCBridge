@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Packs CCBridge diagnostics into a zip on the desktop, to hand to whoever helps you test:
+  Packs StreamHub diagnostics into a zip on the desktop, to hand to whoever helps you test:
   recent logs (masked for user name, paths and email addresses), an environment summary,
   settings, and a check of the Copilot page selectors if Edge with Copilot is open.
 .PARAMETER Days
@@ -18,16 +18,17 @@ Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
 Import-Module (Join-Path $root 'lib\Log.psm1')
 Import-Module (Join-Path $root 'lib\Cdp.psm1')
 Import-Module (Join-Path $root 'lib\SessionReport.psm1')
+Import-Module (Join-Path $root 'lib\AppPaths.psm1')
 
 $stamp = (Get-Date).ToString('yyyyMMdd-HHmm')
-$stage = Join-Path $env:TEMP "ccbridge-diagnostics-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 4))"
+$stage = Join-Path $env:TEMP "streamhub-diagnostics-$stamp-$([guid]::NewGuid().ToString('N').Substring(0, 4))"
 $null = New-Item -ItemType Directory -Path $stage
 
 # 1. Environment and settings (no personal data; paths masked).
-$envInfo = Get-CCBridgeEnvironment $root
-$envInfo.logLevel = [string](Get-CCBridgeConfig harness $root).logLevel
+$envInfo = Get-StreamHubEnvironment $root
+$envInfo.logLevel = [string](Get-StreamHubConfig harness $root).logLevel
 $envInfo.collected = (Get-Date).ToString('s')
-$envInfo.edgeDebugPortOpen = Test-CdpEndpoint ([int](Get-CCBridgeConfig harness $root).cdpPort)
+$envInfo.edgeDebugPortOpen = Test-CdpEndpoint ([int](Get-StreamHubConfig harness $root).cdpPort)
 [IO.File]::WriteAllText((Join-Path $stage 'environment.json'), (Protect-LogText ($envInfo | ConvertTo-Json -Depth 6)))
 foreach ($f in Get-ChildItem (Join-Path $root 'config') -Filter '*.json') {
     [IO.File]::WriteAllText((Join-Path $stage "config-$($f.Name)"), (Protect-LogText ([IO.File]::ReadAllText($f.FullName))))
@@ -36,8 +37,8 @@ foreach ($f in Get-ChildItem (Join-Path $root 'config') -Filter '*.json') {
 # 2. Copilot page check: does each selector still find its element?
 if ($envInfo.edgeDebugPortOpen) {
     try {
-        $port = [int](Get-CCBridgeConfig harness $root).cdpPort
-        $sel = Get-CCBridgeConfig selectors $root
+        $port = [int](Get-StreamHubConfig harness $root).cdpPort
+        $sel = Get-StreamHubConfig selectors $root
         $target = Get-CopilotTarget -Port $port -Selectors $sel
         $s = Connect-Cdp $target.webSocketDebuggerUrl
         $checks = [ordered]@{ chatUrl = $sel.chatUrl; pageHost = ([uri]$target.url).Host }
@@ -59,7 +60,7 @@ if ($envInfo.edgeDebugPortOpen) {
 
 # 3. Logs (already masked when written).
 $logDir = Get-CCBLogDir
-$logs = @(Get-ChildItem $logDir -Filter 'ccbridge-*.log' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge (Get-Date).Date.AddDays(1 - $Days) })
+$logs = @(Get-ChildItem $logDir -Filter 'streamhub-*.log' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge (Get-Date).Date.AddDays(1 - $Days) })
 if ($logs.Count) { $null = New-Item -ItemType Directory -Path (Join-Path $stage 'logs'); $logs | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stage 'logs') } }
 
 # 3a. A session report of the last run in the newest log: what happened, in one page.
@@ -69,8 +70,9 @@ if ($newest) { try { $null = New-SessionReportFile -LogFile $newest.FullName -Ou
 # 3b. False alarms of the file checks (disputed by Copilot or ignored by you), per project: to turn
 #     into test samples so the same false alarm cannot come back.
 $od = if ($env:OneDriveCommercial) { $env:OneDriveCommercial } else { $env:OneDrive }
-if ($od -and (Test-Path -LiteralPath (Join-Path $od 'CCBridge'))) {
-    foreach ($proj in @(Get-ChildItem -LiteralPath (Join-Path $od 'CCBridge') -Directory -ErrorAction SilentlyContinue)) {
+$projectsDir = if ($od) { Resolve-ProjectsDir -OneDriveRoot $od -FolderName "$((Get-StreamHubConfig harness $root).projectsFolder)" } else { '' }
+if ($projectsDir -and (Test-Path -LiteralPath $projectsDir)) {
+    foreach ($proj in @(Get-ChildItem -LiteralPath $projectsDir -Directory -ErrorAction SilentlyContinue)) {
         $f = Join-Path $proj.FullName '.streamhub\check-disputes.json'
         # Both hold file paths, findings and code lines as the project wrote them (not masked when
         # written, unlike the logs): masked here, like the logs, before they leave this computer.
@@ -89,15 +91,15 @@ if ($od -and (Test-Path -LiteralPath (Join-Path $od 'CCBridge'))) {
 
 # 4. Optional: raw reply frames (contain Copilot's full answers).
 if ($IncludeReplies) {
-    $rep = Join-Path $env:LOCALAPPDATA 'CCBridge\replies'
+    $rep = Get-AppDataPath 'replies'
     if (Test-Path $rep) { Copy-Item -LiteralPath $rep -Destination (Join-Path $stage 'replies') -Recurse }
 }
 
 [IO.File]::WriteAllText((Join-Path $stage 'README.txt'), @"
-CCBridge diagnostics $stamp
+StreamHub diagnostics $stamp
 environment.json  versions, PowerShell, Edge, settings (no personal data)
 config-*.json     settings files, including your *.local.json overrides
-page-check.json   whether CCBridge's selectors still find Copilot's controls (only if Edge with Copilot was open)
+page-check.json   whether StreamHub's selectors still find Copilot's controls (only if Edge with Copilot was open)
 check-disputes\   file-check findings Copilot disputed or you ignored, per project (file, finding, code line)
 fix-cases\        problems that needed more than one try, per project: the change that brought them, each try and Copilot's diagnosis (contains code lines)
 logs\             diagnostic logs; user name, profile/OneDrive paths and email addresses are masked
@@ -106,7 +108,7 @@ Log level when collected: $($envInfo.logLevel). For detailed logs, turn on verbo
 "@)
 
 $desktop = [Environment]::GetFolderPath('Desktop')
-$zip = Join-Path $desktop "CCBridge-diagnostics-$stamp.zip"
+$zip = Join-Path $desktop "StreamHub-diagnostics-$stamp.zip"
 if (Test-Path $zip) { [IO.File]::Delete($zip) }
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $fs = [IO.File]::Open($zip, [IO.FileMode]::CreateNew)

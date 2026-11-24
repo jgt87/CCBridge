@@ -1,7 +1,7 @@
 {
   "port": 8765,
   "cdpPort": 9333,
-  "projectsFolder": "CCBridge",
+  "projectsFolder": "StreamHub",
   "maxRounds": 12,
   "promptCharBudget": 75000,
   "resultCharBudget": 60000,

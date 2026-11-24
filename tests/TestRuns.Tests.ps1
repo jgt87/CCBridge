@@ -1,7 +1,7 @@
 # Test runs: saved requests run again in a fresh project, with a report next to the last run.
 # Made-up requests and data in a temporary projects folder.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-tr-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-tr-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'ProjectSetup', 'TestRuns', 'SessionReport') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 $projects = Join-Path $env:TEMP ('ccb-tr-' + [guid]::NewGuid().ToString('N'))
@@ -91,4 +91,4 @@ Describe 'The run''s numbers from the log' {
 }
 
 Remove-Item $projects -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

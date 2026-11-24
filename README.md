@@ -1,6 +1,6 @@
 # StreamHub
 
-_Formerly CCBridge. The scripts (`start.cmd`, `ccbridge.ps1`), the data folder `%LOCALAPPDATA%\CCBridge`, the projects folder `OneDrive\CCBridge`, the MCP server id `ccbridge` and the repository keep that name, so existing installs and settings keep working._
+_Formerly CCBridge (pre-rename name). Since the rename everything is called StreamHub: the scripts (`start.cmd`, `streamhub.ps1`), the data folder `%LOCALAPPDATA%\StreamHub`, the projects folder `OneDrive\StreamHub`, the MCP server id `streamhub` and the repository. An install from before the rename moves its folders by itself at a start (see [Updating](#updating)), and keeps its install folder; register the MCP server again as `streamhub` (see [MCP server](#mcp-server))._
 
 A local coding harness that uses **Microsoft 365 Copilot Chat** (in Microsoft Edge) as its model, with **zero installation**: it runs on Windows PowerShell 5.1 and the Edge browser that ship with Windows. No admin rights, no Node, no Python on the target machine.
 
@@ -46,10 +46,10 @@ Automating Copilot Chat may be subject to your organisation's policies; check be
 
 1. Install (PowerShell, no admin rights):
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jgt87/CCBridge/main/install.ps1 | iex"
+   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jgt87/StreamHub/main/install.ps1 | iex"
    ```
 2. Start **StreamHub** from the desktop or Start menu. An Edge window opens Copilot Chat in a separate profile: sign in once with your Microsoft 365 account. The interface opens at `http://localhost:8765`.
-3. Create a project (it lives in `OneDrive\CCBridge\<name>`), type what to build, and approve the changes Copilot proposes.
+3. Create a project (it lives in `OneDrive\StreamHub\<name>`), type what to build, and approve the changes Copilot proposes.
 4. To update later: just restart StreamHub (it updates itself at every start), or double-click `update.cmd`. See [Updating](#updating).
 
 Requirements: Windows 10/11, Windows PowerShell 5.1 in FullLanguage mode, Microsoft Edge, a Microsoft 365 Copilot Chat account, OneDrive for the web app. `test-tools\probe.cmd` checks a machine and writes `probe-report.txt`.
@@ -167,7 +167,7 @@ The parts a coding harness (an agent that reads, changes and runs a project for 
 | Task queue and background work | Work that waits or runs unattended | A queue that survives restarts, pauses at Copilot's daily limit and continues after it; schedules, runbooks, chains and scripts in Automation |
 | Hooks | Your own commands at fixed moments | `.streamhub/hooks.json`: before or after every Copilot action (optionally matched by action name), after Copilot edits a matching file, before a task counts as done (a failure goes back to Copilot), after a task; approved once per version, paused with a setting |
 | Web access | Reading pages from the internet | The `web` action: public pages only, sites the message names are read at once, other sites need approval |
-| Other programs | Using the harness from another tool | An MCP server (`mcp/ccbridge-mcp.ps1`) and a local HTTP API; tasks from other programs show in the same queue |
+| Other programs | Using the harness from another tool | An MCP server (`mcp/streamhub-mcp.ps1`) and a local HTTP API; tasks from other programs show in the same queue |
 | Records and logs | Seeing what happened | Chat history per project, a task report per task that changed files (`.streamhub/Evidence/`, with the checks Copilot set for the task at its start and answered at the end), Copilot's notes on the project's data (`.streamhub/data-notes.json`, sent with every task), a log with levels, and Export diagnostics |
 | Reliability | Coping with a flaky model page | Replies rebuilt from the raw stream (Copilot's link filter damages code), a lost request is sent again, a cut-off last block is not applied, and the same failing step stops after three tries |
 | Settings | Adjusting how it works | Settings in the app (saved per computer, kept across updates) |
@@ -179,7 +179,7 @@ The parts a coding harness (an agent that reads, changes and runs a project for 
 
 ## Using the web app
 
-1. **Projects**: on first start choose or create a project. Projects are folders in `OneDrive\CCBridge`; StreamHub reopens the last one next time. Switch with *Switch project* in the header or in Menu after the current task finishes or stops. Queued tasks keep the project they were submitted for, including undo requests from MCP clients. Each project in the list shows when it last changed and its size and type, for example `42 files · 1.2 MB · HTML, JavaScript, CSS · source data` (from file names and sizes only, so OneDrive downloads nothing).
+1. **Projects**: on first start choose or create a project. Projects are folders in `OneDrive\StreamHub`; StreamHub reopens the last one next time. Switch with *Switch project* in the header or in Menu after the current task finishes or stops. Queued tasks keep the project they were submitted for, including undo requests from MCP clients. Each project in the list shows when it last changed and its size and type, for example `42 files · 1.2 MB · HTML, JavaScript, CSS · source data` (from file names and sizes only, so OneDrive downloads nothing).
 2. **Ask**: type in the chat box and press Enter. Add files with `@path`, or only some lines with `@path:120-180`. Pick the mode in the chat box. Arrow Up in the box brings back your previous messages (Arrow Down goes forward again, back to what you were typing). All reading happens locally in PowerShell; Copilot gets the contents in the prompt. It reads parts of large files itself (`read index.html:181-420`, usually after a `grep` that returns `PATH:LINE` hits), and a file that does not fit is cut at a whole line with a note on how to read the rest.
 3. **Watch and approve**: while Copilot works you see its text, its actions as cards and its checklist under *Actions*; the waiting card says what StreamHub is doing and when it was last updated (*Show Copilot* brings its tab to the front when it has been quiet for a while). Approve or reject changes; hold to run commands, after reading the full command and scripts on the card.
 4. **Review**: the *History* tab lists change sets; *Undo last change set* reverts the newest one. Click any file to view it.
@@ -205,24 +205,24 @@ The parts a coding harness (an agent that reads, changes and runs a project for 
 Command line, one prompt without the interface:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File ccbridge.ps1 -Ping "say hi" -NewChat
+powershell -NoProfile -ExecutionPolicy Bypass -File streamhub.ps1 -Ping "say hi" -NewChat
 ```
 
-`start.cmd` / `ccbridge.ps1` options: `-Port <n>`, `-NoBrowser`, `-NoUpdate` (skip the update check once and run the installed version as it is; to go back to an earlier release, see [Staying on a version](#staying-on-a-version-or-going-back-to-an-earlier-one)), `-LogLevel off|info|verbose|trace`. If StreamHub is already running, `start.cmd` stops that instance first (it would keep serving its old version after an update) and starts the current one; the open browser tab reconnects by itself. The MCP server and `-Ping` runs are left alone.
+`start.cmd` / `streamhub.ps1` options: `-Port <n>`, `-NoBrowser`, `-NoUpdate` (skip the update check once and run the installed version as it is; to go back to an earlier release, see [Staying on a version](#staying-on-a-version-or-going-back-to-an-earlier-one)), `-LogLevel off|info|verbose|trace`. If StreamHub is already running, `start.cmd` stops that instance first (it would keep serving its old version after an update) and starts the current one; the open browser tab reconnects by itself. The MCP server and `-Ping` runs are left alone.
 
 ---
 
 ## MCP server
 
-`mcp/ccbridge-mcp.ps1` exposes the bridge and agent loop to MCP clients over stdio, without the web interface, in **any** project folder.
+`mcp/streamhub-mcp.ps1` exposes the bridge and agent loop to MCP clients over stdio, without the web interface, in **any** project folder.
 
-Register it with your MCP client's add command (server name `ccbridge`, the command and arguments below), or put it in the client's JSON config (with optional verbose logging):
+Register it with your MCP client's add command (server name `streamhub`, the command and arguments below), or put it in the client's JSON config (with optional verbose logging):
 
 ```json
-{ "mcpServers": { "ccbridge": {
+{ "mcpServers": { "streamhub": {
   "command": "powershell.exe",
-  "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\Users\\<you>\\AppData\\Local\\Programs\\CCBridge\\mcp\\ccbridge-mcp.ps1"],
-  "env": { "CCBRIDGE_LOG": "verbose" } } } }
+  "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\Users\\<you>\\AppData\\Local\\Programs\\StreamHub\\mcp\\streamhub-mcp.ps1"],
+  "env": { "STREAMHUB_LOG": "verbose" } } } }
 ```
 
 The server is written for a calling model that may be small: its instructions and tool descriptions tell it, in plain words, to do only small and clear edits itself and to hand everything that needs reasoning to Copilot, preferably with the single-call `copilot_run_task`.
@@ -262,34 +262,42 @@ With a Microsoft 365 Copilot licence and **Work IQ** on, Copilot can use your Ou
 
 Installing, every start and `check.cmd` show a **system check**: the StreamHub version and commit, Windows PowerShell 5.1 and its language mode, the execution policy, .NET Framework, Microsoft Edge and its policies, the local web server, the ports, OneDrive, the data folder and the UI kit (on or off, its revision and StreamHub version, the parts that are on, the colours and the shared catalogue) (`check.cmd` and the installer also test GitHub and Copilot's site). Each line reads [OK], [WARN] or [FAIL] with what to do; a FAIL stops the start with the reason. When something is missing, the line also gives Microsoft's download page (Edge, .NET Framework 4.8, OneDrive, Windows Management Framework 5.1). What is safe to fix without admin rights is fixed right away: a port in use by another program moves to a free one (saved in `config\harness.local.json`), and OneDrive opens so you can sign in. Company policies (language mode, execution policy, Edge's remote debugging) are never changed: those lines say to ask IT. `check.cmd -NoFix` only reports.
 
-**Install** (no admin rights; into `%LOCALAPPDATA%\Programs\CCBridge`, with desktop and Start menu shortcuts):
+**Install** (no admin rights; into `%LOCALAPPDATA%\Programs\StreamHub`, with desktop and Start menu shortcuts):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jgt87/CCBridge/main/install.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jgt87/StreamHub/main/install.ps1 | iex"
 ```
 
-Set `$env:CCBRIDGE_DIR` first to install elsewhere. Alternatively download `CCBridge-<version>.zip` from [Releases](https://github.com/jgt87/CCBridge/releases), unzip it anywhere and run `start.cmd`.
+Set `$env:STREAMHUB_DIR` first to install elsewhere. Alternatively download `StreamHub-<version>.zip` from [Releases](https://github.com/jgt87/StreamHub/releases), unzip it anywhere and run `start.cmd`.
 
 ### Updating
 
-New versions are published as [GitHub Releases](https://github.com/jgt87/CCBridge/releases). The easiest ways to get one, from least to most effort:
+New versions are published as [GitHub Releases](https://github.com/jgt87/StreamHub/releases). The easiest ways to get one, from least to most effort:
 
 1. **Restart StreamHub.** Every start of StreamHub (and of its MCP server) checks GitHub and installs the newest release before it opens; this takes a few seconds. Offline, or if anything goes wrong, it simply starts the version you have. So normally you do nothing: close the StreamHub window and start it again from the shortcut.
-2. **Double-click `update.cmd`** in the StreamHub folder (`%LOCALAPPDATA%\Programs\CCBridge`). It updates right away and tells you the result, for example `updated v0.1.0 -> v0.1.1` or `Already up to date (v0.1.1)`. If StreamHub was running, close and start it again afterwards.
+2. **Double-click `update.cmd`** in the StreamHub folder (`%LOCALAPPDATA%\Programs\StreamHub`). It updates right away and tells you the result, for example `updated v0.1.0 -> v0.1.1` or `Already up to date (v0.1.1)`. If StreamHub was running, close and start it again afterwards.
 3. **Run the install command again** (see above). It updates the existing installation in place.
 
 Your settings in `config\harness.local.json` and `config\selectors.local.json` are kept by every update. The installed version is in `version.txt` (also shown in `environment.json` of a diagnostics export).
 
-- Turn automatic updates off with Settings > App > *Update automatically*, or `"autoUpdate": false` in `config\harness.local.json` (`update.cmd` still works); for the MCP server alone set the environment variable `CCBRIDGE_NO_UPDATE=1`.
+- Turn automatic updates off with Settings > App > *Update automatically*, or `"autoUpdate": false` in `config\harness.local.json` (`update.cmd` still works); for the MCP server alone set the environment variable `STREAMHUB_NO_UPDATE=1`.
 - A git clone updates with `git pull --ff-only` instead (skipped when it has local changes or is on another branch).
 - MCP clients start the MCP server when they launch, so restarting the MCP client (for example a new session of your coding agent) also picks up a new version.
+
+#### Coming from the old name
+
+Releases before the rename were called CCBridge (pre-rename name). Updating from one needs nothing extra, but some things follow at a later start:
+
+- **Data and projects folders.** At a start, StreamHub moves `%LOCALAPPDATA%\CCBridge` to `%LOCALAPPDATA%\StreamHub` (with the Edge profile, so Copilot stays signed in) and `OneDrive\CCBridge` to `OneDrive\StreamHub` (one rename, which OneDrive syncs as such), and points the saved paths (last project, queue, chat history) at the new places (pre-rename folders). While a folder is in use (the Edge window StreamHub opened, another StreamHub, a file open in a project) it keeps its old name and StreamHub uses it as before; the start says so, and the move is tried again at the next start. Close the StreamHub Edge window and start StreamHub again to finish it. When both folders exist, the new one is used and the old one is left as it is.
+- **Install folder.** An install in `%LOCALAPPDATA%\Programs\CCBridge` stays there (pre-rename folder name; StreamHub cannot move the folder it runs from, and MCP clients point at it). New installs go to `Programs\StreamHub`.
+- **MCP server.** The server id is now `streamhub` and the script `mcp\streamhub-mcp.ps1`; a client registered with the old id and `mcp\ccbridge-mcp.ps1` keeps working (that file starts the new one; pre-rename name), until you register it again. `tools\rebrand-check.ps1` shows where everything is and prints the commands (see `docs/runbooks/rebrand-check.md`).
 
 ### Staying on a version, or going back to an earlier one
 
 If a new release breaks something for you:
 
 - **Start without updating, once:** `start.cmd -NoUpdate` runs the version you have as it is, even when a newer one is out. The shortcut still updates at its next start.
-- **Go back to an earlier release:** in a Command Prompt in the StreamHub folder, run `update.cmd -To v0.1.149` (any version from the [Releases](https://github.com/jgt87/CCBridge/releases) page). It installs that release in place, the same safe way as an update (your settings are kept, and the old files are put back if anything fails), and then:
+- **Go back to an earlier release:** in a Command Prompt in the StreamHub folder, run `update.cmd -To v0.1.149` (any version from the [Releases](https://github.com/jgt87/StreamHub/releases) page). It installs that release in place, the same safe way as an update (your settings are kept, and the old files are put back if anything fails), and then:
   - automatic updates **skip** the release you went back from (and every one before it) and update again as soon as a **newer** release is out, which is normally the fix. Settings > App > *Skip releases up to* shows the skipped release; empty it to take the newest release again. It clears itself once a newer release is installed;
   - a release from before this feature (v0.1.150 and older) does not know how to skip, and would update straight back at its next start. Going back to one of those turns **automatic updates off** instead, and says so: turn them on again in Settings > App once a fixed release is out.
 - **Unzipped an older release by hand?** Run `update.cmd -To` with that same version once: it installs nothing, only keeps the newer releases away.
@@ -299,7 +307,7 @@ If a new release breaks something for you:
 
 ### Staying signed in (single sign-on)
 
-StreamHub's Edge profile (`%LOCALAPPDATA%\CCBridge\edge-profile`) keeps your Copilot sign-in between restarts. Edge stores the sign-in itself and encrypts its cookies with a key that Windows protects for your account (DPAPI); StreamHub stores no password or token. The sign-in can still be lost when:
+StreamHub's Edge profile (`%LOCALAPPDATA%\StreamHub\edge-profile`) keeps your Copilot sign-in between restarts. Edge stores the sign-in itself and encrypts its cookies with a key that Windows protects for your account (DPAPI); StreamHub stores no password or token. The sign-in can still be lost when:
 - you answered "Stay signed in?" with No (the cookies then end when Edge closes);
 - your organisation requires a new sign-in after a set time, or after every browser start (Conditional Access). Nothing on this PC can or should get around that;
 - Edge is set to clear cookies when it closes.
@@ -345,10 +353,10 @@ Settings live in `config\harness.json` and `config\selectors.json`. Put your own
 ## Logging and diagnostics
 
 ### Where and what
-- Log files: **`%LOCALAPPDATA%\CCBridge\logs\ccbridge-yyyyMMdd.log`**, one per day, kept 14 days. The web app, the MCP server, the updater and the diagnostics tool all write to the same file.
+- Log files: **`%LOCALAPPDATA%\StreamHub\logs\streamhub-yyyyMMdd.log`**, one per day, kept 14 days. The web app, the MCP server, the updater and the diagnostics tool all write to the same file.
 - One line per event: time, process id, level, component, message, optional correlation id and JSON data. A `cid` ties all lines from one queued task or user turn together, even when several tasks share the process:
   ```
-  2026-10-02 01:33:30.746 [33720] INFO    server   Web app started on http://localhost:8765/ {"ccbridge":"v0.1.0","powershell":"5.1.26100.9444",...}
+  2026-10-02 01:33:30.746 [33720] INFO    server   Web app started on http://localhost:8765/ {"streamhub":"v0.1.0","powershell":"5.1.26100.9444",...}
   2026-10-02 02:04:12.118 [33720] VERBOSE bridge   Reply received {"ms":7412,"frames":38,"chars":1620,"uncertain":0,"result":"Success","chat":"3/30","credits":"41/50",...}
   ```
 - Components: `server` (web app), `mcp`, `agent` (turns, rounds, actions, approvals), `bridge` (message box, sending, replies), `cdp` (Edge connection), `exec` (commands, risk checks), `source` (source-data protection), `update`, `diag`.
@@ -367,14 +375,14 @@ Settings live in `config\harness.json` and `config\selectors.json`. Put your own
 - **Web app**: Menu (top right) → **Logging**. Each click moves one step: info, verbose, trace, back to info. It takes effect immediately and stays after restarts (stored as `logLevel` in `config\harness.local.json`). Use trace only for a short test: it logs the prompt and reply text.
 - **For one session**: `start.cmd -LogLevel verbose` (or `trace`).
 - **Permanently**: `config\harness.local.json` containing `{ "logLevel": "verbose" }`.
-- **MCP server**: add `"env": { "CCBRIDGE_LOG": "verbose" }` to the server entry in your MCP client's config (environment variable `CCBRIDGE_LOG`), or use `harness.local.json`.
+- **MCP server**: add `"env": { "STREAMHUB_LOG": "verbose" }` to the server entry in your MCP client's config (environment variable `STREAMHUB_LOG`), or use `harness.local.json`.
 
-Precedence: `-LogLevel` parameter, then `CCBRIDGE_LOG`, then `logLevel` in the settings, then `info`.
+Precedence: `-LogLevel` parameter, then `STREAMHUB_LOG`, then `logLevel` in the settings, then `info`.
 
 ### Handing diagnostics to someone
 1. Turn verbose logging on and reproduce the problem.
 2. Run **`diagnostics.cmd`** (in the StreamHub folder) or Menu → **Export diagnostics**.
-3. Send the `CCBridge-diagnostics-yyyyMMdd-HHmm.zip` that appears on your desktop.
+3. Send the `StreamHub-diagnostics-yyyyMMdd-HHmm.zip` that appears on your desktop.
 
 The zip contains:
 
@@ -408,7 +416,7 @@ Double-click `test-tools\complexity-test.cmd` to send 19 prompts, from simple to
 
 Run only the new steps with `test-tools\complexity-test.cmd -From 13`.
 
-Per step the report records the result (`Success`, `NoAnswer`, `OutOfCredits`, `Error`, ...), the time, when the first text arrived, the reply length, the action blocks found, Copilot's message types and filter markers, and (not for the Microsoft 365 steps) the first words of the reply, so refusals stand out. Each run creates its own folder `C:\temp\CCBridge-test-<date>` with `CCBridge-complexity-<date>.txt` and `.json`, masked like the logs (`-OutRoot D:\somewhere` picks another parent folder). Run part of the ladder with `test-tools\complexity-test.cmd -From 5 -To 9`.
+Per step the report records the result (`Success`, `NoAnswer`, `OutOfCredits`, `Error`, ...), the time, when the first text arrived, the reply length, the action blocks found, Copilot's message types and filter markers, and (not for the Microsoft 365 steps) the first words of the reply, so refusals stand out. Each run creates its own folder `C:\temp\StreamHub-test-<date>` with `StreamHub-complexity-<date>.txt` and `.json`, masked like the logs (`-OutRoot D:\somewhere` picks another parent folder). Run part of the ladder with `test-tools\complexity-test.cmd -From 5 -To 9`.
 
 The same run measures speed. For every step it records the exact time (`HH:mm:ss.fff`, plus milliseconds after Send) of what the page shows (Stop button, reply text, Copy button), every connection and request the page uses (first and last data, record types such as the end of a reply), and when StreamHub had the reply and by which route (StreamHub, Chathub or the page). Network times are Edge's own. The TIMING table shows per step how long StreamHub waited after Copilot finished; the full timeline of each step follows below it. Only names, sizes and times are recorded, never prompt or reply text.
 
@@ -422,7 +430,7 @@ The same run measures speed. For every step it records the exact time (`HH:mm:ss
 
 **Message limit per chat.** When Copilot reports no message count (replies read from the page), StreamHub counts messages itself against `messagesPerChat` (30) and continues in a new chat with a summary before the limit.
 
-**Reply format of your tenant (`test-tools\stream-shape.cmd`).** Writes the structure of Copilot's recent replies (field names, types, lengths and status words; no answer text) to `C:\temp\CCBridge-stream-shape-<date>.txt`. Sending that file lets StreamHub support your tenant's reply format (for example StreamHub) directly, which is faster and gives back the chat message count and remaining credits.
+**Reply format of your tenant (`test-tools\stream-shape.cmd`).** Writes the structure of Copilot's recent replies (field names, types, lengths and status words; no answer text) to `C:\temp\StreamHub-stream-shape-<date>.txt`. Sending that file lets StreamHub support your tenant's reply format (for example StreamHub) directly, which is faster and gives back the chat message count and remaining credits.
 
 **Microsoft 365 fields test (`test-tools\m365-fields-test.cmd`).** Asks Copilot, with Work IQ on and strictly read-only, which fields and filters it can use for a Teams channel message, a Teams group chat message, a Teams 1:1 chat message, an email and a calendar item: per topic the field names, types, a description and a placeholder example, the filters you can ask for, and the limits. It asks for no item content and keeps none (only the kinds of sources Copilot cited, never titles or addresses), and if Copilot proposes any action the topic is skipped without touching it. Needs a Microsoft 365 Copilot licence; uses one Copilot message per topic (`test-tools\m365-fields-test.cmd -Topics email,calendar` for some). Report: `C:\temp\StreamHub-m365-fields-<time>.md` and `.json`; review it before sharing.
 
@@ -442,7 +450,7 @@ To test one agent: `test-tools\agent-test.cmd Researcher`. If the agent has anot
 
 **Reading an error.** Every error in the chat shows a category (for example `EDGE-LOST`, `SIGN-IN`, `NO-ANSWER`, `TIMEOUT`, `CREDITS`, `EDIT`), what to do, an error id and **Copy details** (id, time, version, category and the technical detail, ready to send). The same id is in the log, next to the full detail, so `diagnostics.cmd` plus the id leads straight to it. A failed step (read, grep, edit, write, run) shows its own category on its card (for example `EDIT-NOT-FOUND`, `EDIT-AMBIGUOUS`, `EDIT-HALF-BLOCK`, `EDIT-MOVE-ORDER`, `RUN-FAILED`), the possible reasons and what happens next; failed steps are always logged, also without verbose logging.
 
-**Pacing.** StreamHub deliberately takes its time, because completing a task matters more than speed: after a new chat is ready it waits 3 s, after typing a prompt 1 s before pressing Send, and it leaves at least 5 s after the previous reply. Change these in `config\harness.local.json`, for example `{ "pacing": { "newChatSettleSec": 5, "beforeSendSec": 2, "betweenPromptsSec": 10 } }`. If no part of a reply arrives within 25 s of sending, StreamHub stops that request and sends the prompt once more in the same chat. If the page loses its message box, StreamHub reloads it; if that does not help, the error says what the page shows and a screenshot is saved in `%LOCALAPPDATA%\CCBridge\screens`.
+**Pacing.** StreamHub deliberately takes its time, because completing a task matters more than speed: after a new chat is ready it waits 3 s, after typing a prompt 1 s before pressing Send, and it leaves at least 5 s after the previous reply. Change these in `config\harness.local.json`, for example `{ "pacing": { "newChatSettleSec": 5, "beforeSendSec": 2, "betweenPromptsSec": 10 } }`. If no part of a reply arrives within 25 s of sending, StreamHub stops that request and sends the prompt once more in the same chat. If the page loses its message box, StreamHub reloads it; if that does not help, the error says what the page shows and a screenshot is saved in `%LOCALAPPDATA%\StreamHub\screens`.
 
 **Copilot answers in the browser but StreamHub keeps waiting.** StreamHub reads replies from the page's connection to Copilot: Copilot's stream connection (`substrate.svc.cloud.microsoft/m365Copilot/StreamHub`) where the tenant uses it, otherwise Chathub. With verbose logging, "Reply received over StreamHub" lists the field names its messages carried (names only). If neither route delivers the reply, StreamHub notices on the page itself that Copilot has finished (Stop gone, a new reply with its Copy button) and reads the reply's markdown from the page; the log then says "Reply read from the page". With verbose logging, the line "Network after sending" lists which addresses the page used (no content), which shows how replies travel on that tenant.
 
@@ -475,11 +483,11 @@ flowchart LR
     Q["Queue<br/>(one task at a time,<br/>saved across restarts)"] --> W["Worker<br/>(agent loop)"]
     W -->|"prompt: request + instructions<br/>+ project context"| B["Copilot bridge<br/>(Edge DevTools)"]
     B -->|types and sends| C["Microsoft 365 Copilot Chat<br/>(Edge, your sign-in)"]
-    C -->|"reply stream<br/>(Chathub / StreamHub,<br/>or the page itself)"| B
+    C -->|"reply stream<br/>(Chathub / Copilot stream connection,<br/>or the page itself)"| B
     B -->|"reply text, repaired"| W
     W -->|"action blocks:<br/>read, grep, find, edit,<br/>write, run, remember"| X["Executor"]
-    X <-->|"files"| P[("Project folder<br/>OneDrive\CCBridge\project")]
-    X -->|"backups before each change"| L[("%LOCALAPPDATA%\CCBridge<br/>undo, queue, logs")]
+    X <-->|"files"| P[("Project folder<br/>OneDrive\StreamHub\project")]
+    X -->|"backups before each change"| L[("%LOCALAPPDATA%\StreamHub<br/>undo, queue, logs")]
     W -->|"events: replies, actions,<br/>approvals, results"| U
 ```
 
@@ -515,7 +523,7 @@ sequenceDiagram
 
 ### How a prompt is typed and sent
 
-StreamHub uses no Copilot API. It drives the normal Copilot web page in Edge, the way a person would, through Edge's DevTools connection: the same channel the browser's developer tools use. At start it opens Edge with its own profile (`%LOCALAPPDATA%\CCBridge\edge-profile`, where you signed in once) and a debug port (`cdpPort`, default 9333). Over that port it can run JavaScript in the page, press keys, and see the page's network traffic. It never takes its own app tab for the Copilot tab.
+StreamHub uses no Copilot API. It drives the normal Copilot web page in Edge, the way a person would, through Edge's DevTools connection: the same channel the browser's developer tools use. At start it opens Edge with its own profile (`%LOCALAPPDATA%\StreamHub\edge-profile`, where you signed in once) and a debug port (`cdpPort`, default 9333). Over that port it can run JavaScript in the page, press keys, and see the page's network traffic. It never takes its own app tab for the Copilot tab.
 
 ```mermaid
 flowchart TD
@@ -597,7 +605,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    T["One message<br/>= one change set"] --> B["Before the first change to a file,<br/>its old content is copied to<br/>%LOCALAPPDATA%\CCBridge\projects\...\backups"]
+    T["One message<br/>= one change set"] --> B["Before the first change to a file,<br/>its old content is copied to<br/>%LOCALAPPDATA%\StreamHub\projects\...\backups"]
     B --> CH["Changes are written<br/>to the project"]
     CH --> U{Undo?}
     U -->|yes| R["Edited files restored,<br/>files the task created removed<br/>(inside the project only)"]
@@ -638,7 +646,7 @@ StreamHub gives Copilot the same folder rules with every coding or project task 
 | `Scripts/` | Helper scripts: setup, checks, data conversion, one-off tools | Copilot |
 | `Runbooks/` | Everything that gets data from Microsoft 365 or Work IQ: runbooks (checked JSON and text answers) and chains | You, Copilot |
 | `Runbooks/Exports/` | The data they produce (runbook JSON, fetch answers) | StreamHub |
-| `Logs/` | Log files the project's own scripts write (StreamHub's own log stays in `%LOCALAPPDATA%\CCBridge`) | The project's scripts |
+| `Logs/` | Log files the project's own scripts write (StreamHub's own log stays in `%LOCALAPPDATA%\StreamHub`) | The project's scripts |
 | `Source/` | Your source data, read-only | You |
 | `.streamhub/` | StreamHub's own records, which are not part of the project's code: `Evidence/`, `Reviews/`, `History/` (earlier versions of runbook and fetch data), `PLAN.md`, schedules, issues, the import index. Copilot's writes there are refused and Copilot's file list leaves it out; the Files tree shows it (closed at first, with a cog icon), and the chat (*Open* next to *Task report saved*), the plan cards and the Code review section open its files too | StreamHub |
 | `tests/`, `docs/`, `data/` | Tests; documentation; data files the code reads (conventional code folders keep their lowercase names, like `src/`, because tools expect them) | Copilot |
@@ -670,7 +678,7 @@ Edge and Chrome block some things on a page opened straight from disk (`file://`
 
 | Location | Content |
 |---|---|
-| `OneDrive\CCBridge\<project>` | Web-app projects (your files; `Source/` = read-only source data) |
+| `OneDrive\StreamHub\<project>` | Web-app projects (your files; `Source/` = read-only source data) |
 | `<project>\AGENTS.md` | Project notes sent to Copilot with each new chat; `verify:` line; "## Learned" notes |
 | `<project>\.streamhub\PLAN.md` | Every decision of Clarify-first requests: questions, answers, plan versions, approval, result |
 | `<project>\.streamhub\Evidence\` | Per task: what was asked, what changed, which checks passed |
@@ -681,15 +689,15 @@ Edge and Chrome block some things on a page opened straight from disk (`file://`
 | `<project>\Runbooks\` | Everything that gets data from Microsoft 365 / Work IQ: runbooks with checked JSON (`NAME.runbook.md`), runbooks with a text answer (`NAME.prompt.md`) and chains (`NAME.chain.md`) |
 | `<project>\Runbooks\Exports\` | Their latest data: runbook JSON and fetch answers |
 | `<project>\History\` | Earlier versions of that data (dated copies) |
-| `%LOCALAPPDATA%\Programs\CCBridge` | The installed application |
-| `%LOCALAPPDATA%\CCBridge\edge-profile` | The Edge profile StreamHub uses for Copilot (your sign-in) |
-| `%LOCALAPPDATA%\CCBridge\projects\…` | Per project: undo backups, the source-data copy, the chat history (`chat-history.jsonl`), the log of earlier tasks (`progress.jsonl`) and the last test run (`test-baseline.json`); kept on this computer, not synced |
-| `%LOCALAPPDATA%\CCBridge\logs` | Diagnostic logs (14 days) |
-| `%LOCALAPPDATA%\CCBridge\replies` | Raw data of the last 30 Copilot replies (`saveReplyFrames`) |
-| `%LOCALAPPDATA%\CCBridge\session-token.txt` | Token that protects the local web API |
-| `%LOCALAPPDATA%\CCBridge\issue-index.json` | The app-wide issue index: one summary per project, imported from each project's `.streamhub\issues.json` |
-| `%LOCALAPPDATA%\CCBridge\ui-hints.json` | One-time hints already shown (such as how to use Edge's Split screen), so they do not come back |
-| `%LOCALAPPDATA%\CCBridge\queue.json`, `queue-pause.json` | The queue and the daily-limit pause, kept across restarts |
+| `%LOCALAPPDATA%\Programs\StreamHub` | The installed application |
+| `%LOCALAPPDATA%\StreamHub\edge-profile` | The Edge profile StreamHub uses for Copilot (your sign-in) |
+| `%LOCALAPPDATA%\StreamHub\projects\…` | Per project: undo backups, the source-data copy, the chat history (`chat-history.jsonl`), the log of earlier tasks (`progress.jsonl`) and the last test run (`test-baseline.json`); kept on this computer, not synced |
+| `%LOCALAPPDATA%\StreamHub\logs` | Diagnostic logs (14 days) |
+| `%LOCALAPPDATA%\StreamHub\replies` | Raw data of the last 30 Copilot replies (`saveReplyFrames`) |
+| `%LOCALAPPDATA%\StreamHub\session-token.txt` | Token that protects the local web API |
+| `%LOCALAPPDATA%\StreamHub\issue-index.json` | The app-wide issue index: one summary per project, imported from each project's `.streamhub\issues.json` |
+| `%LOCALAPPDATA%\StreamHub\ui-hints.json` | One-time hints already shown (such as how to use Edge's Split screen), so they do not come back |
+| `%LOCALAPPDATA%\StreamHub\queue.json`, `queue-pause.json` | The queue and the daily-limit pause, kept across restarts |
 
 ---
 
@@ -703,17 +711,17 @@ How long generated items are kept is set in **Settings > Retention**: earlier ve
 | The model | **Microsoft 365 Copilot Chat** in Edge, with your own sign-in. StreamHub has no language model of its own |
 | Driving Copilot | The **Chrome DevTools Protocol** (Edge's remote debugging port), with a separate Edge profile: typing into the page, clicking Send, reading the reply stream (SignalR WebSocket frames) and the page's own state |
 | Backend | PowerShell modules (`lib/*.psm1`): bridge, agent loop, executor, file checks, issues, imports, schedules, runbooks, review, web server and JSON API |
-| MCP server | `mcp/ccbridge-mcp.ps1`, JSON-RPC over stdio in Windows PowerShell |
+| MCP server | `mcp/streamhub-mcp.ps1`, JSON-RPC over stdio in Windows PowerShell |
 | Web interface | **React 19** and **TypeScript**, built with **Vite**; **Tailwind CSS 4**; **Kokonut UI** components with **Motion** and **lucide-react** icons. File views use **react-markdown**, **highlight.js** (code), **KaTeX** (math) and **Mermaid** (diagrams). Prebuilt into `ui/`, so the target PC needs no Node |
-| UI kit for projects | Kept in one central catalogue beside the projects (`OneDrive\CCBridge\.streamhub\ui-kit\`, shared by every project in that folder and read by Copilot as `shared/ui-kit/`; a project elsewhere gets its own `.streamhub/ui-kit/`), with only what its pages use in `styles/kit/`. Every control and content element has a kit form (fields of every type, radios and check boxes, lists, trees, popovers, confirm and alert boxes, code, captions, status dots), so a page never falls back to the browser's own look. The same `.streamhub` folder beside the projects holds what every project shares: an `AGENTS.md` with instructions for all of them, `Runbooks/` and `Scripts/` that any project can run, and a `data/data-tools.js` of your own; a kit file you change there stays yours through updates and reaches every project whose copy was still the kit's. Any kit file that is a version a StreamHub release shipped counts as StreamHub's and is brought up to date when a project opens, so an update never leaves the catalogue on an older kit. Parts: parts adapted from **kokonutui** (MIT), chart design from **bklit-ui** (MIT), **Lucide** icons (ISC), and **pdf.js** 3.11 by Mozilla (Apache 2.0) for reading PDF files in a page; each with its licence in the kit |
-| Storage | Projects in **OneDrive** (`OneDrive\CCBridge`); StreamHub's own data (undo backups, queue, chat history, logs) in `%LOCALAPPDATA%\CCBridge`, never synced |
+| UI kit for projects | Kept in one central catalogue beside the projects (`OneDrive\StreamHub\.streamhub\ui-kit\`, shared by every project in that folder and read by Copilot as `shared/ui-kit/`; a project elsewhere gets its own `.streamhub/ui-kit/`), with only what its pages use in `styles/kit/`. Every control and content element has a kit form (fields of every type, radios and check boxes, lists, trees, popovers, confirm and alert boxes, code, captions, status dots), so a page never falls back to the browser's own look. The same `.streamhub` folder beside the projects holds what every project shares: an `AGENTS.md` with instructions for all of them, `Runbooks/` and `Scripts/` that any project can run, and a `data/data-tools.js` of your own; a kit file you change there stays yours through updates and reaches every project whose copy was still the kit's. Any kit file that is a version a StreamHub release shipped counts as StreamHub's and is brought up to date when a project opens, so an update never leaves the catalogue on an older kit. Parts: parts adapted from **kokonutui** (MIT), chart design from **bklit-ui** (MIT), **Lucide** icons (ISC), and **pdf.js** 3.11 by Mozilla (Apache 2.0) for reading PDF files in a page; each with its licence in the kit |
+| Storage | Projects in **OneDrive** (`OneDrive\StreamHub`); StreamHub's own data (undo backups, queue, chat history, logs) in `%LOCALAPPDATA%\StreamHub`, never synced |
 | Tests | **Pester 3.4** (ships with Windows) for the backend; **Vitest** for the interface |
 | Build and release | Node and npm on a development PC only (to build `ui/`); `tools\build-release.ps1` with Git and the **GitHub CLI** (`gh`) for tags and releases |
 
 ## Development
 
-- Backend: `lib/*.psm1` (Cdp, CopilotBridge, Workspace, Protocol, Executor, Agent, Server, Config, Log, Prompts, Fetch, Runbook, Schedule, Review, PlanFile, AppWindow) and `mcp/ccbridge-mcp.ps1`; the diagrams in [How it works](#how-it-works) show how they connect. The running web app keeps modules in memory: restart it after backend changes.
+- Backend: `lib/*.psm1` (Cdp, CopilotBridge, Workspace, Protocol, Executor, Agent, Server, Config, Log, Prompts, Fetch, Runbook, Schedule, Review, PlanFile, AppWindow) and `mcp/streamhub-mcp.ps1`; the diagrams in [How it works](#how-it-works) show how they connect. The running web app keeps modules in memory: restart it after backend changes.
 - Interface: React + Vite + Tailwind with Kokonut UI components (adapted in `ui-src/src/components/kokonutui`); `npm run build` in `ui-src` writes the committed `ui/` folder.
 - Tests: `powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Pester .\tests"` (Pester 3.4, ships with Windows; run under Windows PowerShell 5.1).
-- Release: `tools\build-release.ps1 -Version vX.Y.Z [-NotesFile NOTES.md]` builds `dist\CCBridge-vX.Y.Z.zip`, tags the current commit `vX.Y.Z` (locally and on GitHub) and publishes the GitHub Release with the zip and its `SHA256SUMS`. Every version has its tag and its release; `-NoPublish` only builds the zip.
+- Release: `tools\build-release.ps1 -Version vX.Y.Z [-NotesFile NOTES.md]` builds `dist\StreamHub-vX.Y.Z.zip`, tags the current commit `vX.Y.Z` (locally and on GitHub) and publishes the GitHub Release with the zip and its `SHA256SUMS`. Every version has its tag and its release; `-NoPublish` only builds the zip.
 - Contributor notes, PowerShell 5.1 pitfalls and Copilot quirks: [AGENTS.md](AGENTS.md).

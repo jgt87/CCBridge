@@ -3,12 +3,12 @@
 # exactly one string or nothing (a stray output would turn the message into a list). The checks
 # themselves (tool runs, window apps, the import index) are stood in; nothing is started.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 
 function New-GateState {
-    $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+    $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
     $s.ProjectRoot = Join-Path $env:TEMP ('ccb-gates-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory $s.ProjectRoot -Force | Out-Null
     $s.Mode = 'auto'
@@ -324,4 +324,4 @@ Describe 'Done step: the Done when checks and the closing cards' {
     }
 }
 
-Remove-Item -LiteralPath $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

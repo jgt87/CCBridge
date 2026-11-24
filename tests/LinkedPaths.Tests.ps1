@@ -1,7 +1,7 @@
 # Link targets must obey the same confinement and write protections as their visible paths.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $base = Join-Path $env:TEMP ('ccb-links-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_STATE_ROOT = Join-Path $base 'state'
+$env:STREAMHUB_STATE_ROOT = Join-Path $base 'state'
 foreach ($m in 'Workspace', 'Executor') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 $p = Join-Path $base 'project'; $outside = Join-Path $base 'outside'
 $null = New-Item -ItemType Directory -Force -Path $p, $outside, (Join-Path $p 'Source'), (Join-Path $p 'safe'), (Join-Path $p '.streamhub'), (Join-Path $p 'config')
@@ -60,4 +60,4 @@ Describe 'Fully resolved linked paths' {
 foreach ($name in $links.Keys) { [IO.Directory]::Delete((Join-Path $p $name)) }
 $resolvedBase = [IO.Path]::GetFullPath($base)
 if ($resolvedBase.StartsWith([IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\ccb-links-', [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $resolvedBase -Recurse -Force }
-$env:CCBRIDGE_STATE_ROOT = $null
+$env:STREAMHUB_STATE_ROOT = $null

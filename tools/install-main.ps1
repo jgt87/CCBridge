@@ -1,17 +1,38 @@
-# CCBridge installer: downloads the latest release from GitHub into
-# %LOCALAPPDATA%\Programs\CCBridge (no admin rights) and adds Start menu and desktop shortcuts.
-# Run it again any time to update. CCBridge also updates itself when it starts.
+# StreamHub installer: downloads the latest release from GitHub into
+# %LOCALAPPDATA%\Programs\StreamHub (no admin rights) and adds Start menu and desktop shortcuts.
+# Run it again any time to update. StreamHub also updates itself when it starts.
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jgt87/CCBridge/main/install.ps1 | iex"
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jgt87/StreamHub/main/install.ps1 | iex"
 #
 # That command fetches the one-line bootstrap install.ps1 in the repo root, which downloads this
 # file and runs it with -File (some shells hand a piped script to iex line by line).
 #
-# Optional: set $env:CCBRIDGE_DIR to install somewhere else.
+# Optional: set $env:STREAMHUB_DIR to install somewhere else.
+#
+# The rename (pre-rename name CCBridge, now StreamHub): this file runs on its own (downloaded to TEMP), so it
+# carries its own copy of what lib/Update.psm1 does for the updater: a GitHub request that fails is
+# tried once more on the repository's old name, and a release zip of either name is taken. An
+# install in the old folder (pre-rename Programs\CCBridge) is updated where it is, on purpose: StreamHub runs
+# from that folder and cannot move itself, and MCP client registrations (and any shortcut or task
+# a person made) hold its path, so renaming it would break them without a word. New installs go
+# to Programs\StreamHub.
 
 $ErrorActionPreference = 'Stop'
-$repo = 'jgt87/CCBridge'
-$dir = if ($env:CCBRIDGE_DIR) { $env:CCBRIDGE_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\CCBridge' }
+$repo = 'jgt87/StreamHub'
+function Invoke-GitHubRequest([string]$Url, [scriptblock]$Request) {
+    try { return (& $Request $Url) } catch {
+        $old = [regex]::Replace($Url, '(?i)(?<=/)jgt87/StreamHub(?=[/?#]|$)', 'jgt87/CCBridge')   # pre-rename repository name
+        if ($old -eq $Url) { throw }
+        Write-Host "  (GitHub did not answer for $repo; trying the repository's old name)" -ForegroundColor DarkGray
+    }
+    & $Request $old
+}
+$dir = if ($env:STREAMHUB_DIR) { $env:STREAMHUB_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\StreamHub' }
+$oldDir = Join-Path $env:LOCALAPPDATA 'Programs\CCBridge'   # pre-rename install folder
+if (-not $env:STREAMHUB_DIR -and -not (Test-Path -LiteralPath $dir) -and (Test-Path -LiteralPath $oldDir -PathType Container)) {
+    $dir = $oldDir
+    Write-Host "StreamHub is already installed in $oldDir (its folder name from before the rename): updating it there, so MCP clients and shortcuts that point at it keep working." -ForegroundColor DarkGray
+}
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 if ([Net.WebRequest]::DefaultWebProxy) { [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials }
@@ -38,18 +59,20 @@ if (-not $psOk) {
 Write-Host ''
 
 Write-Host "Installing StreamHub into $dir" -ForegroundColor Cyan
-$release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'CCBridge-installer' }
-$asset = @($release.assets | Where-Object { $_.name -like 'CCBridge-*.zip' }) | Select-Object -First 1
+$release = Invoke-GitHubRequest "https://api.github.com/repos/$repo/releases/latest" { param($u) Invoke-RestMethod $u -Headers @{ 'User-Agent' = 'StreamHub-installer' } }
+$asset = @($release.assets | Where-Object { $_.name -like 'StreamHub-*.zip' }) | Select-Object -First 1
+if (-not $asset) { $asset = @($release.assets | Where-Object { $_.name -like 'CCBridge-*.zip' }) | Select-Object -First 1 }   # pre-rename asset name
 if (-not $asset) { throw "The latest release ($($release.tag_name)) has no StreamHub zip." }
 
-$tmp = Join-Path $env:TEMP ('ccbridge-install-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$tmp = Join-Path $env:TEMP ('streamhub-install-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $null = New-Item -ItemType Directory -Path $tmp
 try {
     $zip = Join-Path $tmp $asset.name
     Write-Host "Downloading $($release.tag_name)..."
-    Invoke-WebRequest $asset.browser_download_url -OutFile $zip -UseBasicParsing
+    $null = Invoke-GitHubRequest "$($asset.browser_download_url)" { param($u) Invoke-WebRequest $u -OutFile $zip -UseBasicParsing }
     Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
-    $src = Join-Path $tmp 'CCBridge'
+    # The zip holds one folder (StreamHub, or the old name in a release from before the rename).
+    $src = (Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1).FullName
     $null = New-Item -ItemType Directory -Force -Path $dir
     # Mirror the release in; settings in config\*.local.json are kept.
     $null = & robocopy.exe $src $dir /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XF '*.local.json' 'capture-report.json' 'probe-report.txt' /XD '.git'
@@ -60,15 +83,16 @@ try {
     try { [IO.Directory]::Delete($tmp, $true) } catch { Write-Host "  (the download folder $tmp could not be removed yet; it can be deleted later)" -ForegroundColor DarkGray }
 }
 
-# Shortcuts: Start menu and desktop (skip with $env:CCBRIDGE_NO_SHORTCUTS = '1').
+# Shortcuts: Start menu and desktop (skip with $env:STREAMHUB_NO_SHORTCUTS = '1').
 $shell = New-Object -ComObject WScript.Shell
 $targets = @(
     (Join-Path ([Environment]::GetFolderPath('Programs')) 'StreamHub.lnk'),
     (Join-Path ([Environment]::GetFolderPath('Desktop')) 'StreamHub.lnk')
 )
-if ($env:CCBRIDGE_NO_SHORTCUTS -eq '1') { $targets = @() }
-# Shortcuts from before the rename (CCBridge.lnk) are replaced by the StreamHub ones.
-foreach ($old in (Join-Path ([Environment]::GetFolderPath('Programs')) 'CCBridge.lnk'), (Join-Path ([Environment]::GetFolderPath('Desktop')) 'CCBridge.lnk')) { if ($targets.Count -and (Test-Path -LiteralPath $old)) { [IO.File]::Delete($old) } }
+if ($env:STREAMHUB_NO_SHORTCUTS -eq '1') { $targets = @() }
+# Shortcuts from before the rename (pre-rename CCBridge.lnk) are replaced by the StreamHub ones; StreamHub.lnk
+# is written again below, so it points at this install folder (also after the folder was renamed).
+foreach ($old in (Join-Path ([Environment]::GetFolderPath('Programs')) 'CCBridge.lnk'), (Join-Path ([Environment]::GetFolderPath('Desktop')) 'CCBridge.lnk')) { if ($targets.Count -and (Test-Path -LiteralPath $old)) { [IO.File]::Delete($old) } }   # pre-rename shortcut name
 foreach ($lnkPath in $targets) {
     $lnk = $shell.CreateShortcut($lnkPath)
     $lnk.TargetPath = Join-Path $dir 'start.cmd'
@@ -86,5 +110,6 @@ Write-Host "StreamHub $($release.tag_name) is installed." -ForegroundColor Green
 Write-Host '  Start it:  StreamHub shortcut on the desktop or in the Start menu'
 Write-Host '  Updates:   automatic each time StreamHub starts (turn off with "autoUpdate": false in config\harness.local.json)'
 Write-Host '  Check:     check.cmd in the StreamHub folder shows what this computer has (also at every start)'
-Write-Host '  MCP:       register with your MCP client''s add command (or its JSON config, see the README) as ccbridge:'
-Write-Host "             powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$dir\mcp\ccbridge-mcp.ps1`""
+Write-Host '  MCP:       register with your MCP client''s add command (or its JSON config, see the README) as streamhub:'
+Write-Host "             powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$dir\mcp\streamhub-mcp.ps1`""
+Write-Host '             (registered before the rename under the old id? remove that entry; tools\rebrand-check.ps1 prints both commands)'

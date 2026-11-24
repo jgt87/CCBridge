@@ -2,13 +2,13 @@
 # Send-ToCopilot): its answer is read into the transcript once Copilot is done, a new request is
 # refused while Copilot still works, and the person's New chat leaves it running. The bridge is mocked.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-pending-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-pending-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 
 Describe 'Resolve-PendingChat' {
     Mock -ModuleName Agent Get-Bridge { [pscustomobject]@{ Session = $null } }
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     function New-PendingState {
         $s = New-AgentState -Config $config -AppRoot $root
         $s.PendingChat = [pscustomobject]@{ address = 'https://m365.cloud.microsoft/chat/conversation/abc123'; since = '2026-11-17T10:42:00'; waitedSec = 1800 }
@@ -81,5 +81,5 @@ Describe 'Resolve-PendingChat' {
     }
 }
 
-Remove-Item -Recurse -Force $env:CCBRIDGE_STATE_ROOT -ErrorAction SilentlyContinue
-$env:CCBRIDGE_STATE_ROOT = $null
+Remove-Item -Recurse -Force $env:STREAMHUB_STATE_ROOT -ErrorAction SilentlyContinue
+$env:STREAMHUB_STATE_ROOT = $null

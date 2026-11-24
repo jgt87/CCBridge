@@ -2,6 +2,7 @@
 # the synchronized $State hashtable (events out, tasks and approval decisions in).
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 $script:ProjectTaskKinds = @('chat', 'agent', 'fetch', 'runbook', 'chain', 'script', 'review', 'packages', 'undo', 'export', 'testrun-report', 'page-report', 'page-compare', 'data-profile', 'overview', 'share-package', 'theme', 'tidy-list', 'tidy', 'pptx-plan', 'pptx-ask', 'pptx-ask-element', 'pptx-apply', 'pptx-build', 'sandbox-fetch')
 foreach ($m in 'Log', 'Cdp', 'CopilotBridge', 'WorkStatus', 'Workspace', 'Protocol', 'Executor', 'Prompts', 'Fetch', 'Runbook', 'Schedule', 'Review', 'PlanFile', 'Lint', 'Issues', 'Imports', 'Guardrails', 'WebFetch', 'Retention', 'Chain', 'Layout', 'DataMirror', 'Config', 'ChatScope', 'TestRunner', 'Hooks', 'RepoMap', 'CheckPolicy', 'AutoFix', 'Office', 'SecretFiles', 'ShotDiff', 'UiKit', 'Contrast', 'DataImport', 'Download', 'Packages', 'FixCases', 'OneFile', 'ProjectSetup', 'ToolChecks', 'WebBuild', 'GuiTest', 'TaskNotes', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'DataQuery', 'PageExport', 'PptxLayoutMatch', 'PptxRetheme', 'PptxChoices', 'PptxDeck', 'PageReport', 'PageCompare', 'SqlServer', 'Handoff', 'LoopGuard', 'TaskGuidance', 'Progress', 'DataProfile', 'ProjectOverview', 'ProjectPackage', 'KitTheme', 'TidyUp', 'FileActions') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
@@ -60,14 +61,14 @@ function New-AgentState {
 # The web app and the MCP server can both drive the same Copilot tab. Whoever sent last is
 # recorded here; a process that finds another sender starts a fresh chat instead of
 # continuing someone else's conversation.
-$script:LastSenderFile = Join-Path $env:LOCALAPPDATA 'CCBridge\last-sender.txt'
+function Get-LastSenderFile { Get-AppDataPath 'last-sender.txt' }   # at call time: the data folder can move at start
 
 function Test-OtherSender {
-    try { $p = [IO.File]::ReadAllText($script:LastSenderFile).Trim(); [bool]($p -and $p -ne "$PID") } catch { $false }
+    try { $p = [IO.File]::ReadAllText((Get-LastSenderFile)).Trim(); [bool]($p -and $p -ne "$PID") } catch { $false }
 }
 
 function Set-LastSender {
-    try { [IO.File]::WriteAllText($script:LastSenderFile, "$PID") } catch { }
+    try { [IO.File]::WriteAllText((Get-LastSenderFile), "$PID") } catch { }
 }
 
 function Add-AgentEvent {
@@ -136,7 +137,7 @@ function Add-AgentEvent {
 }
 
 # --- Chat history: kept per project, back after a restart ------------------------------------
-# One JSON line per event in the project's state folder (%LOCALAPPDATA%\CCBridge\projects\...,
+# One JSON line per event in the project's state folder (%LOCALAPPDATA%\StreamHub\projects\...,
 # not OneDrive: replies can hold Microsoft 365 data, and every event would make OneDrive sync).
 
 $script:HistoryMaxEvents = 1500     # the most a project's history holds: older events are removed past this
@@ -373,7 +374,7 @@ function Complete-CopilotConnect($State, $Bridge) {
     $State.CopilotThemeApplied = $null; Update-CopilotTheme $State   # a new connection: the tab gets StreamHub's theme again
     # What the response picker offers on this tenant (Advanced reasoning, models...), for the app's picker.
     if (Test-ResponseOptionsDue $State) { Update-ResponseOptions $State $script:Bridge }
-    # Page health check: the parts CCBridge relies on are where selectors.json says.
+    # Page health check: the parts StreamHub relies on are where selectors.json says.
     try {
         $health = @(Test-CopilotPage $script:Bridge)
         $bad = @($health | Where-Object { $_.ok -eq $false })
@@ -790,7 +791,7 @@ function Sync-ProjectSchedules {
     $candidates = @($Roots | Where-Object { $_ })
     if (-not $candidates.Count) {
         $candidates = @($State.ScheduleRoots.Values | ForEach-Object { $_.root }) + @($State.ProjectRoot) + @($State.Schedules | ForEach-Object { $_.projectRoot })
-        try { $candidates += @(Get-CCBridgeProjects | ForEach-Object { $_.path }) } catch { }
+        try { $candidates += @(Get-StreamHubProjects | ForEach-Object { $_.path }) } catch { }
     }
     $done = 0; $seen = @{}
     foreach ($r in @($candidates | Where-Object { $_ })) {
@@ -808,7 +809,7 @@ function Sync-ProjectSchedules {
 }
 
 function Restore-Schedules {
-    <# At start: moves schedules from the old app-wide file (%LOCALAPPDATA%\CCBridge\schedules.json,
+    <# At start: moves schedules from the old app-wide file (%LOCALAPPDATA%\StreamHub\schedules.json,
        before v0.1.44) into their projects once, then imports every project's schedules. #>
     param($State)
     if (-not $State.ScheduleFile) { return 0 }
@@ -954,7 +955,7 @@ function Invoke-ExportJob {
     $fmt = if ("$($Task.format)" -eq 'pptx') { 'pptx' } else { 'pdf' }
     $url = if ($State.PreviewPort) { "http://localhost:$($State.PreviewPort)/preview/$($State.PreviewToken)/$page" } else { 'file:///' + (Join-Path $State.ProjectRoot $page.Replace('/', '\')).Replace('\', '/') }
     $port = [int]$State.Config.cdpPort; $own = $null
-    $prof = Join-Path $env:LOCALAPPDATA 'CCBridge\export-edge'
+    $prof = Get-AppDataPath 'export-edge'
     $prev = Enter-Activity $State 'page' "Exporting $page as $(if ($fmt -eq 'pptx') { 'a PowerPoint deck' } else { 'a PDF' })"
     try {
         if (-not $port -or -not (Test-CdpEndpoint $port)) {
@@ -1260,7 +1261,7 @@ function Invoke-PageReportJob {
     $prev = Enter-Activity $State 'page' "Checking $page in full: light, dark and at phone width"
     $edge = $null
     try {
-        $edge = Open-ReportEdge -Port ([int]$State.Config.cdpPort) -ProfileDir (Join-Path $env:LOCALAPPDATA 'CCBridge\export-edge')
+        $edge = Open-ReportEdge -Port ([int]$State.Config.cdpPort) -ProfileDir (Get-AppDataPath 'export-edge')
         $r = Invoke-PageReport -ProjectRoot $State.ProjectRoot -Page $page -Url $url -Port $edge.Port
         Write-CCBLog info agent "Full page check of $page" @{ findings = @($r.findings).Count; report = $r.path }
         # One event: the card shows the summary, opens the report and offers the fix list.
@@ -1287,7 +1288,7 @@ function Invoke-PageCompareJob {
     $prev = Enter-Activity $State 'page' "Comparing $page with how it looked before change set $cs"
     $edge = $null
     try {
-        $edge = Open-ReportEdge -Port ([int]$State.Config.cdpPort) -ProfileDir (Join-Path $env:LOCALAPPDATA 'CCBridge\export-edge')
+        $edge = Open-ReportEdge -Port ([int]$State.Config.cdpPort) -ProfileDir (Get-AppDataPath 'export-edge')
         $r = Invoke-PageCompare -ProjectRoot $State.ProjectRoot -ChangeSet $cs -Page $page -Port $edge.Port
         Write-CCBLog info agent "Page comparison of $page" @{ changeSet = $cs; same = [bool]$r.same; report = $r.path }
         Add-AgentEvent $State 'status' @{ text = "$($r.summary.TrimEnd('.')). Report: $($r.path)"; path = $r.path }
@@ -1440,10 +1441,10 @@ function Invoke-TestRunReport {
        (.streamhub/TestRun-report.md) and beside the test (TestRuns/NAME/report-STAMP.md). #>
     param($State, $Task)
     $tr = $Task.testRun
-    $log = Join-Path (Get-CCBLogDir) ('ccbridge-' + (Get-Date).ToString('yyyyMMdd') + '.log')
+    $log = Join-Path (Get-CCBLogDir) ('streamhub-' + (Get-Date).ToString('yyyyMMdd') + '.log')
     $since = [datetime]::ParseExact("$($tr.started)", 's', [Globalization.CultureInfo]::InvariantCulture)
     $entries = @(if (Test-Path -LiteralPath $log) { Read-LogEntries ([IO.File]::ReadAllLines($log)) $PID | Where-Object { $_.time -ge $since } })
-    $build = Format-CCBBuild (Get-CCBridgeBuild $State.AppRoot)
+    $build = Format-CCBBuild (Get-StreamHubBuild $State.AppRoot)
     $page = Get-SessionReport $entries "StreamHub $build"
     $now = Get-SessionReport $entries "StreamHub $build" -Metrics
     $now.when = (Get-Date).ToString('yyyy-MM-dd HH:mm'); $now.project = Split-Path -Leaf "$($tr.project)"
@@ -2969,7 +2970,7 @@ function Invoke-FetchJob {
 }
 
 function Get-TurnKind {
-    <# The kind of task for this message, with the follow-up rules of a work chat. CCBridge has no
+    <# The kind of task for this message, with the follow-up rules of a work chat. StreamHub has no
        language model of its own, so these are fixed rules, not an understanding of the request:
        - a follow-up that reads like plain chat ("do it", "and the other page too") continues the
          chat's task and gets its instructions instead of a bare pass-through;
@@ -2996,7 +2997,7 @@ function Get-TurnKind {
 }
 
 # Phrases of a reply that tells the user how to do the task by hand, or asks for the files
-# (English and Dutch). CCBridge has no language model: this is a fixed list, kept in tests.
+# (English and Dutch). StreamHub has no language model: this is a fixed list, kept in tests.
 $script:ManualPhrases = '(?i)\b(open (the|your) file|in your (editor|file)|replace (it|this|the following|that) with|add the following|copy (this|the)|paste (this|it|the)|you (can|could|should|need to|will need to)|you''ll need|save the file|upload (the|your)|provide (the|me|your)|share (the|your) (file|code)|i (can''t|cannot|can not|don''t have) (access|see|read|open|make)|i do not have access|once you (provide|share|upload|paste)|open het bestand|vervang|plak|kopieer|je kunt|upload)\b'
 
 function Test-NeedsActionNudge {
@@ -3712,7 +3713,7 @@ function Get-ProjectNotes([string]$ProjectRoot) {
     $memo = Join-Path $ProjectRoot 'AGENTS.md'
     if (-not (Test-Path $memo)) { return '' }
     $lines = @([IO.File]::ReadAllText($memo).Replace("`r`n", "`n").Split("`n") | Where-Object {
-        $_ -notmatch '^(Instructions for coding (agents|assistants)|Project notes for CCBridge|Describe the goal, tech stack)' })
+        $_ -notmatch '^(Instructions for coding (agents|assistants)|Project notes for CCBridge|Describe the goal, tech stack)' })   # pre-rename template line, still in older projects
     $meaningful = @($lines | Where-Object { $_.Trim() -and $_ -notmatch '^\s*#' })
     if (-not $meaningful.Count) { return '' }
     ($lines -join "`n").Trim()
@@ -6281,7 +6282,7 @@ function Invoke-AgentTurn {
     }
 }
 
-function Get-ResponseOptionsFile { Join-Path $env:LOCALAPPDATA 'CCBridge\response-options.json' }
+function Get-ResponseOptionsFile { Get-AppDataPath 'response-options.json' }
 
 function Read-ResponseOptionsFile {
     <# The response picker's options as last read: @{ read (ISO time or ''); options }. #>

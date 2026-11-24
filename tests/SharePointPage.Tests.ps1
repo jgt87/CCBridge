@@ -3,7 +3,7 @@
 # check serves the page under SharePoint's policy with LiveData from the project's own files.
 # Made-up pages and data.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-sp-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-sp-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'ProjectSetup', 'Prompts', 'CheckPolicy', 'SharePointPage') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 $clean = @'
@@ -87,7 +87,7 @@ Describe 'A SharePoint HTML page as a project choice' {
         $rules = Get-PromptPart $root 'rules:sharepoint'
         $rules | Should Match 'ka-livedata-manifest'
         $rules | Should Match 'window\.__LD_RESULTS__'
-        $rules | Should Not Match '(?i)ccbridge|streamhub'
+        $rules | Should Not Match '(?i)(?<![.\w])streamhub'
     }
     It 'is known to the checks and the page check once saved' {
         $p = Join-Path $env:TEMP ('ccb-spp-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $p | Out-Null
@@ -121,4 +121,4 @@ Describe 'LiveData in the page check' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

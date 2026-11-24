@@ -1,4 +1,4 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4. Run: Invoke-Pester .\tests
 # Encodings, line endings, file-type defaults and Copilot's text artifacts. ASCII only: special
 # characters are written as [char] codes.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)

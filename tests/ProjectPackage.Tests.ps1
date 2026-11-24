@@ -1,8 +1,8 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests\ProjectPackage.Tests.ps1
+# Pester 3.4. Run: Invoke-Pester .\tests\ProjectPackage.Tests.ps1
 # Packaging a project for a colleague (lib/ProjectPackage.psm1): what goes into the zip, what is left
 # out and why, links never followed, open files still packed, and the sharing notes at its root.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-test-state-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 Import-Module (Join-Path $root 'lib\ProjectPackage.psm1') -Force
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 
@@ -105,4 +105,4 @@ Describe 'Package for sharing' {
     Remove-Item -Recurse -Force $proj, $outside
 }
 
-Remove-Item -Recurse -Force $env:CCBRIDGE_STATE_ROOT -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $env:STREAMHUB_STATE_ROOT -ErrorAction SilentlyContinue

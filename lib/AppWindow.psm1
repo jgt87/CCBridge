@@ -76,7 +76,7 @@ function Get-TopWindows {
 function Get-CopilotEdgePids {
     <# Processes of StreamHub's own Edge (its profile folder is on their command line). #>
     @(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { "$($_.CommandLine)" -match 'CCBridge\\edge-profile' } | ForEach-Object { [int]$_.ProcessId })
+        Where-Object { "$($_.CommandLine)" -match '(StreamHub|CCBridge)\\edge-profile' } | ForEach-Object { [int]$_.ProcessId })   # pre-rename data folder too, until it is moved
 }
 
 function Set-WindowsSideBySide {

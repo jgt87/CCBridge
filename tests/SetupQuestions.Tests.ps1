@@ -2,7 +2,7 @@
 # each has a trigger on the request and the project's files, the answer the request states itself,
 # the choices, and the context line its answer puts into every task. Made-up requests and projects.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'ProjectSetup', 'Prompts') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 $none = @{ build = ''; answers = @{} }
@@ -122,4 +122,4 @@ Describe 'Saved answers, their labels and their context lines' {
     Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

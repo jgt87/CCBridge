@@ -504,8 +504,8 @@ Describe 'Files in Copilot''s own workspace' {
         $r | Should Match 'unchanged'
         $r | Should Match 'OneDrive'
         $r | Should Match 'link'
-        $r | Should Not Match '(?i)ccbridge'
-        $r | Should Not Match '(?i)streamhub'
+        $r | Should Not Match '(?i)(?<![.\w])streamhub'
+        $r | Should Not Match '(?i)(?<![.\w])streamhub'
     }
 
     It 'takes the OneDrive and SharePoint links from a reply, once each, without trailing punctuation' {

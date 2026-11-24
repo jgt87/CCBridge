@@ -5,9 +5,10 @@
 # the output stays in the window. Started by the person from a run card (Server /api/run/window).
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 foreach ($m in 'Log', 'Executor') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
-function Get-RunWindowDir { Join-Path $env:LOCALAPPDATA 'CCBridge\run-windows' }
+function Get-RunWindowDir { Get-AppDataPath 'run-windows' }
 
 function New-RunWindowBatch {
     <# The batch file's text: title, the command echoed, each line run in turn (stopping at the first

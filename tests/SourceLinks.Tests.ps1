@@ -1,7 +1,7 @@
 # A junction inside Source/ (no rights needed to create one) must never make the vault or the
 # end-of-task restore touch files outside the project, and a file already in Work/ is never replaced.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-srclink-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-srclink-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Workspace', 'Executor') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 $base = Join-Path $env:TEMP ('ccb-srclink-p-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -55,4 +55,4 @@ Describe 'Source/ and links' {
 }
 cmd /c rmdir "$proj\Source\lnk" 2>&1 | Out-Null
 Remove-Item $base -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

@@ -1,6 +1,6 @@
 # Agents with project files, and agents in runbooks and fetch prompts (Agent.psm1, Fetch.psm1).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Fetch.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
@@ -63,7 +63,7 @@ Describe 'Fetch prompts with an agent' {
 }
 
 Describe 'Runbooks and fetch prompts with an agent (Copilot mocked)' {
-    $config = Get-CCBridgeConfig harness $root
+    $config = Get-StreamHubConfig harness $root
     Mock -ModuleName Agent Start-NewChat { }
     Mock -ModuleName Agent Save-AgentCharts { @() }
     Mock -ModuleName Agent Send-ToCopilot {
@@ -131,4 +131,4 @@ Describe 'Runbooks and fetch prompts with an agent (Copilot mocked)' {
         } finally { Remove-Item $p -Recurse -Force }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

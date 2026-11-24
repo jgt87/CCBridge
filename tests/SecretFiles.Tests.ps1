@@ -1,7 +1,7 @@
 # Secret files (lib/SecretFiles.psm1): Copilot sees which keys are set, never the values; images go
 # to Copilot as attachments; outlines for more languages (Executor Get-FileOutline).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\SecretFiles.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
@@ -60,7 +60,7 @@ Describe 'Images go to Copilot as an attachment' {
     It 'is attached by the read action and never written' {
         (Invoke-ReadAction $p @('mockup.png')) -join "`n" | Should Match 'Image, which cannot be read as text here'
         { Assert-Writable $p 'mockup.png' } | Should Throw 'image'
-        $config = Get-CCBridgeConfig harness $root
+        $config = Get-StreamHubConfig harness $root
         $s = New-AgentState -Config $config -AppRoot $root; $s.ProjectRoot = $p
         $res = & (Get-Module Agent) { param($st) Invoke-AgentAction $st ([pscustomobject]@{ type = 'read'; arg = 'mockup.png'; body = '' }) 'a1' $null 0 } $s
         $res.attach[0] | Should Match 'mockup\.png$'
@@ -90,7 +90,7 @@ Describe 'Outlines for more languages' {
 }
 
 Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
 
 Describe 'Secret values in command output' {
     $q = Join-Path $env:TEMP ('ccb-secret-run-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory $q | Out-Null

@@ -1,14 +1,15 @@
-# Protocol-level tests for mcp\ccbridge-mcp.ps1: starts the server as a child process and
+# Protocol-level tests for mcp\streamhub-mcp.ps1: starts the server as a child process and
 # talks JSON-RPC over stdio. Needs no Copilot access (no tool here reaches Copilot).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$server = Join-Path $root 'mcp\ccbridge-mcp.ps1'
+$server = Join-Path $root 'mcp\streamhub-mcp.ps1'
 
 function Start-McpServer {
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = 'powershell.exe'
     $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$server`""
     $psi.UseShellExecute = $false
-$psi.EnvironmentVariables['CCBRIDGE_MCP_STANDALONE'] = '1'   # never hand the calls to a running web app
+$psi.EnvironmentVariables['STREAMHUB_MCP_STANDALONE'] = '1'   # never hand the calls to a running web app
+    $psi.EnvironmentVariables['STREAMHUB_NO_MIGRATE'] = '1'   # never move this computer's real folders to the new name
     $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
     $psi.StandardOutputEncoding = New-Object Text.UTF8Encoding($false)
     $psi.CreateNoWindow = $true
@@ -25,7 +26,7 @@ function Read-Rpc($Proc, [int]$TimeoutMs = 20000) {
     $t.Result
 }
 
-Describe 'CCBridge MCP server (stdio JSON-RPC)' {
+Describe 'StreamHub MCP server (stdio JSON-RPC)' {
     $proc = Start-McpServer
 
     It 'answers initialize with server info and the tools capability' {
@@ -33,15 +34,15 @@ Describe 'CCBridge MCP server (stdio JSON-RPC)' {
         $raw = Read-Rpc $proc 30000
         $r = $raw | ConvertFrom-Json
         $r.id | Should Be 1
-        $r.result.serverInfo.name | Should Be 'ccbridge'
+        $r.result.serverInfo.name | Should Be 'streamhub'
         # The real build (version and commit), not a fixed number: a stale running server shows.
         Import-Module (Join-Path $root 'lib\Config.psm1') -Force
         Import-Module (Join-Path $root 'lib\Log.psm1') -Force
-        $r.result.serverInfo.version | Should Be (Format-CCBBuild (Get-CCBridgeBuild $root))
+        $r.result.serverInfo.version | Should Be (Format-CCBBuild (Get-StreamHubBuild $root))
         $r.result.serverInfo.version | Should Not Be '0.1.0'
         $r.result.protocolVersion | Should Be '2025-06-18'
         $r.result.instructions | Should Match 'WHEN TO USE IT'
-        $r.result.instructions | Should Not Match 'CCBridge'
+        $r.result.instructions | Should Not Match 'StreamHub'
         $null -ne $r.result.capabilities.tools | Should Be $true
     }
 

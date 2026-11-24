@@ -4,8 +4,8 @@
 # Also the generator rule for any stand-in token (Lint Get-StandInToken) and the data import that
 # leaves a file alone when a project script converts it itself. Made-up projects.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
-$env:CCBRIDGE_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_ISSUE_INDEX = Join-Path $env:TEMP ('ccb-app-index-' + [guid]::NewGuid().ToString('N') + '.json')
 foreach ($m in 'Config', 'OneFile', 'Lint', 'Guardrails', 'Executor', 'Review', 'Issues', 'DataImport', 'Health') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 function New-BuiltProject {
@@ -162,5 +162,5 @@ Describe 'Rules refined for what the dashboards showed' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $env:CCBRIDGE_ISSUE_INDEX -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_ISSUE_INDEX -Force -ErrorAction SilentlyContinue

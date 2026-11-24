@@ -1,6 +1,6 @@
 # Data copies: a JS file that only wraps a JSON file's data follows that JSON (lib/DataMirror.psm1).
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\DataMirror.psm1') -Force
 Import-Module (Join-Path $root 'lib\Executor.psm1') -Force
 Import-Module (Join-Path $root 'lib\Review.psm1') -Force
@@ -78,7 +78,7 @@ Describe 'Sync-DataMirrors' {
         Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
         $p = New-MirrorProject
         try {
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
             Sync-DataMirrors $s
             $evts = @($s.Events)
             $card = @($evts | Where-Object { $_.type -eq 'action' })[0]
@@ -99,7 +99,7 @@ Describe 'Sync-DataMirrors' {
             Mock -ModuleName Agent Test-DataCopiesOn { $false }
             Mock -ModuleName Executor Test-DataCopiesOn { $false }
             Mock -ModuleName Review Test-DataCopiesOn { $false }
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
             Sync-DataMirrors $s
             @($s.Events).Count | Should Be 0
             [IO.File]::ReadAllText((Join-Path $p 'calendar-data.js')) | Should Match '"minutes":30'
@@ -112,7 +112,7 @@ Describe 'Sync-DataMirrors' {
         $p = Join-Path $env:TEMP ('ccb-mirror-' + [guid]::NewGuid().ToString('N'))
         Add-File $p 'sales.csv' "region,amount`nNorth,120`n"
         try {
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root; $s.ProjectRoot = $p
             Sync-DataMirrors $s
             Test-Path (Join-Path $p 'data') | Should Be $false
             Sync-DataMirrors $s -Import
@@ -124,10 +124,10 @@ Describe 'Sync-DataMirrors' {
         $od = Join-Path $env:TEMP ('ccb-mirror-' + [guid]::NewGuid().ToString('N'))
         Add-File $od 'sales.csv' "region,amount`nNorth,120`n"
         # Set-Project records the project StreamHub opens next time: kept as it was.
-        $last = Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'
+        $last = Join-Path $env:LOCALAPPDATA 'StreamHub\last-project.txt'
         $lastText = if (Test-Path -LiteralPath $last) { [IO.File]::ReadAllText($last) } else { $null }
         try {
-            $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+            $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
             & (Get-Module Server) { param($st, $path) Set-Project $st $path } $s $od
             $s.OpenSync | Should Be $od
             Test-Path (Join-Path $od 'data') | Should Be $false
@@ -137,7 +137,7 @@ Describe 'Sync-DataMirrors' {
         }
     }
 }
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
 
 Describe 'A data copy is paired only with a JSON in its own places' {
     It 'leaves a same-named JSON elsewhere in the project alone' {

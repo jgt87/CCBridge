@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Records how Microsoft 365 Copilot Chat exposes the Work IQ toggle and source references,
-  so CCBridge can drive them. Run it on a machine with a Microsoft 365 Copilot licence.
+  so StreamHub can drive them. Run it on a machine with a Microsoft 365 Copilot licence.
 .DESCRIPTION
   Keeps only UI control labels/states, request field names, option names and enum-like values.
   Message text, names, IDs, subjects, URLs and tokens are not recorded. Review the report
@@ -12,7 +12,7 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\Cdp.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
-$sel = Get-CCBridgeConfig selectors $root
+$sel = Get-StreamHubConfig selectors $root
 $port = 9333
 $report = [ordered]@{ captured = (Get-Date).ToString('s'); edge = $null; snapshots = [ordered]@{}; request = $null; reply = $null }
 
@@ -85,7 +85,7 @@ $menusJs = @'
 '@
 function Get-OpenMenus { (Invoke-CdpEval $s $menusJs) | ConvertFrom-Json }
 
-Write-Host 'CCBridge capture for Microsoft 365 Copilot (Work IQ toggle and sources)' -ForegroundColor White
+Write-Host 'StreamHub capture for Microsoft 365 Copilot (Work IQ toggle and sources)' -ForegroundColor White
 Write-Host 'An Edge window with Copilot Chat is open. Sign in there with your WORK account if asked.'
 
 Pause-ForUser '1/5  Turn Work IQ ON, with an empty chat.'

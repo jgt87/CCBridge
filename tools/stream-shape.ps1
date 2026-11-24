@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
     Summarises the STRUCTURE of Copilot's recent replies (no content), so the reply format of a tenant
-    (for example StreamHub) can be supported without sharing any answer text.
+    (for example the Copilot stream connection, m365Copilot/StreamHub) can be supported without sharing any answer text.
 .DESCRIPTION
-    Reads the newest reply recordings in %LOCALAPPDATA%\CCBridge\replies (CCBridge keeps the last 30)
+    Reads the newest reply recordings in %LOCALAPPDATA%\StreamHub\replies (StreamHub keeps the last 30)
     and lists, per record type, every field path with its type, string lengths and how often and in
     which frames it occurs. Only short single-word values (status words such as "Completed",
     "Progress", "Success") and booleans are shown; all other text is replaced by its length.
-    The summary is written to C:\temp\CCBridge-stream-shape-<date>.txt.
+    The summary is written to C:\temp\StreamHub-stream-shape-<date>.txt.
     -Path summarises one recording instead (agent-capture.ps1 uses it), -OutFile sets the file.
 .EXAMPLE
     test-tools\stream-shape.cmd
@@ -16,7 +16,8 @@
 param([int]$Count = 3, [string]$OutRoot = 'C:\temp', [string]$Path = '', [string]$OutFile = '')
 
 $ErrorActionPreference = 'Stop'
-$dir = Join-Path $env:LOCALAPPDATA 'CCBridge\replies'
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\AppPaths.psm1')
+$dir = Get-AppDataPath 'replies'
 $files = if ($Path) { @(Get-Item -LiteralPath $Path) } else { @(Get-ChildItem $dir -Filter *.jsonl -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First $Count) }
 if (-not $files.Count) { Write-Host 'No reply recordings found. Ask Copilot something in StreamHub first, then run this again.' -ForegroundColor Yellow; exit 1 }
 
@@ -53,7 +54,7 @@ function Add-Paths($Node, [string]$Path, $Stats, [int]$Frame, [int]$Depth = 0) {
 }
 
 $lines = New-Object System.Collections.Generic.List[string]
-$lines.Add("CCBridge reply structure $(Get-Date -Format 'yyyy-MM-dd HH:mm') - field names, types and status words only; no answer text.")
+$lines.Add("StreamHub reply structure $(Get-Date -Format 'yyyy-MM-dd HH:mm') - field names, types and status words only; no answer text.")
 foreach ($f in $files) {
     $lines.Add(''); $lines.Add("=== $($f.Name) ($((Get-Content $f.FullName).Count) frames)")
     $byType = @{}
@@ -84,7 +85,7 @@ foreach ($f in $files) {
         }
     }
 }
-$out = if ($OutFile) { $OutFile } else { $null = New-Item -ItemType Directory -Force -Path $OutRoot; Join-Path $OutRoot ("CCBridge-stream-shape-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt") }
+$out = if ($OutFile) { $OutFile } else { $null = New-Item -ItemType Directory -Force -Path $OutRoot; Join-Path $OutRoot ("StreamHub-stream-shape-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt") }
 [IO.File]::WriteAllLines($out, [string[]]$lines)
 Write-Host "Written: $out" -ForegroundColor Green
 Write-Host 'It contains field names, types, lengths and status words only - no answer text. Please send this file.'

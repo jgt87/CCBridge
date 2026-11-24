@@ -1,4 +1,4 @@
-# Pester 3.4 (ships with Windows PowerShell 5.1). Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4 (ships with Windows PowerShell 5.1). Run: Invoke-Pester .\tests
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Import-Module (Join-Path $root 'lib\CopilotBridge.psm1') -Force
 $fixtures = Join-Path $PSScriptRoot 'fixtures'

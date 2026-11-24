@@ -2,7 +2,7 @@
 # the helper program checks the pages itself (Agent Get-LeakReport): fixes what has one right answer
 # and names the lines for Copilot.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Prompts', 'Executor', 'Lint', 'AutoFix', 'Agent', 'Config') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 Describe 'Test-LeakReport' {
@@ -24,7 +24,7 @@ Describe 'Test-LeakReport' {
 Describe 'Get-LeakReport' {
     $mk = {
         $p = Join-Path $env:TEMP ('ccb-leak-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory (Join-Path $p 'js') -Force | Out-Null
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s.ProjectRoot = $p; $s.Headless = $true; $s.PreviewPort = 0
         @{ p = $p; s = $s }
     }
@@ -36,7 +36,7 @@ Describe 'Get-LeakReport' {
         $r | Should Match '^THE HELPER PROGRAM CHECKED FOR MARKUP OR SCRIPT SHOWN AS TEXT'
         $r | Should Match 'Fixed already \(read a file again before you edit it\):\n- index\.html: 4 tag\(s\) written with &lt; and &gt;'
         $r | Should Match 'Still to fix, at these lines:\n- js/app\.js line 2: markup given to textContent'
-        $r | Should Not Match 'CCBridge|StreamHub'
+        $r | Should Not Match '(?<![.\w])StreamHub'
         [IO.File]::ReadAllText((Join-Path $p 'index.html')) | Should Match "(?m)^<div class=""kit-panel"">`n  <h2>Users</h2>`n</div>$"
         $ev = @($s.Events | Where-Object { $_.type -eq 'action' -and $_.by -eq 'streamhub' })
         $ev.Count | Should Be 1
@@ -62,4 +62,4 @@ Describe 'Get-LeakReport' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

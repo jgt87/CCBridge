@@ -2,7 +2,7 @@
 # program checks in the files itself, the tests before a change, a review in a fresh chat, and test
 # runs with checks turned off. Made-up projects in a temporary folder.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-hl-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-hl-state-' + [guid]::NewGuid().ToString('N'))
 foreach ($m in 'Config', 'Workspace', 'Progress', 'TaskNotes', 'TestRunner', 'Review', 'TestRuns', 'Agent') { Import-Module (Join-Path $root "lib\$m.psm1") -Force }
 
 $proj = Join-Path $env:TEMP ('ccb-hl-' + [guid]::NewGuid().ToString('N'))
@@ -11,7 +11,7 @@ $null = New-Item -ItemType Directory -Force -Path (Join-Path $proj 'src')
 [IO.File]::WriteAllText((Join-Path $proj 'src\app.js'), "function total(rows) {`n  return rows.length;`n}`n")
 
 Describe 'Progress across chats' {
-    $dir = Join-Path $env:CCBRIDGE_STATE_ROOT 'progress'
+    $dir = Join-Path $env:STREAMHUB_STATE_ROOT 'progress'
     $null = New-Item -ItemType Directory -Force -Path $dir
     It 'keeps what a task did on one line each, the newest last, within its limits' {
         $e = New-ProgressEntry -Request "Add a chart of orders`nper region" -Status 'finished' -Result "## Summary`nAdded the chart to index.html." -Changed @('index.html', 'src/app.js') -Acceptance @(@{ check = 'the chart shows regions'; met = $false }, @{ check = 'x'; met = $true }) -Verify @{ passed = $false; preexisting = $true } -Todos @(@{ text = 'add a legend'; done = $false }, @{ text = 'done one'; done = $true }) -Kind 'coding'
@@ -27,7 +27,7 @@ Describe 'Progress across chats' {
         $text | Should Match 'Changed: index.html, src/app.js\.'
         $text | Should Match 'Checks not met: the chart shows regions\.'
         $text | Should Match 'Still open: add a legend\.'
-        $text | Should Not Match 'CCBridge'
+        $text | Should Not Match '(?<![.\w])StreamHub'
     }
     It 'keeps only the newest 50 entries and drops the oldest from the context first' {
         for ($i = 1; $i -le 60; $i++) { Add-ProgressEntry $dir (New-ProgressEntry -Request "Request number $i $('x' * 200)" -Status 'finished' -Result '' -Changed @() -Acceptance @() -Verify $null -Todos @()) }
@@ -108,7 +108,7 @@ Describe 'Tests before the change' {
         Get-ProjectStamp $proj | Should Be $s1
         [IO.File]::WriteAllText((Join-Path $proj 'src\more.js'), 'var a = 1;')
         Get-ProjectStamp $proj | Should Not Be $s1
-        $dir = Join-Path $env:CCBRIDGE_STATE_ROOT 'tb'
+        $dir = Join-Path $env:STREAMHUB_STATE_ROOT 'tb'
         $null = New-Item -ItemType Directory -Force -Path $dir
         Read-TestBaseline $dir | Should BeNullOrEmpty
         Save-TestBaseline $dir @{ command = 'npm test --silent'; stamp = 'S'; passed = $false; failures = @('a', 'b'); when = 'now' }
@@ -136,7 +136,7 @@ Describe 'Review in a fresh chat' {
         $m | Should Match '\+ \s*return rows.length;'
         $m | Should Match 'Not shown \(too long for one message\): big.js'
         $m | Should Match 'NO PROBLEMS'
-        $m | Should Not Match 'CCBridge'
+        $m | Should Not Match '(?<![.\w])StreamHub'
     }
     It 'reads PROBLEM lines with their quote, and nothing from NO PROBLEMS' {
         $reply = "PROBLEM: src/app.js:2 - returns the count, not the total of the amounts`n> return rows.length;`n`n**PROBLEM:** ``index.html``:1 - no chart script is loaded`n> <canvas id=`"chart`"></canvas>`nSome closing words."
@@ -183,5 +183,5 @@ Describe 'Test runs with checks turned off' {
 }
 
 Remove-Item $proj -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
-$env:CCBRIDGE_STATE_ROOT = $null
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+$env:STREAMHUB_STATE_ROOT = $null

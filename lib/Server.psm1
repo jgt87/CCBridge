@@ -1,8 +1,9 @@
 # Local web server: serves the built UI from ui\ and a small JSON API for it.
 # Bound to localhost only; every API call must carry the per-session token that is
-# injected into index.html, so other web pages cannot drive CCBridge.
+# injected into index.html, so other web pages cannot drive StreamHub.
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AppPaths.psm1')   # Get-AppDataDir: the data folder (also under its old name until moved)
 foreach ($m in 'Log', 'Config', 'Cdp', 'Workspace', 'Executor', 'Prompts', 'Agent', 'Fetch', 'Runbook', 'Schedule', 'Review', 'AppWindow', 'PlanFile', 'Issues', 'Layout', 'Sso', 'Retention', 'Imports', 'Chain', 'Relink', 'EdgeCache', 'Hooks', 'ToolInstall', 'CheckPolicy', 'Packages', 'TestRunner', 'RunWindow', 'ProjectSetup', 'SharePointPage', 'SessionReport', 'TestRuns', 'SharePointLink', 'FileIntake', 'SqlServer', 'Progress', 'WorkStatus', 'DataProfile', 'RunbookFromChat', 'KitTheme', 'Download', 'PptxLayoutMatch', 'PptxRetheme', 'PptxDeck', 'SyncedFiles') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 
 $script:Mime = @{
@@ -46,7 +47,7 @@ function Get-JobView($State, $Job) {
 
 $script:LocationCache = @{}
 function Get-ProjectLocation([string]$ProjectRoot) {
-    <# The folders the project sits in, for the side panel: OneDrive, CCBridge, <project>. Cached:
+    <# The folders the project sits in, for the side panel: OneDrive, StreamHub, <project>. Cached:
        the snapshot is built several times a second. #>
     if (-not $script:LocationCache.ContainsKey($ProjectRoot)) {
         $loc = try { Get-OneDriveLocation $ProjectRoot } catch { $null }
@@ -133,13 +134,13 @@ function Get-StateSnapshot($State) {
         release = $(if ($State.Build) { [string]$State.Build.version } else { [string]$State.Version })
         commit = $(if ($State.Build) { [string]$State.Build.commit } else { '' })
         workIq = $State.WorkIq; workIqActual = $State.WorkIqActual
-        workIqAvailable = [bool](Get-CCBridgeConfig selectors $State.AppRoot).workIq.toggle
+        workIqAvailable = [bool](Get-StreamHubConfig selectors $State.AppRoot).workIq.toggle
         # A chat Copilot was left running in at the time cap (Read the answer); the address stays here.
         pendingChat = $(if ($State.PendingChat) { @{ since = [string]$State.PendingChat.since } } else { $null })
         activity = (Get-ActivityView $State)
         work = (Get-WorkView $State)   # the waiting card: phase, timers, counts, last steps (WorkStatus)
         look = [bool]($State.Busy -and $State.VisualTurn)   # a turn about how something looks: the indicator's art lines
-        installProblem = [string]$State.InstallProblem   # files missing or different from the release (ccbridge.ps1)
+        installProblem = [string]$State.InstallProblem   # files missing or different from the release (streamhub.ps1)
         runLive = $State.RunLive   # the command running now: its last output lines (New-RunWatch)
         runWindows = @(Update-RunWindows $State)   # commands the person opened in a console window
         appWindow = [string]$State.Config.appWindow   # where the app opened (the Split screen hint is for copilot-tab)
@@ -150,15 +151,16 @@ function Get-StateSnapshot($State) {
     }
 }
 
-$script:HintsFile = Join-Path $env:LOCALAPPDATA 'CCBridge\ui-hints.json'
+function Get-UiHintsFile { Get-AppDataPath 'ui-hints.json' }   # at call time: the data folder can move at start
 
 function Get-UiHints($State) {
     <# One-time hints already shown (e.g. splitView), kept in the data folder so they stay shown
        after a restart, an update or cleared browser data. Read once, then kept in $State. #>
     if ($null -eq $State.Hints) {
         $h = @{}
-        if (Test-Path -LiteralPath $script:HintsFile) {
-            try { foreach ($p in @(([IO.File]::ReadAllText($script:HintsFile) | ConvertFrom-Json).PSObject.Properties)) { $h[$p.Name] = "$($p.Value)" } } catch { }
+        $file = Get-UiHintsFile
+        if (Test-Path -LiteralPath $file) {
+            try { foreach ($p in @(([IO.File]::ReadAllText($file) | ConvertFrom-Json).PSObject.Properties)) { $h[$p.Name] = "$($p.Value)" } } catch { }
         }
         $State.Hints = $h
     }
@@ -169,8 +171,9 @@ function Set-UiHintShown($State, [string]$Name) {
     if ($Name -notmatch '^[A-Za-z][\w-]{0,40}$') { throw 'Unknown hint.' }
     $h = Get-UiHints $State
     $h[$Name] = (Get-Date).ToString('s')
-    $null = New-Item -ItemType Directory -Force -Path (Split-Path $script:HintsFile)
-    Write-AtomicText $script:HintsFile (ConvertTo-Json -InputObject $h -Compress) (New-Object Text.UTF8Encoding($false))
+    $file = Get-UiHintsFile
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $file)
+    Write-AtomicText $file (ConvertTo-Json -InputObject $h -Compress) (New-Object Text.UTF8Encoding($false))
 }
 
 function Get-WorkerStopReason($Worker) {
@@ -412,9 +415,9 @@ function Invoke-ApiRequest($Ctx, $State) {
             # Each project with its size and type (file names and sizes only); ?quick=1 only names and
             # times, so the picker can look for folders added outside the app without walking every project.
             if ($req.QueryString['quick'] -eq '1') {
-                return Send-Json $Ctx @{ root = (Get-ProjectsRoot $State.Config.projectsFolder); projects = @(Get-CCBridgeProjects $State.Config.projectsFolder) }
+                return Send-Json $Ctx @{ root = (Get-ProjectsRoot $State.Config.projectsFolder); projects = @(Get-StreamHubProjects $State.Config.projectsFolder) }
             }
-            $list = @(Get-CCBridgeProjects $State.Config.projectsFolder | ForEach-Object {
+            $list = @(Get-StreamHubProjects $State.Config.projectsFolder | ForEach-Object {
                 $pr = $_; $o = $null
                 try { $o = Get-ProjectOverview $pr.path } catch { Write-CCBLogError server "project overview $($pr.name)" $_ }
                 [pscustomobject]@{ name = $pr.name; path = $pr.path; modified = $pr.modified; overview = $o }
@@ -423,7 +426,7 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^POST /api/projects$' {
             $b = Read-JsonBody $Ctx
-            $path = New-CCBridgeProject -Name $b.name -FolderName $State.Config.projectsFolder
+            $path = New-StreamHubProject -Name $b.name -FolderName $State.Config.projectsFolder
             try { Set-Project $State $path } catch { $busy = Get-ProjectSwitchBusy $State $_ $path; if (-not $busy) { throw }; $busy.path = $path; return Send-Json $Ctx $busy }
             return Send-Json $Ctx @{ ok = $true; path = $path }
         }
@@ -491,7 +494,7 @@ function Invoke-ApiRequest($Ctx, $State) {
         '^POST /api/copilot/show$' {
             if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             # The waiting card's Show Copilot: the Copilot tab to the front (only a tab switch).
-            $sel = Get-CCBridgeConfig selectors $State.AppRoot
+            $sel = Get-StreamHubConfig selectors $State.AppRoot
             $hosts = @(@($sel.chatHosts) + (([uri]$sel.chatUrl).Host -replace '^www\.', '') | Where-Object { $_ } | ForEach-Object { "$_".ToLowerInvariant() })
             $r = try { Show-CopilotTab ([int]$State.Config.cdpPort) $hosts } catch { 'not-found' }
             return Send-Json $Ctx @{ ok = ($r -eq 'shown'); shown = ($r -eq 'shown') }
@@ -513,7 +516,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             # pick:PATH = an entry read from Copilot's picker (Advanced reasoning, GPT > a model).
             if (@('leave', 'auto', 'quick', 'deep') -notcontains $v -and $v -notmatch '^pick:\S.{0,150}$') { throw 'value must be leave, auto, quick, deep or pick:<an option of the picker>' }
             $State.ResponseMode = $v
-            $null = Set-CCBridgeSetting 'responseMode' $v $State.AppRoot
+            $null = Set-StreamHubSetting 'responseMode' $v $State.AppRoot
             $State.Config.responseMode = $v
             return Send-Json $Ctx @{ ok = $true }
         }
@@ -806,13 +809,13 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^POST /api/settings/reset$' {
             if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
-            $changed = @(Reset-CCBridgeSettings $State.AppRoot)
+            $changed = @(Reset-StreamHubSettings $State.AppRoot)
             $keep = @{ port = $State.Config.port; cdpPort = $State.Config.cdpPort }
-            $State.Config = Get-CCBridgeConfig harness $State.AppRoot
+            $State.Config = Get-StreamHubConfig harness $State.AppRoot
             $State.Config.port = $keep.port; $State.Config.cdpPort = $keep.cdpPort
             $State.SaveHistory = ($State.Config.chatHistory -ne $false -and "$($State.Config.chatHistory)" -ne 'off')
             Write-CCBLog info server 'Settings reset to the app defaults' @{ changed = $changed -join ', ' }
-            return Send-Json $Ctx @{ ok = $true; changed = $changed; settings = @(Get-CCBridgeSettings $State.AppRoot) }
+            return Send-Json $Ctx @{ ok = $true; changed = $changed; settings = @(Get-StreamHubSettings $State.AppRoot) }
         }
         '^GET /api/sso$' {
             # Settings > Sign-in: work account on this PC, the profile switch, the Copilot tab.
@@ -860,18 +863,18 @@ function Invoke-ApiRequest($Ctx, $State) {
             Write-CCBLog info server 'Chat history cleared' @{ project = $State.ProjectRoot }
             return Send-Json $Ctx @{ ok = $true }
         }
-        '^GET /api/settings$' { return Send-Json $Ctx @{ settings = @(Get-CCBridgeSettings $State.AppRoot) } }
+        '^GET /api/settings$' { return Send-Json $Ctx @{ settings = @(Get-StreamHubSettings $State.AppRoot) } }
         '^POST /api/settings$' {
             if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
             $b = Read-JsonBody $Ctx
-            $value = Set-CCBridgeSetting ([string]$b.key) $b.value $State.AppRoot
+            $value = Set-StreamHubSetting ([string]$b.key) $b.value $State.AppRoot
             # In effect right away: the worker reads $State.Config on every turn.
             $keep = @{ port = $State.Config.port; cdpPort = $State.Config.cdpPort }   # ports in use stay (also -Port)
-            $State.Config = Get-CCBridgeConfig harness $State.AppRoot
+            $State.Config = Get-StreamHubConfig harness $State.AppRoot
             $State.Config.port = $keep.port; $State.Config.cdpPort = $keep.cdpPort
             $State.SaveHistory = ($State.Config.chatHistory -ne $false -and "$($State.Config.chatHistory)" -ne 'off')
             Write-CCBLog info server "Setting $($b.key) = $(if ($null -eq $b.value) { '(default)' } else { $b.value })"
-            return Send-Json $Ctx @{ ok = $true; value = $value; settings = @(Get-CCBridgeSettings $State.AppRoot) }
+            return Send-Json $Ctx @{ ok = $true; value = $value; settings = @(Get-StreamHubSettings $State.AppRoot) }
         }
         '^POST /api/logging$' {
             if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
@@ -879,7 +882,7 @@ function Invoke-ApiRequest($Ctx, $State) {
             if (@('info', 'verbose', 'trace', 'off') -notcontains $b.level) { throw 'level must be off, info, verbose or trace' }
             Set-CCBLogLevel $b.level
             $State.LogLevel = [string]$b.level   # the worker runspace follows
-            Set-CCBridgeLocalSetting harness logLevel ([string]$b.level) $State.AppRoot
+            Set-StreamHubLocalSetting harness logLevel ([string]$b.level) $State.AppRoot
             $now = Sync-LogLevel $State
             Write-CCBLog info server "Log level set to $now from the web app"
             return Send-Json $Ctx @{ ok = $true; level = $now }   # the level now in force: the page shows and steps from it
@@ -1344,7 +1347,7 @@ function Set-Project($State, [string]$Path) {
     $indexing = $false
     try { $indexing = Start-IssueIndexer $State $State.ProjectRoot } catch { Write-CCBLogError server 'issue index' $_ }   # step 1 of the issue cycle, in the background (with the import index)
     if (-not $indexing) { try { $null = Update-ImportIndex $State.ProjectRoot } catch { Write-CCBLogError server 'import index' $_ } }   # issues off: the import index alone
-    try { [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'), $State.ProjectRoot) } catch { }
+    try { [IO.File]::WriteAllText((Get-AppDataPath 'last-project.txt'), $State.ProjectRoot) } catch { }
     } finally { [Threading.Monitor]::Exit($State.ProjectGate) }
 }
 
@@ -1414,14 +1417,14 @@ function Send-StaticFile($Ctx, [string]$UiDir, [string]$Token) {
     Send-Response $Ctx 200 $type ([IO.File]::ReadAllBytes($full))
 }
 
-function Start-CCBridgeServer {
+function Start-StreamHubServer {
     <# Serves until Ctrl+C. The agent worker runs in its own runspace. #>
     param([Parameter(Mandatory)]$State, [switch]$NoBrowser)
     $appRoot = $State.AppRoot
     $uiDir = (Join-Path $appRoot 'ui').TrimEnd('\')
     if (-not (Test-Path (Join-Path $uiDir 'index.html'))) { throw "UI not built: $uiDir\index.html is missing" }
-    # The token survives restarts, so an open browser tab keeps working after CCBridge restarts.
-    $tokenFile = Join-Path $env:LOCALAPPDATA 'CCBridge\session-token.txt'
+    # The token survives restarts, so an open browser tab keeps working after StreamHub restarts.
+    $tokenFile = Get-AppDataPath 'session-token.txt'
     $token = if (Test-Path $tokenFile) { [IO.File]::ReadAllText($tokenFile).Trim() } else { '' }
     if ($token -notmatch '^[0-9a-f]{32}$') {
         $token = [guid]::NewGuid().ToString('N')
@@ -1448,7 +1451,7 @@ function Start-CCBridgeServer {
     $State.Tasks.Enqueue(@{ kind = 'connect' })
     # Instance start: undo backups and chat history of every project get the retention limits.
     try { $null = Invoke-StateRetention $State.Config } catch { Write-CCBLogError server 'state retention' $_ }
-    $last = Join-Path $env:LOCALAPPDATA 'CCBridge\last-project.txt'
+    $last = Get-AppDataPath 'last-project.txt'
     if (Test-Path $last) {
         $lp = [IO.File]::ReadAllText($last).Trim()
         if ($lp -and (Test-Path -LiteralPath $lp -PathType Container) -and (Test-UnderOneDrive $lp)) { Set-Project $State $lp }
@@ -1460,7 +1463,7 @@ function Start-CCBridgeServer {
     $url = "http://localhost:$port/"
     Write-Host "StreamHub is running at $url  (Ctrl+C to stop)"
     Write-Host "Log: $(Get-CCBLogDir) (level $(Get-CCBLogLevel))"
-    Write-CCBLog info server "Web app started on $url" (Get-CCBridgeEnvironment $appRoot)
+    Write-CCBLog info server "Web app started on $url" (Get-StreamHubEnvironment $appRoot)
     $State.PreviewPort = $port   # the page check can open project pages through this server
     if (-not $NoBrowser) {
         # In the Copilot window (default), side by side with it, or in the default browser.
@@ -1529,4 +1532,8 @@ function Start-CCBridgeServer {
     }
 }
 
-Export-ModuleMember -Function Start-CCBridgeServer, Test-ClientGone
+# The name from before the rename, for one start only: the start script of an older release keeps
+# running right after it updated itself and starts the server under this name (see Config.psm1).
+Set-Alias -Name Start-CCBridgeServer -Value Start-StreamHubServer   # pre-rename name
+
+Export-ModuleMember -Function Start-StreamHubServer, Test-ClientGone -Alias Start-CCBridgeServer   # pre-rename name

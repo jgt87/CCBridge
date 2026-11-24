@@ -2903,11 +2903,11 @@ function ConvertFrom-ConsoleBytes([AllowEmptyString()][string]$Raw) {
 }
 
 function Get-OwnEnvironmentNames {
-    <# StreamHub's own environment variables set in this process (CCBRIDGE_*: the log folder and its
+    <# StreamHub's own environment variables set in this process (STREAMHUB_*: the log folder and its
        header, the build, a state folder or switch in tests). Project code never gets them: commands,
        the window app test and run windows start without them (Remove-OwnEnvironment, the run window's
        batch), so a project script can neither read them nor come to depend on them. #>
-    @(Get-ChildItem Env: | Where-Object { $_.Name -match '(?i)^CCBRIDGE_' } | ForEach-Object { $_.Name })
+    @(Get-ChildItem Env: | Where-Object { $_.Name -match '(?i)^STREAMHUB_' } | ForEach-Object { $_.Name })
 }
 
 function Remove-OwnEnvironment($StartInfo) {

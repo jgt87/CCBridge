@@ -2,7 +2,7 @@
 # package.json lists packages node_modules does not have, the card for it, and npm install started
 # by a person. npm itself is mocked: no downloads here.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$env:CCBRIDGE_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
+$env:STREAMHUB_STATE_ROOT = Join-Path $env:TEMP ('ccb-state-' + [guid]::NewGuid().ToString('N'))
 Import-Module (Join-Path $root 'lib\Packages.psm1') -Force
 Import-Module (Join-Path $root 'lib\Agent.psm1') -Force
 Import-Module (Join-Path $root 'lib\Config.psm1') -Force
@@ -43,7 +43,7 @@ Describe 'Which packages are missing' {
 Describe 'The packages card and npm install' {
     It 'shows the card once per set of missing packages' {
         $p = New-NodeProject
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s.ProjectRoot = $p
         Mock -ModuleName Agent Get-RealCommand { 'C:\node\npm.cmd' }
         Publish-PackagesNeeded $s
@@ -57,7 +57,7 @@ Describe 'The packages card and npm install' {
     }
     It 'runs npm install in the folder, with a run card, and reports what is still missing' {
         $p = New-NodeProject
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s.ProjectRoot = $p
         Mock -ModuleName Agent Get-RealCommand { 'C:\node\npm.cmd' }
         Mock -ModuleName Agent Invoke-RunAction {
@@ -76,7 +76,7 @@ Describe 'The packages card and npm install' {
     }
     It 'explains a blocked registry and says when npm is not installed' {
         $p = New-NodeProject
-        $s = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s.ProjectRoot = $p
         Mock -ModuleName Agent Get-RealCommand { 'C:\node\npm.cmd' }
         Mock -ModuleName Agent Invoke-RunAction { @{ exitCode = 1; output = 'npm error code ETIMEDOUT'; timedOut = $false; cancelled = $false } }
@@ -85,7 +85,7 @@ Describe 'The packages card and npm install' {
         ($ev | Where-Object { $_.type -eq 'action-result' }).output | Should Match 'proxy or a blocked registry'
         ($ev | Where-Object { $_.type -eq 'error' }).text | Should Match 'still missing'
         Mock -ModuleName Agent Get-RealCommand { $null }
-        $s2 = New-AgentState -Config (Get-CCBridgeConfig harness $root) -AppRoot $root
+        $s2 = New-AgentState -Config (Get-StreamHubConfig harness $root) -AppRoot $root
         $s2.ProjectRoot = $p
         Invoke-PackagesJob $s2 ''
         (@(Get-AgentEvents $s2 0) | Where-Object { $_.type -eq 'error' }).hint | Should Match 'Node\.js > Install for me'
@@ -93,4 +93,4 @@ Describe 'The packages card and npm install' {
     }
 }
 
-Remove-Item $env:CCBRIDGE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $env:STREAMHUB_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue

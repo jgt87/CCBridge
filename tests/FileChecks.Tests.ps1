@@ -1,4 +1,4 @@
-# Pester 3.4. Run: Invoke-Pester C:\Files\Apps\CCBridge\tests
+# Pester 3.4. Run: Invoke-Pester .\tests
 # The mistakes that commonly break each file type: every type has a correct sample (no problems)
 # and its typical breakages (each must be found, at the right line). ASCII only.
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
