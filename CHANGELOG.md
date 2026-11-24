@@ -4,6 +4,8 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+## [v0.1.171] - 2026-11-25
+
 ### Changed
 
 - The code name CCBridge is gone: everything is called StreamHub now. The start script is `streamhub.ps1`, the MCP server `mcp/streamhub-mcp.ps1` with the server id `streamhub`, the data folder `%LOCALAPPDATA%\StreamHub`, the projects folder `OneDrive\StreamHub`, the log files `streamhub-yyyyMMdd.log`, the environment variables `STREAMHUB_*`, and the repository `jgt87/StreamHub`. The release zip is `StreamHub-vX.Y.Z.zip`; each release also carries the same zip under its old name, so installs from before the rename still find their update.
