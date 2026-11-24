@@ -17,7 +17,9 @@ if (-not $Package) {
         cmd /c "npm pack lucide-static --silent >nul 2>&1"
         $tgz = Get-ChildItem -Filter 'lucide-static-*.tgz' | Select-Object -First 1
         if (-not $tgz) { throw 'npm pack lucide-static failed (is npm installed and the registry reachable?)' }
-        tar -xzf $tgz.Name
+        # Windows' own tar: started from Git Bash, GNU tar comes first on PATH and reads C: as a host.
+        & "$env:SystemRoot\System32\tar.exe" -xzf $tgz.Name
+        if ($LASTEXITCODE -ne 0) { throw "tar could not unpack $($tgz.Name)" }
     } finally { Pop-Location }
     $Package = Join-Path $work 'package'
 }

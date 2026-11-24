@@ -9,11 +9,14 @@ export const TIDY_KINDS: { kind: TidyItem["kind"]; label: string }[] = [
   { kind: "work", label: "Old working files in Work/" },
 ];
 
+// A no-break space between a number and its unit: they never break apart over two lines.
+const NBSP = " ";
+
 /** A size people read: 512 bytes, 3.4 KB, 1.2 MB. */
 export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} bytes`;
-  if (bytes < 1024 * 1024) return `${(Math.round((bytes / 1024) * 10) / 10).toString()} KB`;
-  return `${(Math.round((bytes / 1024 / 1024) * 10) / 10).toString()} MB`;
+  if (bytes < 1024) return `${bytes}${NBSP}bytes`;
+  if (bytes < 1024 * 1024) return `${(Math.round((bytes / 1024) * 10) / 10).toString()}${NBSP}KB`;
+  return `${(Math.round((bytes / 1024 / 1024) * 10) / 10).toString()}${NBSP}MB`;
 }
 
 /** The items by kind, in the card's order; kinds without items left out. */

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DbConnection } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { ConfirmRemove } from "./confirm-remove";
 
 const loadApi = () => import("@/lib/api").then((m) => m.api);
 const buttonClass = "kit-btn kit-btn--ghost kit-btn--sm";
@@ -52,9 +53,7 @@ export function DatabasesSection({ projectPath }: { projectPath: string }) {
           >
             Test
           </button>
-          <button className={cn(buttonClass, "shrink-0")} disabled={busy} onClick={() => void run(async () => setItems((await (await loadApi()).dbOp({ op: "remove", name: d.name })).items))} type="button">
-            Remove
-          </button>
+          <ConfirmRemove disabled={busy} name={d.name} onRemove={() => void run(async () => setItems((await (await loadApi()).dbOp({ op: "remove", name: d.name })).items))} />
         </div>
       ))}
       {adding ? (

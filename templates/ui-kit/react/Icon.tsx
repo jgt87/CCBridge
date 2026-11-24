@@ -11,14 +11,22 @@ declare global {
   }
 }
 
-/** One icon in the current text colour. With label it is an image with that name; else decorative. */
+const warned = new Set<string>();
+
+/** One icon in the current text colour. With label it is an image with that name; else decorative.
+ *  An unknown name draws nothing and warns once, as the data-kit-icon path does. */
 export function Icon({ name, label, className }: { name: string; label?: string; className?: string }) {
+  const markup = window.KitIcons.svg(name);
+  if (!markup && name && !warned.has(name)) {
+    warned.add(name);
+    console.warn("Unknown icon: " + name + " (kit-icons.js has no icon of that name)");
+  }
   return (
     <span
       aria-hidden={label ? undefined : true}
       aria-label={label}
       className={className}
-      dangerouslySetInnerHTML={{ __html: window.KitIcons.svg(name) }}
+      dangerouslySetInnerHTML={{ __html: markup }}
       role={label ? "img" : undefined}
       style={{ display: "inline-flex", lineHeight: 0 }}
     />

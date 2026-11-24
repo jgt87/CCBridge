@@ -199,8 +199,9 @@ function Save-Review {
     $null = New-Item -ItemType Directory -Force -Path $dir
     $md = Get-LayoutPath Reviews "$($Review.id).md"; $json = Get-LayoutPath Reviews "$($Review.id).json"
     $enc = New-Object Text.UTF8Encoding($false)
-    [IO.File]::WriteAllText((Resolve-ProjectPath $ProjectRoot $md), (Format-ReviewReport $Review), $enc)
-    [IO.File]::WriteAllText((Resolve-ProjectPath $ProjectRoot $json), (ConvertTo-Json -InputObject $Review -Depth 6), $enc)
+    # Through temporary files with retries: reviews are saved in the project, under OneDrive.
+    Write-AtomicText (Resolve-ProjectPath $ProjectRoot $md) (Format-ReviewReport $Review) $enc
+    Write-AtomicText (Resolve-ProjectPath $ProjectRoot $json) (ConvertTo-Json -InputObject $Review -Depth 6) $enc
     @{ md = $md; json = $json }
 }
 

@@ -15,6 +15,7 @@ export function PageCompareButton({
   if (!page) return null;
   return (
     <button
+      aria-busy={busy || undefined}
       className="flex shrink-0 items-center gap-1 rounded px-1 hover:bg-(--kit-surface-2) hover:text-foreground disabled:opacity-40"
       disabled={busy}
       onClick={() => onCompare(page)}

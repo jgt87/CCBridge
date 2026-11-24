@@ -23,14 +23,20 @@ export class ErrorBoundary extends Component<{ children: ReactNode; area: string
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div className="kit-notice kit-notice--error mx-auto my-6 max-w-2xl flex-col p-4 text-sm">
+      // role alert: it replaces the area after a failure, so a screen reader says so.
+      <div className="kit-notice kit-notice--error mx-auto my-6 max-w-2xl flex-col p-4 text-sm" role="alert">
         <p className="font-medium text-(--kit-error)">Something in the {this.props.area} could not be shown.</p>
         <p className="mt-1 break-words font-mono text-muted-foreground text-xs">{this.state.error.message}</p>
         <p className="mt-2 text-muted-foreground text-xs">
           The details were written to the StreamHub log; Menu, Export diagnostics includes them.
         </p>
         <div className="mt-3 flex gap-2">
-          <button className="kit-btn kit-btn--sm" onClick={() => this.setState({ error: null })} type="button">
+          <button
+            aria-label={`Continue: show the ${this.props.area} again`}
+            className="kit-btn kit-btn--sm"
+            onClick={() => this.setState({ error: null })}
+            type="button"
+          >
             Continue
           </button>
           <button className="kit-btn kit-btn--sm" onClick={() => location.reload()} type="button">

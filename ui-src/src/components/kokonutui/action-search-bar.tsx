@@ -11,10 +11,10 @@
 
 import { Search, Send } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import useDebounce from "@/hooks/use-debounce";
-import { actionTitle, filterActions, nextIndex, prevIndex } from "@/lib/action-search";
+import { actionTitle, filterActions, nextIndex, prevIndex, resultCountText } from "@/lib/action-search";
 
 export interface Action {
   id: string;
@@ -99,6 +99,8 @@ function useActionSearch(actions: Action[], maxResults: number, onClose?: () => 
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // CCBridge: keys that end an IME composition (Enter, Esc) belong to the composition.
+      if (e.nativeEvent.isComposing) return;
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
@@ -113,11 +115,14 @@ function useActionSearch(actions: Action[], maxResults: number, onClose?: () => 
           choose(result.actions[activeIndex]);
           break;
         case "Escape":
-          onClose?.();
+          // CCBridge: Esc clears the query first, and closes when there is none.
+          e.preventDefault();
+          if (query) setQuery("");
+          else onClose?.();
           break;
       }
     },
-    [result.actions, activeIndex, choose, onClose]
+    [result.actions, activeIndex, choose, onClose, query]
   );
 
   return { query, result, activeIndex, setActiveIndex, choose, handleInputChange, handleKeyDown };
@@ -172,6 +177,8 @@ const ActionRow = ({
     id={`action-${action.id}`}
     layout
     onClick={onChoose}
+    // CCBridge: a press on a row keeps the focus in the field.
+    onMouseDown={(e) => e.preventDefault()}
     onMouseEnter={onHover}
     role="option"
     // The whole text on hover when the description is cut off.
@@ -196,12 +203,12 @@ const ActionRow = ({
     </div>
     <div className="flex shrink-0 items-center gap-2">
       {action.short && (
-        <span
+        <kbd
           aria-label={`Keyboard shortcut: ${action.short}`}
-          className="text-muted-foreground text-xs"
+          className="font-sans text-muted-foreground text-xs"
         >
           {action.short}
-        </span>
+        </kbd>
       )}
       {action.end && (
         <span className="text-right text-muted-foreground text-xs">{action.end}</span>
@@ -217,18 +224,22 @@ const ActionRow = ({
 function ActionSearchBar({
   actions,
   label = "Search Commands",
+  labelId,
   placeholder = "Type a command or file name...",
   onClose,
   maxResults = 12,
 }: {
   actions: Action[];
   label?: string;
+  /** CCBridge: an id for the visible label, so the dialog around it can be named by it. */
+  labelId?: string;
   placeholder?: string;
   onClose?: () => void;
   maxResults?: number;
 }) {
   const { query, result, activeIndex, setActiveIndex, choose, handleInputChange, handleKeyDown } =
     useActionSearch(actions, maxResults, onClose);
+  const listId = useId();
 
   return (
     <div className="mx-auto w-full max-w-xl">
@@ -237,13 +248,15 @@ function ActionSearchBar({
           <label
             className="mb-1 block font-medium text-muted-foreground text-xs"
             htmlFor="search"
+            id={labelId}
           >
             {label}
           </label>
           <div className="relative">
             <Input
+              aria-controls={listId}
               aria-activedescendant={
-                activeIndex >= 0 ? `action-${result.actions[activeIndex]?.id}` : undefined
+                result.actions[activeIndex] ? `action-${result.actions[activeIndex].id}` : undefined
               }
               aria-autocomplete="list"
               aria-expanded
@@ -260,23 +273,27 @@ function ActionSearchBar({
             />
             <QueryIcon typed={query.length > 0} />
           </div>
+          <span aria-live="polite" className="sr-only">
+            {resultCountText(result.actions.length)}
+          </span>
         </div>
 
         <div className="w-full">
           <AnimatePresence>
             <motion.div
               animate="show"
-              aria-label="Search results"
               className="mt-1 w-full overflow-hidden rounded-md border bg-white shadow-xs dark:border-white/10 dark:bg-popover"
               exit="exit"
               initial="hidden"
-              role="listbox"
               variants={ANIMATION_VARIANTS.container}
             >
-              <motion.ul role="none">
-                {result.actions.length === 0 && (
-                  <li className="px-3 py-2 text-muted-foreground text-sm">No matches</li>
-                )}
+              {/* CCBridge: the list itself is the listbox (only options inside), and says when nothing matched. */}
+              {result.actions.length === 0 && (
+                <p className="px-3 py-2 text-muted-foreground text-sm">
+                  {query ? `No matches for \u201c${query}\u201d` : "No matches"}
+                </p>
+              )}
+              <motion.ul aria-label="Search results" id={listId} role="listbox">
                 {result.actions.map((action, index) => (
                   <ActionRow
                     action={action}

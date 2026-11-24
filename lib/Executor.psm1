@@ -88,7 +88,9 @@ function Write-TextFile([string]$Path, [string]$Text, [bool]$Bom = $false, [bool
     $t = $Text.Replace("`r`n", "`n")
     if ($Crlf) { $t = $t.Replace("`n", "`r`n") }
     $enc = if ($Encoding) { $Encoding } elseif ($Bom) { 'utf8bom' } else { 'utf8' }
-    [IO.File]::WriteAllText($Path, $t, (Get-TextEncoding $enc))
+    # Through a temporary file with retries (Workspace): projects live under OneDrive, which may hold
+    # the file for a moment, and a failed write must never leave it half written.
+    Write-AtomicText $Path $t (Get-TextEncoding $enc)
 }
 
 function Get-NewFileFormat {
@@ -418,7 +420,9 @@ function Get-FileState([string]$ProjectRoot) {
 }
 
 function Save-CheckpointManifest($Checkpoint) {
-    $Checkpoint.Files | ConvertTo-Json | Set-Content (Join-Path $Checkpoint.Dir 'manifest.json') -Encoding UTF8
+    # UTF-8 without a BOM (Set-Content -Encoding UTF8 writes one in 5.1), through a temporary file.
+    $json = $Checkpoint.Files | ConvertTo-Json
+    Write-AtomicText (Join-Path $Checkpoint.Dir 'manifest.json') ("$json" + "`r`n")
 }
 
 function Start-RunSnapshot {

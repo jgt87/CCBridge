@@ -1,7 +1,7 @@
 /**
  * UI kit component for React projects: renders the kit's markup (styles/kit/kit.css), needs only React.
  */
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 
 export interface BoardColumn {
   id: string;
@@ -31,6 +31,7 @@ export function Board({ columns, cards, onMove }: { columns: BoardColumn[]; card
   const [over, setOver] = useState<string | null>(null);
   const [said, setSaid] = useState("");
   const board = useRef<HTMLDivElement>(null);
+  const uid = useId();
   // A move, read out by screen readers ("Moved Fix the login to Doing, position 2 of 3"), then passed on.
   const move = (id: string, toColumn: string, index: number) => {
     const el = Array.from(board.current?.querySelectorAll("[data-id]") ?? []).find((c) => c.getAttribute("data-id") === id);
@@ -64,14 +65,17 @@ export function Board({ columns, cards, onMove }: { columns: BoardColumn[]; card
   };
   return (
     <div className="kit-board" ref={board}>
-      {columns.map((col) => {
+      {columns.map((col, ci) => {
         const list = inColumn(col.id);
+        const titleId = uid + "-col" + ci; // an id never holds a space, whatever the column's own id is
         return (
-          <section className="kit-board__column" key={col.id}>
-            <h3 className="kit-board__title">
+          // A named region per column (its title), and its list named the same.
+          <section aria-labelledby={titleId} className="kit-board__column" key={col.id}>
+            <h3 className="kit-board__title" id={titleId}>
               {col.title} <span className="kit-badge">{list.length}</span>
             </h3>
             <ul
+              aria-labelledby={titleId}
               className={"kit-board__list" + (over === col.id ? " is-over" : "")}
               data-kit-board={col.id}
               onDragLeave={(e) => {

@@ -8,7 +8,7 @@ import { SsoSection } from "./sso-section";
 import { ToolsSection } from "./tools-section";
 import { actionClass, fieldClass, Segmented, SettingLine, SettingsGroup } from "./settings-ui";
 import { BoldLabel } from "./text-parts";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { api, type EdgeCacheInfo, type Setting } from "@/lib/api";
 import type { ResponseOption } from "@/lib/response-modes";
 import { formatBytes } from "@/lib/project-overview";
@@ -371,7 +371,7 @@ function NotificationSetting() {
 /** Closes on Escape while the window is open. */
 function useEscapeKey(onClose: () => void) {
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && !e.isComposing && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -561,16 +561,16 @@ function CardViewSetting() {
 }
 
 /** The modal's header: title, Reset all and Close. It stays in place; only the settings below it scroll. */
-function SettingsHeader({ anyCustom, onReset, onClose }: { anyCustom: boolean; onReset: () => void; onClose: () => void }) {
+function SettingsHeader({ anyCustom, onReset, onClose, titleId }: { anyCustom: boolean; onReset: () => void; onClose: () => void; titleId: string }) {
   return (
     <div className="flex shrink-0 items-center justify-between overflow-hidden border-(--kit-border) border-b px-5 py-3 [scrollbar-gutter:stable_both-edges]">
       <div>
-        <div className="font-semibold">Settings</div>
+        <div className="font-semibold" id={titleId}>Settings</div>
         <div className="text-muted-foreground text-xs">For this computer; changes apply right away and are kept across updates.</div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <ResetAllControl anyCustom={anyCustom} onReset={onReset} />
-        <button className="rounded p-1.5 hover:bg-(--kit-surface-2)" onClick={onClose} title="Close (Esc)" type="button">
+        <button aria-label="Close" className="rounded p-1.5 hover:bg-(--kit-surface-2)" onClick={onClose} title="Close (Esc)" type="button">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -580,6 +580,7 @@ function SettingsHeader({ anyCustom, onReset, onClose }: { anyCustom: boolean; o
 
 /** Settings for this computer (saved in config\harness.local.json; kept across updates). */
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
+  const titleId = useId();
   // Shown at once from what was loaded in the background; refreshed quietly while open.
   const [settings, setSettingsState] = useState<Setting[] | null>(cachedSettings());
   const setSettings = (list: Setting[]) => {
@@ -612,12 +613,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   useEscapeKey(onClose);
 
   return (
-    <ModalBackdrop onClose={onClose}>
+    <ModalBackdrop label="Settings" onClose={onClose} titleId={titleId}>
       <div
         className="kit-dialog flex h-[min(80vh,760px)] w-full max-w-[960px] flex-col overflow-hidden p-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <SettingsHeader anyCustom={anyCustom} onClose={onClose} onReset={resetAll} />
+        <SettingsHeader anyCustom={anyCustom} onClose={onClose} onReset={resetAll} titleId={titleId} />
         {error && <div className="shrink-0 px-5 pt-2 text-(--kit-error) text-sm">{error}</div>}
         {/* The first time, before the background load: everything at once, not group by group. */}
         {!settings && !error && <div className="px-5 pt-4 text-muted-foreground text-sm">Loading settings...</div>}

@@ -25,21 +25,27 @@ function useIndicator(index: number) {
   };
 }
 
-/** Tabs with a sliding underline. The arrow keys, Home and End move between them (one tab stop). */
-export function Tabs({ tabs, value, onChange, label }: { tabs: string[]; value: number; onChange: (i: number) => void; label: string }) {
+/**
+ * Tabs with a sliding underline. The arrow keys, Home and End move between them (one tab stop).
+ * disabled lists the indexes of unavailable tabs: they keep their place and focus (aria-disabled) but are never selected.
+ */
+export function Tabs({ tabs, value, onChange, label, disabled = [] }: { tabs: string[]; value: number; onChange: (i: number) => void; label: string; disabled?: number[] }) {
   const { group, lineStyle } = useIndicator(value);
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // From the selected tab, or from an unavailable one the arrows reached (it has focus but is not selected).
+    const focused = Array.from(group.current?.querySelectorAll<HTMLButtonElement>("button.kit-tab") ?? []).indexOf(document.activeElement as HTMLButtonElement);
+    const from = disabled.includes(focused) ? focused : value;
     const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    const next = step ? (value + step + tabs.length) % tabs.length : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+    const next = step ? (from + step + tabs.length) % tabs.length : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
     if (next < 0) return;
     e.preventDefault();
-    onChange(next);
+    if (!disabled.includes(next)) onChange(next);
     group.current?.querySelectorAll<HTMLButtonElement>("button")[next]?.focus();
   };
   return (
     <div aria-label={label} className="kit-tabs kit-tabs--animated" onKeyDown={onKey} ref={group} role="tablist">
       {tabs.map((t, i) => (
-        <button aria-selected={i === value} className="kit-tab" key={t} onClick={() => onChange(i)} role="tab" tabIndex={i === value ? 0 : -1} type="button">
+        <button aria-disabled={disabled.includes(i) || undefined} aria-selected={i === value} className="kit-tab" key={t} onClick={() => !disabled.includes(i) && onChange(i)} role="tab" tabIndex={i === value ? 0 : -1} type="button">
           {t}
         </button>
       ))}
@@ -48,13 +54,13 @@ export function Tabs({ tabs, value, onChange, label }: { tabs: string[]; value: 
   );
 }
 
-/** A segmented choice with a sliding background. */
-export function Segmented({ options, value, onChange, label }: { options: string[]; value: number; onChange: (i: number) => void; label: string }) {
+/** A segmented choice with a sliding background. disabled lists unavailable options (aria-disabled: focusable, never chosen). */
+export function Segmented({ options, value, onChange, label, disabled = [] }: { options: string[]; value: number; onChange: (i: number) => void; label: string; disabled?: number[] }) {
   const { group, style } = useIndicator(value);
   return (
     <div aria-label={label} className="kit-segmented kit-segmented--animated" ref={group} role="group">
       {options.map((o, i) => (
-        <button aria-pressed={i === value} key={o} onClick={() => onChange(i)} type="button">
+        <button aria-disabled={disabled.includes(i) || undefined} aria-pressed={i === value} key={o} onClick={() => !disabled.includes(i) && onChange(i)} type="button">
           {o}
         </button>
       ))}

@@ -18,3 +18,6 @@ export const prevIndex = (prev: number, count: number) => (prev > 0 ? prev - 1 :
 
 /** A row's hover text: the whole label and description, which the row may cut off. */
 export const actionTitle = (a: Searchable) => (a.description ? `${a.label}: ${a.description}` : a.label);
+
+/** What a screen reader hears when the list changes: how many rows match. */
+export const resultCountText = (count: number) => (count === 0 ? "No matches" : count === 1 ? "1 match" : `${count} matches`);

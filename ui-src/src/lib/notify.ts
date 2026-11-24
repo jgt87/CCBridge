@@ -16,11 +16,16 @@ export function notifyEnabled(): boolean {
   }
 }
 
+// The latest switch: a permission answer that arrives after the person switched again is not applied.
+let latestSwitch = 0;
+
 /** Turns notifications on (asking the browser's permission) or off. Returns whether they are on. */
 export async function setNotifyEnabled(on: boolean): Promise<boolean> {
+  const mine = ++latestSwitch;
   if (on) {
     if (!notifySupported()) return false;
     const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+    if (mine !== latestSwitch) return notifyEnabled();
     if (permission !== "granted") return false;
   }
   try {

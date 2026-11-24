@@ -6,10 +6,10 @@ const item = (id: string, kind: TidyItem["kind"], path: string, size: number, se
 const items = [item("a", "work", "Work/x.txt", 100), item("b", "file", "js/old.js", 2048), item("c", "css-rule", "css/site.css", 30, ".gone")];
 
 describe("tidy-up card", () => {
-  it("writes sizes people read", () => {
-    expect(formatSize(512)).toBe("512 bytes");
-    expect(formatSize(3482)).toBe("3.4 KB");
-    expect(formatSize(5 * 1024 * 1024)).toBe("5 MB");
+  it("writes sizes people read, number and unit kept together", () => {
+    expect(formatSize(512)).toBe("512 bytes");
+    expect(formatSize(3482)).toBe("3.4 KB");
+    expect(formatSize(5 * 1024 * 1024)).toBe("5 MB");
   });
 
   it("groups the items by kind in a fixed order, leaving empty kinds out", () => {
@@ -27,7 +27,7 @@ describe("tidy-up card", () => {
     expect(selectionSummary(items, new Set()).text).toBe("Nothing selected");
     const s = selectionSummary(items, new Set(["a", "b"]));
     expect(s.count).toBe(2);
-    expect(s.text).toBe("2 selected (2.1 KB)");
+    expect(s.text).toBe("2 selected (2.1 KB)");
   });
 
   it("selects all, then none, and toggles one", () => {

@@ -9,9 +9,29 @@ export interface MenuItem {
   label: string;
   danger?: boolean;
   separatorBefore?: boolean;
+  /** Unavailable: stays in place and in the arrow-key order (aria-disabled), but cannot be picked. */
+  disabled?: boolean;
 }
 
 const MOVE_KEYS = ["ArrowDown", "ArrowUp", "Home", "End"];
+
+// Type-ahead in menus and trees: a printable key moves to the next item whose text starts with what
+// was typed in the last 600 ms (one letter again steps through the items with that letter).
+let typed = "";
+let typedAt = 0;
+function isTypeaheadKey(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }) {
+  return e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey;
+}
+function typeahead<T extends Element>(items: T[], current: Element | null, key: string): T | null {
+  const now = Date.now();
+  const k = key.toLowerCase();
+  typed = now - typedAt > 600 ? k : typed + k;
+  typedAt = now;
+  const at = items.indexOf(current as T);
+  const order = items.slice(at + 1).concat(items.slice(0, at + 1));
+  const starts = (want: string) => (it: T) => (it.textContent || "").trim().toLowerCase().startsWith(want);
+  return order.find(starts(typed)) || (typed.length > 1 ? null : order.find(starts(k))) || null;
+}
 
 // The item a key moves to among n items from item i: Home and End go to the ends, the arrows wrap around.
 function nextIndex(key: string, i: number, n: number) {
@@ -39,9 +59,13 @@ export function Menu({ label, items, head, onPick, align = "right", buttonLabel,
     setPoint(null);
     setPlace(null);
   };
+  // ArrowUp on the button opens the menu on its last item; everything else on the first.
+  const startAt = useRef<"first" | "last">("first");
   useEffect(() => {
     if (!open) return;
-    list.current?.querySelector<HTMLButtonElement>(".kit-menu__item")?.focus();
+    const rows = list.current?.querySelectorAll<HTMLButtonElement>(".kit-menu__item:not([disabled])");
+    (startAt.current === "last" && rows?.length ? rows[rows.length - 1] : rows?.[0])?.focus();
+    startAt.current = "first";
     const outside = (e: MouseEvent) => {
       if (wrap.current && !wrap.current.contains(e.target as Node)) shut();
     };
@@ -107,8 +131,10 @@ export function Menu({ label, items, head, onPick, align = "right", buttonLabel,
       area.removeEventListener("keydown", onKey);
     };
   }, [contextRef]);
+  // Every item, aria-disabled ones included (they keep their place); natively disabled ones are left out.
+  const menuItems = () => Array.from(list.current?.querySelectorAll<HTMLButtonElement>(".kit-menu__item:not([disabled])") ?? []);
   const move = (key: string) => {
-    const all = Array.from(list.current?.querySelectorAll<HTMLButtonElement>(".kit-menu__item:not([disabled])") ?? []);
+    const all = menuItems();
     if (!all.length) return;
     const i = all.indexOf(document.activeElement as HTMLButtonElement);
     all[nextIndex(key, i, all.length)].focus();
@@ -136,6 +162,19 @@ export function Menu({ label, items, head, onPick, align = "right", buttonLabel,
           setPlace(null);
           setOpen((o) => !o);
         }}
+        onKeyDown={(e) => {
+          // ArrowDown or ArrowUp on the button opens the menu on its first or last item (Enter and Space click).
+          if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+          e.preventDefault();
+          if (open) {
+            move(e.key === "ArrowDown" ? "Home" : "End");
+            return;
+          }
+          startAt.current = e.key === "ArrowUp" ? "last" : "first";
+          setPoint(null);
+          setPlace(null);
+          setOpen(true);
+        }}
         ref={button}
         type="button"
       >
@@ -148,6 +187,12 @@ export function Menu({ label, items, head, onPick, align = "right", buttonLabel,
           if (MOVE_KEYS.includes(e.key)) {
             e.preventDefault();
             move(e.key);
+          } else if (isTypeaheadKey(e)) {
+            const to = typeahead(menuItems(), document.activeElement, e.key);
+            if (to) {
+              e.preventDefault();
+              to.focus();
+            }
           } else if (e.key === "Escape" || e.key === "Tab") {
             // Escape closes the menu only: a dialog or side panel around it stays open.
             if (e.key === "Escape") {
@@ -166,13 +211,16 @@ export function Menu({ label, items, head, onPick, align = "right", buttonLabel,
           <div key={it.value} role="none">
             {it.separatorBefore ? <hr className="kit-menu__sep" /> : null}
             <button
+              aria-disabled={it.disabled || undefined}
               className={"kit-menu__item" + (it.danger ? " kit-menu__item--danger" : "")}
               onClick={() => {
+                if (it.disabled) return; // stays open: nothing was picked
                 shut();
                 focusBack();
                 onPick(it.value);
               }}
               role="menuitem"
+              tabIndex={-1}
               type="button"
             >
               {it.label}

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resetNoteText, responseOptionsHelp } from "./settings-view";
 
 describe("settings view", () => {
@@ -9,11 +9,17 @@ describe("settings view", () => {
   });
 
   it("lists the offered options with their parent menu", () => {
+    // The machine's locale and time zone pinned, so the date format is checked, not copied from the same call.
+    const toLocale = Date.prototype.toLocaleString;
+    const spy = vi.spyOn(Date.prototype, "toLocaleString").mockImplementation(function (this: Date) {
+      return toLocale.call(this, "en-GB", { timeZone: "UTC" });
+    });
     const text = responseOptionsHelp("2026-10-01T10:00:00Z", [
       { path: "Quick", title: "Quick" },
       { path: "GPT > Model", title: "Model", parent: "GPT" },
     ]);
-    expect(text).toContain(`Last read: ${new Date("2026-10-01T10:00:00Z").toLocaleString()}.`);
+    spy.mockRestore();
+    expect(text).toContain("Last read: 01/10/2026, 10:00:00.");
     expect(text).toMatch(/Offered: Quick, Model \(GPT\)\.$/);
   });
 

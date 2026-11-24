@@ -65,4 +65,39 @@ Describe 'Putting a temporary file in place' {
     }
 }
 
+Describe 'Writing text through a temporary file' {
+    It 'writes the same bytes as WriteAllText, with and without a BOM' {
+        foreach ($enc in (New-Object Text.UTF8Encoding($false)), (New-Object Text.UTF8Encoding($true)), (New-Object Text.UnicodeEncoding($false, $true))) {
+            $a = Join-Path $base 'direct.txt'; $b = Join-Path $base 'atomic.txt'
+            $text = "caf$([char]0xE9)`r`nline two"
+            [IO.File]::WriteAllText($a, $text, $enc)
+            Write-AtomicText $b $text $enc
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($b)) | Should Be ([Convert]::ToBase64String([IO.File]::ReadAllBytes($a)))
+            Test-Path -LiteralPath "$b.tmp" | Should Be $false
+            Remove-Item -LiteralPath $a, $b -Force
+        }
+    }
+
+    It 'replaces a file that is there and leaves no temporary file' {
+        $p = Join-Path $base 'replace.txt'
+        [IO.File]::WriteAllText($p, 'old')
+        Write-AtomicText $p 'new'
+        [IO.File]::ReadAllText($p) | Should Be 'new'
+        Test-Path -LiteralPath "$p.tmp" | Should Be $false
+    }
+
+    It 'leaves the old text in place when the file stays held' {
+        $p = Join-Path $base 'held-atomic.txt'
+        [IO.File]::WriteAllText($p, 'old')
+        $fs = [IO.File]::Open($p, 'Open', 'Read', 'Read')
+        try {
+            $threw = $false
+            try { Write-AtomicText $p 'new' } catch { $threw = $true }
+            $threw | Should Be $true
+        } finally { $fs.Dispose() }
+        [IO.File]::ReadAllText($p) | Should Be 'old'
+        Test-Path -LiteralPath "$p.tmp" | Should Be $false
+    }
+}
+
 Remove-Item -LiteralPath $base -Recurse -Force -ErrorAction SilentlyContinue

@@ -391,7 +391,8 @@
     var dots = k.sr.map(function (x, si) { return svgEl("circle", { r: 4, fill: color(si), class: "kit-chart__dot", visibility: "hidden" }, k.svg); });
     var tip = tooltip(k.host);
     var hit = svgEl("rect", { x: k.pad.l, y: k.pad.t, width: k.plotW, height: k.plotH, fill: "transparent" }, k.svg);
-    hit.addEventListener("mousemove", function (e) {
+    // Pointer events, so touch and pen read the values too (mousemove stays for browsers without them).
+    var readOut = function (e) {
       var r = k.svg.getBoundingClientRect(), x = (e.clientX - r.left) * (k.s.w / r.width), labels = k.labels;
       var i = Math.max(0, Math.min(labels.length - 1, Math.round(((x - k.pad.l) / k.plotW) * (labels.length - 1))));
       guide.setAttribute("x1", k.px(i)); guide.setAttribute("x2", k.px(i)); guide.setAttribute("visibility", "visible");
@@ -404,8 +405,10 @@
         html += "<br>" + (sx.name ? esc(sx.name) + ": " : "") + esc(fmt(v, k.data));
       });
       tip.show(html, k.px(i) * (r.width / k.s.w), (ys.length ? Math.min.apply(null, ys) : k.pad.t) * (r.height / k.s.h));
-    });
-    hit.addEventListener("mouseleave", function () { guide.setAttribute("visibility", "hidden"); dots.forEach(function (d) { d.setAttribute("visibility", "hidden"); }); tip.hide(); });
+    };
+    var clear = function () { guide.setAttribute("visibility", "hidden"); dots.forEach(function (d) { d.setAttribute("visibility", "hidden"); }); tip.hide(); };
+    hit.addEventListener("pointermove", readOut); hit.addEventListener("mousemove", readOut);
+    hit.addEventListener("pointerleave", clear); hit.addEventListener("mouseleave", clear);
   }
   // Line chart (data.area for a fading fill under each line). A value that is not a number leaves
   // a gap in the line; values below zero get an axis below zero.

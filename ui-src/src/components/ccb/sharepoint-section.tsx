@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import HoldButton from "@/components/kokonutui/hold-button";
+import { ConfirmRemove } from "./confirm-remove";
 import type { SharePointSource } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -71,14 +72,12 @@ export function SharePointSection({ projectPath }: { projectPath: string }) {
             <span className="truncate" title={s.spItemUrl}>
               {s.kind === "list" ? `List: ${s.label}` : s.fileName}
             </span>
-            <button
-              className={cn(buttonClass, "ml-auto shrink-0")}
+            <ConfirmRemove
+              className="ml-auto"
               disabled={busy}
-              onClick={() => void run(async () => setSources((await (await loadApi()).unlinkSharePoint(s.spItemUrl)).sources))}
-              type="button"
-            >
-              Remove
-            </button>
+              name={s.kind === "list" ? s.label : s.fileName}
+              onRemove={() => void run(async () => setSources((await (await loadApi()).unlinkSharePoint(s.spItemUrl)).sources))}
+            />
           </div>
         ))}
       </div>

@@ -1,6 +1,6 @@
 # Every test runner the repository has, on each push to main, each release tag and each pull request:
 # the Pester suite under Windows PowerShell 5.1 (tools/run-tests.ps1, as the release gate runs it),
-# and the UI's typecheck, lint, vitest, build and rendered design checks (Edge, which the runner has);
+# and the UI's typecheck, lint, vitest, build, rendered design checks and smoke test (Edge, which the runner has);
 # the build must reproduce the committed ui/ exactly.
 # No third-party actions: the commit is fetched with git, as in dependency-check.yml. One command per
 # step, so each step fails on its own command's exit code.
@@ -85,6 +85,11 @@ jobs:
         shell: powershell
         working-directory: repo/ui-src
         run: npm run check:design
+
+      - name: Smoke test (every view loads, no console error, no missing asset)
+        shell: powershell
+        working-directory: repo/ui-src
+        run: npm run smoke
 
       - name: The build matches the committed ui/
         shell: powershell

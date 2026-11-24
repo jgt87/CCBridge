@@ -46,6 +46,46 @@ Describe 'More components' {
     }
 }
 
+Describe 'Forms and touch parts (kit revision 17)' {
+    It 'has the styles, the behaviour and an example of every part, before the kokonutui licence note' {
+        $kok = $kitCss.IndexOf('Interactive components adapted from kokonutui')
+        foreach ($c in 'kit-listbox', 'kit-option', 'kit-option__meta', 'kit-number', 'kit-number__step', 'kit-password', 'kit-password__reveal', 'kit-otp', 'kit-otp__box', 'kit-daterange', 'kit-daterange__preset',
+            'kit-sheet', 'kit-sheet__grab', 'kit-sheet__body', 'kit-carousel', 'kit-carousel__track', 'kit-carousel__item', 'kit-reorder', 'kit-reorder__line', 'kit-swipe', 'kit-swipe__actions', 'kit-swipe__row',
+            'kit-splitpane', 'kit-splitpane__pane', 'kit-splitter', 'kit-disclosure', 'kit-disclosure__head', 'kit-disclosure__panel', 'kit-overflow', 'kit-breadcrumbs__more') {
+            $kitCss | Should Match ('\.' + [regex]::Escape($c) + '\b')
+            $i = $kitCss.IndexOf(".$c ")
+            ($i -ge 0 -and $i -lt $kok) | Should Be $true
+        }
+        foreach ($f in 'function setupListbox', 'function setupNumber', 'function checkField', 'function setupPassword', 'function setupOtp', 'function setupAddress', 'function setupDateRange', 'function setupSheet',
+            'function setupCarousel', 'function setupReorder', 'function setupSwipe', 'function setupSplitter', 'function setupDisclosure', 'function setupOverflow', 'function setupCrumbs', 'check: checkField') {
+            $kitJs | Should Match ([regex]::Escape($f))
+        }
+        [regex]::IsMatch($kitJs, '[^\x00-\x7F]') | Should Be $false
+        foreach ($id in 'form-parts', 'touch-parts') { $examples | Should Match ('<section id="' + $id + '"') }
+        $index = @(Get-KitExamplesIndex $examples)
+        @($index | Where-Object { $_.title -eq 'Form parts' -and @($_.classes) -contains 'kit-listbox' }).Count | Should Be 1
+        @($index | Where-Object { $_.title -eq 'Touch and layout parts' -and @($_.classes) -contains 'kit-sheet' }).Count | Should Be 1
+        & (Get-Module UiKit) { $script:KitRevision } | Should BeGreaterThan 16
+    }
+    It 'names in its rule line only classes the kit has, and drops it with the part off' {
+        $line = @($rule.Split("`n") | Where-Object { $_ -like '- More components for forms and touch*' })
+        $line.Count | Should Be 1
+        foreach ($m in [regex]::Matches($line[0], '(?<![\w-])kit-[a-z0-9]+(?:__[a-z0-9-]+|--[a-z0-9-]+|-[a-z0-9]+)*')) { $kitCss | Should Match ('\.' + [regex]::Escape($m.Value) + '\b') }
+        $line[0] | Should Match 'never type="number"'
+        $line[0] | Should Match 'write no field check of your own'
+        Mock -ModuleName Prompts Test-UiKitPart { $Name -ne 'extras' }
+        (& (Get-Module Prompts) { param($r) Get-PromptPart $r 'rules:uikit' @{} } $root) | Should Not Match 'forms and touch'
+    }
+    It 'keeps what the parts write in a page''s kit.css when the page uses their hook' {
+        $p = New-TempProject
+        try {
+            Add-File $p 'index.html' '<div class="kit-toolbar kit-overflow" data-kit-overflow></div><div class="kit-daterange" data-kit-daterange></div><script src="styles/kit/kit.js"></script>'
+            $u = Get-KitUsage $p
+            foreach ($c in 'kit-menu__list', 'kit-overflow__more', 'kit-daterange__panel', 'kit-popover') { $u.classes.Contains($c) | Should Be $true }
+        } finally { Remove-Item -LiteralPath $p -Recurse -Force }
+    }
+}
+
 Describe 'Status bars and chart bars' {
     It 'rounds a progress or status bar at both ends' {
         [regex]::Match($kitCss, '\.kit-progress \{[^}]*\}').Value | Should Match 'border-radius: 999px;'

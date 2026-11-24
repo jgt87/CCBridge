@@ -1,5 +1,5 @@
 import { AtSign, ClipboardCheck, ClipboardList, Eraser, FileArchive, FileCode2, FileText, FolderOpen, MessageSquarePlus, Palette, PencilRuler, Presentation, RotateCcw, ScrollText, Settings, ShieldCheck, Zap } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import ActionSearchBar, { type Action } from "@/components/kokonutui/action-search-bar";
 import type { PromptMode } from "@/components/kokonutui/ai-prompt";
 import { ModalBackdrop } from "@/components/ccb/modal-backdrop";
@@ -303,7 +303,7 @@ function commandActions(ctx: CommandContext, show: (p: PaletteKind) => void, set
   const later = (f: () => void) => () => setTimeout(f, 0);
   return [
     { id: "new-chat", label: "New chat", description: "Start a fresh Copilot chat; the project stays open", icon: icon(MessageSquarePlus), end: "Command", onSelect: ctx.startNewChat },
-    { id: "undo", label: "Undo last change set", description: "Restore files from before the last message", icon: icon(RotateCcw), end: "Command", onSelect: () => api.undo() },
+    { id: "undo", label: "Undo last change set", description: "Take back what the last message changed in the files", icon: icon(RotateCcw), end: "Command", onSelect: () => api.undo() },
     { id: "settings", label: "Settings", icon: icon(Settings), end: "Command", onSelect: later(ctx.openSettings) },
     { id: "project", label: "Switch project", description: "Open or create a OneDrive project folder", icon: icon(FolderOpen), end: "Command", onSelect: ctx.openPicker },
     { id: "attach", label: "Attach a file to the message", description: "Adds @path so Copilot gets the file", icon: icon(AtSign), end: "Command", onSelect: later(() => show("attach")) },
@@ -332,6 +332,7 @@ function commandActions(ctx: CommandContext, show: (p: PaletteKind) => void, set
 /** The command palette (Menu, Ctrl/Cmd+K) and its second lists: files to attach, logging levels, test runs, data files to profile. */
 export function useCommandPalette(ctx: CommandContext) {
   const [palette, setPalette] = useState<PaletteKind | null>(null);
+  const titleId = useId();
   const [testRuns, setTestRuns] = useState<TestRunItem[]>([]);
   const [dataSources, setDataSources] = useState<DataProfileSource[]>([]);
   const appEntry = useMemo(() => findAppEntry(ctx.files.map((f) => f.path)), [ctx.files]);
@@ -356,9 +357,9 @@ export function useCommandPalette(ctx: CommandContext) {
     dataprofile: () => dataProfileActions(ctx, dataSources, api),
   };
   const element = palette && (
-    <ModalBackdrop className="pt-24" onClose={() => setPalette(null)}>
+    <ModalBackdrop className="pt-24" label={PALETTE_TEXT[palette].label} onClose={() => setPalette(null)} titleId={titleId}>
       <div className="kit-dialog w-full max-w-xl px-4 pt-0 pb-4">
-        <ActionSearchBar actions={actionsFor[palette]()} key={palette} label={PALETTE_TEXT[palette].label} onClose={() => setPalette(null)} placeholder={PALETTE_TEXT[palette].placeholder} />
+        <ActionSearchBar actions={actionsFor[palette]()} key={palette} label={PALETTE_TEXT[palette].label} labelId={titleId} onClose={() => setPalette(null)} placeholder={PALETTE_TEXT[palette].placeholder} />
       </div>
     </ModalBackdrop>
   );

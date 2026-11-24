@@ -1,11 +1,13 @@
 ---
 name: StreamHub
 description: A quiet grey workbench for directing Microsoft 365 Copilot through code, files and automation.
+register: app
+iconSet: Lucide
 colors:
   paper: "oklch(1 0 0)"
   ink: "oklch(0.145 0 0)"
   ink-press: "oklch(0.205 0 0)"
-  pencil: "oklch(0.556 0 0)"
+  pencil: "oklch(0.535 0 0)"
   shelf: "oklch(0.97 0 0)"
   hairline: "oklch(0.922 0 0)"
   edge: "oklch(0.62 0 0)"
@@ -15,7 +17,7 @@ colors:
   graphite-float: "oklch(0.305 0.004 84.6)"
   graphite-shelf: "oklch(0.348 0.004 84.6)"
   chalk: "oklch(0.901 0.002 84.6)"
-  dust: "oklch(0.751 0.003 84.6)"
+  dust: "oklch(0.765 0.003 84.6)"
   signal-red: "oklch(0.577 0.245 27.325)"
   signal-red-night: "oklch(0.704 0.191 22.216)"
   added-green: "oklch(0.596 0.145 163.225)"
@@ -123,6 +125,8 @@ The system is dense and calm. Panels stack in narrow columns with small uppercas
 
 It rejects **colourful SaaS dashboards**: blue or purple brand accents, gradient buttons, hero metrics, and coloured status pills. StreamHub sits next to Copilot in the same window and earns trust by staying out of the way.
 
+**Register:** app (a tool people work in all day, not a page to read). **Icon set:** Lucide (lucide-react in the app; the kit's Lucide icons in pages).
+
 **Key Characteristics:**
 - Monochrome chrome: greys only (light is pure grey; dark carries Copilot's faint warm tint); colour only as content.
 - Flat by default: tints (3 to 15% black or white) and 1px hairlines, never shadows.
@@ -142,11 +146,11 @@ A grey scale (pure in light; in dark, Copilot's warm graphite with a barely visi
 - **Shelf** (oklch(0.97 0 0)): light muted surfaces and secondary fills.
 - **Hairline** (oklch(0.922 0 0)): light dividers and panel borders; in practice drawn as black at 10%.
 - **Edge** (oklch(0.62 0 0); **Edge Night** white at 38% in dark; CSS `--input`): the outline of every field and bordered control, at least 3:1 against the surface and the 5% bands it sits on, so a place to type or choose reads as one at rest (operator, 2026-11-16; before, fields used the Hairline).
-- **Pencil** (oklch(0.556 0 0)): light secondary text, labels, counts, placeholders' darker cousin.
+- **Pencil** (oklch(0.535 0 0); CSS `--muted-foreground`): light secondary text, labels, counts, placeholders' darker cousin. At least 4.5:1 on every band it sits on, down to the 5% black tint (#f2f2f2: the palette's active row, count chips) and the Shelf of the Beta tag (operator, 2026-11-24; at 0.556 it was 4.2:1 there).
 - **Graphite** (oklch(0.261 0.004 84.6), rgb 37 36 34): the dark page. It is exactly the base color of the Copilot window, measured from its page, so the two panes meet without a seam.
 - **Graphite Raised** (oklch(0.29 0.004 84.6)) and **Graphite Float** (oklch(0.305 0.004 84.6)): dark cards, the side panel, popovers and menus, one and two steps above the page in the same hue.
 - **Graphite Shelf** (oklch(0.348 0.004 84.6)): dark muted surfaces and the selected side panel tab; Copilot's own raised-control level (rgb 58).
-- **Dust** (oklch(0.751 0.003 84.6)): dark secondary text, Copilot's secondary grey (rgb 174; about 7:1 on Graphite).
+- **Dust** (oklch(0.765 0.003 84.6)): dark secondary text, one step above Copilot's secondary grey (rgb 178 against Copilot's 174; about 7:1 on Graphite), so it keeps 4.5:1 on a popover's 10% white active row too (operator, 2026-11-24; at 0.751 it was 4.38:1 there).
 
 ### Tertiary (content signals only)
 - **Signal Red** (oklch(0.577 0.245 27.325); **Signal Red Night** oklch(0.704 0.191 22.216) in dark): errors, failed steps, destructive confirmation.
@@ -156,7 +160,7 @@ A grey scale (pure in light; in dark, Copilot's warm graphite with a barely visi
 ### Named Rules
 **The Colour Is Content Rule.** The app's own chrome never carries hue. Colour appears only when it describes the material: code syntax, added and removed lines, errors. A blue or green button, badge, link or status dot is prohibited.
 
-**The One Window Rule.** In dark mode StreamHub takes the Copilot window's palette: page Graphite is Copilot's base (rgb 37 36 34) and text uses Copilot's greys (Chalk 222, Dust 174), about 11:1 and 7:1. Never near-black with near-white, and never a cold neutral grey (zinc, gray, neutral) beside the warm base: use the tokens.
+**The One Window Rule.** In dark mode StreamHub takes the Copilot window's palette: page Graphite is Copilot's base (rgb 37 36 34) and text uses Copilot's greys (Chalk 222; Dust 178, one step above Copilot's 174 for contrast), about 11:1 and 7:1. Never near-black with near-white, and never a cold neutral grey (zinc, gray, neutral) beside the warm base: use the tokens.
 
 **The Tint, Don't Paint Rule.** Hover, selection and grouping are black (light) or white (dark) at 3, 5, 10 or 15 percent over the surface. Never a new grey value, never a colour.
 
@@ -201,6 +205,7 @@ Flat and unassuming: controls look like part of the page until you need them.
 - **Tinted:** the default action in a row (Create, Send answer): a 5% tint at rest (10% in dark), 10% on hover.
 - **Solid:** Ink fill with Paper text (inverted in dark), for the one active choice; hover at 85% opacity.
 - **Disabled:** 40% opacity and no hover tint.
+- **Keyboard focus:** one ring for every control, a 2px Ring (`--ring`) outline 2px away (`src/index.css`, base layer, inside `:where()` so a component's own focus style wins). Text fields, selects and text areas are left out: they show focus by their border (Inputs below). Operator, 2026-11-24.
 - **Bordered (Settings, the message box header):** a 1px Edge, 32px tall, one fixed width (192px) so every control column lines up.
 
 ### Chips
@@ -253,6 +258,13 @@ Flat and unassuming: controls look like part of the page until you need them.
 - **Don't** use `border-left` or `border-right` wider than 1px as a coloured or grey stripe on cards, notes or alerts. (Markdown callouts in replies still use a 3px left rule; that is existing drift to replace with a full tint, not a pattern to copy.)
 - **Don't** introduce a second typeface or uppercase anything but section labels and tags.
 - **Don't** wrap a Copilot reply in a card; replies sit directly on the page.
+
+### Accepted deviations
+Places that differ from the shared element specs on purpose (operator decisions):
+- **Mode menu rows are 68px tall** (2026-11-24), above the usual menu row: each mode has a description line under its name, and that line is where a mode explains itself, so it stays.
+- **Modals keep the app's own overlay** (`ModalBackdrop`, not a native `<dialog>`; 2026-11-24): role dialog, aria-modal, focus kept inside, the page behind inert, and the dialog named by its visible title (aria-labelledby).
+- **The console view keeps the Windows console's own colours** in both themes (`console-view.tsx`, marked `/* design: */`): it shows a command's output as the window it would run in looks.
+- **UI kit parts that differ from the element specs** are listed in the header of `templates/ui-kit/kit.js`.
 
 ### Rules a test holds
 `ui-src/src/design-rules.test.ts` reads the app's own source and fails with file and line:

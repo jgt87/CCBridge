@@ -585,9 +585,12 @@ if ($Agent) {
     [IO.File]::AppendAllText((Join-Path $out 'summary.txt'), "`r`nAutomatic run: $(if ($auto -and $auto.result) { $auto.result } else { 'not finished' }); answers sent: $(if ($auto) { $auto.answered } else { 0 })`r`n")
 }
 try { & (Join-Path $root 'tools\stream-shape.ps1') -Path (Join-Path $out 'frames.jsonl') -OutFile (Join-Path $out 'shape.txt') | Out-Null } catch { Write-Host "shape.txt not written: $($_.Exception.Message)" -ForegroundColor Yellow }
-$safe = @('summary.txt', 'run.log', 'timeline.txt', 'page.txt', 'shape.txt') | ForEach-Object { Join-Path $out $_ } | Where-Object { Test-Path $_ }
+$safe = @(@('summary.txt', 'run.log', 'timeline.txt', 'page.txt', 'shape.txt') | Where-Object { Test-Path (Join-Path $out $_) })
 $zip = Join-Path $out "agent-capture-$Label.zip"
-Compress-Archive -Path $safe -DestinationPath $zip -Force
+# Windows' own tar writes zip entries with forward slashes (Compress-Archive writes backslashes in 5.1).
+if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+& "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $out @safe
+if ($LASTEXITCODE -ne 0) { Write-Host "The zip could not be written; send the files in $out instead." -ForegroundColor Yellow }
 Write-Host ''
 Write-Host "Done. Please send: $zip" -ForegroundColor Green
 Write-Host '  (summary, timeline, page and shape: field names, status words, lengths and timings; no text)'

@@ -192,9 +192,19 @@ function Import-KitData {
 }
 
 function Export-KitCsv {
-    # Rows to a CSV file that Excel opens with the right characters (UTF-8 with a BOM).
+    # Rows to a CSV file that Excel opens with the right characters (UTF-8 with a BOM). Text that starts
+    # with = + - @, a tab or CR (and is not a plain number) gets a leading ' so Excel never runs it.
     param([Parameter(Mandatory)]$Rows, [Parameter(Mandatory)][string]$Path)
-    $text = @($Rows) | ConvertTo-Csv -NoTypeInformation
+    $safe = foreach ($r in @($Rows)) {
+        $o = [ordered]@{}
+        foreach ($p in $r.PSObject.Properties) {
+            $v = $p.Value
+            if ($v -is [string] -and $v -match '^[=+\-@\t\r]' -and $v -notmatch '^[+-]?(\d+([.,]\d+)?|[.,]\d+)([eE][+-]?\d+)?$') { $v = "'" + $v }
+            $o[$p.Name] = $v
+        }
+        [pscustomobject]$o
+    }
+    $text = @($safe) | ConvertTo-Csv -NoTypeInformation
     [IO.File]::WriteAllLines($Path, [string[]]$text, (New-Object Text.UTF8Encoding($true)))
 }
 

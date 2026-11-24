@@ -34,6 +34,11 @@ Describe 'CCBridge MCP server (stdio JSON-RPC)' {
         $r = $raw | ConvertFrom-Json
         $r.id | Should Be 1
         $r.result.serverInfo.name | Should Be 'ccbridge'
+        # The real build (version and commit), not a fixed number: a stale running server shows.
+        Import-Module (Join-Path $root 'lib\Config.psm1') -Force
+        Import-Module (Join-Path $root 'lib\Log.psm1') -Force
+        $r.result.serverInfo.version | Should Be (Format-CCBBuild (Get-CCBridgeBuild $root))
+        $r.result.serverInfo.version | Should Not Be '0.1.0'
         $r.result.protocolVersion | Should Be '2025-06-18'
         $r.result.instructions | Should Match 'WHEN TO USE IT'
         $r.result.instructions | Should Not Match 'CCBridge'
@@ -54,6 +59,20 @@ Describe 'CCBridge MCP server (stdio JSON-RPC)' {
         ($names -join ',') | Should Match 'copilot_start_task'
         @($r.result.tools | Where-Object { -not $_.inputSchema -or $_.inputSchema.type -ne 'object' }).Count | Should Be 0
         @($r.result.tools | Where-Object name -eq 'copilot_start_task')[0].inputSchema.required -join ',' | Should Be 'project_path,task'
+        # The README's tool table lists exactly the registered tools.
+        $readme = [IO.File]::ReadAllText((Join-Path $root 'README.md'))
+        $documented = @([regex]::Matches($readme, '(?m)^\| `(copilot_\w+)` \|') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+        ($documented -join ',') | Should Be ((@($names | Sort-Object)) -join ',')
+        # The instructions name only registered tools.
+        Send-Rpc $proc '{"jsonrpc":"2.0","id":21,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"pester","version":"1"}}}'
+        $init = (Read-Rpc $proc) | ConvertFrom-Json
+        @([regex]::Matches($init.result.instructions, 'copilot_\w+') | ForEach-Object { $_.Value } | Where-Object { $names -notcontains $_ }).Count | Should Be 0
+        # The long blocking tools say so and point to the job tools.
+        foreach ($n in 'copilot_run_task', 'copilot_ask') {
+            $d = @($r.result.tools | Where-Object name -eq $n)[0].description
+            $d | Should Match 'blocks'
+            $d | Should Match 'copilot_task_status'
+        }
     }
 
     It 'answers ping' {

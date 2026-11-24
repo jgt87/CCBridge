@@ -1,6 +1,6 @@
 import { CalendarClock, ChevronRight, Plus, X } from "lucide-react";
 import { ModalBackdrop } from "./modal-backdrop";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { ChainItem, FetchItem, FileInfo, RunbookItem, ScheduleItem, ScheduleSpec } from "@/lib/api";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -55,24 +55,25 @@ export function SchedulesModal({
   onCreate: (spec: ScheduleSpec) => Promise<void>;
   onClose: () => void;
 }) {
+  const titleId = useId();
   const [target, setTarget] = useState<ScheduleTarget | null>(initial);
   const [editing, setEditing] = useState<ScheduleItem | null>(initialEditing ?? null);
   useEffect(() => setTarget(initial), [initial]);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && !e.isComposing && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
   return (
-    <ModalBackdrop onClose={onClose}>
+    <ModalBackdrop label="Scheduled" onClose={onClose} titleId={titleId}>
       <div
         className="kit-dialog flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden p-0"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-(--kit-border) border-b px-4 py-3">
           <div className="min-w-0">
-            <div className="font-semibold">Scheduled</div>
+            <div className="font-semibold" id={titleId}>Scheduled</div>
             <div className="text-muted-foreground text-xs">Messages, runbooks and chains that run on set days and times while StreamHub is open.</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -85,7 +86,7 @@ export function SchedulesModal({
                 <Plus className="h-3.5 w-3.5" /> New schedule
               </button>
             )}
-            <button className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" onClick={onClose} title="Close (Esc)" type="button">
+            <button aria-label="Close" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" onClick={onClose} title="Close (Esc)" type="button">
               <X className="h-4 w-4" />
             </button>
           </div>

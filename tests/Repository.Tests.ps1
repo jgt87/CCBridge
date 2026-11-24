@@ -55,6 +55,14 @@ Describe 'User and machine independence' {
         }
         @($hits) -join "`n" | Should BeNullOrEmpty
     }
+    It 'tracks no captured Copilot material (probe and capture reports; .gitignore policy block)' {
+        $tracked = @(Push-Location $root; try { git ls-files 2>$null } finally { Pop-Location })
+        $captured = '(?i)(^|/)(probe-report\.txt|probe - Copy\.txt|capture-report\.json)$|(^|/)StreamHub-agent-capture-[^/]*/'
+        @($tracked | Where-Object { $_ -match $captured }) -join "`n" | Should BeNullOrEmpty
+        # The patterns are ignored, so a new capture never shows up as a file to add.
+        $ignored = @(Push-Location $root; try { git check-ignore --no-index 'probe-report.txt' 'capture-report.json' 'StreamHub-agent-capture-x-1/summary.txt' 2>$null } finally { Pop-Location })
+        $ignored.Count | Should Be 3
+    }
 }
 
 # AGENTS.md is loaded into every coding agent's context, which warns past 40,000 characters (it had

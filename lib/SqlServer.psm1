@@ -107,13 +107,24 @@ function Invoke-DbQuery {
     } finally { $conn.Dispose() }
 }
 
+function ConvertTo-DbCsvCell($v) {
+    <# One CSV cell: numbers and dates in the invariant form, quoted when needed. Text that starts with
+       = + - @, a tab or CR (and is not a plain number) gets a leading ' so Excel shows it as text and
+       never runs it as a formula. Also written into the refresh script, so both give the same file. #>
+    if ($null -eq $v -or $v -is [DBNull]) { return '' }
+    if ($v -is [IFormattable]) { $s = $v.ToString($null, [Globalization.CultureInfo]::InvariantCulture) }
+    else {
+        $s = "$v"
+        if ($s -match '^[=+\-@\t\r]' -and $s -notmatch '^[+-]?(\d+([.,]\d+)?|[.,]\d+)([eE][+-]?\d+)?$') { $s = "'" + $s }
+    }
+    if ($s -match '[",\r\n]') { '"' + $s.Replace('"', '""') + '"' } else { $s }
+}
+
 function ConvertTo-DbCsv($Result) {
     # The result as CSV text (a header row; values quoted when needed; numbers with a dot).
-    $inv = [Globalization.CultureInfo]::InvariantCulture
-    $q = { param($v) if ($null -eq $v) { '' } else { $s = if ($v -is [IFormattable]) { $v.ToString($null, $inv) } else { "$v" }; if ($s -match '[",\r\n]') { '"' + $s.Replace('"', '""') + '"' } else { $s } } }
     $lines = New-Object System.Collections.Generic.List[string]
-    $lines.Add(((@($Result.columns) | ForEach-Object { & $q $_ }) -join ','))
-    foreach ($r in @($Result.rows)) { $lines.Add(((@($r) | ForEach-Object { & $q $_ }) -join ',')) }
+    $lines.Add(((@($Result.columns) | ForEach-Object { ConvertTo-DbCsvCell $_ }) -join ','))
+    foreach ($r in @($Result.rows)) { $lines.Add(((@($r) | ForEach-Object { ConvertTo-DbCsvCell $_ }) -join ',')) }
     ($lines -join "`r`n") + "`r`n"
 }
 
@@ -156,6 +167,7 @@ function Write-DbRefreshScript {
     powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\Refresh-Database.ps1
 #>
 `$ErrorActionPreference = 'Stop'
+function ConvertTo-DbCsvCell {$(${function:ConvertTo-DbCsvCell})}
 `$root = Split-Path -Parent `$PSScriptRoot
 `$list = Get-Content -Raw (Join-Path `$root '.streamhub\databases.json') | ConvertFrom-Json   # assigned first: piped on, a JSON array is one object in 5.1
 `$conns = @{}; foreach (`$c in `$list) { `$conns[`$c.name] = `$c }
@@ -178,7 +190,11 @@ foreach (`$q in `$queries) {
         `$out = Join-Path `$root (`$q.file -replace '/', '\')
         `$null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent `$out)
         if (Test-Path -LiteralPath `$out) { [IO.File]::SetAttributes(`$out, 'Normal') }
-        `$t | Export-Csv -LiteralPath `$out -NoTypeInformation -Encoding UTF8
+        # The same CSV as the app writes (Excel-safe cells, numbers with a dot, UTF-8 with a BOM).
+        `$lines = New-Object System.Collections.Generic.List[string]
+        `$lines.Add((@(`$t.Columns | ForEach-Object { ConvertTo-DbCsvCell `$_.ColumnName }) -join ','))
+        foreach (`$row in `$t.Rows) { `$lines.Add((@(`$row.ItemArray | ForEach-Object { ConvertTo-DbCsvCell `$_ }) -join ',')) }
+        [IO.File]::WriteAllText(`$out, ((`$lines -join "``r``n") + "``r``n"), (New-Object Text.UTF8Encoding(`$true)))
         Write-Output "`$(`$q.name): `$(`$t.Rows.Count) rows -> `$(`$q.file)"
     } finally { `$conn.Dispose() }
 }

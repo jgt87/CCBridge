@@ -85,7 +85,7 @@ function Get-TabAddresses([int]$Port = 9333) {
 function Test-ProfileSsoAuto {
     <# Whether Edge turned single sign-on for work sites on by itself for StreamHub's profile:
        Preferences edge.profile_sso_info.aad_sso_algo_state = 2 ("intelligent enablement" for a
-       single profile on a work PC; 1 = off). Read only. #>
+       single profile on a PC joined to Microsoft Entra ID; 1 = off). Read only. #>
     param([string]$ProfileDir = (Join-Path $env:LOCALAPPDATA 'CCBridge\edge-profile'))
     try { $p = [IO.File]::ReadAllText((Join-Path $ProfileDir 'Default\Preferences')) | ConvertFrom-Json } catch { return $false }
     "$($p.edge.profile_sso_info.aad_sso_algo_state)" -eq '2'

@@ -28,11 +28,27 @@ function Get-CCBridgeConfig {
     $config
 }
 
+function Invoke-NativeLines {
+    <# A native command's standard output lines, or nothing when it fails or cannot be started. Its
+       stderr is dropped. This module runs with $ErrorActionPreference = 'Stop', under which Windows
+       PowerShell 5.1 turns a native command's stderr into a terminating error (AGENTS.md): that would
+       end the caller's try block early, so one failing call (git describe with no tags) emptied the
+       next one too. Here the preference is Continue and the result decided by the exit code. #>
+    param([Parameter(Mandatory)][string]$Exe, [string[]]$Arguments = @())
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = @(& $Exe @Arguments 2>&1 | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) { return @() }
+        $out
+    } catch { @() }
+}
+
 function Get-CCBridgeVersion([string]$AppRoot) {
     if (-not $AppRoot) { $AppRoot = Split-Path -Parent $PSScriptRoot }
     $v = Join-Path $AppRoot 'version.txt'
     if (Test-Path $v) { return ([IO.File]::ReadAllText($v)).Trim() }
-    try { $sha = & git -C $AppRoot rev-parse --short HEAD 2>$null; if ($sha) { return "git-$sha" } } catch { }
+    $sha = @(Invoke-NativeLines -Exe 'git' -Arguments @('-C', $AppRoot, 'rev-parse', '--short', 'HEAD')) | Select-Object -First 1
+    if ($sha) { return "git-$sha" }
     'dev'
 }
 
@@ -47,10 +63,9 @@ function Get-CCBridgeBuild {
     if (Test-Path $v) { $version = ([IO.File]::ReadAllText($v)).Trim() }
     if (Test-Path $c) { $commit = ([IO.File]::ReadAllText($c)).Trim() }
     if (Test-Path (Join-Path $AppRoot '.git')) {
-        try {
-            if (-not $version) { $version = (& git -C $AppRoot describe --tags --abbrev=0 2>$null | Select-Object -First 1) }
-            if (-not $commit) { $commit = (& git -C $AppRoot rev-parse --short HEAD 2>$null | Select-Object -First 1) }
-        } catch { }
+        # Each on its own: a copy without release tags (git describe fails) still shows its commit.
+        if (-not $version) { $version = @(Invoke-NativeLines -Exe 'git' -Arguments @('-C', $AppRoot, 'describe', '--tags', '--abbrev=0')) | Select-Object -First 1 }
+        if (-not $commit) { $commit = @(Invoke-NativeLines -Exe 'git' -Arguments @('-C', $AppRoot, 'rev-parse', '--short', 'HEAD')) | Select-Object -First 1 }
     }
     [pscustomobject]@{ version = $(if ($version) { "$version" } else { 'dev' }); commit = $(if ($commit) { "$commit" } else { '' }) }
 }
@@ -262,15 +277,17 @@ function Get-ScriptLanguageMode {
     if (-not $ProjectRoot) { return '' }
     if ($script:ScriptLanguage.ContainsKey($ProjectRoot)) { return $script:ScriptLanguage[$ProjectRoot] }
     $mode = ''
+    $probe = $null
     try {
         $dir = Join-Path $ProjectRoot '.streamhub'
         $null = New-Item -ItemType Directory -Force -Path $dir
         $probe = Join-Path $dir 'language-mode.ps1'
         [IO.File]::WriteAllText($probe, '$ExecutionContext.SessionState.LanguageMode')
         $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $mode = "$(& $exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probe 2>$null)".Trim()
-        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        # Stdout only; a warning on stderr no longer empties the answer (Invoke-NativeLines).
+        $mode = "$(@(Invoke-NativeLines -Exe $exe -Arguments @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $probe)) | Select-Object -First 1)".Trim()
     } catch { $mode = '' }
+    finally { if ($probe) { Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue } }
     $script:ScriptLanguage[$ProjectRoot] = $mode
     $mode
 }

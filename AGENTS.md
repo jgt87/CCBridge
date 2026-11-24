@@ -81,6 +81,9 @@ cd ui-src; npm run build; npm test
 # Rendered design checks on the built ui/ with invented data (design-check.json: views, API stubs, waivers;
 # test ports 5297, 9571, 9572), never the running app: touch reach, field edges, row heights, layout lint
 cd ui-src; npm run check:design
+# Smoke test of the built ui/ (a free port, headless Edge/Chrome; also in CI): every design-check view
+# loads with no console error and no missing asset
+cd ui-src; npm run smoke
 # Build a release zip (dist\) and publish it as a GitHub Release
 # (it also creates and pushes the annotated tag of the same name on HEAD and publishes the GitHub
 # Release "StreamHub vX.Y.Z" with the zip; needs a clean, pushed tree and refuses an existing tag or
@@ -146,6 +149,12 @@ The rules below hold for every change; their mechanisms, the rest of the product
 - Project instruction files are named `AGENTS.md` (sent to Copilot at the start of each chat).
 - UI: monochrome white/grey, flat buttons, no blue/green accents; side panel on the left.
 - Every task goes through `Submit-AgentTask`; every agent turn is one checkpoint (backups in `%LOCALAPPDATA%`, never OneDrive).
+
+## Decisions (operator, 2026-11-24)
+
+- MCP contract unchanged: the tool descriptions already point to the job tools (`copilot_run_task`, `copilot_ask`); no tool is added, renamed or removed for this.
+- Starting the web app stops an older instance with `Stop-Process` on that one process, never `taskkill /T`: the tree holds the commands it opened in visible run windows, which belong to the person (`ccbridge.ps1`).
+- `Set-StrictMode -Version 2.0` goes in one module at a time where tests cover it (so far SyncedFiles, RepoMap, ChatScope, SecretFiles); the rest is on the Later list in `tasks/todo.md`, with the other deferred items.
 
 ## Repository
 

@@ -101,6 +101,9 @@ $url = "http://localhost:$($config.port)/"
 # memory), also right after an update. Stop it, so this start always serves the current files.
 # The web server runs through Windows' HTTP service, so the port belongs to "System": the
 # instance is found by the process id it recorded and by its command line instead.
+# Stop-Process ends only that process, on purpose (operator, 2026-11-24): taskkill /T would also end
+# its child processes, which include the commands it opened in visible run windows (a person's
+# build, server or script still running there), and the new instance must leave those alone.
 $pidFile = Join-Path $env:LOCALAPPDATA 'CCBridge\server.pid'
 $stopped = @()
 try {

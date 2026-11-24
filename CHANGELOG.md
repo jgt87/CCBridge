@@ -4,6 +4,75 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+## [v0.1.170] - 2026-11-24
+
+### Added
+
+- UI kit for pages Copilot builds (kit revision 17), new form parts:
+  - a list to pick from with rows that hold more than a word (`kit-listbox`), on its own or opened from a button, for one choice or several, with the arrow keys and typed letters;
+  - a number field (`kit-number`) with minus and plus buttons that reads a decimal comma or point and a unit typed along, keeps the value between its limits, and steps with the arrow keys, Page Up and Page Down;
+  - email, phone, postcode, IBAN, card, expiry, security code, one-time code, web address and amount fields (`data-kit-field`) that check the form of what was typed, say under the field what is wrong with an invented example, show the cleaned-up value and send the clean one with the form; an email address with a likely typo in its domain gets a "Did you mean" suggestion;
+  - a password field with a show button inside it, a note while Caps Lock is on, and the length a new password needs shown before typing;
+  - a one-time code in separate boxes that takes a pasted or autofilled code;
+  - an address that follows its country: the postcode and state or province fields appear, are labelled and are required only where that country uses them;
+  - a date range picker: a button that opens the presets and two date fields with Apply.
+- UI kit, new parts for touch screens and layout:
+  - a sheet from the bottom of the screen that stops at set heights and can be dragged between them;
+  - a carousel of cards with previous and next buttons and its position ("4-6 of 12");
+  - lists that can be put in order by dragging a handle or with the keyboard;
+  - swipe actions on list rows on touch screens (each also in the row's menu), with Undo after a delete;
+  - a splitter to resize two panes by dragging or with the arrow keys, which can remember the size;
+  - sections that open and close, optionally one at a time, which open by themselves when a field inside them has an error;
+  - toolbars that stay on one line and put what does not fit into a More menu, and breadcrumbs that fold their middle levels into a menu.
+
+### Changed
+
+- UI kit for React projects: hold buttons, switches, menu items, icon toolbar items, tabs, segments, theme buttons and command buttons can be marked unavailable and stay reachable with the keyboard; hold buttons start only on the main mouse button, ignore a held key repeating and can show a done word (`doneLabel`); menus and trees jump to an item when you type its first letters; every theme button on a page updates when one is pressed. A command button no longer runs while it is busy.
+- UI kit: the slash between breadcrumbs is no longer read out by screen readers.
+- UI kit for pages Copilot builds, brought in line with the shared element specs:
+  - a button, field, check box or switch can be marked unavailable with `aria-disabled="true"`: it keeps its place for the keyboard and its focus ring, looks unavailable, and the kit ignores presses, keys, typing, pasting and dropping on it (and leaves its value out of the form); a busy button (`aria-busy="true"`) no longer submits twice from the keyboard;
+  - buttons move down a pixel while pressed, and a toggle button that is on (`aria-pressed="true"`) shows the soft accent fill;
+  - hold-to-confirm buttons start only on the main mouse button, ignore a held key repeating, empty quickly when let go early, keep their fill under reduced motion (it shows how long is left), stay full when done, and can show and announce a done word (`data-kit-hold-done`);
+  - menus and trees jump to an item when you type its first letters;
+  - every theme button on a page updates when one is pressed, and the whole page changes theme at once instead of parts fading separately;
+  - in Windows contrast themes, pressed, selected and current items, the switch, the hold fill, badges, toasts and tooltips stay visible;
+  - on touch screens the switch is larger (46 x 28), and tree rows and table sort buttons are at least 44 px tall.
+- UI kit (pages Copilot builds and React projects):
+  - a person's photo that fails to load shows their initials; an avatar beside the written name is skipped by screen readers; no name shows a person outline;
+  - drop zones take only the file types they accept, also when files are dropped, and say which files they left out; the highlight no longer flickers while dragging over them;
+  - a confirm box gives the focus back to the button that asked; popovers are announced as dialogs named by their button, and Escape while typing with an input method no longer closes them;
+  - ArrowDown or ArrowUp on a menu button opens the menu on its first or last item; long tree names end in an ellipsis with the full name on hover; a second Escape in a search box clears it; tag fields refuse a duplicate with a reason and split a pasted list;
+  - charts redraw their colours when the computer switches between light and dark; touch and pen can read a line chart's values; today in a calendar is announced as "Today"; board columns are named regions.
+- Removing a saved database or a linked SharePoint file or list asks once more ("Remove sales?") before it happens.
+- The hold-to-confirm buttons in the app (run approvals, project setup, tidy-up, SharePoint publishing) can be held with Space or Enter, start only on the main mouse button, stop when the focus leaves them, and are described and announced to screen readers.
+- Settings, Scheduled, the command menu and the file viewer are real dialogs for screen readers and the keyboard: the focus moves into them, Tab stays inside, the app behind cannot be reached, and the focus returns to where it was when they close. The side panel over the chat on a narrow window does the same, and its button says whether it is open.
+- The command menu: Escape first clears what was typed and closes on the second press; Enter that ends an input-method composition no longer runs a command; a click on a row keeps the focus in the field; screen readers hear how many commands match, and no match names the text typed.
+- The side panel's tabs (Files, Automation, History and the others) can be reached with the arrow keys, Home and End; before, only the selected tab could be reached from the keyboard.
+- A "Skip to content" link is the first stop for the keyboard (shown only while it has the focus).
+- With reduced motion set in Windows, the app's animations keep their fades and drop their movement.
+- A menu opened from the message box closes when the mouse wheel turns outside it.
+- The explanation behind an info button opens after a short rest of the pointer (at once from the keyboard), so passing over it no longer flashes it open, and it stays open while the pointer moves into it.
+- Grey secondary text is a little darker in the light theme and a little lighter in the dark theme, so it is easy to read on every background it sits on (at least 4.5:1): the Beta tags, "by JGT" in the header, the message count, the descriptions in the command menu's highlighted row and the counts on the side panel tabs.
+- Every button, link and tab shows the same ring when it has the keyboard focus (2 px, a little away from it); fields and lists keep showing the focus with their border.
+- Settings, Scheduled, the command menu and the file viewer are named after the title they show, for screen readers.
+- History: the button on an older change set is now "Undo to here" (it was "Restore"), and its question reads "Undo 2 change sets?", so taking changes back has one name throughout.
+- The README and the install message describe registering the MCP server with your MCP client's add command or its JSON settings, instead of naming one client.
+- UI kit for React projects: the rules tell Copilot to load the kit's script for the new form and touch parts (listbox, number field, typed fields and the others), which have no React version yet.
+- Development: `npm run smoke` in `ui-src` loads every view of the built app in a headless browser on a free port and fails on a console error or a missing file; the checks on GitHub run it too. Three more modules run in strict mode.
+
+### Fixed
+
+- Files Copilot writes, project setup, reviews, progress notes and the app's hint state are saved through a temporary file that is checked and then put in place, with a few tries while OneDrive or a scanner holds the file, so a failed save never leaves a file half written.
+- Saving a project's setup keeps settings it does not know (written by a newer version or by hand) instead of dropping them.
+- Database results saved as CSV, the database refresh script and the window apps' CSV export write text that starts with =, +, - or @ as plain text, so Excel never runs it as a formula; numbers stay numbers. The refresh script now writes the same CSV as the app.
+- A copy without release tags shows its commit again, and the script language check no longer leaves a probe file behind.
+- The MCP server reports its real version and commit, and the descriptions of the tools that wait say so and point to the job tools for long work. The README's tool list now includes the code review.
+- Notifications are no longer turned on when they were switched off again while the browser was still asking for permission.
+- The Hooks list says when the hooks file could not be read, with a way to try again, instead of offering to create a new one.
+- Screen readers hear notices, errors and the "Opening Copilot" note when they appear, and an area that could not be shown is announced as an error.
+- A file size and its unit (3.4 KB) no longer break over two lines.
+- The contrast check reads see-through colours with a 00 or ff alpha correctly.
+
 ## [v0.1.169] - 2026-11-19
 
 ### Changed

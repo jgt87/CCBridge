@@ -4,6 +4,7 @@
 # message names first, then the files the chat works on, then files many others use (import
 # index), then the rest; a big project gets a more selective map, never a bigger one.
 
+Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 foreach ($m in 'Workspace', 'Executor', 'Imports', 'ChatScope') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 

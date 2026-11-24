@@ -122,13 +122,13 @@ describe("SidePanel: History", () => {
     expect(onUndo).toHaveBeenCalledTimes(1);
   });
 
-  it("restores an older change set only after a yes, undoing it and every newer one", () => {
+  it("undoes to an older change set only after a yes, undoing it and every newer one", () => {
     const onUndoTo = vi.fn();
     const box = render(props({ changes, onUndoTo }), "changes");
     const older = box.querySelector("#change-1") as HTMLElement;
 
-    click(buttonWithText(older, "Restore"));
-    expect(older.textContent).toContain("Restore: undo 2 change sets?");
+    click(buttonWithText(older, "Undo to here"));
+    expect(older.textContent).toContain("Undo 2 change sets?");
     expect(onUndoTo).not.toHaveBeenCalled();
     click(buttonWithText(box.querySelector("#change-1") as HTMLElement, "Yes"));
     expect(onUndoTo).toHaveBeenCalledWith("cs-1");

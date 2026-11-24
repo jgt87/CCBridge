@@ -143,7 +143,8 @@ export function Calendar({
         {days.map((day) => {
           const iso = isoDay(day);
           const evs = events.filter((ev) => String(ev.date).slice(0, 10) === iso);
-          const name = fmt({ dateStyle: "full" }, day, iso) + (evs.length ? ", " + evs.length + " item" + (evs.length > 1 ? "s" : "") : "");
+          // Today says so in its name too, not only by its look.
+          const name = (iso === today ? "Today, " : "") + fmt({ dateStyle: "full" }, day, iso) + (evs.length ? ", " + evs.length + " item" + (evs.length > 1 ? "s" : "") : "");
           return (
             <button
               aria-current={iso === today ? "date" : undefined}

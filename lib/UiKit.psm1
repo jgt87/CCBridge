@@ -373,7 +373,7 @@ $script:Companions = @{
 }
 # The kit's revision: raise it when the kit changes in a way projects should get (new classes, chart
 # options the rules name). Update-UiKitCatalog brings an older project catalogue up to date.
-$script:KitRevision = 16
+$script:KitRevision = 17
 
 $script:ScanCache = @{ root = ''; at = [datetime]::MinValue; files = @() }
 $script:ScanSkip = '^(node_modules|dist|build|out|\.git|\.streamhub|Source)$'
@@ -682,7 +682,7 @@ function Get-KitExamplesIndex([string]$Text) {
 }
 
 $script:KitFileNotes = [ordered]@{
-    'kit.js'        = 'behaviour by data-kit-* attributes: sortable tables with pages and a search box, KitUI.fillTable(table, rows) and KitUI.options(select, values) to fill from data, tab panels by aria-controls, progress bars from aria-valuenow, hold to confirm, search with suggestions, file drop zone, animated tabs and choices, side panel and dialog openers, popovers, trees with the arrow keys, filters for several values and for a period, info tips and tooltips, context menus, a command palette (Ctrl+K), data-as-of stamps, a print button; KitUI.toast for confirmations, KitUI.confirm and KitUI.alert instead of the browser''s own boxes'
+    'kit.js'        = 'behaviour by data-kit-* attributes: sortable tables with pages and a search box, KitUI.fillTable(table, rows) and KitUI.options(select, values) to fill from data, tab panels by aria-controls, progress bars from aria-valuenow, hold to confirm, search with suggestions, file drop zone, animated tabs and choices, side panel and dialog openers, popovers, trees with the arrow keys, filters for several values and for a period, info tips and tooltips, context menus, a command palette (Ctrl+K), data-as-of stamps, a print button, a listbox, number fields, typed fields with shape checks (KitUI.check: email, phone, postcode, IBAN, card), a password reveal, one-time code boxes, a country-first address, a date range, a sheet with stops, a carousel, reordering by a handle, swipe actions, a splitter, disclosures, toolbars and breadcrumbs that fold; KitUI.toast for confirmations, KitUI.confirm and KitUI.alert instead of the browser''s own boxes'
     'kit-charts.js' = 'charts on the kit colours: bar (grouped, stacked or 100% stacked), line, area, ring, gauge, heatmap, sparkline, barlist (shares, funnels, colours by meaning); target lines; filter the page on a click; KitCharts.palette for canvas code'
     'kit-data.js'   = 'reading a file a person picks or drops: CSV, TSV, Excel, JSON, Word, PowerPoint'
     'kit-sql.js'    = 'SQL in the page: KitSql.open({ name: rows }) then db.query("SELECT ...") (SQLite; load vendor/sqljs/sql-asm.js first; works from disk)'
@@ -910,10 +910,15 @@ function Get-KitUsage([string]$ProjectRoot) {
     # kit-FAMILY itself, or its hook (data-kit-HOOK, KitUI.HOOK, KitCharts).
     $hooks = New-Object 'System.Collections.Generic.HashSet[string]'
     $fromKit = New-Object System.Collections.Generic.List[object]
-    $kitHooks = @{ pager = @('pages'); toasts = @('toast'); toast = @('toast'); tip = @('tip'); multi = @('multi'); range = @('range'); segmented = @('range'); search = @('search'); drop = @('drop');
+    $kitHooks = @{ pager = @('pages'); toasts = @('toast', 'swipe'); toast = @('toast', 'swipe'); tip = @('tip'); multi = @('multi'); range = @('range'); segmented = @('range'); search = @('search'); drop = @('drop');
         tags = @('tags'); board = @('board'); calendar = @('calendar'); avatar = @('avatar'); avatars = @('avatar'); 'slider-range' = @('slider-range'); slider = @('slider-range'); iconbar = @('iconbar');
-        menu = @('menu', 'context'); tooltip = @('tooltip', 'theme'); chart = @('chart'); barlist = @('chart'); empty = @('chart'); icon = @('icon'); table = @('sort', 'pages', 'filter'); btn = @('multi', 'calendar', 'chart', 'range', 'pages', 'confirm', 'alert', 'toast'); input = @('multi', 'range', 'tags'); tabs = @('tabs'); progress = @('progress')
+        menu = @('menu', 'context', 'overflow', 'breadcrumbs'); tooltip = @('tooltip', 'theme'); chart = @('chart'); barlist = @('chart'); empty = @('chart'); icon = @('icon'); table = @('sort', 'pages', 'filter')
+        btn = @('multi', 'calendar', 'chart', 'range', 'pages', 'confirm', 'alert', 'toast', 'daterange', 'password', 'overflow', 'breadcrumbs'); input = @('multi', 'range', 'tags', 'daterange'); tabs = @('tabs'); progress = @('progress')
         dialog = @('confirm', 'alert'); h3 = @('confirm', 'alert'); tree = @('tree')
+        # The forms and touch parts (kit revision 17): what their scripts write (an error under a field, the date
+        # range's panel, the More menu, the reorder line).
+        'error-text' = @('field', 'number', 'daterange'); help = @('field', 'password'); link = @('field'); select = @('daterange'); popover = @('daterange'); field = @('daterange'); label = @('daterange', 'address')
+        daterange = @('daterange'); password = @('password'); reorder = @('reorder'); overflow = @('overflow'); breadcrumbs = @('breadcrumbs')
         'grow-x' = @('chart'); 'grow-y' = @('chart'); draw = @('chart') }   # the chart animations (@keyframes kit-grow-x/y, kit-draw) kit-charts.js sets from code
     foreach ($f in $files) {
         $rel = $f.FullName.Substring($root.Length + 1).Replace('\', '/')

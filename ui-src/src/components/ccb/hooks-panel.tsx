@@ -16,7 +16,19 @@ const MOMENTS: { id: HookItem["event"]; label: string; help: string }[] = [
 export function HooksPanel({ onOpen, refreshKey }: { onOpen: (path: string) => void; refreshKey?: unknown }) {
   const [state, setState] = useState<{ exists: boolean; error: string | null; hooks: HookItem[]; path: string } | null>(null);
   const [note, setNote] = useState("");
-  const load = () => api.hooks().then(setState, () => setState(null));
+  // A failed read is its own state: not "no hooks file" (which offers to create one).
+  const [loadError, setLoadError] = useState("");
+  const load = () =>
+    api.hooks().then(
+      (s) => {
+        setState(s);
+        setLoadError("");
+      },
+      (e: unknown) => {
+        setState(null);
+        setLoadError(e instanceof Error ? e.message : String(e));
+      }
+    );
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloads when files change
   useEffect(() => {
     void load();
@@ -48,7 +60,14 @@ export function HooksPanel({ onOpen, refreshKey }: { onOpen: (path: string) => v
         Your commands at fixed moments of a task.
       </InfoNote>
       {state?.error && <p className="kit-error-text">{state.error}</p>}
-      {state?.exists ? (
+      {loadError ? (
+        <p className="kit-error-text">
+          Could not read the hooks file: {loadError}{" "}
+          <button className="kit-link" onClick={() => void load()} type="button">
+            Try reading the hooks again
+          </button>
+        </p>
+      ) : state?.exists ? (
         <>
           {MOMENTS.map((m) => {
             const list = state.hooks.filter((h) => h.event === m.id);

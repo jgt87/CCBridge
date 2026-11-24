@@ -751,7 +751,7 @@ function ThinkingIndicator({
   // One order of the light lines per wait (the indicator mounts when a message starts waiting).
   const [seed] = useState(() => Date.now());
   return (
-    <div className="kit-panel min-w-0 overflow-hidden border-dashed px-3 py-2">
+    <div aria-busy="true" className="kit-panel min-w-0 overflow-hidden border-dashed px-3 py-2">
       <AITextLoading
         className="font-semibold text-base"
         containerClassName="justify-start p-0"

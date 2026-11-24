@@ -9,7 +9,7 @@ export function useSideDrawer() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   useEffect(() => {
     if (!drawerOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDrawerOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && !e.isComposing && setDrawerOpen(false);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen]);

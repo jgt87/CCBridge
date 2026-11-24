@@ -67,6 +67,11 @@
          around its fields. -->
     <button class="kit-btn kit-btn--primary" type="button" aria-busy="true">Saving</button>
     <span class="kit-sr-only" role="status">Saving the report</span>
+    <!-- Not available yet: aria-disabled="true", never the disabled attribute, so the button keeps its
+         place for the keyboard and can say why (kit.js ignores the press; also on fields, a kit-check or a
+         group around them). A button that turns a setting on and off says so with aria-pressed. -->
+    <button class="kit-btn kit-btn--primary" type="button" aria-disabled="true">Publish</button>
+    <button class="kit-btn" type="button" aria-pressed="true"><span data-kit-icon="pin" aria-hidden="true"></span>Pinned</button>
   </div>
 </section>
 
@@ -461,11 +466,12 @@ GROUP BY station;</pre>
 <!-- Adapted from kokonutui (MIT, see LICENSE-kokonutui.txt): the parts below need kit.js. -->
 
 <!-- kit-btn--hold with data-kit-hold (ms); listens: kit:hold. kit.js describes it as a hold to screen readers
-     and says when it is done. -->
+     and says when it is done; data-kit-hold-done gives the done word (the same verb), shown in the
+     data-kit-hold-label part. Only for what cannot be undone. -->
 <section id="hold">
   <h2 class="kit-h2">Hold to confirm</h2>
   <div class="kit-row">
-    <button class="kit-btn kit-btn--hold" data-kit-hold="1500" type="button">Hold to delete</button>
+    <button class="kit-btn kit-btn--hold" data-kit-hold="1500" data-kit-hold-done="Deleted" type="button"><span data-kit-hold-label>Hold to delete</span></button>
     <!-- command button: a kit-btn with its shortcut in a kit-kbd -->
     <button class="kit-btn" type="button"><span data-kit-icon="search" aria-hidden="true"></span>Search <kbd class="kit-kbd">Ctrl+K</kbd></button>
   </div>
@@ -955,6 +961,106 @@ GROUP BY station;</pre>
       KitUI.toast(e.detail.value + ": " + row.querySelector(".kit-list__title").textContent);
     });
   </script>
+</section>
+<!-- Form parts (kit.js): a listbox for rich rows (kit-listbox, kit-option, kit-option__label, kit-option__meta;
+     data-kit-listbox, aria-multiselectable for several, data-name; kit:select), a number field (kit-number,
+     kit-number__step; data-kit-number, data-kit-nudge; kit:change), typed fields with shape checks (data-kit-field on a
+     kit-input: email, phone, postcode, iban, card, expiry, card-code, code, url, amount, name, password, new-password;
+     novalidate on the form; kit:check; KitUI.check), a password with its reveal button (kit-password; data-kit-password),
+     a one-time code in boxes (kit-otp, kit-otp__box; data-kit-otp; kit:code), an address that follows its country
+     (data-kit-address; kit:address) and a date range (kit-daterange; data-kit-daterange; kit:range). -->
+<section id="form-parts" class="kit-stack">
+  <h2 class="kit-h2">Form parts</h2>
+  <form class="kit-form" id="kit-signup" novalidate>
+    <div class="kit-field"><label class="kit-label" for="kit-owner">Owner</label>
+      <div class="kit-popover-wrap"><button class="kit-select" id="kit-owner" type="button" data-kit-popover="kit-owner-list" aria-expanded="false"><span data-kit-listbox-value data-empty="Choose an owner">Ana Lima</span></button>
+        <div class="kit-popover" id="kit-owner-list" hidden>
+          <ul class="kit-listbox" role="listbox" data-kit-listbox data-name="owner" aria-label="Owner">
+            <li class="kit-option" role="option" data-value="ana" aria-selected="true"><span class="kit-option__label">Ana Lima</span><span class="kit-option__meta">Design</span></li>
+            <li class="kit-option" role="option" data-value="bo"><span class="kit-option__label">Bo Lee</span><span class="kit-option__meta">Finance</span></li>
+            <li class="kit-option" role="option" data-value="chris" aria-disabled="true"><span class="kit-option__label">Chris Day</span><span class="kit-option__meta">On leave</span></li>
+          </ul>
+        </div></div></div>
+    <div class="kit-field"><span class="kit-label" id="kit-bikes-label">Bikes</span>
+      <div class="kit-number"><button class="kit-number__step" type="button" data-kit-nudge="-1" aria-label="Fewer bikes">-</button><input class="kit-input" data-kit-number aria-labelledby="kit-bikes-label" inputmode="numeric" min="1" max="20" step="1" value="4" name="bikes"><button class="kit-number__step" type="button" data-kit-nudge="1" aria-label="More bikes">+</button></div></div>
+    <div class="kit-field"><label class="kit-label kit-label--required" for="kit-mail">Email</label><input class="kit-input" id="kit-mail" name="email" type="email" inputmode="email" autocomplete="email" data-kit-field="email" required placeholder="ana@studio.example"></div>
+    <div class="kit-field"><label class="kit-label" for="kit-phone">Phone</label><input class="kit-input" id="kit-phone" name="phone" type="tel" autocomplete="tel" data-kit-field="phone" data-calling-code="31" placeholder="020 123 4567"></div>
+    <div class="kit-field"><label class="kit-label" for="kit-iban">IBAN</label><input class="kit-input" id="kit-iban" name="iban" type="text" data-kit-field="iban" placeholder="NL74 EXMP 0123 4567 89"></div>
+    <div class="kit-field"><label class="kit-label kit-label--required" for="kit-pw">New password</label>
+      <div class="kit-input-group kit-password" data-kit-password><input class="kit-input" id="kit-pw" name="password" type="password" autocomplete="new-password" minlength="12" data-kit-field="new-password" required></div></div>
+    <fieldset class="kit-fieldset" data-kit-address><legend class="kit-legend">Delivery address</legend>
+      <div class="kit-field"><label class="kit-label" for="kit-country">Country</label><select class="kit-select" id="kit-country" name="country" autocomplete="country"><option value="NL" data-calling-code="31">Netherlands</option><option value="US" data-calling-code="1">United States</option><option value="IE" data-calling-code="353">Ireland</option><option value="HK" data-calling-code="852">Hong Kong</option></select></div>
+      <div class="kit-field"><label class="kit-label" for="kit-city">City</label><input class="kit-input" id="kit-city" name="city" autocomplete="address-level2"></div>
+      <div class="kit-field"><label class="kit-label" for="kit-region">State</label><input class="kit-input" id="kit-region" name="region" autocomplete="address-level1"></div>
+      <div class="kit-field"><label class="kit-label" for="kit-postcode">Postcode</label><input class="kit-input" id="kit-postcode" name="postcode" autocomplete="postal-code" data-kit-field="postcode"></div>
+    </fieldset>
+    <fieldset class="kit-fieldset kit-fieldset--plain"><legend class="kit-legend">Code from the text message</legend>
+      <div class="kit-otp" data-kit-otp data-name="code" role="group" aria-label="Code from the text message"><input class="kit-input kit-otp__box"><input class="kit-input kit-otp__box"><input class="kit-input kit-otp__box"><input class="kit-input kit-otp__box"><input class="kit-input kit-otp__box"><input class="kit-input kit-otp__box"></div></fieldset>
+    <div class="kit-field"><span class="kit-label">Period</span><div class="kit-daterange" data-kit-daterange data-value="30d" data-presets="7d,30d,month,quarter,year,all" data-min="2024-01-01" aria-label="Period"></div></div>
+    <div class="kit-form__actions"><button class="kit-btn kit-btn--primary" type="submit">Sign up</button></div>
+  </form>
+  <script>
+    document.getElementById("kit-signup").addEventListener("submit", function (e) { e.preventDefault(); KitUI.toast("Signed up", { tone: "ok" }); });
+  </script>
+</section>
+<!-- Touch and layout parts (kit.js): a sheet with stops (dialog kit-sheet, kit-sheet__grab, kit-sheet__handle,
+     kit-sheet__head, kit-sheet__title, kit-sheet__body; data-kit-sheet, data-detents, data-kit-detent; kit:detent),
+     a carousel (kit-carousel, kit-carousel__head, kit-carousel__pos, kit-carousel__track, kit-carousel__item;
+     data-kit-carousel, data-kit-prev, data-kit-next; kit:carousel), a list to reorder (kit-reorder, kit-reorder__handle;
+     data-kit-reorder, data-kit-handle; kit:reorder), swipe actions (kit-swipe, kit-swipe__actions, kit-swipe__action,
+     kit-swipe__action--danger, kit-swipe__row; data-kit-swipe; kit:swipe), a splitter (kit-splitpane,
+     kit-splitpane--stacked, kit-splitpane__pane, kit-splitter; data-kit-splitter; kit:resize), sections that open
+     (kit-disclosure, kit-disclosure__heading, kit-disclosure__head, kit-disclosure__panel, kit-disclosure__body;
+     data-kit-disclosure, data-single, data-persist; kit:toggle), a toolbar that folds into More (kit-overflow;
+     data-kit-overflow, data-kit-keep, data-priority="low"; kit:overflow) and breadcrumbs that fold
+     (data-kit-breadcrumbs on kit-breadcrumbs). Swipe actions are a touch shortcut: every action is in the row's menu too. -->
+<section id="touch-parts" class="kit-stack">
+  <h2 class="kit-h2">Touch and layout parts</h2>
+  <nav class="kit-breadcrumbs" aria-label="Breadcrumb" data-kit-breadcrumbs><ol><li><a href="#touch-parts">Stations</a></li><li><a href="#touch-parts">North region</a></li><li><a href="#touch-parts">Central station</a></li><li><a href="#touch-parts">Docks</a></li><li aria-current="page">Dock 4</li></ol></nav>
+  <div class="kit-toolbar kit-overflow" role="toolbar" aria-label="Report actions" data-kit-overflow data-more-label="More actions">
+    <button class="kit-btn kit-btn--primary" type="button">Share</button>
+    <button class="kit-btn" type="button" aria-pressed="false">Show totals</button>
+    <button class="kit-btn" type="button">Export</button>
+    <button class="kit-btn" type="button" data-priority="low">Print</button>
+    <button class="kit-btn" type="button" aria-disabled="true">Archive</button>
+  </div>
+  <div class="kit-carousel" role="region" data-kit-carousel aria-label="Recent reports">
+    <div class="kit-carousel__head"><h3 class="kit-h3">Recent reports</h3><span class="kit-carousel__pos"></span>
+      <button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" type="button" data-kit-prev aria-label="Previous reports" data-kit-tooltip="Previous reports"><span data-kit-icon="chevron-left" aria-hidden="true"></span></button>
+      <button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" type="button" data-kit-next aria-label="Next reports" data-kit-tooltip="Next reports"><span data-kit-icon="chevron-right" aria-hidden="true"></span></button></div>
+    <ul class="kit-carousel__track" tabindex="0" aria-label="Reports">
+      <li class="kit-carousel__item kit-panel">Rentals in October</li><li class="kit-carousel__item kit-panel">Bikes out of order</li><li class="kit-carousel__item kit-panel">Dock use per hour</li><li class="kit-carousel__item kit-panel">Repairs per station</li><li class="kit-carousel__item kit-panel">New members</li>
+    </ul>
+  </div>
+  <ul class="kit-list kit-reorder" data-kit-reorder aria-label="Agenda">
+    <li class="kit-list__item" data-id="a"><button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-reorder__handle" type="button" data-kit-handle aria-label="Move Budget review"><span data-kit-icon="grip-vertical" aria-hidden="true"></span></button><div class="kit-list__body"><div class="kit-list__title">Budget review</div></div></li>
+    <li class="kit-list__item" data-id="b"><button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-reorder__handle" type="button" data-kit-handle aria-label="Move New docks"><span data-kit-icon="grip-vertical" aria-hidden="true"></span></button><div class="kit-list__body"><div class="kit-list__title">New docks</div></div></li>
+    <li class="kit-list__item" data-id="c"><button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-reorder__handle" type="button" data-kit-handle aria-label="Move Summer hours"><span data-kit-icon="grip-vertical" aria-hidden="true"></span></button><div class="kit-list__body"><div class="kit-list__title">Summer hours</div></div></li>
+  </ul>
+  <ul class="kit-list" data-kit-swipe aria-label="Messages">
+    <li class="kit-swipe" data-name="Dock 4 stuck"><div class="kit-swipe__actions"><button class="kit-swipe__action" type="button" data-value="archive" data-full>Archive</button><button class="kit-swipe__action kit-swipe__action--danger" type="button" data-value="delete" data-remove="Message deleted">Delete</button></div>
+      <div class="kit-swipe__row kit-list__item"><div class="kit-list__body"><div class="kit-list__title">Dock 4 stuck</div><div class="kit-list__meta">From the night shift</div></div>
+        <div class="kit-list__actions"><div class="kit-menu"><button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false" aria-label="Actions for Dock 4 stuck" data-kit-tooltip="More actions"><span data-kit-icon="ellipsis" aria-hidden="true"></span></button>
+          <div class="kit-menu__list" role="menu" hidden><button class="kit-menu__item" role="menuitem" type="button" data-value="archive">Archive</button><button class="kit-menu__item kit-menu__item--danger" role="menuitem" type="button" data-value="delete">Delete</button></div></div></div></div></li>
+  </ul>
+  <div class="kit-splitpane kit-panel" style="height: 10rem; padding: 0">
+    <div class="kit-splitpane__pane" id="kit-split-list"><p class="kit-muted" style="padding: 0 var(--kit-space-3)">Stations</p></div>
+    <div class="kit-splitter" role="separator" tabindex="0" aria-controls="kit-split-list" aria-label="Resize the station list" data-kit-splitter data-min="120" data-default="220"></div>
+    <div class="kit-splitpane__pane"><p class="kit-muted" style="padding: 0 var(--kit-space-3)">Details</p></div>
+  </div>
+  <div class="kit-disclosure" data-kit-disclosure data-single>
+    <h3 class="kit-disclosure__heading"><button class="kit-disclosure__head" type="button" aria-expanded="false" aria-controls="kit-disc-1">How rentals are counted</button></h3>
+    <div class="kit-disclosure__panel" id="kit-disc-1"><div class="kit-disclosure__body"><p>Every trip that started in the period.</p></div></div>
+    <h3 class="kit-disclosure__heading"><button class="kit-disclosure__head" type="button" aria-expanded="false" aria-controls="kit-disc-2">When the data is updated</button></h3>
+    <div class="kit-disclosure__panel" id="kit-disc-2"><div class="kit-disclosure__body"><p>Every night at two.</p></div></div>
+  </div>
+  <button class="kit-btn" type="button" data-kit-open="kit-stops">Show the stops</button>
+  <dialog class="kit-sheet" id="kit-stops" data-kit-sheet data-detents="0.3 0.6 0.92" data-detent="0" aria-labelledby="kit-stops-title">
+    <div class="kit-sheet__grab"><span class="kit-sheet__handle" aria-hidden="true"></span>
+      <div class="kit-sheet__head"><h2 class="kit-sheet__title" id="kit-stops-title">Stops on route 4</h2><button class="kit-btn kit-btn--sm" type="button" data-kit-detent aria-expanded="false">Expand</button>
+        <button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" type="button" data-kit-close aria-label="Close" data-kit-tooltip="Close"><span data-kit-icon="x" aria-hidden="true"></span></button></div></div>
+    <div class="kit-sheet__body"><ol class="kit-timeline"><li class="kit-timeline__item"><span class="kit-timeline__time">09:30</span>Central station</li><li class="kit-timeline__item"><span class="kit-timeline__time">09:42</span>Harbour</li><li class="kit-timeline__item"><span class="kit-timeline__time">09:55</span>North dock</li></ol></div>
+  </dialog>
 </section>
 
 <!-- /kit-part:extras -->

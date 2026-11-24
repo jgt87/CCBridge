@@ -9,11 +9,11 @@ function ConvertFrom-CssColor([string]$Value) {
     if ($v -match '^#([0-9a-f]{3,4})$') {
         $h = $Matches[1]
         $c = @(0..($h.Length - 1) | ForEach-Object { [Convert]::ToInt32("$($h[$_])$($h[$_])", 16) })
-        return @{ r = $c[0]; g = $c[1]; b = $c[2]; a = $(if ($c.Count -eq 4) { $c[3] / 255 } else { 1.0 }) }
+        return @{ r = $c[0]; g = $c[1]; b = $c[2]; a = $(if ($c.Count -eq 4) { [double]$c[3] / 255 } else { 1.0 }) }
     }
     if ($v -match '^#([0-9a-f]{6})([0-9a-f]{2})?$') {
         $h = $Matches[1]
-        $a = if ($Matches[2]) { [Convert]::ToInt32($Matches[2], 16) / 255 } else { 1.0 }
+        $a = if ($Matches[2]) { [double][Convert]::ToInt32($Matches[2], 16) / 255 } else { 1.0 }   # [double]: 0/255 and 255/255 would stay Int32
         return @{ r = [Convert]::ToInt32($h.Substring(0, 2), 16); g = [Convert]::ToInt32($h.Substring(2, 2), 16); b = [Convert]::ToInt32($h.Substring(4, 2), 16); a = $a }
     }
     if ($v -match '^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$') {

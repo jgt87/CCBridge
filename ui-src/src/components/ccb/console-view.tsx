@@ -35,6 +35,9 @@ export function ConsoleView({
     const el = body.current;
     if (el) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM;
   };
+  /* design: these colours are the Windows console's own (#0c0c0c page, #cccccc text, #1f1f1f title
+     bar, neutral greys for edges), not the app's tokens, and stay the same in both themes: the view
+     shows a command's output as the window it would run in looks, so a person recognises it. */
   return (
     <div className={cn("overflow-hidden rounded-md border border-neutral-700 bg-[#0c0c0c] text-[#cccccc]", className)}>
       {title && (

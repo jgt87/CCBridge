@@ -14,9 +14,14 @@ export type AgentChoice = "auto" | "copilot" | "researcher" | "analyst";
 /** The changelog on GitHub, always the current one on main (newer entries than this build included). */
 const changelogUrl = () => "https://github.com/jgt87/CCBridge/blob/main/CHANGELOG.md";
 
-export function AppHeader({ state, showDrawerButton, onOpenDrawer, onSwitchProject, onSettings, onMenu }: {
+/** The id of the side panel (app-layout SideDrawer), named by the header's button that opens it (aria-controls). */
+export const SIDE_PANEL_ID = "side-panel";
+
+export function AppHeader({ state, showDrawerButton, drawerOpen, onOpenDrawer, onSwitchProject, onSettings, onMenu }: {
   state: AppState;
   showDrawerButton: boolean;
+  /** The side panel is open over the chat (the button's aria-expanded). */
+  drawerOpen: boolean;
   onOpenDrawer: () => void;
   onSwitchProject: () => void;
   onSettings: () => void;
@@ -26,6 +31,8 @@ export function AppHeader({ state, showDrawerButton, onOpenDrawer, onSwitchProje
     <header className="flex h-14 shrink-0 items-center gap-3 border-(--kit-border) border-b px-4">
       {showDrawerButton && (
         <button
+          aria-controls={SIDE_PANEL_ID}
+          aria-expanded={drawerOpen}
           aria-label="Open side panel"
           className="kit-btn kit-btn--ghost kit-btn--icon -ml-1.5 h-8 min-h-0 w-8 text-muted-foreground hover:text-foreground"
           onClick={onOpenDrawer}
@@ -90,7 +97,7 @@ export function NoticeBar({ notice, onDismiss }: { notice: Notice; onDismiss: ()
 export function PendingChatBar({ since }: { since: string }) {
   const [asked, setAsked] = useState(false);
   return (
-    <div className="flex items-center justify-between gap-3 bg-(--kit-surface-2) px-4 py-2 text-sm" role="status">
+    <div className="flex items-center justify-between gap-3 bg-(--kit-surface-2) px-4 py-2 text-sm">
       <span className="min-w-0">{pendingChatText(since)}</span>
       <button
         className="kit-btn kit-btn--sm shrink-0"
@@ -110,7 +117,7 @@ export function PendingChatBar({ since }: { since: string }) {
 
 export function ErrorBar({ error, onDismiss }: { error: string; onDismiss: () => void }) {
   return (
-    <div className="kit-notice kit-notice--error items-center justify-between rounded-none border-x-0 border-t-0 px-4 py-2 text-(--kit-error) text-sm" role="alert">
+    <div className="kit-notice kit-notice--error items-center justify-between rounded-none border-x-0 border-t-0 px-4 py-2 text-(--kit-error) text-sm">
       {error}
       <button aria-label="Dismiss the error" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm text-(--kit-error)" title="Dismiss" onClick={onDismiss} type="button">
         <X className="h-4 w-4" />
@@ -171,12 +178,14 @@ export function ChatEmpty({ state }: { state: AppState }) {
           Type <span className="font-mono">@</span> or use the @ button to attach files.
         </p>
       </div>
-      {state.copilot === "connecting" && (
-        <p className="flex max-w-md items-center gap-2 text-muted-foreground text-xs" role="status">
-          <Loader2 aria-hidden className="h-3.5 w-3.5 shrink-0 animate-spin" />
-          {state.copilotMessage || "Opening Copilot in Edge. Sign in there if asked."}
-        </p>
-      )}
+      <div aria-live="polite" className="contents">
+        {state.copilot === "connecting" && (
+          <p className="flex max-w-md items-center gap-2 text-muted-foreground text-xs">
+            <Loader2 aria-hidden className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            {state.copilotMessage || "Opening Copilot in Edge. Sign in there if asked."}
+          </p>
+        )}
+      </div>
       {state.copilot === "ready" && <LimitationsNote />}
     </div>
   );

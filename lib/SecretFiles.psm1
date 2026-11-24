@@ -4,6 +4,7 @@
 # overwrite them), and they are not attached to a message. Example files (.env.example, .sample,
 # .template, .dist) are meant to be shared and stay as they are.
 
+Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:Hidden = '<hidden>'

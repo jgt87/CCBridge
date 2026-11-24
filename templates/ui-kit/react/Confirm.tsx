@@ -45,6 +45,13 @@ function ConfirmDialog({ box, onDone }: { box: Box; onDone: (yes: boolean) => vo
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const textId = useId();
+  // Focus goes back to what had it before the dialog opened (the button that asked), without scrolling.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    return () => {
+      if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus({ preventScroll: true });
+    };
+  }, []);
   useEffect(() => {
     const d = ref.current;
     if (!d || d.open) return;

@@ -86,8 +86,5 @@ Write-Host "StreamHub $($release.tag_name) is installed." -ForegroundColor Green
 Write-Host '  Start it:  StreamHub shortcut on the desktop or in the Start menu'
 Write-Host '  Updates:   automatic each time StreamHub starts (turn off with "autoUpdate": false in config\harness.local.json)'
 Write-Host '  Check:     check.cmd in the StreamHub folder shows what this computer has (also at every start)'
-Write-Host '  MCP:       register in your MCP client with'
+Write-Host '  MCP:       register with your MCP client''s add command (or its JSON config, see the README) as ccbridge:'
 Write-Host "             powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$dir\mcp\ccbridge-mcp.ps1`""
-if (Get-Command claude -ErrorAction SilentlyContinue) {
-    Write-Host "             or: claude mcp add ccbridge -s user -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$dir\mcp\ccbridge-mcp.ps1`""
-}

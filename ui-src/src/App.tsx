@@ -90,7 +90,12 @@ export default function App() {
 
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
+      {/* The first stop for the keyboard: straight to the main view, shown only while focused. */}
+      <a className="kit-btn sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50" href="#main">
+        Skip to content
+      </a>
       <AppHeader
+        drawerOpen={drawerOpen}
         onMenu={() => palette.open("commands")}
         onOpenDrawer={() => setDrawerOpen(true)}
         onSettings={() => setShowSettings(true)}
@@ -100,9 +105,12 @@ export default function App() {
       />
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-      {notice && <NoticeBar notice={notice} onDismiss={() => setNotice(null)} />}
-      {state.pendingChat && <PendingChatBar since={state.pendingChat.since} />}
-      {error && <ErrorBar error={error} onDismiss={() => setError("")} />}
+      {/* Live regions that stay mounted, so a message that appears in them is announced. */}
+      <div aria-live="polite">
+        {notice && <NoticeBar notice={notice} onDismiss={() => setNotice(null)} />}
+        {state.pendingChat && <PendingChatBar since={state.pendingChat.since} />}
+      </div>
+      <div aria-live="assertive">{error && <ErrorBar error={error} onDismiss={() => setError("")} />}</div>
 
       {pickerOpen ? (
         <PickerView onClose={() => setShowPicker(false)} project={state.project} />
@@ -140,7 +148,7 @@ export default function App() {
           </SideDrawer>
 
           {/* Chat column */}
-          <main className="flex min-w-0 flex-1 flex-col">
+          <main className="flex min-w-0 flex-1 flex-col" id="main" tabIndex={-1}>
             {state.installProblem && <InstallProblem problem={state.installProblem} />}
             <div className="min-h-0 flex-1 overflow-y-auto">
               <ChatTranscript

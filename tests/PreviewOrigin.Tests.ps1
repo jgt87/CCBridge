@@ -103,6 +103,14 @@ Describe 'Settings, mode, tools, links, undo and history change only from the ap
         }
         $s.Mode | Should Be 'ask'
     }
+    It 'refuses origins that only look like the page''s' {
+        $port = $s.Config.port
+        foreach ($origin in "http://localhost.evil.example:$port", "http://127.0.0.1.evil.example:$port", "http://localhost@evil.example:$port", "https://localhost:$port", 'null', "http://localhost:$port.evil.example", "http://localhost:$($port)0", "http://LOCALHOST:$port/", 'http://localhost') {
+            $c = New-FakeCtx 'POST' '/api/mode' @{ mode = 'auto' } $origin
+            & (Get-Module Server) { param($c, $st) Test-PageOrigin $c $st } $c $s | Should Be $false
+        }
+        & (Get-Module Server) { param($c, $st) Test-PageOrigin $c $st } (New-FakeCtx 'POST' '/api/mode' @{ mode = 'auto' } "http://localhost:$port") $s | Should Be $true
+    }
     It 'takes the mode from the page itself' {
         $c = New-FakeCtx 'POST' '/api/mode' @{ mode = 'auto' } $page
         & (Get-Module Server) { param($c, $st) Invoke-ApiRequest $c $st } $c $s

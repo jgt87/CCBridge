@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
+import { focusableIn, keepFocusInside } from "@/lib/focus-trap";
 import { ErrorBoundary } from "@/components/ccb/error-boundary";
-import { ChatEmpty } from "@/components/ccb/app-chrome";
+import { ChatEmpty, SIDE_PANEL_ID } from "@/components/ccb/app-chrome";
 import { ProjectPicker } from "@/components/ccb/project-picker";
 import { Transcript, type TranscriptItem } from "@/components/ccb/transcript";
 import { type AgentEvent, type AppState, type ChatOptions, api } from "@/lib/api";
@@ -9,7 +10,7 @@ import { runWindowList } from "@/lib/app-view";
 /** The project list, with a way back to the open project. */
 export function PickerView({ project, onClose }: { project: AppState["project"]; onClose: () => void }) {
   return (
-    <main className="flex-1 overflow-y-auto">
+    <main className="flex-1 overflow-y-auto" id="main" tabIndex={-1}>
       {project && (
         <div className="mx-auto max-w-xl px-4 pt-6">
           <button className="text-muted-foreground text-sm hover:text-foreground" onClick={onClose} type="button">
@@ -24,11 +25,35 @@ export function PickerView({ project, onClose }: { project: AppState["project"];
 
 /** The side panel's place: beside the chat on a wide window, else a drawer over it. */
 export function SideDrawer({ wide, open, onClose, footer, children }: { wide: boolean; open: boolean; onClose: () => void; footer: ReactNode; children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  const overlay = !wide && open;
+  // Over the chat it is a modal dialog: focus moves into it, Tab stays inside, and on close focus goes
+  // back to the button that opened it (shown again once the panel is closed).
+  useEffect(() => {
+    if (!overlay || !ref.current) return;
+    (focusableIn(ref.current)[0] ?? ref.current).focus({ preventScroll: true });
+    const panel = ref.current;
+    return () => {
+      window.requestAnimationFrame(() => {
+        // Only when focus was left in the closed panel (or lost): a file or form opened from it keeps it.
+        const active = document.activeElement;
+        if (active && active !== document.body && !panel.contains(active)) return;
+        document.querySelector<HTMLElement>(`[aria-controls="${SIDE_PANEL_ID}"]`)?.focus({ preventScroll: true });
+      });
+    };
+  }, [overlay]);
   return (
     <>
       {/* The chat is not dimmed: a click beside the open panel only closes it. */}
-      {!wide && open && <div aria-hidden className="fixed inset-0 top-14 z-30" onClick={onClose} />}
+      {overlay && <div aria-hidden className="fixed inset-0 top-14 z-30" onClick={onClose} />}
       <aside
+        aria-label="Side panel"
+        aria-modal={overlay || undefined}
+        id={SIDE_PANEL_ID}
+        onKeyDown={overlay ? keepFocusInside : undefined}
+        ref={ref}
+        role={overlay ? "dialog" : undefined}
+        tabIndex={overlay ? -1 : undefined}
         className={
           wide
             ? `flex w-80 shrink-0 flex-col border-(--kit-border) border-r p-3`

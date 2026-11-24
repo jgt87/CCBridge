@@ -25,6 +25,18 @@ Describe 'Invoke-KitSql (window apps)' {
     }
 }
 
+Describe 'Export-KitCsv (window apps)' {
+    It 'writes text Excel would run as a formula as plain text, and keeps numbers' {
+        $f = Join-Path $p 'out.csv'
+        Export-KitCsv @([pscustomobject]@{ A = '=1+1'; B = '-2' }, [pscustomobject]@{ A = '@cmd'; B = -3 }, [pscustomobject]@{ A = '+x'; B = 'plain' }) $f
+        $lines = [IO.File]::ReadAllLines($f)
+        $lines[0] | Should Be '"A","B"'
+        $lines[1] | Should Be '"''=1+1","-2"'
+        $lines[2] | Should Be '"''@cmd","-3"'
+        $lines[3] | Should Be '"''+x","plain"'
+    }
+}
+
 Describe 'Database access a window app writes itself' {
     It 'reports its own connection and values pasted into a query' {
         $app = ". (Join-Path `$PSScriptRoot 'styles\kit\wpf\KitWpf.ps1')`n`$c = New-Object System.Data.SqlClient.SqlConnection 'Server=SQL01;Integrated Security=true'`n"

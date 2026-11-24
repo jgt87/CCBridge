@@ -38,3 +38,33 @@ Source: a read-only survey of ObsidiNote; the operator asked for all five ("do a
 - [x] CHANGELOG, docs/architecture.md rows, AGENTS.md rows and quirks (prompt budget untouched).
 
 Released in v0.1.167; CI fixes in v0.1.168 (main run green, 2026-11-17).
+
+# Operator decisions (2026-11-24)
+
+Done now: muted text contrast (light Pencil 0.535, dark Dust 0.765), neutral MCP client wording, unused
+brand icon components removed, dialogs named by their visible title, one global keyboard focus ring,
+mode menu rows and kit spec differences recorded as deliberate, "Undo to here" (was Restore), console
+view colours marked, `npm run smoke` (also in CI), kit.js kept as one file, React rule line for the new
+kit parts, Stop-Process kept, strict mode in RepoMap, ChatScope and SecretFiles. Not committed yet.
+
+## Later
+- [ ] Tab panels always rendered (decision 6).
+- [ ] Motion and wording pass over the app (decision 7).
+- [ ] Kit vs spec pass: align or keep each difference listed in the header of `templates/ui-kit/kit.js`.
+- [ ] React versions of the 15 kit form and touch parts (listbox, number field, typed fields, password,
+      code boxes, address, period, sheet, carousel, reorder, swipe, split panes, disclosure, overflow
+      toolbar, breadcrumbs); then drop the React line in `prompts/rules/uikit.md`.
+- [ ] `Set-StrictMode -Version 2.0`, one module at a time where tests cover it, fixing what it exposes.
+      Not yet: Agent, AppWindow, AutoFix, Cdp, Chain, CheckPolicy, Config, Contrast, CopilotBridge,
+      DataImport, DataMirror, DataProfile, DataQuery, Download, EdgeCache, Executor, Fetch, FileActions,
+      FileIntake, FixCases, Guardrails, GuiTest, Handoff, Health, Hooks, Imports, Issues, KitTheme,
+      Layout, Lint, Log, LoopGuard, Office, OneFile, Packages, PageCompare, PageExport, PageReport,
+      PlanFile, PptxChoices, PptxDeck, PptxLayoutMatch, PptxRetheme, Prereq, Progress, ProjectOverview,
+      ProjectPackage, ProjectSetup, Prompts, Protocol, Relink, Retention, Review, Runbook,
+      RunbookFromChat, RunWindow, Schedule, Server, SessionReport, SharePointLink, SharePointPage,
+      ShotDiff, SqlServer, Sso, TaskGuidance, TaskNotes, TestRunner, TestRuns, TidyUp, ToolChecks,
+      ToolInstall, UiKit, Update, WebBuild, WebFetch, Workspace, WorkStatus.
+- [ ] Keep the stored token with DPAPI (protected for the user) instead of plain text.
+- [ ] Document the SharePoint page CSP (what a published page may load).
+- [ ] A gzip size budget for the built UI.
+- [ ] Schedule form: ask first before it creates a schedule.

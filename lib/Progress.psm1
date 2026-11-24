@@ -7,6 +7,7 @@
 # ASCII only (Windows PowerShell 5.1).
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'Workspace.psm1')
 
 $script:MaxEntries = 50
 
@@ -44,7 +45,8 @@ function Add-ProgressEntry([string]$StateDir, [hashtable]$Entry) {
     if (Test-Path -LiteralPath $p) { foreach ($l in [IO.File]::ReadAllLines($p)) { if ($l.Trim()) { $lines.Add($l) } } }
     $lines.Add(($Entry | ConvertTo-Json -Depth 5 -Compress))
     $keep = @($lines | Select-Object -Last $script:MaxEntries)
-    [IO.File]::WriteAllText($p, (($keep -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
+    # Through a temporary file: a failed rewrite must not cut the history short.
+    Write-AtomicText $p (($keep -join "`n") + "`n") (New-Object Text.UTF8Encoding($false))
 }
 
 function Read-ProgressEntries([string]$StateDir, [int]$Last = 5) {

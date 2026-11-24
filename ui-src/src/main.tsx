@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import './styles/markdown.css'
+import { MotionConfig } from 'motion/react'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ccb/error-boundary.tsx'
 import { reportClientError } from './lib/api.ts'
@@ -15,9 +16,12 @@ window.addEventListener('unhandledrejection', (e) => reportClientError(`Unhandle
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ErrorBoundary area="app">
-      <App />
-    </ErrorBoundary>
+    {/* Reduced motion (the system setting): animations keep their fades and drop their movement. */}
+    <MotionConfig reducedMotion="user">
+      <ErrorBoundary area="app">
+        <App />
+      </ErrorBoundary>
+    </MotionConfig>
   </StrictMode>,
 )
 

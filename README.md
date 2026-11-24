@@ -4,7 +4,7 @@ _Formerly CCBridge. The scripts (`start.cmd`, `ccbridge.ps1`), the data folder `
 
 A local coding harness that uses **Microsoft 365 Copilot Chat** (in Microsoft Edge) as its model, with **zero installation**: it runs on Windows PowerShell 5.1 and the Edge browser that ship with Windows. No admin rights, no Node, no Python on the target machine.
 
-You describe what you want in a web interface on `http://localhost:8765` (or from an MCP client such as Claude Code). StreamHub types the request into Copilot Chat, reads the reply, and carries out the actions Copilot asks for (read and search files, write and edit files, run commands) inside a project folder, with your approval.
+You describe what you want in a web interface on `http://localhost:8765` (or from an MCP client, such as a coding agent). StreamHub types the request into Copilot Chat, reads the reply, and carries out the actions Copilot asks for (read and search files, write and edit files, run commands) inside a project folder, with your approval.
 
 ```
  you ──► StreamHub web app / MCP client
@@ -123,7 +123,7 @@ Copilot works through *action blocks* that StreamHub executes and answers with r
 - Prompts up to the configured budget (default 75,000 characters); Copilot's page accepts up to 128,000.
 
 ### MCP server
-The same bridge and agent loop for MCP clients (Claude Code, VS Code, ...), in any project folder, with background jobs, approvals and undo. See [MCP server](#mcp-server).
+The same bridge and agent loop for MCP clients (a coding agent, an editor, ...), in any project folder, with background jobs, approvals and undo. See [MCP server](#mcp-server).
 
 ### Install, updates and diagnostics
 - One-line install, automatic updates from GitHub Releases at every start, machine settings kept in `*.local.json` files.
@@ -155,7 +155,7 @@ The parts a coding harness (an agent that reads, changes and runs a project for 
 | Running commands | Builds, tests and scripts | The `run` action in the project folder, with a timeout and stop; commands that start with an allowed prefix run without asking |
 | Permissions | Who approves what | Modes Ask, Auto-accept edits and Plan only; commands need approval (hold to run); deleting data and Microsoft 365 access always need a person, never an automatic approval, and so do scripts that reach beyond the project (writes outside it, the registry, installs, administrator rights, data sent to a web address...); a command's card shows the full text of every script it starts; scripts and the hooks file are approved once per version |
 | Boundaries (sandbox) | What the agent may never touch | Secret files (.env, .npmrc, keys...) show Copilot only which keys are set, also in searches and command output, and are never changed or attached by it; Paths stay inside the project (also through links and junctions); deleting or moving outside it is refused, with scripts read the way they run (paths built from the script's own folder, folder changes, the scripts it starts, three levels deep) and a target that cannot be worked out, such as one from a variable, sent to a person's Hold to run; `Source/` and the files you list as protected are read-only and put back after every command; `.streamhub/`, build output and lock files are not written |
-| Checkpoints and undo | Taking a change back | Every message is one change set, also covering what commands changed, created or deleted; History lists them; Undo takes back the latest and Restore goes back to before any earlier one, with per-file details |
+| Checkpoints and undo | Taking a change back | Every message is one change set, also covering what commands changed, created or deleted; History lists them; *Undo last change set* takes back the latest and *Undo to here* goes back to before any earlier one, with per-file details |
 | Checking its own work | Catching mistakes before "done" | After every round: syntax and file checks per file type, missing local files, imports of moved or deleted files, secrets, debug leftovers; "done" is refused while a changed file is broken; at "done" the project's tests for the changed files (or a `verify:` command from AGENTS.md), compared with a run before the change so tests that were already failing are not blamed on Copilot; the task's Done when checks about files (a file exists, contains a text) are checked by StreamHub itself, not by Copilot; changed web pages are opened to catch script errors, and a screenshot goes to Copilot to compare with the request |
 | Planning | Thinking before building | Copilot's checklist (Actions > Checklist); Clarify first: questions, then a plan to approve, then the build, all kept in `.streamhub/PLAN.md` |
 | Context management | Keeping the model's context useful | A new Copilot chat with a summary before Copilot's message limit, a new chat when a message is about another part of the project than the chat so far, New chat by hand, recaps instead of repeating all instructions, and a code map sized to a budget |
@@ -216,13 +216,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ccbridge.ps1 -Ping "say hi" 
 
 `mcp/ccbridge-mcp.ps1` exposes the bridge and agent loop to MCP clients over stdio, without the web interface, in **any** project folder.
 
-Register it in Claude Code:
-
-```powershell
-claude mcp add ccbridge -s user -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\Programs\CCBridge\mcp\ccbridge-mcp.ps1"
-```
-
-or in any client's JSON config (with optional verbose logging):
+Register it with your MCP client's add command (server name `ccbridge`, the command and arguments below), or put it in the client's JSON config (with optional verbose logging):
 
 ```json
 { "mcpServers": { "ccbridge": {
@@ -238,6 +232,7 @@ The server is written for a calling model that may be small: its instructions an
 | `copilot_run_task` | **One call for a whole task**: Copilot does the task in `project_path` and the call returns the full report when it is done (waits up to `wait_sec`, default 600); same options as `copilot_start_task` |
 | `copilot_ask` | One prompt to Copilot for anything that needs reasoning (explain, root cause, review, plan, longer text); returns the repaired reply and cited sources; `new_chat`, `work_iq`, `timeout_sec` |
 | `copilot_start_task` | Same as `copilot_run_task` but returns at once with a job id, for callers that poll; `mode` `auto` / `plan` / `ask`, `allow_commands`, `new_chat`, `work_iq` |
+| `copilot_review` | Read-only code review of `project_path` (or chosen `paths`) in batches; every finding must quote real lines; saved as a review report in the project (waits up to `wait_sec`, then `copilot_task_result`) |
 | `copilot_task_status` | Long-polls (up to `wait_sec`) progress, plan, actions, pending approvals with unified diffs, sources, human-required notices |
 | `copilot_approve` | Approves or rejects a pending action in `ask` mode, with an optional note for Copilot |
 | `copilot_task_result` | Full report: every action with its output, files changed, done summary, Copilot's last reply |
@@ -287,7 +282,7 @@ Your settings in `config\harness.local.json` and `config\selectors.local.json` a
 
 - Turn automatic updates off with Settings > App > *Update automatically*, or `"autoUpdate": false` in `config\harness.local.json` (`update.cmd` still works); for the MCP server alone set the environment variable `CCBRIDGE_NO_UPDATE=1`.
 - A git clone updates with `git pull --ff-only` instead (skipped when it has local changes or is on another branch).
-- MCP clients start the MCP server when they launch, so restarting the MCP client (for example a new Claude Code session) also picks up a new version.
+- MCP clients start the MCP server when they launch, so restarting the MCP client (for example a new session of your coding agent) also picks up a new version.
 
 ### Staying on a version, or going back to an earlier one
 
@@ -309,7 +304,7 @@ StreamHub's Edge profile (`%LOCALAPPDATA%\CCBridge\edge-profile`) keeps your Cop
 - your organisation requires a new sign-in after a set time, or after every browser start (Conditional Access). Nothing on this PC can or should get around that;
 - Edge is set to clear cookies when it closes.
 
-On a work PC (joined to Microsoft Entra ID), Copilot can instead sign in by itself with the work account Windows already holds. Use **Settings > Sign-in**:
+On a PC joined to Microsoft Entra ID, Copilot can instead sign in by itself with the work account Windows already holds. Use **Settings > Sign-in**:
 
 | Item | What it does |
 |---|---|
@@ -475,7 +470,7 @@ StreamHub has no language model of its own: Copilot is the only intelligence. Ev
 ```mermaid
 flowchart LR
     U["You<br/>(web app on localhost:8765)"] --> Q
-    M["MCP client<br/>(e.g. Claude Code)"] -->|tasks, through the app| Q
+    M["MCP client<br/>(e.g. a coding agent)"] -->|tasks, through the app| Q
     S["Schedules"] --> Q
     Q["Queue<br/>(one task at a time,<br/>saved across restarts)"] --> W["Worker<br/>(agent loop)"]
     W -->|"prompt: request + instructions<br/>+ project context"| B["Copilot bridge<br/>(Edge DevTools)"]

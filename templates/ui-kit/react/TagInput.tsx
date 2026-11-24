@@ -11,9 +11,25 @@ export function TagInput({ value, onChange, label, suggestions }: { value: strin
   const listId = useId();
   const add = (t: string) => {
     const v = t.replace(/,/g, " ").trim();
-    if (v && !value.includes(v)) {
+    if (v && value.includes(v)) {
+      // Refused with a reason; the text stays in the field to change it.
+      setSaid(v + " is already added");
+      return;
+    }
+    if (v) {
       onChange([...value, v]);
       setSaid("Added " + v);
+    }
+    setText("");
+  };
+  // A pasted list (commas or new lines) becomes one tag per item; duplicates are left out.
+  const addMany = (parts: string[]) => {
+    const next = [...value];
+    for (const p of parts.map((x) => x.trim()).filter(Boolean)) if (!next.includes(p)) next.push(p);
+    const added = next.slice(value.length);
+    if (added.length) {
+      onChange(next);
+      setSaid("Added " + added.join(", "));
     }
     setText("");
   };
@@ -48,6 +64,12 @@ export function TagInput({ value, onChange, label, suggestions }: { value: strin
         className="kit-tags__input"
         list={suggestions?.length ? listId : undefined}
         onChange={(e) => setText(e.target.value)}
+        onPaste={(e) => {
+          const pasted = e.clipboardData.getData("text");
+          if (!/[,\r\n]/.test(pasted)) return; // one word: the field takes it as typed
+          e.preventDefault();
+          addMany((text + pasted).split(/[,\r\n]+/));
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === ",") {
             e.preventDefault();

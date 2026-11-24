@@ -418,7 +418,7 @@ type SidePanelProps = {
   /** Opens a file of a change set with the lines it added and removed (History). */
   onOpenChangeFile?: (changeSet: string, path: string) => void;
   onUndo: () => void;
-  /** Undoes this change set and every newer one (History > Restore). */
+  /** Undoes this change set and every newer one (History > Undo to here). */
   onUndoTo?: (changeSet: string) => void;
   /** Shows a page before this change set next to now (History > Compare page). */
   onComparePage?: (changeSet: string, page: string) => void;
@@ -482,7 +482,7 @@ function TasksPanel({
   );
 }
 
-/** Restore on an older change set: a button, then a confirmation in its place. */
+/** Undo to here on an older change set: a button, then a confirmation in its place. */
 function RestoreControl({
   newer,
   busy,
@@ -500,13 +500,13 @@ function RestoreControl({
         title={`Put the files back as they were before this change set: undoes it and the ${newer} newer one(s), newest first`}
         type="button"
       >
-        Restore
+        Undo to here
       </button>
     );
   }
   return (
     <span className="ml-auto flex shrink-0 items-center gap-1">
-      <span>Restore: undo {newer + 1} change sets?</span>
+      <span>Undo {newer + 1} change sets?</span>
       <button className="kit-btn kit-btn--sm h-6 min-h-0 px-1.5" onClick={onRestore} type="button">
         Yes
       </button>
@@ -522,7 +522,7 @@ function countBadge(n: number) {
   return n ? <SectionCount n={n} /> : null;
 }
 
-/** Restore on an older change set; a confirmation that is open stays until it is answered. */
+/** Undo to here on an older change set; a confirmation that is open stays until it is answered. */
 function canRestore(newer: number, changeSet: string | undefined, canUndoTo: boolean, confirming: boolean) {
   return newer > 0 && Boolean(changeSet) && (canUndoTo || confirming);
 }

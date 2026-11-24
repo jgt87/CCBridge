@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && node scripts/clean-ui.mjs && vite build --emptyOutDir=false",
+    "typecheck": "tsc -b",
     "lint": "oxlint",
     "test": "vitest run",
     "check:design": "node scripts/design-checks.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

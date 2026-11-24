@@ -171,13 +171,19 @@ export function ProjectPicker({ onOpened }: { onOpened: () => void }) {
       <PickerHeader onRefresh={() => void refresh()} refreshing={refreshing} root={root} />
       <NewProjectForm onCreate={create} />
 
-      {waitNote && !error && (
-        <p className="kit-notice text-sm" role="status">
-          {opening ? <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" /> : <Info className="mt-0.5 h-4 w-4 shrink-0" />}
-          <span>{waitNote}</span>
-        </p>
-      )}
-      {error && <p className="text-(--kit-error) text-sm">{error}</p>}
+      {/* Live regions that stay mounted, so a note or error that appears in them is announced
+          (display: contents, so mb-6 on the message stands in for this list's space-y-6). */}
+      <div aria-live="polite" className="contents">
+        {waitNote && !error && (
+          <p className="kit-notice mb-6 text-sm">
+            {opening ? <Loader2 aria-hidden className="mt-0.5 h-4 w-4 shrink-0 animate-spin" /> : <Info aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />}
+            <span>{waitNote}</span>
+          </p>
+        )}
+      </div>
+      <div aria-live="assertive" className="contents">
+        {error && <p className="mb-6 text-(--kit-error) text-sm">{error}</p>}
+      </div>
 
       <div className="space-y-2">
         {projects.map((p) => (

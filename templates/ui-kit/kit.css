@@ -116,14 +116,23 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
   border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius);
   background: var(--kit-surface); color: var(--kit-text);
   font: inherit; font-size: var(--kit-text-sm); font-weight: 550; cursor: pointer;
-  transition: background var(--kit-speed) ease-out, border-color var(--kit-speed) ease-out;
+  transition: background var(--kit-speed) ease-out, border-color var(--kit-speed) ease-out, transform var(--kit-speed) ease-out;
 }
 @media (hover: hover) and (pointer: fine) { .kit-btn:hover { background: var(--kit-surface-2); } }
 /* A tap on a button acts at once: no wait for a double tap (panning and pinching stay). */
 :where(.kit-btn, .kit-segmented button, .kit-tab, .kit-menu__item, .kit-iconbar__item, .kit-calendar__day, .kit-tags__remove, .kit-tip) { touch-action: manipulation; }
 .kit-btn:focus-visible { outline: none; box-shadow: var(--kit-focus); }
-.kit-btn:active:not(:disabled) { background: var(--kit-accent-soft); }
-.kit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.kit-btn:active:not(:disabled):not([aria-disabled="true"]) { background: var(--kit-accent-soft); transform: translateY(1px); }
+/* A toggle button that is on (aria-pressed="true"): the soft accent fill, like a picked segment. */
+.kit-btn[aria-pressed="true"] { background: var(--kit-accent-soft); color: var(--kit-text); }
+/* Disabled stays focusable: aria-disabled="true" (kit.js ignores the press, the focus ring still shows).
+   :disabled stays for native markup. A disabled button paints no hover: its look is the resting one. */
+.kit-btn:disabled, .kit-btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+@media (hover: hover) and (pointer: fine) {
+  .kit-btn[aria-disabled="true"]:hover { background: var(--kit-surface); }
+  .kit-btn--primary[aria-disabled="true"]:hover { background: var(--kit-accent); border-color: var(--kit-accent); }
+  .kit-btn--ghost[aria-disabled="true"]:hover, .kit-btn--danger[aria-disabled="true"]:hover { background: transparent; }
+}
 .kit-btn--primary { background: var(--kit-accent); border-color: var(--kit-accent); color: var(--kit-on-accent); --kit-icon: var(--kit-on-accent); }
 @media (hover: hover) and (pointer: fine) { .kit-btn--primary:hover { background: var(--kit-accent-hover); border-color: var(--kit-accent-hover); } }
 .kit-btn--ghost { background: transparent; border-color: transparent; }
@@ -148,7 +157,8 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 /* A list box or field that holds an active filter (add is-active while it filters). */
 .kit-select.is-active, .kit-input.is-active { border-color: var(--kit-accent); background-color: var(--kit-accent-soft); }
 .kit-input[aria-invalid="true"], .kit-select[aria-invalid="true"], .kit-textarea[aria-invalid="true"] { border-color: var(--kit-error); }
-.kit-input:disabled, .kit-select:disabled, .kit-textarea:disabled { opacity: 0.5; cursor: not-allowed; background: var(--kit-surface-2); }
+.kit-input:disabled, .kit-select:disabled, .kit-textarea:disabled,
+.kit-input[aria-disabled="true"], .kit-select[aria-disabled="true"], .kit-textarea[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; background: var(--kit-surface-2); }
 .kit-input[readonly], .kit-textarea[readonly] { background: var(--kit-surface-2); }
 /* Placeholder text readable (the browser's own grey is too light); a placeholder is never the only label. */
 .kit-input::placeholder, .kit-textarea::placeholder, .kit-tags__input::placeholder, .kit-composer textarea::placeholder { color: var(--kit-text-muted); opacity: 1; }
@@ -473,7 +483,7 @@ html:has(> body.kit-page) { scrollbar-width: thin; scrollbar-color: var(--kit-sc
 
 /* Breadcrumbs: <nav class="kit-breadcrumbs" aria-label="Breadcrumb"><ol><li><a href="..">Home</a></li><li aria-current="page">Now</li></ol></nav> */
 .kit-breadcrumbs ol { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kit-space-1); list-style: none; margin: 0; padding: 0; font-size: var(--kit-text-sm); color: var(--kit-text-muted); }
-.kit-breadcrumbs li + li::before { content: "/"; margin-right: var(--kit-space-1); opacity: 0.6; }
+.kit-breadcrumbs li + li::before { content: "/"; content: "/" / ""; margin-right: var(--kit-space-1); opacity: 0.6; }
 .kit-breadcrumbs a { color: inherit; text-decoration: none; }
 @media (hover: hover) and (pointer: fine) { .kit-breadcrumbs a:hover { color: var(--kit-text); text-decoration: underline; } }
 .kit-breadcrumbs [aria-current="page"] { color: var(--kit-text); font-weight: 600; }
@@ -627,7 +637,8 @@ fieldset:disabled .kit-btn, fieldset:disabled .kit-input, fieldset:disabled .kit
    grouped with their question in <fieldset class="kit-fieldset"><legend class="kit-legend">. */
 .kit-check input:focus-visible { outline: none; box-shadow: var(--kit-focus); border-radius: var(--kit-radius-sm); }
 .kit-check input[type="radio"]:focus-visible { border-radius: 999px; }
-.kit-check input:disabled, .kit-check:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
+.kit-check input:disabled, .kit-check:has(input:disabled),
+.kit-check[aria-disabled="true"], .kit-check:has(input[aria-disabled="true"]) { opacity: 0.5; cursor: not-allowed; }
 .kit-choices { display: flex; flex-direction: column; gap: var(--kit-space-2); }
 .kit-choices--row { flex-direction: row; flex-wrap: wrap; gap: var(--kit-space-2) var(--kit-space-4); }
 .kit-fieldset { border: 1px solid var(--kit-border); border-radius: var(--kit-radius); padding: var(--kit-space-3) var(--kit-space-4) var(--kit-space-4); margin: 0; min-width: 0; }
@@ -703,6 +714,8 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-tree li[aria-expanded="true"] > .kit-tree__row > .kit-tree__toggle::before { transform: translateY(-1px) rotate(45deg); }
 @media (hover: hover) and (pointer: fine) { .kit-tree__toggle:hover { background: var(--kit-border); color: var(--kit-text); } }
 .kit-tree__spacer { flex: 0 0 auto; width: 1.25rem; }
+/* A row's name in <span class="kit-tree__label" title="FULL NAME">: one line, a long one ends in an ellipsis. */
+.kit-tree__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kit-tree__row [data-kit-icon] { color: var(--kit-icon); }
 @media (prefers-reduced-motion: reduce) { .kit-tree__toggle::before { transition: none; } }
 
@@ -733,7 +746,7 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-dot--error { background: var(--kit-error); }
 .kit-dot--accent { background: var(--kit-accent); }
 .kit-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.kit-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.kit-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
 .kit-skip { position: absolute; left: var(--kit-space-3); top: -100px; z-index: var(--kit-z-skip, 100); padding: var(--kit-space-2) var(--kit-space-3); background: var(--kit-surface); color: var(--kit-text); border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); text-decoration: none; }
 .kit-skip:focus { top: var(--kit-space-3); outline: none; box-shadow: var(--kit-focus); }
 .kit-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--kit-space-2) var(--kit-space-4); margin-top: var(--kit-space-6); padding: var(--kit-space-4) 0; border-top: 1px solid var(--kit-border); font-size: var(--kit-text-xs); color: var(--kit-text-muted); }
@@ -744,7 +757,18 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 @media (forced-colors: active) {
   [class*="kit-"]:focus-visible, .kit-input:focus, .kit-select:focus, .kit-textarea:focus, .kit-skip:focus, .kit-check input:focus-visible, .kit-switch input:focus-visible + .kit-switch__track, .kit-tags:focus-within, .kit-composer:focus-within, .kit-drop:focus-within { outline: 2px solid CanvasText !important; outline-offset: 2px; }
   .kit-progress__bar, .kit-switch__track, .kit-slider-range__fill, .kit-barlist__fill, .kit-chart__bar, .kit-chart__arc, .kit-chart__path, .kit-chart__cell, .kit-chart__dot, .kit-chart__point, .kit-chart__swatch { forced-color-adjust: none; }
+  /* A state shown only by a fill (on, picked, current) would vanish: an outline in the text colour marks it. */
+  .kit-btn[aria-pressed="true"], .kit-segmented button[aria-pressed="true"], .kit-iconbar__item[aria-pressed="true"], .kit-tab[aria-selected="true"],
+  .kit-tree li[aria-selected="true"] > .kit-tree__row, .kit-nav [aria-current], .kit-table tbody tr[aria-selected="true"] { outline: 2px solid CanvasText; outline-offset: -2px; }
+  .kit-calendar__day[aria-selected="true"], .kit-calendar__day[aria-pressed="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; }
+  .kit-switch input:checked + .kit-switch__track { background: Highlight; }
+  .kit-switch__track { border: 1px solid CanvasText; }
+  .kit-btn--hold::before { forced-color-adjust: none; background: Highlight; }
+  .kit-progress, .kit-badge, .kit-toast, .kit-tooltip, .kit-tip__bubble { border: 1px solid CanvasText; }
+  .kit-skeleton { forced-color-adjust: none; background: GrayText; }
 }
+/* Changing the theme: every surface changes at once (kit.js sets this for two frames), no part fading on its own. */
+:root[data-kit-theme-switching] *, :root[data-kit-theme-switching] *::before, :root[data-kit-theme-switching] *::after { transition: none !important; }
 /* Touch screens: every small control is reached over 44px without a bigger visible box (an invisible
    ::after in :where(), so a part's own position wins). A busy button keeps its spinner (its ::after);
    it takes no clicks anyway. Fields use at least 16px text, so the phone does not zoom in on them.
@@ -755,10 +779,157 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
     content: ""; position: absolute; top: 50%; left: 50%;
     width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%);
   }
-  .kit-menu__item { min-height: 44px; }
+  .kit-menu__item, .kit-tree__row, .kit-table__sort { min-height: 44px; }
   .kit-slider { height: 44px; }
   .kit-check input { width: 1.25rem; height: 1.25rem; }
   .kit-input, .kit-select, .kit-textarea, .kit-tags__input { font-size: max(16px, 1em); }
+}
+
+/* Forms and touch parts (kit revision 17, kit.js; the forms and touch section of the examples): listbox, number
+   field, password, one-time code, date range, sheet, carousel, reorder, swipe actions, splitter, disclosure,
+   toolbar overflow and breadcrumbs that fold. The kit's own, on its tokens. */
+/* Listbox (rich rows; a plain choice stays a <select>): <ul class="kit-listbox" role="listbox" data-kit-listbox> of
+   <li class="kit-option" role="option">; the picked row has the soft accent fill and a drawn check. */
+.kit-listbox { margin: 0; padding: var(--kit-space-1); list-style: none; max-height: 16rem; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; border: 1px solid var(--kit-border-strong); border-radius: var(--kit-radius); background: var(--kit-surface); }
+.kit-popover .kit-listbox { border: 0; padding: 0; }
+.kit-listbox:focus-visible { outline: none; box-shadow: var(--kit-focus); }
+.kit-option { display: flex; align-items: center; gap: var(--kit-space-3); min-height: 2rem; padding: var(--kit-space-1) var(--kit-space-3); border-radius: var(--kit-radius-sm); font-size: var(--kit-text-sm); cursor: pointer; user-select: none; }
+.kit-option__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-option__meta { color: var(--kit-text-muted); font-size: var(--kit-text-xs); font-variant-numeric: tabular-nums; }
+.kit-option::after { content: ""; flex: 0 0 auto; width: 0.3em; height: 0.65em; margin: 0 0.2em 0.2em auto; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); visibility: hidden; }
+.kit-option[aria-selected="true"] { background: var(--kit-accent-soft); }
+.kit-option[aria-selected="true"]::after { visibility: visible; }
+@media (hover: hover) and (pointer: fine) { .kit-option:hover { background: var(--kit-surface-2); } .kit-option[aria-selected="true"]:hover { background: var(--kit-accent-soft); } }
+.kit-listbox:focus-visible .kit-option[data-active] { box-shadow: inset var(--kit-focus); }
+.kit-option[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+/* A button that opens a listbox or a date range looks like a select: <button class="kit-select" type="button"> */
+button.kit-select { display: inline-flex; align-items: center; gap: var(--kit-space-3); text-align: left; cursor: pointer; }
+button.kit-select::after { content: ""; flex: 0 0 auto; width: 0.4em; height: 0.4em; margin: 0 0.15em 0.2em auto; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; opacity: 0.7; transform: rotate(45deg); }
+/* Number field: <div class="kit-number"> with kit-number__step buttons around a kit-input data-kit-number (never type="number"). */
+.kit-number { display: inline-flex; align-items: stretch; max-width: 100%; }
+.kit-number > .kit-input { flex: 1 1 auto; width: 7rem; min-width: 3rem; text-align: right; font-variant-numeric: tabular-nums; }
+.kit-number > .kit-number__step + .kit-input { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.kit-number > .kit-input:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.kit-number__step { flex: 0 0 auto; min-width: 2.25rem; padding: 0; border: 1px solid var(--kit-border-strong); background: var(--kit-surface-2); color: var(--kit-text); font: inherit; font-size: var(--kit-text-md); cursor: pointer; touch-action: manipulation; }
+.kit-number__step:first-child { border-right: 0; border-radius: var(--kit-radius) 0 0 var(--kit-radius); }
+.kit-number__step:last-child { border-left: 0; border-radius: 0 var(--kit-radius) var(--kit-radius) 0; }
+@media (hover: hover) and (pointer: fine) { .kit-number__step:hover { background: var(--kit-accent-soft); } .kit-number__step[aria-disabled="true"]:hover { background: var(--kit-surface-2); } }
+.kit-number__step[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+/* Password with its reveal button inside the field: <div class="kit-input-group kit-password" data-kit-password>. */
+.kit-password { position: relative; }
+.kit-password > .kit-input { padding-right: 2.75rem; border-radius: var(--kit-radius); }
+.kit-password > .kit-password__reveal { position: absolute; top: 50%; right: 3px; z-index: 2; margin: 0; transform: translateY(-50%); }
+/* One-time code in boxes: <div class="kit-otp" data-kit-otp> of kit-input kit-otp__box fields. */
+.kit-otp { display: inline-flex; gap: var(--kit-space-2); }
+.kit-otp__box { width: 2.5rem; padding: 0; text-align: center; font-size: var(--kit-text-lg); font-variant-numeric: tabular-nums; }
+/* Date range: <div class="kit-daterange" data-kit-daterange>; kit.js writes its button and panel. */
+.kit-daterange { position: relative; display: inline-block; max-width: 100%; }
+.kit-daterange__trigger { min-width: 12rem; }
+.kit-daterange__panel { min-width: 18rem; }
+.kit-daterange__presets { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--kit-space-3); }
+.kit-daterange__preset { display: block; width: 100%; min-height: 2rem; padding: var(--kit-space-1) var(--kit-space-3); border: 0; border-radius: var(--kit-radius-sm); background: transparent; color: var(--kit-text); font: inherit; font-size: var(--kit-text-sm); text-align: left; cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { .kit-daterange__preset:hover { background: var(--kit-surface-2); } }
+.kit-daterange__preset[aria-pressed="true"] { background: var(--kit-accent-soft); }
+.kit-daterange__preset:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
+.kit-daterange__custom { display: grid; grid-template-columns: 1fr 1fr; gap: var(--kit-space-2); padding-top: var(--kit-space-3); border-top: 1px solid var(--kit-border); }
+.kit-daterange__custom > .kit-error-text, .kit-daterange__custom > .kit-btn { grid-column: 1 / -1; margin: 0; }
+.kit-daterange__custom > .kit-btn { justify-self: end; }
+/* Sheet with stops: <dialog class="kit-sheet" data-kit-sheet data-detents="0.3 0.6 0.92">, as tall as its highest stop;
+   the lower stops are positions of it (kit.js moves it), so its content never reflows. */
+.kit-sheet { position: fixed; inset: auto 0 0 0; box-sizing: border-box; width: min(100%, 40rem); max-width: 100%; height: 85dvh; max-height: none; margin: 0 auto; padding: 0; border: 1px solid var(--kit-border); border-bottom: 0; border-radius: var(--kit-radius-lg) var(--kit-radius-lg) 0 0; background: var(--kit-surface); color: var(--kit-text); box-shadow: var(--kit-shadow); }
+.kit-sheet[open] { display: flex; flex-direction: column; animation: kit-fade var(--kit-speed) ease-out; }
+.kit-sheet::backdrop { background: var(--kit-backdrop); }
+.kit-sheet__grab { flex: 0 0 auto; padding-top: var(--kit-space-2); touch-action: none; cursor: grab; }
+.kit-sheet__handle { display: block; width: 36px; height: 4px; margin: 0 auto; border-radius: 2px; background: var(--kit-border-strong); }
+.kit-sheet__head { display: flex; align-items: center; gap: var(--kit-space-2); padding: var(--kit-space-2) var(--kit-space-4) var(--kit-space-3); }
+.kit-sheet__title { flex: 1 1 auto; margin: 0; font-size: var(--kit-text-md); font-weight: 600; color: var(--kit-title); }
+.kit-sheet__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0 var(--kit-space-4) var(--kit-space-4); }
+/* Carousel: <section class="kit-carousel" data-kit-carousel> with a kit-carousel__head and a kit-carousel__track of
+   kit-carousel__item; the next item peeks, the side with more content fades (data-more), not while the track has focus. */
+.kit-carousel { display: flex; flex-direction: column; gap: var(--kit-space-2); min-width: 0; }
+.kit-carousel__head { display: flex; align-items: center; gap: var(--kit-space-2); }
+.kit-carousel__head > :first-child { flex: 1 1 auto; margin: 0; }
+.kit-carousel__pos { font-size: var(--kit-text-xs); color: var(--kit-text-muted); font-variant-numeric: tabular-nums; }
+.kit-carousel__track { position: relative; display: flex; gap: var(--kit-space-3); margin: 0; padding: var(--kit-space-1) 0 var(--kit-space-2); list-style: none; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: thin; scroll-behavior: smooth; border-radius: var(--kit-radius); }
+.kit-carousel__item { flex: 0 0 auto; width: min(16rem, 85%); scroll-snap-align: start; }
+.kit-carousel__track[data-more="end"] { mask-image: linear-gradient(to right, currentColor calc(100% - 2.5rem), transparent); }
+.kit-carousel__track[data-more="start"] { mask-image: linear-gradient(to left, currentColor calc(100% - 2.5rem), transparent); }
+.kit-carousel__track[data-more="both"] { mask-image: linear-gradient(to right, transparent, currentColor 2.5rem, currentColor calc(100% - 2.5rem), transparent); }
+.kit-carousel__track:focus-visible { outline: none; box-shadow: var(--kit-focus); mask-image: none; }
+/* Reorder by a handle: <ul class="kit-list kit-reorder" data-kit-reorder>; the moving row dims, a line marks where it lands. */
+.kit-reorder { position: relative; }
+.kit-reorder__handle { cursor: grab; touch-action: none; }
+.kit-reorder > .is-moving { opacity: 0.5; }
+.kit-reorder__line { position: absolute; left: var(--kit-space-2); right: var(--kit-space-2); height: 2px; margin: 0; padding: 0; border-radius: 1px; background: var(--kit-accent); list-style: none; pointer-events: none; }
+/* Swipe actions: <li class="kit-swipe"> with kit-swipe__actions behind its kit-swipe__row; shown only while swiped open. */
+.kit-swipe { position: relative; overflow: hidden; padding: 0; }
+.kit-swipe__row { position: relative; z-index: 1; background: var(--kit-surface); touch-action: pan-y; }
+.kit-swipe__actions { position: absolute; top: 0; bottom: 0; right: 0; display: flex; visibility: hidden; }
+[dir="rtl"] .kit-swipe__actions { right: auto; left: 0; }
+.kit-swipe.is-open > .kit-swipe__actions, .kit-swipe.is-swiping > .kit-swipe__actions { visibility: visible; }
+.kit-swipe__action { min-width: 4.5rem; padding: 0 var(--kit-space-3); border: 0; background: var(--kit-surface-2); color: var(--kit-text); font: inherit; font-size: var(--kit-text-sm); font-weight: 550; cursor: pointer; }
+.kit-swipe__action--danger { background: var(--kit-error-soft); color: var(--kit-error); }
+.kit-swipe__action:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
+/* Splitter: <div class="kit-splitpane"> of kit-splitpane__pane parts with a kit-splitter bar (role="separator") between;
+   kit-splitpane--stacked puts the panes above each other. The bar is 6px with a hairline and a wider invisible reach. */
+.kit-splitpane { display: flex; min-width: 0; min-height: 0; }
+.kit-splitpane--stacked { flex-direction: column; }
+.kit-splitpane__pane { flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; }
+.kit-splitpane__pane:first-child { flex: 0 0 auto; }
+.kit-splitter { position: relative; flex: 0 0 6px; display: flex; justify-content: center; cursor: col-resize; touch-action: none; }
+.kit-splitter::before { content: ""; width: 1px; background: var(--kit-border); }
+.kit-splitter::after { content: ""; position: absolute; inset: 0 -4px; }
+.kit-splitpane--stacked > .kit-splitter { flex-direction: column; cursor: row-resize; }
+.kit-splitpane--stacked > .kit-splitter::before { width: auto; height: 1px; }
+.kit-splitpane--stacked > .kit-splitter::after { inset: -4px 0; }
+@media (hover: hover) and (pointer: fine) { .kit-splitter:hover::before { background: var(--kit-border-strong); } }
+.kit-splitter:focus-visible { outline: none; box-shadow: var(--kit-focus); }
+.kit-splitpane.is-resizing { cursor: col-resize; user-select: none; }
+.kit-splitpane--stacked.is-resizing { cursor: row-resize; }
+.kit-splitpane.is-resizing > .kit-splitter::before { background: var(--kit-accent); }
+.kit-splitter[aria-disabled="true"] { cursor: default; }
+/* Disclosure: <div class="kit-disclosure" data-kit-disclosure> with kit-disclosure__heading > kit-disclosure__head buttons
+   and kit-disclosure__panel > kit-disclosure__body parts; sections split by hairlines, the panel slides (grid rows). */
+.kit-disclosure { border-bottom: 1px solid var(--kit-border); }
+.kit-disclosure__heading { margin: 0; border-top: 1px solid var(--kit-border); font-size: inherit; font-weight: inherit; }
+.kit-disclosure__head { display: flex; align-items: center; gap: var(--kit-space-2); width: 100%; min-height: 2.75rem; padding: var(--kit-space-2) var(--kit-space-1); border: 0; border-radius: var(--kit-radius-sm); background: none; color: var(--kit-text); font: inherit; font-size: var(--kit-text-sm); font-weight: 550; text-align: left; cursor: pointer; }
+.kit-disclosure__head::before { content: ""; flex: 0 0 auto; width: 0.45em; height: 0.45em; margin: 0 0.2em; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; opacity: 0.7; transform: rotate(-45deg); transition: transform var(--kit-speed) ease-out; }
+.kit-disclosure__head[aria-expanded="true"]::before { transform: rotate(45deg); }
+[dir="rtl"] .kit-disclosure__head[aria-expanded="false"]::before { transform: rotate(135deg); }
+@media (hover: hover) and (pointer: fine) { .kit-disclosure__head:hover { background: var(--kit-surface-2); } }
+.kit-disclosure__head:focus-visible { outline: none; box-shadow: inset var(--kit-focus); }
+.kit-disclosure__panel { display: grid; grid-template-rows: 1fr; }
+.kit-disclosure__panel[data-state="closed"] { grid-template-rows: 0fr; visibility: hidden; }
+.kit-disclosure[data-ready] .kit-disclosure__panel { transition: grid-template-rows var(--kit-speed-slow) ease-out, visibility var(--kit-speed-slow); }
+.kit-disclosure__body { min-height: 0; overflow: hidden; padding: 0 var(--kit-space-1); }
+.kit-disclosure__body > :last-child { margin-bottom: var(--kit-space-3); }
+/* Toolbar overflow: data-kit-overflow on a kit-toolbar kit-overflow keeps it on one line; kit.js adds kit-overflow__more. */
+.kit-overflow { flex-wrap: nowrap; min-width: 0; }
+.kit-overflow > * { flex-shrink: 0; }
+.kit-overflow > .kit-toolbar__spacer { flex-shrink: 1; min-width: 0; }
+/* Breadcrumbs that fold (data-kit-breadcrumbs): one line, long names cut at about 24 letters, a kit-breadcrumbs__more menu. */
+.kit-breadcrumbs[data-kit-breadcrumbs] ol { flex-wrap: nowrap; min-width: 0; }
+.kit-breadcrumbs[data-kit-breadcrumbs] li { white-space: nowrap; }
+.kit-breadcrumbs[data-kit-breadcrumbs] li > a { display: inline-block; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.kit-breadcrumbs__more .kit-btn { min-height: 1.5rem; padding: 0 var(--kit-space-2); }
+/* Reduced motion: these parts move at once (kit.js does the same for the sheet, swipe and carousel scrolling). */
+@media (prefers-reduced-motion: reduce) {
+  .kit-disclosure__panel, .kit-disclosure__head::before { transition: none !important; }
+  .kit-carousel__track { scroll-behavior: auto; }
+}
+/* Windows contrast themes: picked rows and presets keep an outline, the reorder line and the drag bar a system colour. */
+@media (forced-colors: active) {
+  .kit-option[aria-selected="true"], .kit-daterange__preset[aria-pressed="true"] { outline: 2px solid CanvasText; outline-offset: -2px; }
+  .kit-reorder__line, .kit-splitpane.is-resizing > .kit-splitter::before { forced-color-adjust: none; background: Highlight; }
+  .kit-splitter::before { background: CanvasText; }
+}
+/* Touch screens: rows and buttons of these parts reach 44px; the splitter's reach grows to 10px a side. */
+@media (pointer: coarse) {
+  .kit-option, .kit-daterange__preset, .kit-disclosure__head { min-height: 44px; }
+  .kit-number__step { min-width: 44px; }
+  .kit-otp__box { width: 2.75rem; }
+  .kit-splitter::after { inset: 0 -10px; }
+  .kit-splitpane--stacked > .kit-splitter::after { inset: -10px 0; }
 }
 
 /*
@@ -773,8 +944,11 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-btn--hold::before {
   content: ""; position: absolute; inset: 0; z-index: -1;
   background: var(--kit-error-soft); transform: scaleX(0); transform-origin: left;
+  transition: transform var(--kit-speed) ease-out;   /* let go early: the fill runs back fast from where it is */
 }
+[dir="rtl"] .kit-btn--hold::before { transform-origin: right; }
 .kit-btn--hold.is-holding::before { transform: scaleX(1); transition: transform var(--kit-hold-ms, 1500ms) linear; }
+.kit-btn--hold.is-done::before { transform: scaleX(1); transition: none; }
 .kit-btn--hold.is-done { border-color: var(--kit-error); color: var(--kit-error); }
 
 /* Command button (from kokonutui command-button): a button with its keyboard shortcut. */
@@ -840,7 +1014,8 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
   background: var(--kit-accent-soft);
   transition: transform var(--kit-speed-slow) var(--kit-ease-in-out, cubic-bezier(0.65, 0, 0.35, 1)), width var(--kit-speed-slow) var(--kit-ease-in-out, cubic-bezier(0.65, 0, 0.35, 1));
 }
-@media (prefers-reduced-motion: reduce) { .kit-tabs__indicator, .kit-segmented__indicator, .kit-btn--hold.is-holding::before { transition-duration: 0ms; } }
+/* The hold fill is left out on purpose: it shows how long is left, so it keeps filling under reduced motion. */
+@media (prefers-reduced-motion: reduce) { .kit-tabs__indicator, .kit-segmented__indicator { transition-duration: 0ms; } }
 
 /* Loading text (from kokonutui ai-text-loading): a soft pulse, not a gradient. */
 .kit-loading { display: inline-flex; align-items: center; gap: var(--kit-space-2); color: var(--kit-text-muted); font-size: var(--kit-text-sm); }
@@ -870,7 +1045,14 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
 .kit-switch input:checked + .kit-switch__track { background: var(--kit-accent); }
 .kit-switch input:checked + .kit-switch__track::after { transform: translateX(1rem); }
 .kit-switch input:focus-visible + .kit-switch__track { box-shadow: var(--kit-focus); }
-.kit-switch input:disabled + .kit-switch__track { opacity: 0.5; }
+.kit-switch input:disabled + .kit-switch__track, .kit-switch input[aria-disabled="true"] + .kit-switch__track { opacity: 0.5; }
+.kit-switch:has(input:disabled), .kit-switch:has(input[aria-disabled="true"]) { cursor: not-allowed; }
+/* Touch screens: the switch grows to 46 x 28 with a 22px knob, easier to hit and to see. */
+@media (pointer: coarse) {
+  .kit-switch__track { width: 46px; height: 28px; }
+  .kit-switch__track::after { width: 22px; height: 22px; top: 3px; left: 3px; }
+  .kit-switch input:checked + .kit-switch__track::after { transform: translateX(18px); }
+}
 @media (prefers-reduced-motion: reduce) { .kit-switch__track, .kit-switch__track::after { transition: none; } }
 
 /* Menu (from kokonutui profile-dropdown, as a general menu): <div class="kit-menu"><button class="kit-btn" type="button"
@@ -955,6 +1137,7 @@ a.kit-list__item:focus-visible, button.kit-list__item:focus-visible { outline: n
   padding: var(--kit-space-1) var(--kit-space-2); border-radius: var(--kit-radius);
   background: var(--kit-surface); color: var(--kit-text); border: 1px solid var(--kit-border);
   box-shadow: var(--kit-shadow); font-size: var(--kit-text-xs); line-height: 1.4;
+  font-variant-numeric: tabular-nums;
 }
 .kit-chart__legend { display: flex; flex-wrap: wrap; gap: var(--kit-space-1) var(--kit-space-4); list-style: none; margin: var(--kit-space-2) 0 0; padding: 0; font-size: var(--kit-text-xs); color: var(--kit-text-muted); }
 .kit-chart__legend li { display: inline-flex; align-items: center; gap: var(--kit-space-1); cursor: default; }

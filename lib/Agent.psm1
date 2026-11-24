@@ -3572,7 +3572,7 @@ function Invoke-ProjectHooksCore {
 
 function Invoke-UndoTask {
     <# Undo: the newest change set, or with $UpTo that change set and every newer one, newest first
-       (History > Restore). One undo event per change set, so the History list follows. #>
+       (History > Undo to here). One undo event per change set, so the History list follows. #>
     param($State, [string]$UpTo = '')
     $root = $State.ProjectRoot
     if ($UpTo) {
@@ -3587,7 +3587,7 @@ function Invoke-UndoTask {
         $files = @($details | ForEach-Object { $_.path })
         $count++
         $text = if ($files.Count) { 'Undid the last change set: ' + ($files -join ', ') } else { 'Nothing to undo.' }
-        if ($UpTo -and $files.Count) { $text = "Restore, change set ${count}: undid " + ($files -join ', ') }
+        if ($UpTo -and $files.Count) { $text = "Undo to here, change set ${count}: undid " + ($files -join ', ') }
         # Per file: the lines the undo brought back and took away, with a preview.
         $changes = @($details | ForEach-Object { @{ path = $_.path; deleted = [bool]$_.deleted; added = [int]$_.added; removed = [int]$_.removed; binary = [bool]$_.binary; preview = $_.preview } })
         Add-AgentEvent $State 'undo' @{ files = $files; text = $text; changes = $changes }

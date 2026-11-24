@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  CCBridge MCP server (stdio). Lets an MCP client (Claude Code, VS Code, ...) offload work to
+  CCBridge MCP server (stdio). Lets an MCP client (a coding agent, VS Code, ...) offload work to
   Microsoft 365 Copilot Chat through the same bridge and agent loop as the CCBridge web app.
 .DESCRIPTION
   Register it in your MCP client as:
@@ -32,7 +32,10 @@ Import-Module (Join-Path $root 'lib\Config.psm1') -Force
 $config = Get-CCBridgeConfig harness $root
 # Log level: $env:CCBRIDGE_LOG (set it in the MCP client's server config) or logLevel in harness.local.json.
 Import-Module (Join-Path $root 'lib\Log.psm1')
-Initialize-CCBLog -Config $config -Build (Format-CCBBuild (Get-CCBridgeBuild $root)) -Role 'MCP server'
+$build = Get-CCBridgeBuild $root
+# Reported in initialize, so a client can tell a stale running server from the installed release.
+$serverVersion = Format-CCBBuild $build
+Initialize-CCBLog -Config $config -Build $serverVersion -Role 'MCP server'
 $State = New-AgentState -Config $config -AppRoot $root
 $State.LogLevel = Get-CCBLogLevel
 $State.Headless = $true
@@ -539,7 +542,7 @@ function Invoke-Tool([string]$Name, $ToolArgs) {
 
 $tools = @(
     @{ name = 'copilot_run_task'
-       description = 'USE THIS for any coding task that needs thinking: more than a small, clear edit in one file, a bug you do not immediately understand, a new feature, a design, changes across several files, unfamiliar libraries or APIs. A stronger model (Microsoft 365 Copilot) does the whole task in the project folder (reads, edits, optionally builds and tests) and this call returns the full report when it is done. One call is enough; it waits up to wait_sec (default 600).'
+       description = 'USE THIS for any coding task that needs thinking: more than a small, clear edit in one file, a bug you do not immediately understand, a new feature, a design, changes across several files, unfamiliar libraries or APIs. A stronger model (Microsoft 365 Copilot) does the whole task in the project folder (reads, edits, optionally builds and tests) and this call returns the full report when it is done. One call is enough; it waits up to wait_sec (default 600). This call blocks while it waits: to keep working meanwhile, or for a task that may take longer than your client waits for a tool, use copilot_start_task (returns a job id at once) and poll copilot_task_status, then copilot_task_result.'
        inputSchema = @{ type = 'object'; required = @('project_path', 'task'); properties = @{
            project_path = @{ type = 'string'; description = 'Absolute path of the project folder (created if missing).' }
            task = @{ type = 'string'; description = 'What to build, fix or change, in plain words: the goal, which files if known, how to check that it works.' }
@@ -551,7 +554,7 @@ $tools = @(
            wait_sec = @{ type = 'integer'; description = 'How long to wait for the result (default 600, max 1800). If it is not finished by then, call copilot_task_status.' }
            copilot_review = @{ type = 'boolean'; description = 'true: after big changes Copilot also reviews its own work (costs extra Copilot messages). Default false: you review the diffs in the report yourself.' } } } }
     @{ name = 'copilot_ask'
-       description = 'USE THIS for any question that needs reasoning: explaining code or an error, finding a root cause, reviewing code, choosing an approach, making a plan, writing longer text, or (with work_iq) looking things up in the user''s email, calendar, Teams chats and files. Copilot sees only the prompt, so paste the code or error you ask about. Returns Copilot''s answer. No files are changed.'
+       description = 'USE THIS for any question that needs reasoning: explaining code or an error, finding a root cause, reviewing code, choosing an approach, making a plan, writing longer text, or (with work_iq) looking things up in the user''s email, calendar, Teams chats and files. Copilot sees only the prompt, so paste the code or error you ask about. Returns Copilot''s answer. No files are changed. This call blocks until Copilot answers, up to timeout_sec (default 240); when the answer is not ready by then it returns a job id instead, which you poll with copilot_task_status and read with copilot_task_result.'
        inputSchema = @{ type = 'object'; required = @('prompt'); properties = @{
            prompt = @{ type = 'string'; description = 'The full prompt. Copilot sees nothing else, so include any code or context it needs (up to about 75,000 characters).' }
            new_chat = @{ type = 'boolean'; description = 'Start a fresh Copilot conversation first (default false: continue the current one).' }
@@ -640,7 +643,7 @@ try {
                     Send-Result $id @{
                         protocolVersion = $pv
                         capabilities = @{ tools = @{ listChanged = $false } }
-                        serverInfo = @{ name = 'ccbridge'; version = '0.1.0' }
+                        serverInfo = @{ name = 'ccbridge'; version = $serverVersion }
                         instructions = $instructions
                     }
                 }

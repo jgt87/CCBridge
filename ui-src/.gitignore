@@ -1,4 +1,4 @@
-# Logs
+# Machine-local: logs of npm and other package managers
 logs
 *.log
 npm-debug.log*
@@ -7,12 +7,17 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Regenerable: dependencies and build output (npm ci; npm run build writes ../ui, not dist/)
 node_modules
-dist
-dist-ssr
+/dist/
+/dist-ssr/
+*.tsbuildinfo
+coverage/
+
+# Machine-local: settings of this machine (*.local)
 *.local
 
-# Editor directories and files
+# Machine-local: editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea

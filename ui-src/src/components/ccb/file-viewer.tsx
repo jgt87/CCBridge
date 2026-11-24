@@ -1,5 +1,5 @@
 import { Check, Link2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { isImagePath } from "@/lib/app-view";
 import { isMarkdownPath, previewImageSrc, viewerBody, webUrlOf } from "@/lib/file-viewer";
 import { languageForPath } from "@/lib/highlight";
@@ -138,6 +138,7 @@ export function FileViewer({
   onOpenFile: (path: string) => void;
   previewBase?: string;
 }) {
+  const titleId = useId();
   const md = isMarkdownPath(file.path);
   const [source, setSource] = useState(false);
   const [showChange, setShowChange] = useState(Boolean(file.change));
@@ -147,16 +148,16 @@ export function FileViewer({
   }, [file.path, file.change]);
   const change = showChange ? file.change : undefined;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && !e.isComposing && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
   return (
-    <ModalBackdrop center onClose={onClose}>
+    <ModalBackdrop center label={file.path} onClose={onClose} titleId={titleId}>
       <div className="kit-dialog flex max-h-full w-full max-w-4xl flex-col overflow-hidden p-0" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 border-(--kit-border) border-b px-4 py-2">
-          <span className="min-w-0 flex-1 truncate font-mono text-sm">{file.path}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-sm" id={titleId}>{file.path}</span>
           {file.change && (
             <Toggle
               first={showChange}
@@ -170,7 +171,7 @@ export function FileViewer({
           {/* keyed by path: another file starts with no address and nothing copied */}
           <WebUrlButton key={file.path} path={file.path} />
           {!isImagePath(file.path) && <CopyButton text={file.text} />}
-          <button className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" onClick={onClose} title="Close (Esc)" type="button">
+          <button aria-label="Close" className="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm" onClick={onClose} title="Close (Esc)" type="button">
             <X className="h-4 w-4" />
           </button>
         </div>

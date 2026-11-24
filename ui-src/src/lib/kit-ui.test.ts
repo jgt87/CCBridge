@@ -171,6 +171,11 @@ describe("kit-charts.js", () => {
     const dots = Array.from(c.querySelectorAll("circle.kit-chart__dot")).map((x) => x.getAttribute("visibility"));
     expect(dots).toEqual(["visible", "hidden"]);
     expect(c.querySelector(".kit-chart__tip")!.textContent).toBe("aS: 1T: -");
+    // Pointer events too, so touch and pen read the values.
+    hit.dispatchEvent(new MouseEvent("pointerleave"));
+    expect(Array.from(c.querySelectorAll("circle.kit-chart__dot")).map((x) => x.getAttribute("visibility"))).toEqual(["hidden", "hidden"]);
+    hit.dispatchEvent(new MouseEvent("pointermove", { clientX: 590 }));
+    expect(Array.from(c.querySelectorAll("circle.kit-chart__dot")).map((x) => x.getAttribute("visibility"))).toEqual(["visible", "visible"]);
   });
 });
 
@@ -644,6 +649,90 @@ describe("kit.js drop zone file names", () => {
   });
 });
 
+describe("kit.js element specs: fallbacks, names and keys", () => {
+  const press = (el: Element, key: string, opts: KeyboardEventInit = {}) => {
+    const e = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...opts });
+    el.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+  it("takes only the dropped files its accept list allows, says which it left, and keeps the highlight over its children", async () => {
+    document.body.innerHTML = `<label class="kit-drop" data-kit-drop><input type="file" accept=".csv"><span class="kit-drop__title">Drop</span><ul class="kit-drop__files"></ul></label>`;
+    load(kitJs);
+    await tick();
+    const zone = document.querySelector(".kit-drop") as HTMLElement;
+    let got: string[] = [];
+    zone.addEventListener("kit:files", (e) => { got = Array.from((e as CustomEvent).detail.files as File[]).map((f) => f.name); });
+    zone.dispatchEvent(new Event("dragenter", { bubbles: true, cancelable: true }));
+    zone.querySelector(".kit-drop__title")!.dispatchEvent(new Event("dragenter", { bubbles: true, cancelable: true }));
+    zone.dispatchEvent(new Event("dragleave", { bubbles: true }));
+    expect(zone.classList.contains("is-over")).toBe(true);
+    const ev = new Event("drop", { bubbles: true, cancelable: true }) as Event & { dataTransfer: unknown };
+    ev.dataTransfer = { files: [new File(["a"], "a.csv", { type: "text/csv" }), new File(["b"], "b.png", { type: "image/png" }), new File(["c"], "c.csv")] };
+    zone.dispatchEvent(ev);
+    expect(zone.classList.contains("is-over")).toBe(false);
+    expect(got).toEqual(["a.csv"]); // not multiple: the first accepted file only
+    expect(zone.querySelector("[role=alert]")!.textContent).toContain("b.png");
+  });
+  it("falls back to the initials when an avatar's photo fails, and leaves an avatar beside its name unnamed", async () => {
+    document.body.innerHTML = '<span data-kit-avatar="Ada Lovelace"><img alt="" src="broken.png"></span><span data-kit-avatar="Grace Hopper" aria-hidden="true"></span>';
+    load(kitJs);
+    await tick();
+    const [a, b] = Array.from(document.querySelectorAll("[data-kit-avatar]")) as HTMLElement[];
+    a.querySelector("img")!.dispatchEvent(new Event("error"));
+    expect(a.textContent).toBe("AL");
+    expect(b.hasAttribute("role")).toBe(false);
+    expect(b.hasAttribute("aria-label")).toBe(false);
+  });
+  it("opens a menu from its button with ArrowUp on the last item, and the rows are not Tab stops", async () => {
+    document.body.innerHTML = '<div class="kit-menu"><button data-kit-menu aria-expanded="false" type="button">Actions</button><div class="kit-menu__list" hidden><button class="kit-menu__item" type="button">Edit</button><button class="kit-menu__item" type="button">Delete</button></div></div>';
+    load(kitJs);
+    await tick();
+    const btn = document.querySelector("[data-kit-menu]") as HTMLButtonElement;
+    expect(press(btn, "ArrowUp")).toBe(true);
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement!.textContent).toBe("Delete");
+    expect(Array.from(document.querySelectorAll(".kit-menu__item")).map((i) => i.getAttribute("tabindex"))).toEqual(["-1", "-1"]);
+    press(document.activeElement!, "Escape");
+    expect(press(btn, "ArrowDown")).toBe(true);
+    expect(document.activeElement!.textContent).toBe("Edit");
+  });
+  it("makes a popover a non-modal dialog named by its button and leaves an input-method Escape alone", async () => {
+    document.body.innerHTML = '<div class="kit-popover-wrap"><button type="button" data-kit-popover="pq" aria-expanded="false">Columns</button><div class="kit-popover" id="pq" hidden><input aria-label="Name"></div></div>';
+    load(kitJs);
+    await tick();
+    (document.querySelector("[data-kit-popover]") as HTMLButtonElement).click();
+    const panel = document.getElementById("pq")!;
+    expect(panel.getAttribute("role")).toBe("dialog");
+    expect(document.getElementById(panel.getAttribute("aria-labelledby")!)!.textContent).toBe("Columns");
+    press(document.activeElement!, "Escape", { isComposing: true });
+    expect(panel.hidden).toBe(false);
+    press(document.activeElement!, "Escape");
+    expect(panel.hidden).toBe(true);
+  });
+  it("clears a search box with a second Escape once its list is closed", async () => {
+    document.body.innerHTML = '<div class="kit-search" data-kit-search><input class="kit-input" aria-label="Find"><ul class="kit-search__list"><li class="kit-search__item">One</li></ul></div>';
+    load(kitJs);
+    await tick();
+    const input = document.querySelector(".kit-search input") as HTMLInputElement;
+    input.value = "On";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    press(input, "Escape");
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(input.value).toBe("On");
+    expect(press(input, "Escape")).toBe(true);
+    expect(input.value).toBe("");
+  });
+  it("names each board column and its list by the column's title", async () => {
+    document.body.innerHTML = '<div class="kit-board"><section class="kit-board__column"><h3 class="kit-board__title">To do</h3><ul class="kit-board__list" data-kit-board="todo"><li data-id="1">One</li></ul></section></div>';
+    load(kitJs);
+    await tick();
+    const col = document.querySelector(".kit-board__column")!;
+    const id = col.getAttribute("aria-labelledby")!;
+    expect(document.getElementById(id)!.textContent).toBe("To do");
+    expect(document.querySelector(".kit-board__list")!.getAttribute("aria-labelledby")).toBe(id);
+  });
+});
+
 describe("page check: kit classes without a rule", () => {
   const pageCheck = pageCheckJs;
   it("lists kit classes on the page, also ones a script added, that no loaded stylesheet has a rule for", async () => {
@@ -1027,5 +1116,497 @@ describe("kit.js tooltips, toast buttons, context menus and the command palette"
     expect(pal.hasAttribute("open")).toBe(true);
     press(input, "k", { ctrlKey: true });
     expect(pal.hasAttribute("open")).toBe(false);
+  });
+});
+describe("kit.js shared element specs: disabled guard, hold, type-ahead, theme", () => {
+  const press = (el: Element, key: string, more: KeyboardEventInit = {}) => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...more }));
+  afterEach(() => { vi.useRealTimers(); });
+  it("ignores presses and keys on an aria-disabled or busy control but keeps it focusable", async () => {
+    document.body.innerHTML = '<button class="kit-btn" type="button" aria-disabled="true" id="off">Publish</button>' +
+      '<button class="kit-btn" type="button" aria-busy="true" id="busy">Saving</button><button class="kit-btn" type="button" id="on">Save</button>';
+    load(kitJs);
+    await tick();
+    const ran: string[] = [];
+    for (const id of ["off", "busy", "on"]) document.getElementById(id)!.addEventListener("click", () => ran.push(id));
+    for (const id of ["off", "busy", "on"]) document.getElementById(id)!.click();
+    expect(ran).toEqual(["on"]);
+    const off = document.getElementById("off") as HTMLButtonElement;
+    off.focus();
+    expect(document.activeElement).toBe(off);
+    expect(press(off, "Enter").valueOf()).toBe(false);   // cancelled before any handler
+    expect(press(off, "Tab").valueOf()).toBe(true);
+  });
+  it("leaves an aria-disabled field out of the form data", async () => {
+    document.body.innerHTML = '<form id="f"><input name="a" value="1"><input name="b" value="2" aria-disabled="true" readonly></form>';
+    load(kitJs);
+    await tick();
+    const form = document.getElementById("f") as HTMLFormElement;
+    const data = new FormData(form);
+    // jsdom sends no formdata event; send the one a browser sends while it builds the data.
+    form.dispatchEvent(Object.assign(new Event("formdata", { bubbles: true }), { formData: data }));
+    expect(data.get("a")).toBe("1");
+    expect(data.get("b")).toBeNull();
+  });
+  it("starts a hold only on the main button, says the done word and stays full when done", async () => {
+    document.body.innerHTML = '<button class="kit-btn kit-btn--hold" data-kit-hold="100" data-kit-hold-done="Deleted" type="button"><span data-kit-hold-label>Hold to delete</span></button>';
+    load(kitJs);
+    await tick();
+    vi.useFakeTimers();
+    const b = document.querySelector(".kit-btn--hold") as HTMLButtonElement;
+    let held = 0;
+    b.addEventListener("kit:hold", () => held++);
+    b.dispatchEvent(new MouseEvent("pointerdown", { button: 2, bubbles: true }));
+    expect(b.classList.contains("is-holding")).toBe(false);
+    b.dispatchEvent(new MouseEvent("pointerdown", { button: 0, bubbles: true }));
+    expect(b.classList.contains("is-holding")).toBe(true);
+    vi.advanceTimersByTime(150);
+    expect(held).toBe(1);
+    expect(b.classList.contains("is-done")).toBe(true);
+    expect(b.querySelector("[data-kit-hold-label]")!.textContent).toBe("Deleted");
+    expect(press(b, " ", { repeat: true }).valueOf()).toBe(false);   // a repeating key does not start again
+    expect(b.classList.contains("is-holding")).toBe(false);
+  });
+  it("does not start a hold on an aria-disabled hold button", async () => {
+    document.body.innerHTML = '<button class="kit-btn kit-btn--hold" data-kit-hold="100" aria-disabled="true" type="button">Hold to delete</button>';
+    load(kitJs);
+    await tick();
+    const b = document.querySelector(".kit-btn--hold") as HTMLButtonElement;
+    b.dispatchEvent(new MouseEvent("pointerdown", { button: 0, bubbles: true }));
+    expect(b.classList.contains("is-holding")).toBe(false);
+  });
+  it("jumps to a menu item or tree row by its first letters", async () => {
+    document.body.innerHTML = '<div class="kit-menu"><button data-kit-menu aria-expanded="false" type="button">Actions</button><div class="kit-menu__list" hidden>' +
+      '<button class="kit-menu__item" type="button">Edit</button><button class="kit-menu__item" type="button">Export</button><button class="kit-menu__item" type="button">Delete</button></div></div>' +
+      '<ul class="kit-tree" data-kit-tree aria-label="Folders"><li><span class="kit-tree__row">Alpha</span></li><li><span class="kit-tree__row">Beta</span></li></ul>';
+    load(kitJs);
+    await tick();
+    const items = Array.from(document.querySelectorAll(".kit-menu__item")) as HTMLButtonElement[];
+    (document.querySelector("[data-kit-menu]") as HTMLButtonElement).click();
+    expect(document.activeElement).toBe(items[0]);
+    press(items[0], "d");
+    expect(document.activeElement).toBe(items[2]);
+    press(items[2], "e");
+    expect(document.activeElement).toBe(items[2]);   // "de" typed together still names Delete
+    const rows = Array.from(document.querySelectorAll(".kit-tree__row")) as HTMLElement[];
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 1000);   // past the 600 ms in which typed letters add up
+    rows[0].focus();
+    press(rows[0], "b");
+    expect(document.activeElement).toBe(rows[1]);
+  });
+  it("updates every theme button on the page when one is pressed", async () => {
+    document.documentElement.setAttribute("data-theme", "light");
+    document.body.innerHTML = '<button class="kit-btn" type="button" data-kit-theme id="t1"></button><button class="kit-btn" type="button" data-kit-theme id="t2"></button>';
+    load(kitJs);
+    await tick();
+    (document.getElementById("t1") as HTMLButtonElement).click();
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(document.documentElement.hasAttribute("data-kit-theme-switching")).toBe(true);
+    expect(document.getElementById("t2")!.getAttribute("aria-label")).toBe("Switch to the light theme");
+    document.documentElement.removeAttribute("data-theme");
+    document.documentElement.removeAttribute("data-kit-theme-switching");
+    try { localStorage.removeItem("kit-theme"); } catch { /* jsdom storage */ }
+  });
+});
+describe("kit.js forms and touch parts (kit revision 17)", () => {
+  type Check = { value: string; display: string; ok: boolean; message: string; suggestion?: string; brand?: string };
+  const kit = () => (window as unknown as { KitUI: { check: (kind: string, text: string, opts?: Record<string, unknown>) => Check } }).KitUI;
+  const key = (el: Element, k: string, more: KeyboardEventInit = {}) => el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...more }));
+  const events = (el: Element, name: string) => { const got: Record<string, unknown>[] = []; el.addEventListener(name, (e) => got.push((e as CustomEvent).detail)); return got; };
+  const box = (width: number) => ({ width, height: 20, top: 0, left: 0, right: width, bottom: 20, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  afterEach(() => { vi.useRealTimers(); document.documentElement.lang = ""; });
+
+  it("listbox: one tab stop, arrows move and pick, an aria-disabled option is never picked, kit:select and the form value", async () => {
+    document.body.innerHTML = '<form><ul class="kit-listbox" role="listbox" data-kit-listbox data-name="owner" aria-label="Owner">' +
+      '<li class="kit-option" role="option" data-value="ana"><span class="kit-option__label">Ana Lima</span><span class="kit-option__meta">Design</span></li>' +
+      '<li class="kit-option" role="option" data-value="bo" aria-disabled="true">Bo Lee</li><li class="kit-option" role="option" data-value="cy">Cy Park</li></ul></form>';
+    load(kitJs);
+    await tick();
+    const lb = document.querySelector(".kit-listbox") as HTMLElement;
+    const got = events(lb, "kit:select");
+    expect(lb.tabIndex).toBe(0);
+    lb.focus();
+    key(lb, "ArrowDown");
+    expect(lb.getAttribute("aria-activedescendant")).toBe(lb.children[1].id);
+    expect(lb.children[1].getAttribute("aria-selected")).toBe("false");   // aria-disabled: reached, not picked
+    key(lb, "ArrowDown");
+    expect(lb.children[2].getAttribute("aria-selected")).toBe("true");   // one choice follows the move
+    (lb.children[1] as HTMLElement).click();
+    expect(lb.children[1].getAttribute("aria-selected")).toBe("false");
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 5000);   // past the 600 ms in which an earlier test's letters add up
+    key(lb, "a");
+    expect(lb.children[0].getAttribute("aria-selected")).toBe("true");   // typed letters
+    expect(got[got.length - 1]).toMatchObject({ value: "ana", values: ["ana"] });
+    expect(new FormData(document.querySelector("form") as HTMLFormElement).getAll("owner")).toEqual(["ana"]);
+  });
+
+  it("listbox in a popover: a pick closes it and shows the label on its button", async () => {
+    document.body.innerHTML = '<div class="kit-popover-wrap"><button class="kit-select" type="button" data-kit-popover="pl" aria-expanded="false"><span data-kit-listbox-value>Choose</span></button>' +
+      '<div class="kit-popover" id="pl" hidden><ul class="kit-listbox" role="listbox" data-kit-listbox aria-label="Owner"><li class="kit-option" role="option">Ana Lima</li><li class="kit-option" role="option">Bo Lee</li></ul></div></div>';
+    load(kitJs);
+    await tick();
+    const btn = document.querySelector("[data-kit-popover]") as HTMLButtonElement;
+    expect(btn.getAttribute("aria-haspopup")).toBe("listbox");
+    btn.click();
+    const lb = document.querySelector(".kit-listbox") as HTMLElement;
+    expect(document.activeElement).toBe(lb);
+    key(lb, "ArrowDown");
+    expect(lb.children[1].getAttribute("aria-selected")).toBe("false");   // in a popover the move does not pick
+    key(lb, "Enter");
+    expect(btn.querySelector("[data-kit-listbox-value]")!.textContent).toBe("Bo Lee");
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(btn);
+  });
+
+  it("number field: a spinbutton that steps, keeps within min and max, reads a decimal comma and disables a step at its bound", async () => {
+    document.documentElement.lang = "nl";
+    document.body.innerHTML = '<form><div class="kit-number"><button class="kit-number__step" type="button" data-kit-nudge="-1">-</button>' +
+      '<input class="kit-input" id="n" data-kit-number min="0" max="10" step="0.5" value="9" name="qty" aria-label="Amount"><button class="kit-number__step" type="button" data-kit-nudge="1">+</button></div></form>';
+    load(kitJs);
+    await tick();
+    const input = document.getElementById("n") as HTMLInputElement;
+    const [less, more] = Array.from(document.querySelectorAll(".kit-number__step")) as HTMLButtonElement[];
+    const got = events(input, "kit:change");
+    expect(input.getAttribute("role")).toBe("spinbutton");
+    expect(input.getAttribute("aria-valuenow")).toBe("9");
+    expect(more.tabIndex).toBe(-1);
+    key(input, "ArrowUp");
+    key(input, "ArrowUp");
+    key(input, "ArrowUp");
+    expect(input.getAttribute("aria-valuenow")).toBe("10");   // kept at max
+    expect(more.getAttribute("aria-disabled")).toBe("true");
+    more.click();
+    expect(got.length).toBe(2);
+    key(input, "Home");
+    expect(input.getAttribute("aria-valuenow")).toBe("0");
+    expect(less.getAttribute("aria-disabled")).toBe("true");
+    input.value = "7,5 kg";
+    input.dispatchEvent(new Event("blur"));
+    expect(input.getAttribute("aria-valuenow")).toBe("7.5");
+    expect(input.value).toBe("7,5");
+    expect(new FormData(document.querySelector("form") as HTMLFormElement).get("qty")).toBe("7.5");
+    input.value = "seven";
+    input.dispatchEvent(new Event("blur"));
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.value).toBe("seven");   // kept as typed, with a message
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)!.textContent).toMatch(/Use a number, like 12 or 3,5/);
+  });
+
+  it("typed field checks: email hint, phone, IBAN, card, postcode, amount and code", async () => {
+    document.body.innerHTML = "";
+    load(kitJs);
+    await tick();
+    const k = kit();
+    expect(k.check("email", "ana@gmial.com")).toMatchObject({ ok: true, suggestion: "ana@gmail.com" });
+    expect(k.check("email", "ana.studio.example").ok).toBe(false);
+    expect(k.check("phone", "020 123 4567", { callingCode: "31" })).toMatchObject({ ok: true, value: "+31201234567", display: "+31 201 234 567" });   // stored international, shown in threes
+    expect(k.check("phone", "020 123 4567").message).toMatch(/country code/);
+    expect(k.check("iban", "nl74 exmp 0123 4567 89")).toMatchObject({ ok: true, value: "NL74EXMP0123456789", display: "NL74 EXMP 0123 4567 89" });
+    expect(k.check("iban", "NL75EXMP0123456789").message).toMatch(/typo/);
+    expect(k.check("card", "4111-1111-1111-1111")).toMatchObject({ ok: true, value: "4111111111111111", brand: "visa" });
+    expect(k.check("card", "4111 1111 1111 1112").ok).toBe(false);
+    expect(k.check("postcode", "1234ab", { country: "NL" })).toMatchObject({ ok: true, value: "1234 AB" });
+    expect(k.check("postcode", "123", { country: "US" }).message).toMatch(/ZIP codes in/);
+    expect(k.check("postcode", "", { country: "HK" }).ok).toBe(true);   // no postcodes there
+    document.documentElement.lang = "nl";
+    expect(k.check("amount", "1.250,5")).toMatchObject({ ok: true, value: "1250.50", display: "1.250,50" });
+    expect(k.check("code", "12 34 5").message).toMatch(/6 digits; this has 5/);
+    expect(k.check("new-password", "short", { min: 12 }).ok).toBe(false);
+  });
+
+  it("typed fields in a form: the submit stops on the first error, a closed section opens, the form sends the clean value", async () => {
+    document.body.innerHTML = '<form id="f" novalidate><div class="kit-disclosure" data-kit-disclosure><h3 class="kit-disclosure__heading"><button class="kit-disclosure__head" type="button" aria-expanded="false" aria-controls="p1">Contact</button></h3>' +
+      '<div class="kit-disclosure__panel" id="p1"><div class="kit-disclosure__body"><div class="kit-field"><input class="kit-input" id="m" name="email" data-kit-field="email" required></div>' +
+      '<div class="kit-field"><input class="kit-input" id="ph" name="phone" data-kit-field="phone" data-calling-code="31" value="020 123 4567"></div></div></div></div><button type="submit">Send</button></form>';
+    load(kitJs);
+    await tick();
+    const form = document.getElementById("f") as HTMLFormElement, mail = document.getElementById("m") as HTMLInputElement;
+    let sent = 0;
+    form.addEventListener("submit", (e) => { e.preventDefault(); sent++; });
+    expect(document.getElementById("p1")!.hasAttribute("inert")).toBe(true);
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(sent).toBe(0);
+    expect(mail.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById("p1")!.getAttribute("data-state")).toBe("open");
+    expect(document.activeElement).toBe(mail);
+    expect(document.getElementById(mail.getAttribute("aria-describedby")!)!.textContent).toMatch(/Enter an email address/);
+    mail.value = "ana@studio.example";
+    mail.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(mail.hasAttribute("aria-invalid")).toBe(false);   // typing clears a fixed error
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(sent).toBe(1);
+    expect((document.getElementById("ph") as HTMLInputElement).value).toBe("+31 201 234 567");
+    const data = new FormData(form);
+    form.dispatchEvent(Object.assign(new Event("formdata", { bubbles: true }), { formData: data }));
+    expect(data.get("phone")).toBe("+31201234567");
+  });
+
+  it("password: adds a named reveal toggle that keeps focus, and hides the value again on submit", async () => {
+    document.body.innerHTML = '<form id="f"><div class="kit-field"><div class="kit-input-group kit-password" data-kit-password><input class="kit-input" id="pw" type="password" minlength="12" maxlength="20" autocomplete="off"></div></div></form>';
+    load(kitJs);
+    await tick();
+    const pw = document.getElementById("pw") as HTMLInputElement, btn = document.querySelector("[data-kit-reveal]") as HTMLButtonElement;
+    expect(btn.getAttribute("aria-label")).toBe("Show password");
+    expect(pw.getAttribute("autocomplete")).toBe("new-password");
+    expect(pw.hasAttribute("maxlength")).toBe(false);
+    expect(document.getElementById(pw.getAttribute("aria-describedby")!)!.textContent).toMatch(/At least 12 characters/);
+    pw.focus();
+    btn.click();
+    expect(pw.type).toBe("text");
+    expect(btn.getAttribute("aria-pressed")).toBe("true");
+    expect(document.activeElement).toBe(pw);
+    document.getElementById("f")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(pw.type).toBe("password");
+  });
+
+  it("one-time code: a pasted code spreads over the boxes and the joined digits go with the form", async () => {
+    document.body.innerHTML = '<form><div class="kit-otp" data-kit-otp data-name="code"><input class="kit-input kit-otp__box"><input class="kit-input kit-otp__box"><input class="kit-input kit-otp__box"><input class="kit-input kit-otp__box"></div></form>';
+    load(kitJs);
+    await tick();
+    const boxes = Array.from(document.querySelectorAll(".kit-otp__box")) as HTMLInputElement[];
+    const got = events(document.querySelector(".kit-otp")!, "kit:code");
+    expect(boxes[0].getAttribute("autocomplete")).toBe("one-time-code");
+    expect(boxes[2].getAttribute("aria-label")).toBe("Digit 3 of 4");
+    boxes[0].value = "12 34";
+    boxes[0].dispatchEvent(new Event("input", { bubbles: true }));
+    expect(boxes.map((b) => b.value)).toEqual(["1", "2", "3", "4"]);
+    expect(got[got.length - 1]).toMatchObject({ value: "1234", complete: true });
+    expect(new FormData(document.querySelector("form") as HTMLFormElement).get("code")).toBe("1234");
+    boxes[3].value = "";
+    boxes[3].focus();
+    key(boxes[3], "Backspace");
+    expect(document.activeElement).toBe(boxes[2]);
+    expect(boxes[2].value).toBe("");
+  });
+
+  it("address: the country decides the postcode and region fields", async () => {
+    document.body.innerHTML = '<form><fieldset data-kit-address><div class="kit-field"><select id="c" autocomplete="country"><option value="US">United States</option><option value="HK">Hong Kong</option><option value="NL">Netherlands</option></select></div>' +
+      '<div class="kit-field"><label class="kit-label" for="r">Region</label><input id="r" name="region" autocomplete="address-level1"></div>' +
+      '<div class="kit-field"><label class="kit-label" for="p">Postcode</label><input id="p" name="postcode" autocomplete="postal-code" data-kit-field="postcode"></div></fieldset></form>';
+    load(kitJs);
+    await tick();
+    const sel = document.getElementById("c") as HTMLSelectElement, pc = document.getElementById("p") as HTMLInputElement;
+    expect(document.querySelector('label[for="p"]')!.textContent).toBe("ZIP code");
+    expect(document.querySelector('label[for="r"]')!.textContent).toBe("State");
+    expect((document.getElementById("r") as HTMLInputElement).required).toBe(true);
+    sel.value = "HK";
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(pc.closest(".kit-field")!.hasAttribute("hidden")).toBe(true);
+    expect(pc.hasAttribute("name")).toBe(false);   // a hidden field sends nothing
+    sel.value = "NL";
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(pc.getAttribute("name")).toBe("postcode");
+    expect(pc.getAttribute("placeholder")).toBe("1234 AB");
+    expect(document.getElementById("r")!.closest(".kit-field")!.hasAttribute("hidden")).toBe(true);
+  });
+
+  it("date range: presets apply on pick, custom dates are swapped and checked against min, kit:range", async () => {
+    document.body.innerHTML = '<div class="kit-daterange" data-kit-daterange data-value="7d" data-presets="7d,30d,all" data-min="2026-01-01" aria-label="Period"></div>';
+    load(kitJs);
+    await tick();
+    const el = document.querySelector(".kit-daterange") as HTMLElement, trigger = el.querySelector("button") as HTMLButtonElement;
+    const got = events(el, "kit:range");
+    expect(trigger.getAttribute("aria-label")).toBe("Period, Last 7 days");
+    trigger.click();
+    const panel = document.getElementById(trigger.getAttribute("data-kit-popover")!)!;
+    expect(panel.hidden).toBe(false);
+    (panel.querySelector('[data-preset="all"]') as HTMLButtonElement).click();
+    expect(got[0]).toMatchObject({ preset: "all", from: "", to: "" });
+    expect(panel.hidden).toBe(true);
+    trigger.click();
+    const [from, to] = Array.from(panel.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
+    from.value = "2026-03-10";
+    to.value = "2026-03-01";
+    (panel.querySelector(".kit-btn--primary") as HTMLButtonElement).click();
+    expect(got[1]).toMatchObject({ preset: "custom", from: "2026-03-01", to: "2026-03-10" });
+    trigger.click();
+    from.value = "2025-12-01";
+    key(from, "Enter");
+    expect(got.length).toBe(2);
+    expect(from.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("sheet: opens on its lowest stop, steps through the stops and closes on a flick down", async () => {
+    document.body.innerHTML = '<button type="button" data-kit-open="sh">Open</button><dialog class="kit-sheet" id="sh" data-kit-sheet data-detents="0.3 0.9"><div class="kit-sheet__grab"><span class="kit-sheet__handle"></span>' +
+      '<div class="kit-sheet__head"><h2 class="kit-sheet__title">Stops</h2><button type="button" data-kit-detent aria-expanded="false">Expand</button></div></div><div class="kit-sheet__body">x</div></dialog>';
+    load(kitJs);
+    await tick();
+    const d = document.getElementById("sh") as HTMLDialogElement, step = d.querySelector("[data-kit-detent]") as HTMLButtonElement;
+    const got = events(d, "kit:detent");
+    (document.querySelector("[data-kit-open]") as HTMLButtonElement).click();
+    expect(d.open).toBe(true);
+    expect(got[0]).toMatchObject({ index: 0 });
+    expect(d.style.transform).toMatch(/translateY\([1-9]\d*px\)/);   // the lower stop is a position, not a smaller sheet
+    step.click();
+    expect(got[1]).toMatchObject({ index: 1 });
+    expect(step.getAttribute("aria-expanded")).toBe("true");
+    expect(d.style.transform).toBe("translateY(0px)");
+    step.click();
+    const grab = d.querySelector(".kit-sheet__grab")!;
+    grab.dispatchEvent(new MouseEvent("pointerdown", { button: 0, clientY: 100, bubbles: true }));
+    d.dispatchEvent(new MouseEvent("pointermove", { clientY: 400, bubbles: true }));
+    d.dispatchEvent(new MouseEvent("pointerup", { clientY: 400, bubbles: true }));
+    expect(d.open).toBe(false);   // pulled past half below the lowest stop
+  });
+
+  it("carousel: the buttons follow the scroll, the track keys move, the position is written", async () => {
+    document.body.innerHTML = '<section class="kit-carousel" data-kit-carousel aria-label="Reports"><div class="kit-carousel__head"><h2>R</h2><span class="kit-carousel__pos"></span>' +
+      '<button type="button" data-kit-prev aria-label="Previous">p</button><button type="button" data-kit-next aria-label="Next">n</button></div><ul class="kit-carousel__track"><li class="kit-carousel__item">a</li><li class="kit-carousel__item">b</li><li class="kit-carousel__item">c</li></ul></section>';
+    const track = document.querySelector(".kit-carousel__track") as HTMLElement;
+    Object.defineProperty(track, "scrollTo", { value: undefined });
+    Object.defineProperty(track, "scrollLeft", { value: 0, writable: true });
+    Object.defineProperty(track, "clientWidth", { value: 200 });
+    Object.defineProperty(track, "scrollWidth", { value: 600 });
+    Array.from(track.children).forEach((it, i) => { Object.defineProperty(it, "offsetLeft", { value: i * 200 }); Object.defineProperty(it, "offsetWidth", { value: 200 }); });
+    load(kitJs);
+    await tick();
+    const prev = document.querySelector("[data-kit-prev]") as HTMLButtonElement, next = document.querySelector("[data-kit-next]") as HTMLButtonElement;
+    expect(track.tabIndex).toBe(0);
+    expect(prev.getAttribute("aria-disabled")).toBe("true");
+    expect(track.getAttribute("data-more")).toBe("end");
+    expect(document.querySelector(".kit-carousel__pos")!.textContent).toBe("1 of 3");
+    next.click();
+    expect(track.scrollLeft).toBe(200);
+    expect(prev.hasAttribute("aria-disabled")).toBe(false);
+    key(track, "End");
+    expect(next.getAttribute("aria-disabled")).toBe("true");
+    key(track, "ArrowLeft");
+    expect(track.scrollLeft).toBe(200);
+  });
+
+  it("reorder: Space picks up, arrows move, Space drops; Escape cancels; Alt+arrow moves at once", async () => {
+    document.body.innerHTML = '<ul class="kit-list kit-reorder" data-kit-reorder aria-label="Agenda">' + ["a", "b", "c"].map((id) =>
+      `<li class="kit-list__item" data-id="${id}"><button type="button" data-kit-handle aria-label="Move ${id}">=</button><span class="kit-list__title">${id}</span></li>`).join("") + "</ul>";
+    load(kitJs);
+    await tick();
+    const list = document.querySelector(".kit-reorder") as HTMLElement;
+    const order = () => Array.from(list.querySelectorAll("[data-id]")).map((r) => r.getAttribute("data-id")).join("");
+    const handle = (id: string) => list.querySelector(`[data-id="${id}"] [data-kit-handle]`) as HTMLButtonElement;
+    const got = events(list, "kit:reorder");
+    handle("a").focus();
+    key(handle("a"), " ");
+    expect(list.querySelector('[data-id="a"]')!.classList.contains("is-moving")).toBe(true);
+    key(handle("a"), "ArrowDown");
+    key(handle("a"), "ArrowDown");
+    key(handle("a"), " ");
+    expect(order()).toBe("bca");
+    expect(got[0]).toMatchObject({ id: "a", from: 0, to: 2 });
+    expect(document.activeElement).toBe(handle("a"));
+    key(handle("a"), " ");
+    key(handle("a"), "ArrowUp");
+    key(handle("a"), "Escape");
+    expect(order()).toBe("bca");
+    key(handle("b"), "ArrowDown", { altKey: true });
+    expect(order()).toBe("cba");
+  });
+
+  it("swipe actions: a mouse never swipes; a delete hides the row with Undo, and Undo brings it back", async () => {
+    document.body.innerHTML = '<ul data-kit-swipe><li class="kit-swipe" data-name="Dock 4 stuck"><div class="kit-swipe__actions"><button class="kit-swipe__action" type="button" data-value="delete" data-remove="Message deleted">Delete</button></div>' +
+      '<div class="kit-swipe__row">Dock 4 stuck</div></li></ul>';
+    load(kitJs);
+    await tick();
+    const li = document.querySelector(".kit-swipe") as HTMLElement, row = li.querySelector(".kit-swipe__row") as HTMLElement, act = li.querySelector(".kit-swipe__action") as HTMLButtonElement;
+    const got = events(li, "kit:swipe");
+    expect(act.getAttribute("aria-label")).toBe("Delete Dock 4 stuck");
+    expect(li.querySelector(".kit-swipe__actions")!.hasAttribute("inert")).toBe(true);
+    row.dispatchEvent(Object.assign(new MouseEvent("pointerdown", { clientX: 200, bubbles: true }), { pointerType: "mouse" }));
+    document.dispatchEvent(Object.assign(new MouseEvent("pointermove", { clientX: 50, bubbles: true }), { pointerType: "mouse" }));
+    expect(row.style.transform).toBe("");
+    act.click();
+    expect(li.hidden).toBe(true);
+    expect(got[0]).toMatchObject({ value: "delete", state: "removed" });
+    const undo = Array.from(document.querySelectorAll(".kit-toast__action")).pop() as HTMLButtonElement;
+    expect(undo.textContent).toBe("Undo");
+    undo.click();
+    expect(li.hidden).toBe(false);
+    expect(got[1]).toMatchObject({ state: "restored" });
+  });
+
+  it("splitter: arrows, Home, Enter folding and back, kit:resize once per change; aria-disabled keeps the size", async () => {
+    document.body.innerHTML = '<div class="kit-splitpane"><div class="kit-splitpane__pane" id="side">s</div><div class="kit-splitter" aria-controls="side" aria-label="Resize" data-kit-splitter data-min="100" data-max="500" data-default="300" data-persist="t1"></div><div class="kit-splitpane__pane">m</div></div>';
+    load(kitJs);
+    await tick();
+    const bar = document.querySelector(".kit-splitter") as HTMLElement, pane = document.getElementById("side") as HTMLElement;
+    const got = events(bar, "kit:resize");
+    expect(bar.getAttribute("role")).toBe("separator");
+    expect(bar.getAttribute("aria-valuenow")).toBe("300");
+    key(bar, "ArrowRight");
+    expect(pane.style.flexBasis).toBe("316px");
+    key(bar, "ArrowLeft", { shiftKey: true });
+    expect(bar.getAttribute("aria-valuenow")).toBe("252");
+    key(bar, "Enter");
+    expect(bar.getAttribute("aria-valuenow")).toBe("100");
+    key(bar, "Enter");
+    expect(bar.getAttribute("aria-valuenow")).toBe("252");
+    key(bar, "End");
+    expect(got.map((g) => g.size)).toEqual([316, 252, 100, 252, 500]);
+    expect(localStorage.getItem("kit-split:t1")).toBe("500");
+    bar.setAttribute("aria-disabled", "true");
+    key(bar, "Home");
+    expect(bar.getAttribute("aria-valuenow")).toBe("500");
+    localStorage.removeItem("kit-split:t1");
+  });
+
+  it("disclosure: toggles with aria-expanded, a closed panel is inert, data-single keeps one open", async () => {
+    document.body.innerHTML = '<div class="kit-disclosure" data-kit-disclosure data-single>' + [1, 2].map((i) =>
+      `<h3 class="kit-disclosure__heading"><button class="kit-disclosure__head" type="button" aria-expanded="${i === 1}" aria-controls="dp${i}">S${i}</button></h3><div class="kit-disclosure__panel" id="dp${i}"><div class="kit-disclosure__body">b</div></div>`).join("") + "</div>";
+    load(kitJs);
+    await tick();
+    const [b1, b2] = Array.from(document.querySelectorAll(".kit-disclosure__head")) as HTMLButtonElement[];
+    const got = events(document.querySelector(".kit-disclosure")!, "kit:toggle");
+    expect(document.getElementById("dp1")!.hasAttribute("inert")).toBe(false);
+    expect(document.getElementById("dp2")!.hasAttribute("inert")).toBe(true);
+    b2.click();
+    expect(b2.getAttribute("aria-expanded")).toBe("true");
+    expect(b1.getAttribute("aria-expanded")).toBe("false");
+    expect(document.getElementById("dp1")!.getAttribute("data-state")).toBe("closed");
+    expect(got.map((g) => g.open)).toEqual([false, true]);
+  });
+
+  it("toolbar overflow: buttons that do not fit fold into More in order, the primary stays, a menu item presses its button", async () => {
+    document.body.innerHTML = '<div class="kit-toolbar kit-overflow" role="toolbar" aria-label="Actions" data-kit-overflow data-more-label="More actions">' +
+      '<button class="kit-btn kit-btn--primary" type="button">Share</button><button class="kit-btn" type="button" aria-pressed="false">Totals</button><button class="kit-btn" type="button">Export</button><button class="kit-btn" type="button" data-priority="low">Print</button></div>';
+    const row = document.querySelector(".kit-overflow") as HTMLElement;
+    Object.defineProperty(row, "clientWidth", { value: 260 });
+    Array.from(row.children).forEach((c) => { (c as HTMLElement).getBoundingClientRect = () => box(80); });
+    const OrigDiv = HTMLDivElement.prototype.getBoundingClientRect;
+    HTMLDivElement.prototype.getBoundingClientRect = function () { return this.classList.contains("kit-overflow__more") ? box(40) : OrigDiv.call(this); };
+    load(kitJs);
+    await tick();
+    HTMLDivElement.prototype.getBoundingClientRect = OrigDiv;
+    const [share, totals, exp, print] = Array.from(row.querySelectorAll(":scope > button")) as HTMLButtonElement[];
+    const more = row.querySelector(".kit-overflow__more") as HTMLElement;
+    expect(more.hidden).toBe(false);
+    expect(share.hidden).toBe(false);
+    expect(print.hidden).toBe(true);   // low priority first
+    expect(exp.hidden).toBe(true);
+    expect(totals.hidden).toBe(false);
+    const moreBtn = more.querySelector("[data-kit-menu]") as HTMLButtonElement;
+    expect(moreBtn.getAttribute("aria-label")).toBe("More actions");
+    moreBtn.click();
+    const items = Array.from(more.querySelectorAll(".kit-menu__item")) as HTMLButtonElement[];
+    expect(items.map((i) => i.textContent)).toEqual(["Export", "Print"]);   // in the row's order
+    let printed = 0;
+    print.addEventListener("click", () => printed++);
+    items[1].click();
+    expect(printed).toBe(1);
+  });
+
+  it("breadcrumbs: the middle levels fold into a menu after the first until the trail fits", async () => {
+    document.body.innerHTML = '<nav class="kit-breadcrumbs" aria-label="Breadcrumb" data-kit-breadcrumbs><ol>' + ["Home", "Region", "Station", "Docks"].map((t) => `<li><a href="#${t}">${t}</a></li>`).join("") + "<li>Dock 4</li></ol></nav>";
+    const ol = document.querySelector("ol") as HTMLElement;
+    Object.defineProperty(ol, "clientWidth", { value: 350 });
+    Object.defineProperty(ol, "scrollWidth", { get: () => Array.from(ol.children).filter((c) => !(c as HTMLElement).hidden).reduce((s, c) => s + ((c as HTMLElement).className ? 40 : 100), 0) });
+    load(kitJs);
+    await tick();
+    const levels = Array.from(ol.children) as HTMLElement[];
+    expect(levels[levels.length - 1].getAttribute("aria-current")).toBe("page");
+    const more = ol.querySelector(".kit-breadcrumbs__more") as HTMLElement;
+    expect(more.hidden).toBe(false);
+    expect(levels.filter((l) => l.hidden).map((l) => l.textContent)).toEqual(["Region", "Station"]);
+    const links = Array.from(more.querySelectorAll("a.kit-menu__item")).map((a) => a.textContent);
+    expect(links).toEqual(["Region", "Station"]);
+    expect(more.querySelector("button")!.getAttribute("aria-label")).toBe("Show 2 more levels");
   });
 });

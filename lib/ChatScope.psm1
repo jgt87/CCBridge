@@ -5,6 +5,7 @@
 # the files its messages named), widened with the files those import or are used by. A new message
 # that names files only in other areas, and does not continue the earlier work, starts a new chat.
 
+Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 foreach ($m in 'Workspace', 'Imports') { Import-Module (Join-Path $PSScriptRoot "$m.psm1") }
 

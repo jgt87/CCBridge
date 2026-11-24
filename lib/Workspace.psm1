@@ -370,6 +370,29 @@ function Move-TempFile([string]$Tmp, [string]$Path) {
     }
 }
 
+function Write-AtomicText {
+    <# Writes text through a temporary file beside Path: written in full, read back and compared, then
+       put in place with Move-TempFile (its retries cover OneDrive or a scanner holding the file). A
+       crash or a held file never leaves Path half written. The encoding's preamble (BOM) is written
+       exactly as [IO.File]::WriteAllText would. A Path that is a junction or symbolic link is written
+       through in place, as before: replacing it would swap the link for a plain file. #>
+    param([string]$Path, [string]$Text, [Text.Encoding]$Encoding = (New-Object Text.UTF8Encoding($false)))
+    if ((Test-Path -LiteralPath $Path) -and (Test-LinkPath $Path)) { [IO.File]::WriteAllText($Path, $Text, $Encoding); return }
+    $pre = $Encoding.GetPreamble()
+    $body = $Encoding.GetBytes($Text)
+    $bytes = New-Object byte[] ($pre.Length + $body.Length)
+    [Array]::Copy($pre, 0, $bytes, 0, $pre.Length)
+    [Array]::Copy($body, 0, $bytes, $pre.Length, $body.Length)
+    $tmp = "$Path.tmp"
+    [IO.File]::WriteAllBytes($tmp, $bytes)
+    $back = [IO.File]::ReadAllBytes($tmp)
+    if ($back.Length -ne $bytes.Length -or [Convert]::ToBase64String($back) -ne [Convert]::ToBase64String($bytes)) {
+        try { [IO.File]::Delete($tmp) } catch { }
+        throw "The temporary copy of $Path did not read back as written; the file was left as it was."
+    }
+    Move-TempFile $tmp $Path
+}
+
 function Test-LinkPath([string]$Path) {
     <# True for a junction or symbolic link, which a walk must not follow. OneDrive marks its files and
        folders as reparse points too (Files On-Demand: a cloud tag, no link type), so the attribute
@@ -567,6 +590,6 @@ function Save-SourceFile {
     ConvertTo-RelativePath $ProjectRoot $target
 }
 
-Export-ModuleMember -Function Get-FullRoot, Test-RootedPath, Get-PathLeaf, Test-PathChars,Move-TempFile, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
+Export-ModuleMember -Function Get-FullRoot, Test-RootedPath, Get-PathLeaf, Test-PathChars,Move-TempFile, Write-AtomicText, Resolve-ProjectLinkPath, Test-LinkPath, Get-ProtectedPatterns, Test-ProtectedPath, Sync-ProtectedVault, Restore-ProtectedFiles, Get-ProjectOverview, Assert-NoOutsideLink, Get-OneDriveLocation, Get-OneDriveRoot, Get-ProjectsRoot, Test-UnderOneDrive, Get-CCBridgeProjects, New-CCBridgeProject,
     Get-ProjectStateDir, Resolve-ProjectPath, ConvertTo-RelativePath, Get-ProjectFiles, Format-ProjectTree,
     Get-SourceDir, Test-InSource, Sync-SourceVault, Restore-SourceData, Save-SourceFile, Get-FileFingerprint, Get-SharedRoot, Get-SharedPrefix, Initialize-SharedRoot, Get-SharedNotes

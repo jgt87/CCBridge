@@ -138,6 +138,22 @@ Describe 'The saved project setup' {
             (Get-ProjectSetup $p).build | Should Be ''
         } finally { Remove-Item $p -Recurse -Force }
     }
+    It 'keeps fields it does not know when it saves' {
+        $p = New-SetupProject
+        try {
+            $f = Join-Path $p '.streamhub\project.json'
+            $null = New-Item -ItemType Directory -Force -Path (Split-Path $f)
+            [IO.File]::WriteAllText($f, '{"build":"single","futureField":"kept","nested":{"a":1},"answers":{"q1":"yes"}}')
+            $null = Save-ProjectSetup $p @{ chosenBy = 'user' }
+            $j = [IO.File]::ReadAllText($f) | ConvertFrom-Json
+            $j.futureField | Should Be 'kept'
+            $j.nested.a | Should Be 1
+            $j.build | Should Be 'single'
+            $j.answers.q1 | Should Be 'yes'
+            $j.chosenBy | Should Be 'user'
+            Test-Path -LiteralPath "$f.tmp" | Should Be $false
+        } finally { Remove-Item $p -Recurse -Force }
+    }
     It 'is named to Copilot in the project context' {
         $p = New-SetupProject
         try {

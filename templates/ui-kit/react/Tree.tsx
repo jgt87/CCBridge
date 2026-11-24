@@ -10,6 +10,21 @@ export interface TreeNode {
   children?: TreeNode[];
 }
 
+// Type-ahead: a printable key moves to the next row whose text starts with what was typed in the last
+// 600 ms (one letter again steps through the rows with that letter).
+let typed = "";
+let typedAt = 0;
+function typeahead(rows: HTMLDivElement[], current: Element, key: string) {
+  const now = Date.now();
+  const k = key.toLowerCase();
+  typed = now - typedAt > 600 ? k : typed + k;
+  typedAt = now;
+  const at = rows.indexOf(current as HTMLDivElement);
+  const order = rows.slice(at + 1).concat(rows.slice(0, at + 1));
+  const starts = (want: string) => (r: HTMLDivElement) => (r.textContent || "").trim().toLowerCase().startsWith(want);
+  return order.find(starts(typed)) || (typed.length > 1 ? undefined : order.find(starts(k)));
+}
+
 /** A hierarchy (folders, an organisation): toggles on branches, the arrow keys move and open or close, Enter or Space picks. */
 export function Tree({ nodes, label, selected, onSelect, defaultOpen = [] }: { nodes: TreeNode[]; label: string; selected?: string; onSelect: (value: string) => void; defaultOpen?: string[] }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(defaultOpen));
@@ -57,7 +72,14 @@ export function Tree({ nodes, label, selected, onSelect, defaultOpen = [] }: { n
       " ": pick,
     };
     const act = Object.prototype.hasOwnProperty.call(keys, e.key) ? keys[e.key] : undefined;
-    if (!act) return;
+    if (!act) {
+      if (e.key.length !== 1 || e.key === " " || e.ctrlKey || e.metaKey || e.altKey) return;
+      const to = typeahead(list, e.currentTarget, e.key);
+      if (!to) return;
+      focusRow(to);
+      e.preventDefault();
+      return;
+    }
     act();
     e.preventDefault();
   };
@@ -93,7 +115,10 @@ export function Tree({ nodes, label, selected, onSelect, defaultOpen = [] }: { n
               <span aria-hidden="true" className="kit-tree__spacer" />
             )}
             {n.icon}
-            {n.label}
+            {/* A long name ends in an ellipsis on one line; the full name shows on hover (title). */}
+            <span className="kit-tree__label" title={typeof n.label === "string" ? n.label : undefined}>
+              {n.label}
+            </span>
           </div>
           {branch ? <ul role="group">{render(n.children!, n)}</ul> : null}
         </li>

@@ -170,7 +170,7 @@ function Set-UiHintShown($State, [string]$Name) {
     $h = Get-UiHints $State
     $h[$Name] = (Get-Date).ToString('s')
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $script:HintsFile)
-    [IO.File]::WriteAllText($script:HintsFile, (ConvertTo-Json -InputObject $h -Compress), (New-Object Text.UTF8Encoding($false)))
+    Write-AtomicText $script:HintsFile (ConvertTo-Json -InputObject $h -Compress) (New-Object Text.UTF8Encoding($false))
 }
 
 function Get-WorkerStopReason($Worker) {
@@ -1255,7 +1255,7 @@ function Invoke-ApiRequest($Ctx, $State) {
         }
         '^POST /api/undo$'    {
             if (-not (Test-PageOrigin $Ctx $State)) { return Send-Json $Ctx @{ error = 'Only the StreamHub page itself may do this.' } 403 }
-            # Without "to": the newest change set. With "to": that one and every newer one (History > Restore).
+            # Without "to": the newest change set. With "to": that one and every newer one (History > Undo to here).
             $b = Read-JsonBody $Ctx
             $to = "$($b.to)"
             if ($to -and $to -notmatch '^[\w.-]+$') { throw "Unknown change set '$to'" }

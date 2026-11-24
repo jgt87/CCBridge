@@ -18,12 +18,12 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import { motion, useAnimation } from "motion/react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { type HoldVariant, holdCompleted, holdFillClass, holdIconVariant } from "@/lib/hold-button";
 import { cn } from "@/lib/utils";
 
-const holdButtonVariants = cva("relative min-w-40 touch-none overflow-hidden", {
+const holdButtonVariants = cva("relative min-w-40 touch-manipulation select-none overflow-hidden", {
   variants: {
     variant: {
       red: [
@@ -74,6 +74,8 @@ interface HoldButtonProps
   onHoldComplete?: () => void;
 }
 
+const isHoldKey = (k: string) => k === " " || k === "Enter";
+
 const VARIANT_ICON: Record<HoldVariant, typeof Trash2Icon> = {
   red: Trash2Icon,
   green: ArchiveXIcon,
@@ -88,8 +90,12 @@ function useHold(holdDuration: number, disabled: boolean | undefined, onHoldComp
   const holdingRef = useRef(false);
   const controls = useAnimation();
 
+  const [done, setDone] = useState(false);
+
   async function handleHoldStart() {
-    if (disabled) return;
+    // CCBridge: one hold at a time (a held key repeats; a second pointer does not restart it).
+    if (disabled || holdingRef.current) return;
+    setDone(false);
     setIsHolding(true);
     holdingRef.current = true;
     const started = Date.now();
@@ -105,6 +111,7 @@ function useHold(holdDuration: number, disabled: boolean | undefined, onHoldComp
     if (holdCompleted(holdingRef.current, started, Date.now(), holdDuration)) {
       holdingRef.current = false;
       setIsHolding(false);
+      setDone(true);
       onHoldComplete?.();
     }
   }
@@ -119,7 +126,7 @@ function useHold(holdDuration: number, disabled: boolean | undefined, onHoldComp
     });
   }
 
-  return { isHolding, controls, handleHoldStart, handleHoldEnd };
+  return { isHolding, done, controls, handleHoldStart, handleHoldEnd };
 }
 
 export default function HoldButton({
@@ -132,18 +139,35 @@ export default function HoldButton({
   onHoldComplete,
   ...props
 }: HoldButtonProps) {
-  const { isHolding, controls, handleHoldStart, handleHoldEnd } = useHold(holdDuration, props.disabled, onHoldComplete);
+  const { isHolding, done, controls, handleHoldStart, handleHoldEnd } = useHold(holdDuration, props.disabled, onHoldComplete);
   const Icon = VARIANT_ICON[holdIconVariant(variant)];
+  const helpId = useId();
 
   return (
+    <>
     <Button
+      aria-describedby={helpId}
       className={cn(holdButtonVariants({ variant, className }))}
-      onMouseDown={handleHoldStart}
-      onMouseLeave={handleHoldEnd}
-      onMouseUp={handleHoldEnd}
-      onTouchCancel={handleHoldEnd}
-      onTouchEnd={handleHoldEnd}
-      onTouchStart={handleHoldStart}
+      onBlur={handleHoldEnd}
+      // CCBridge: the hold is the action, never a click (Space and Enter would click on their own).
+      onClick={(e) => e.preventDefault()}
+      onKeyDown={(e) => {
+        // Space and Enter hold too, as with the kit's hold button; a held key repeats and does not restart it.
+        if (!isHoldKey(e.key)) return;
+        e.preventDefault();
+        if (!e.repeat) void handleHoldStart();
+      }}
+      onKeyUp={(e) => {
+        if (isHoldKey(e.key)) e.preventDefault();
+        handleHoldEnd();
+      }}
+      onPointerCancel={handleHoldEnd}
+      onPointerDown={(e) => {
+        // Only the main button holds (not a right or middle press).
+        if (e.button === 0) void handleHoldStart();
+      }}
+      onPointerLeave={handleHoldEnd}
+      onPointerUp={handleHoldEnd}
       {...props}
     >
       <motion.div
@@ -156,5 +180,13 @@ export default function HoldButton({
         {isHolding ? holdingLabel : label}
       </span>
     </Button>
+    {/* Beside the button, so its name stays its label: the hold described, and announced when done. */}
+    <span hidden id={helpId}>
+      Press and hold to confirm
+    </span>
+    <span aria-live="polite" className="sr-only">
+      {done ? `${label}: confirmed` : ""}
+    </span>
+    </>
   );
 }

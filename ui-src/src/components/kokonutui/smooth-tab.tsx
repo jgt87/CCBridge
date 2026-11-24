@@ -279,6 +279,29 @@ function TabLabelParts({ item }: { item: TabItem }) {
   );
 }
 
+// CCBridge: the arrow keys move between the tabs (only the selected one is a Tab stop), Home and End
+// jump to the first and last; the tab reached is selected.
+const TAB_KEYS: Record<string, (i: number, n: number) => number> = {
+  ArrowRight: (i, n) => (i + 1) % n,
+  ArrowDown: (i, n) => (i + 1) % n,
+  ArrowLeft: (i, n) => (i - 1 + n) % n,
+  ArrowUp: (i, n) => (i - 1 + n) % n,
+  Home: () => 0,
+  End: (_i, n) => n - 1,
+};
+
+function moveBetweenTabs(e: React.KeyboardEvent<HTMLDivElement>) {
+  const step = TAB_KEYS[e.key];
+  if (!step) return;
+  const tabs = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+  const at = tabs.indexOf(document.activeElement as HTMLButtonElement);
+  if (at < 0 || tabs.length === 0) return;
+  e.preventDefault();
+  const next = tabs[step(at, tabs.length)];
+  next.focus();
+  next.click();
+}
+
 function TabButton({
   item,
   isSelected,
@@ -305,7 +328,8 @@ function TabButton({
   };
   return (
     <motion.button
-      aria-controls={`panel-${item.id}`}
+      // CCBridge: only the selected tab's panel exists, so only that tab names it.
+      aria-controls={isSelected ? `panel-${item.id}` : undefined}
       aria-selected={isSelected}
       className={cn(
         "relative flex items-center justify-center gap-1 rounded-lg px-1 py-1.5",
@@ -349,6 +373,7 @@ function TabPanel({ selected, selectedItem, direction }: { selected: string; sel
             className="absolute inset-0 h-full w-full overflow-y-auto bg-card will-change-transform"
             custom={direction}
             exit="exit"
+            aria-labelledby={`tab-${selected}`}
             id={`panel-${selected}`}
             initial="enter"
             key={`card-${selected}`}
@@ -411,7 +436,7 @@ export default function SmoothTab({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
-        aria-label="Smooth tabs"
+        aria-label="Side panel sections"
         className={cn(
           "relative flex items-center justify-between gap-1 p-1",
           "w-full bg-background",
@@ -419,6 +444,7 @@ export default function SmoothTab({
           "transition duration-200",
           className
         )}
+        onKeyDown={moveBetweenTabs}
         ref={containerRef}
         role="tablist"
       >

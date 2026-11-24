@@ -49,6 +49,7 @@ export function SearchBox({ options, onPick, placeholder = "Search", label = "Se
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return; // Enter or Escape that ends an input-method composition
           if (e.key === "ArrowDown") {
             e.preventDefault();
             step(1);
@@ -62,6 +63,12 @@ export function SearchBox({ options, onPick, placeholder = "Search", label = "Se
             e.preventDefault(); // the list only: a dialog or side panel around it stays open
             e.stopPropagation();
             setOpen(false);
+          } else if (e.key === "Escape" && text) {
+            // A second Escape (the list already closed) clears the text.
+            e.preventDefault();
+            e.stopPropagation();
+            setText("");
+            setActive(-1);
           }
         }}
         placeholder={placeholder}

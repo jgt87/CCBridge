@@ -64,6 +64,19 @@ Describe 'Which database queries run' {
         # The same one-pass reading of comments, strings and quoted names as Test-DbQuery.
         $t | Should Match 'comments, strings and quoted names in one pass'
         $t | Should Match ([regex]::Escape('|\[[^\]]*\]|"[^"]*"'))
+        # The script writes its CSV with the same cell rule as the app (no Export-Csv of DataRows).
+        $t | Should Not Match 'Export-Csv'
+        $t | Should Match 'function ConvertTo-DbCsvCell'
+    }
+    It 'writes text that Excel would run as a formula as plain text, and keeps numbers' {
+        $res = [pscustomobject]@{ columns = @('A', 'B'); rows = @(, @('=1+1', '+SUM(A1)')) + @(, @('@cmd', "`tx")) + @(, @('-2', -3.5)) + @(, @('-1+cmd|x', 'ok')) }
+        ConvertTo-DbCsv $res | Should Be "A,B`r`n'=1+1,'+SUM(A1)`r`n'@cmd,'`tx`r`n-2,-3.5`r`n'-1+cmd|x,ok`r`n"
+        # The refresh script carries the same rule: run its function on the same cells.
+        $null = Write-DbRefreshScript $p
+        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $p 'Scripts\Refresh-Database.ps1'), [ref]$null, [ref]$null)
+        $fn = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'ConvertTo-DbCsvCell' }, $true)
+        $sb = [scriptblock]::Create($fn.Extent.Text + "`n" + '@("=1+1", "-2", -3.5, "a,b") | ForEach-Object { ConvertTo-DbCsvCell $_ }')
+        (& $sb) -join '|' | Should Be "'=1+1|-2|-3.5|`"a,b`""
     }
 }
 

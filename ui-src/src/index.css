@@ -63,7 +63,10 @@
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
     --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
+    /* Secondary text (DESIGN.md "Pencil"): at least 4.5:1 on the darkest band it sits on, the 5% black
+       tint (#f2f2f2: the palette's active row, the count chip) and the 0.97 shelf of the Beta tag
+       (operator, 2026-11-24; at 0.556 it was 4.2:1 there). */
+    --muted-foreground: oklch(0.535 0 0);
     --accent: oklch(0.97 0 0);
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
@@ -103,7 +106,9 @@
     --secondary: oklch(0.348 0.004 84.6);
     --secondary-foreground: oklch(0.901 0.002 84.6);
     --muted: oklch(0.348 0.004 84.6);
-    --muted-foreground: oklch(0.751 0.003 84.6);
+    /* Dust, one step above Copilot's 174 grey (rgb 178): at least 4.5:1 also on a popover's 10% white
+       active row (operator, 2026-11-24; at 0.751 it was 4.38:1 there). */
+    --muted-foreground: oklch(0.765 0.003 84.6);
     --accent: oklch(0.348 0.004 84.6);
     --accent-foreground: oklch(0.901 0.002 84.6);
     --destructive: oklch(0.704 0.191 22.216);
@@ -143,7 +148,25 @@
     background-color: var(--popover);
     color: var(--popover-foreground);
     }
+  /* One keyboard focus ring for every control (DESIGN.md "Focus"; operator, 2026-11-24): 2px Ring,
+     2px away. In the base layer and inside :where(), so a component's own focus style still wins.
+     Text fields, selects and text areas are left out: they show focus by their border. */
+  :where(:focus-visible):where(:not(input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=reset], [type=color], [type=file]), select, textarea, [contenteditable])) {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    }
 }
+
+/* Reduced motion (the system setting), for the whole app: transitions keep their fades and colour
+   changes and drop movement (position, size, scale). Unlayered and !important, so it wins over every
+   utility and kit rule; the animation library follows the same setting (MotionConfig in main.tsx). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-property: opacity, color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, box-shadow !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Markdown in Copilot replies (CCBridge) */
 .ccb-markdown p { margin: 0.4rem 0; }
 .ccb-markdown ul { list-style: disc; padding-left: 1.25rem; margin: 0.4rem 0; }

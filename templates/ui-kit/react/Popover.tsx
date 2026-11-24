@@ -20,7 +20,7 @@ export function Popover({ label, children, align = "left", head, className = "ki
     };
     // Escape closes the popover only (a dialog or side panel around it stays open), and not when another part already used it.
     const escape = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) {
+      if (e.key === "Escape" && !e.defaultPrevented && !e.isComposing) {
         e.preventDefault();
         e.stopPropagation();
         setOpen(false);
@@ -36,10 +36,11 @@ export function Popover({ label, children, align = "left", head, className = "ki
   }, [open]);
   return (
     <div className="kit-popover-wrap" ref={wrap}>
-      <button aria-controls={id} aria-expanded={open} className={className} onClick={() => setOpen((o) => !o)} ref={button} type="button">
+      <button aria-controls={id} aria-expanded={open} aria-haspopup="dialog" className={className} id={id + "-button"} onClick={() => setOpen((o) => !o)} ref={button} type="button">
         {label}
       </button>
-      <div className={"kit-popover" + (align === "right" ? " kit-popover--right" : "")} hidden={!open} id={id} ref={panel} tabIndex={-1}>
+      {/* A non-modal dialog named by its button: no aria-modal and no focus trap. */}
+      <div aria-labelledby={id + "-button"} className={"kit-popover" + (align === "right" ? " kit-popover--right" : "")} hidden={!open} id={id} ref={panel} role="dialog" tabIndex={-1}>
         {head ? <p className="kit-popover__head">{head}</p> : null}
         {children}
       </div>

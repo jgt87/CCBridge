@@ -6,6 +6,17 @@
   hold-button, action-search-bar, file-upload, smooth-tab.
   The sortable table with pages (data-kit-sort, data-kit-pages, data-kit-rows="external") and the
   theme switch (data-kit-theme) are the kit's own.
+
+  One file on purpose (about 220 KB, 2026-11-24): a plain page loads the kit with one script tag that
+  works from file://, with no loader and no order between files to get wrong; the forms parts
+  (listbox, number field, typed fields, ...) stay here rather than in a kit-forms.js of their own.
+
+  Deliberate differences from the shared element specs (kept as they are; a later pass may align them):
+  avatar 44px; board columns 220px with no phone layout; calendar days at 12px with no agenda view;
+  toast radius and stack limit; tooltip padding; chip text 14px; drawer 440px; tree indent 24px; the
+  spinner is CSS; command palette width; menu with no max height; confirm about 520px wide without a
+  solid danger fill; slider track; tab bold-width reserve; chart markers and value labels; multiselect
+  row height; popover clamp, flip and portal; search box icon and clear button; date range trigger.
 */
 (function () {
   "use strict";
@@ -32,6 +43,57 @@
   // Escape that closed a kit part stops there: a dialog or side panel around it stays open.
   function escapeHandled(e) { e.preventDefault(); e.stopPropagation(); }
 
+  // Disabled controls stay focusable (shared element specs, docs/19 section 7): aria-disabled="true" on
+  // a control or on a group around it keeps its Tab stop and its place in arrow-key order, and keeps
+  // focus when it turns disabled while focused (Save that becomes Saving). aria-disabled stops nothing
+  // by itself, so this guard blocks every change first (capture phase on the document): click, Enter,
+  // Space, the value keys of native inputs, typing, paste, cut, drop, drag and wheel. A busy button or
+  // switch (aria-busy="true") counts as disabled too. A disabled field leaves the form data. Native
+  // `disabled` keeps working as before; Tab, Escape and pointer-down (closing a menu) still pass.
+  var BUSY_CONTROL = 'button, [role="button"], [role="switch"]';
+  var VALUE_INPUT = /^(range|number|date|time|datetime-local|month|week|color)$/;
+  var VALUE_KEYS = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Home: 1, End: 1, PageUp: 1, PageDown: 1 };
+  function nodeElement(node) { return (node && node.nodeType === 1 ? node : node && node.parentElement) || null; }
+  function offControl(node) {
+    var el = nodeElement(node);
+    if (!el || !el.closest) return null;
+    var off = el.closest('[aria-disabled="true"]');
+    if (off) return off;
+    var busy = el.closest(BUSY_CONTROL);
+    return busy && busy.getAttribute("aria-busy") === "true" ? busy : null;
+  }
+  function isOff(el) { return !!el && (el.disabled === true || !!offControl(el)); }
+  function guardStop(e) { e.preventDefault(); e.stopImmediatePropagation(); }
+  function isValueInput(el) { return el.localName === "input" && VALUE_INPUT.test(el.type || ""); }
+  function guardKey(e) {
+    if (!offControl(e.target)) return;
+    var k = e.key, el = e.target;
+    var block = k === "Enter" || k === " " || k === "Spacebar" ||
+      (el.localName === "select" && (VALUE_KEYS[k] === 1 || (k.length === 1 && !e.ctrlKey && !e.metaKey))) ||
+      (isValueInput(el) && VALUE_KEYS[k] === 1);
+    if (block) guardStop(e);
+  }
+  function guardEdit(e) { if (offControl(e.target)) guardStop(e); }
+  function guardPress(e) {   // a native select or range acts on press (the picker, a drag): keep focus only
+    var el = nodeElement(e.target);
+    if (!el || !(el.localName === "select" || isValueInput(el)) || !offControl(el)) return;
+    e.preventDefault();
+    if (el.focus) el.focus();
+  }
+  function guardDropData(e) {   // a disabled field sends no value, as native disabled would
+    var form = e.target, data = e.formData;
+    if (!data || !form || !form.elements) return;
+    Array.prototype.forEach.call(form.elements, function (f) { if (f.name && (offControl(f) || (f.kitFor && isOff(f.kitFor)))) data.delete(f.name); });   // a hidden value of a disabled part too
+  }
+  function setupGuard() {
+    var cap = { capture: true };
+    ["click", "auxclick", "dblclick", "beforeinput", "paste", "cut", "drop", "dragstart"].forEach(function (t) { document.addEventListener(t, guardEdit, cap); });
+    document.addEventListener("keydown", guardKey, cap);
+    document.addEventListener("mousedown", guardPress, cap);
+    document.addEventListener("wheel", function (e) { var el = nodeElement(e.target); if (el && (el.localName === "select" || isValueInput(el)) && offControl(el)) e.preventDefault(); }, { capture: true, passive: false });
+    document.addEventListener("formdata", guardDropData, cap);
+  }
+
   // Hold to confirm: <button class="kit-btn kit-btn--hold" data-kit-hold="1500">Delete</button>
   // Fires "kit:hold" on the button when held long enough (mouse, touch, Space or Enter).
   function isHoldKey(k) { return k === " " || k === "Enter"; }
@@ -56,21 +118,30 @@
     var described = btn.getAttribute("aria-describedby") || "";
     if (!/(^|\s)kit-hold-help(\s|$)/.test(described)) btn.setAttribute("aria-describedby", (described + " " + holdHelp()).trim());
     function isKey(e) { return !!e && e.type === "keydown"; }
+    // data-kit-hold-done="Deleted" on the button: the confirmed word, said and shown in its
+    // [data-kit-hold-label] part (the same verb as the label), until the next hold.
+    var labelEl = btn.querySelector("[data-kit-hold-label]"), labelText = labelEl ? labelEl.textContent : "";
     function begin(e) {
-      if (timer || btn.disabled) return;
+      if (timer || isOff(btn)) return;
       if (isKey(e) && !isHoldKey(e.key)) return;
-      if (isKey(e)) e.preventDefault();
+      if (isKey(e) && e.repeat) { e.preventDefault(); return; }   // a held key repeats: it does not start again
+      if (!isKey(e) && e.button !== 0) return;   // only the primary button holds (not a right or middle press)
+      if (isKey(e)) e.preventDefault();   // no native click: the hold is the action
       btn.classList.remove("is-done");
+      if (labelEl) labelEl.textContent = labelText;
       btn.classList.add("is-holding");
       timer = setTimeout(function () {
         timer = null;
         btn.classList.remove("is-holding");
         btn.classList.add("is-done");
-        announce((btn.getAttribute("aria-label") || btn.textContent.trim()) + ": confirmed");
+        var done = btn.getAttribute("data-kit-hold-done");
+        if (done && labelEl) labelEl.textContent = done;
+        announce(done || ((btn.getAttribute("aria-label") || btn.textContent.trim()) + ": confirmed"));
         btn.dispatchEvent(new CustomEvent("kit:hold", { bubbles: true }));
       }, ms);
     }
-    function stop() {
+    function stop(e) {
+      if (e && e.type === "keyup" && isHoldKey(e.key)) e.preventDefault();   // Space's keyup would click
       if (!timer) return;
       clearTimeout(timer);
       timer = null;
@@ -125,10 +196,13 @@
     input.addEventListener("focus", filter);
     input.addEventListener("blur", function () { setTimeout(function () { open(false); }, 120); });
     input.addEventListener("keydown", function (e) {
+      if (e.isComposing) return;   // Enter or Escape that ends an input-method composition
       if (e.key === "ArrowDown") { e.preventDefault(); mark(active + 1); }
       else if (e.key === "ArrowUp") { e.preventDefault(); mark(active - 1); }
       else if (e.key === "Enter" && active >= 0) { e.preventDefault(); pick(visible()[active]); }
       else if (e.key === "Escape" && !list.hidden) { escapeHandled(e); open(false); }
+      // A second Escape (the list already closed) clears the text.
+      else if (e.key === "Escape" && input.value) { escapeHandled(e); input.value = ""; items.forEach(function (i) { i.hidden = false; }); mark(-1); }
     });
     items.forEach(function (i) { i.addEventListener("mousedown", function (e) { e.preventDefault(); pick(i); }); });
     open(false);
@@ -155,6 +229,26 @@
     return li;
   }
 
+  // True when a file matches an input's accept list (".csv,image/*,application/pdf"); no list takes every file.
+  function dropAccepts(file, accept) {
+    var parts = String(accept || "").split(",").map(function (p) { return p.trim().toLowerCase(); }).filter(Boolean);
+    if (!parts.length) return true;
+    var name = String(file.name || "").toLowerCase();
+    var type = String(file.type || "").toLowerCase();
+    return parts.some(function (p) {
+      if (p.charAt(0) === ".") return name.slice(-p.length) === p;
+      if (p.slice(-2) === "/*") return type.indexOf(p.slice(0, -1)) === 0;
+      return type === p;
+    });
+  }
+  // Says which dropped files were not taken (role="alert"), or removes the note.
+  function dropRefused(zone, text) {
+    var note = zone.querySelector(".kit-drop__refused");
+    if (!text) { if (note) note.parentNode.removeChild(note); return; }
+    if (!note) { note = document.createElement("span"); note.className = "kit-error-text kit-drop__refused"; note.setAttribute("role", "alert"); zone.appendChild(note); }
+    note.textContent = text;
+  }
+
   // File drop zone: <label class="kit-drop" data-kit-drop><input type="file" multiple> ...</label>
   // Highlights while a file is over it and lists the chosen files. Fires "kit:files" with { files }.
   function setupDrop(zone) {
@@ -166,10 +260,26 @@
       if (out) { out.textContent = ""; Array.prototype.forEach.call(files, function (f) { out.appendChild(dropFileRow(f.name)); }); }
       zone.dispatchEvent(new CustomEvent("kit:files", { bubbles: true, detail: { files: files } }));
     }
-    ["dragenter", "dragover"].forEach(function (n) { zone.addEventListener(n, function (e) { e.preventDefault(); zone.classList.add("is-over"); }); });
-    ["dragleave", "drop"].forEach(function (n) { zone.addEventListener(n, function () { zone.classList.remove("is-over"); }); });
-    zone.addEventListener("drop", function (e) { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) show(e.dataTransfer.files); });
-    if (input) input.addEventListener("change", function () { if (input.files.length) show(input.files); });
+    // dragenter/dragleave also fire over the zone's own children: count them so the highlight does not flicker.
+    var depth = 0;
+    zone.addEventListener("dragenter", function (e) { e.preventDefault(); depth++; zone.classList.add("is-over"); });
+    zone.addEventListener("dragover", function (e) { e.preventDefault(); zone.classList.add("is-over"); });
+    zone.addEventListener("dragleave", function () { depth = Math.max(0, depth - 1); if (!depth) zone.classList.remove("is-over"); });
+    // The picker filters by accept and multiple itself; a drop does not, so check it here.
+    zone.addEventListener("drop", function (e) {
+      e.preventDefault();
+      depth = 0;
+      zone.classList.remove("is-over");
+      if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+      var all = e.dataTransfer.files;
+      var accept = input ? input.getAttribute("accept") : "";
+      var ok = Array.prototype.filter.call(all, function (f) { return dropAccepts(f, accept); });
+      if (input && !input.multiple) ok = ok.slice(0, 1);
+      var wrong = Array.prototype.filter.call(all, function (f) { return !dropAccepts(f, accept); });
+      dropRefused(zone, wrong.length ? "Not taken (" + accept + " only): " + wrong.map(function (f) { return f.name; }).join(", ") : "");
+      if (ok.length) show(ok.length === all.length ? all : ok);
+    });
+    if (input) input.addEventListener("change", function () { dropRefused(zone, ""); if (input.files.length) show(input.files); });
   }
 
   // Animated tabs / segmented choice: add kit-tabs--animated or kit-segmented--animated.
@@ -512,6 +622,17 @@
   }
   var saved = readTheme();
   if (saved === "dark" || saved === "light") document.documentElement.setAttribute("data-theme", saved);
+  // The computer switching between light and dark (while no choice is on <html>) is a theme change too:
+  // one "kit:theme" on the document, so charts and canvas code read their colours again.
+  if (window.matchMedia && !window.kitSystemThemeEvent) {
+    window.kitSystemThemeEvent = true;
+    var sysMq = matchMedia("(prefers-color-scheme: dark)");
+    if (sysMq.addEventListener) sysMq.addEventListener("change", function () {
+      var t = document.documentElement.getAttribute("data-theme");
+      if (t === "dark" || t === "light") return;
+      document.dispatchEvent(new CustomEvent("kit:theme", { detail: { theme: isDark() ? "dark" : "light" } }));
+    });
+  }
   function setupTheme(btn) {
     if (btn.kitTheme) return;
     btn.kitTheme = true;
@@ -523,11 +644,17 @@
       btn.setAttribute("data-kit-tooltip", btn.getAttribute("aria-label"));   // the kit's tooltip says the same
       if (tooltipFor === btn && tooltip) tooltip.textContent = btn.getAttribute("aria-label");
     }
+    btn.kitShowTheme = showTheme;
     btn.addEventListener("click", function () {
-      var theme = isDark() ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", theme);
+      var theme = isDark() ? "light" : "dark", root = document.documentElement;
+      // Every surface changes at once: transitions stay off for two frames (kit.css), so no part fades on its own.
+      root.setAttribute("data-kit-theme-switching", "");
+      root.setAttribute("data-theme", theme);
+      var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+      raf(function () { raf(function () { root.removeAttribute("data-kit-theme-switching"); }); });
       try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* not kept: private window or blocked storage */ }
-      showTheme();
+      // Every theme button on the page says what a click does now, not only the one pressed.
+      Array.prototype.forEach.call(document.querySelectorAll("[data-kit-theme]"), function (b) { if (b.kitShowTheme) b.kitShowTheme(); });
       btn.dispatchEvent(new CustomEvent("kit:theme", { bubbles: true, detail: { theme: theme } }));
     });
     if (window.matchMedia) {
@@ -578,7 +705,7 @@
     if (t.matches && t.matches("dialog[open]") && t.classList.contains(DRAWER)) { closePanel(t); return; }   // the backdrop
     if (t.closest && t.closest("[data-kit-print]")) window.print();
   });
-  function isKitPanel(el) { return !!el.matches && el.matches("dialog") && (el.classList.contains(DRAWER) || el.classList.contains(DIALOG)); }
+  function isKitPanel(el) { return !!el.matches && el.matches("dialog") && (el.classList.contains(DRAWER) || el.classList.contains(DIALOG) || el.hasAttribute("data-kit-sheet")); }
   document.addEventListener("close", function (e) {
     if (isKitPanel(e.target)) e.target.dispatchEvent(new CustomEvent("kit:close", { bubbles: true }));
   }, true);
@@ -632,7 +759,7 @@
       clearTimeout(timer); timer = null;
       if (t.classList.contains("is-leaving")) return;
       t.classList.add("is-leaving");
-      setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 400);
+      setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); if (typeof opts.onClose === "function") safe(opts.onClose); }, 400);   // onClose: gone, after its action ran
     };
     var run = function () { if (timer || t.classList.contains("is-leaving")) return; since = Date.now(); timer = setTimeout(leave, left); };
     var pause = function () { if (!timer) return; clearTimeout(timer); timer = null; left = Math.max(1000, left - (Date.now() - since)); };
@@ -1014,6 +1141,8 @@
     if (!list) return;
     list.hidden = open;
     if (open) return;
+    // The arrow keys move between the rows, so the rows are not separate Tab stops.
+    menuItems(list).forEach(function (it) { if (!it.hasAttribute("tabindex")) it.setAttribute("tabindex", "-1"); });
     var first = menuItems(list)[0];
     if (first) first.focus();
   }
@@ -1048,11 +1177,35 @@
     if (!Object.prototype.hasOwnProperty.call(places, key)) return undefined;
     return items[places[key]] || null;
   }
+  // Type-ahead in menus and trees: a printable key moves to the next item whose text starts with what
+  // was typed in the last 600 ms (one letter again steps through the items with that letter).
+  var typed = "", typedAt = 0;
+  function typeaheadKey(e) {
+    var t = e.target, typing = t && (/^(input|textarea|select)$/.test(t.localName || "") || t.isContentEditable);
+    return !typing && !!e.key && e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey;
+  }
+  function typeahead(items, current, key, textOf) {
+    var now = Date.now(), k = key.toLowerCase();
+    typed = now - typedAt > 600 ? k : typed + k; typedAt = now;
+    var at = items.indexOf(current), order = items.slice(at + 1).concat(items.slice(0, at + 1));
+    var starts = function (want) { return function (it) { return (textOf ? textOf(it) : it.textContent || "").trim().toLowerCase().indexOf(want) === 0; }; };
+    return order.filter(starts(typed))[0] || (typed.length > 1 ? null : order.filter(starts(k))[0]) || null;
+  }
   document.addEventListener("keydown", function (e) {
+    // ArrowDown or ArrowUp on a menu's button opens it on its first or last item (Enter and Space click it).
+    var trigger = (e.key === "ArrowDown" || e.key === "ArrowUp") && closestOf(e.target, "[data-kit-menu]");
+    if (trigger) {
+      e.preventDefault();
+      if (trigger.getAttribute("aria-expanded") !== "true") toggleMenu(trigger);
+      var tl = menuList(trigger), ti = tl ? menuItems(tl) : [];
+      if (ti.length) ti[e.key === "ArrowUp" ? ti.length - 1 : 0].focus();
+      return;
+    }
     var list = closestOf(e.target, ".kit-menu__list");
     if (!list) return;
     var items = menuItems(list);
     var to = menuTarget(items, items.indexOf(document.activeElement), e.key);
+    if (to === undefined && typeaheadKey(e)) { to = typeahead(items, document.activeElement, e.key); if (!to) return; }
     if (to !== undefined) { e.preventDefault(); if (to) to.focus(); }
     else if (e.key === "Escape" || e.key === "Tab") { var mb = menuButtonOf(list), back = list.kitBack; closeMenus(); if (e.key === "Escape") { escapeHandled(e); focusBack(back, mb); } }
   });
@@ -1165,10 +1318,19 @@
     var name = (el.getAttribute("data-kit-avatar") || "").trim();
     if (!name || el.kitAvatar === name) return;
     el.kitAvatar = name;
-    if (!el.querySelector("img")) el.textContent = initialsOf(name);
+    var img = el.querySelector("img");
+    if (!img) el.textContent = initialsOf(name);
+    // A photo that fails to load falls back to the initials (once; no broken-image icon).
+    else if (!img.kitAvatarFallback) {
+      img.kitAvatarFallback = true;
+      var fallback = function () { if (img.parentNode === el) el.textContent = initialsOf(el.kitAvatar || name); };
+      if (img.complete && img.naturalWidth === 0 && img.getAttribute("src")) fallback();
+      else img.addEventListener("error", fallback);
+    }
     el.style.setProperty("--kit-avatar-color", "var(--kit-chart-" + nameColor(name) + ")");
     el.setAttribute("title", name);
-    if (!el.hasAttribute("aria-label")) { el.setAttribute("role", "img"); el.setAttribute("aria-label", name); }
+    // aria-hidden="true": the name is written beside the avatar, so it is not read twice.
+    if (!el.hasAttribute("aria-label") && el.getAttribute("aria-hidden") !== "true") { el.setAttribute("role", "img"); el.setAttribute("aria-label", name); }
   }
 
   // Two values on one slider: data-kit-slider-range with data-min, data-max, data-step, data-from, data-to and
@@ -1304,6 +1466,13 @@
   function setupBoardList(list) {
     if (list.kitList) return;
     list.kitList = true;
+    // A named region per column (its title), and its list named the same, unless the page named them.
+    var colBox = list.closest(".kit-board__column"), colTitle = colBox && colBox.querySelector(".kit-board__title");
+    if (colTitle) {
+      var tid = idOf(colTitle, "board-title");
+      if (!colBox.hasAttribute("aria-label") && !colBox.hasAttribute("aria-labelledby")) colBox.setAttribute("aria-labelledby", tid);
+      if (!list.hasAttribute("aria-label") && !list.hasAttribute("aria-labelledby")) list.setAttribute("aria-labelledby", tid);
+    }
     list.addEventListener("dragover", function (e) {
       if (!dragCard) return;
       e.preventDefault();
@@ -1382,10 +1551,11 @@
     evs.slice(0, 3).forEach(function (ev) { b.appendChild(calendarEvent(ev)); });
     if (evs.length > 3) { var more = document.createElement("span"); more.className = "kit-calendar__event"; more.textContent = "+" + (evs.length - 3); b.appendChild(more); }
   }
-  // A day's name: its full date, and how many items it has.
+  // A day's name: "Today, " for today (not only its look), its full date, and how many items it has.
   function calendarDayLabel(day, iso, n) {
     var label;
     try { label = new Intl.DateTimeFormat(undefined, { dateStyle: "full" }).format(day); } catch (e) { label = iso; }
+    if (iso === isoDay(new Date())) label = "Today, " + label;
     return label + (n ? ", " + n + " item" + (n > 1 ? "s" : "") : "");
   }
   function calendarDraw(el) {
@@ -1728,6 +1898,7 @@
     };
     tree.addEventListener("keydown", function (e) {
       var row = e.target.closest && e.target.closest(".kit-tree__row");
+      if (row && typeaheadKey(e)) { var t = typeahead(treeRows(tree), row, e.key); if (t) { e.preventDefault(); go(t); } return; }
       if (!row || !Object.prototype.hasOwnProperty.call(keys, e.key)) return;
       var li = row.parentElement, rows = treeRows(tree);
       e.preventDefault();
@@ -1755,6 +1926,9 @@
     closePopovers(btn);
     btn.setAttribute("aria-expanded", String(!open));
     if (!btn.getAttribute("aria-controls")) btn.setAttribute("aria-controls", p.id);
+    // A non-modal dialog named by its button (no aria-modal, no focus trap), unless the page gave it a role.
+    if (!p.getAttribute("role")) p.setAttribute("role", "dialog");
+    if (p.getAttribute("role") === "dialog" && !p.getAttribute("aria-label") && !p.getAttribute("aria-labelledby")) p.setAttribute("aria-labelledby", idOf(btn, "popover-btn"));
     p.hidden = open;
     if (open) { p.dispatchEvent(new CustomEvent("kit:close", { bubbles: true })); return; }
     p.dispatchEvent(new CustomEvent("kit:open", { bubbles: true }));
@@ -1767,7 +1941,7 @@
     if (!closestOf(e.target, ".kit-popover")) closePopovers();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key !== "Escape" || e.defaultPrevented) return;
+    if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
     var open = Array.prototype.slice.call(document.querySelectorAll("[data-kit-popover][aria-expanded=true]"));
     if (!open.length) return;
     escapeHandled(e);
@@ -1834,6 +2008,1379 @@
     return queuedBox(text, opts, [{ label: opts.ok || "OK", value: "ok", kind: "primary" }]).then(function () { });
   }
 
+  // ---- Forms and touch parts (kit revision 17), after the shared element specs: listbox, number field,
+  // typed fields, password, one-time code, address, date range, sheet, carousel, reorder, swipe actions,
+  // splitter, disclosure, toolbar overflow and breadcrumbs that fold. Each starts on its data-kit-* hook
+  // (PARTS below); an aria-disabled control keeps its place and does nothing (the guard above); under
+  // reduced motion they move at once.
+  function reducedMotion() { return !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }
+  function emit(el, name, detail) { el.dispatchEvent(new CustomEvent("kit:" + name, { bubbles: true, detail: detail || {} })); }
+  var kitUid = 0;
+  function idOf(el, prefix) { if (!el.id) el.id = "kit-" + prefix + "-" + (++kitUid); return el.id; }
+  function describedBy(el, id, add) {
+    var ids = (el.getAttribute("aria-describedby") || "").split(/\s+/).filter(function (x) { return x && x !== id; });
+    if (add) ids.push(id);
+    if (ids.length) el.setAttribute("aria-describedby", ids.join(" ")); else el.removeAttribute("aria-describedby");
+  }
+  function readStore(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+  function writeStore(key, v) { try { localStorage.setItem(key, v); } catch (e) { /* not kept: private window or blocked storage */ } }
+  function clampNum(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+  function nfc(s) { s = String(s == null ? "" : s); return s.normalize ? s.normalize("NFC") : s; }
+  function hiddenInput(name, value) { var h = document.createElement("input"); h.type = "hidden"; h.name = name; h.value = value || ""; return h; }
+  function rowWidth(el) { return el.getBoundingClientRect().width; }
+  // Small line icons in the text colour, so these parts need no icons script.
+  var ICONS = {
+    eye: '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>',
+    "eye-off": '<path d="M6.6 3.7A6.6 6.6 0 0 1 8 3.5c4 0 6.5 4.5 6.5 4.5a12 12 0 0 1-1.7 2.3M9.4 9.5a2 2 0 0 1-2.9-2.8M4.2 4.9C2.5 6.1 1.5 8 1.5 8s2.5 4.5 6.5 4.5c1.2 0 2.3-.4 3.2-.9M2 2l12 12"/>',
+    more: '<path d="M3.5 8h.01M8 8h.01M12.5 8h.01" stroke-width="2.4"/>'
+  };
+  function lineIcon(name) { return '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + ICONS[name] + "</svg>"; }
+
+  // Listbox (rich rows; a plain choice stays a native <select>): <ul class="kit-listbox" role="listbox" data-kit-listbox
+  // aria-label="Owner"> of <li class="kit-option" role="option" data-value="ana"><span class="kit-option__label">Ana Lima</span>
+  // <span class="kit-option__meta">Design</span></li>; aria-multiselectable="true" for several. One Tab stop
+  // (aria-activedescendant): arrows, Home, End and typed letters move; one choice follows the move, several toggle
+  // with Space, Enter or a click (Shift+arrow adds, Ctrl+A takes all). An aria-disabled option keeps its place but is
+  // never picked. In a kit-popover a pick closes it and writes the label into the button's [data-kit-listbox-value].
+  // data-name="FIELD" sends the values with a form. kit:select with detail.value (the first) and detail.values.
+  function optionLabel(o) {
+    var l = o.querySelector(".kit-option__label");
+    if (l) return l.textContent.trim();
+    var t = Array.prototype.filter.call(o.childNodes, function (n) { return n.nodeType === 3; }).map(function (n) { return n.nodeValue; }).join("").trim();
+    return t || o.textContent.trim();
+  }
+  function setupListbox(box) {
+    if (box.kitListbox) return;
+    box.kitListbox = true;
+    var multi = box.getAttribute("aria-multiselectable") === "true", active = null, sent = [];
+    var pop = box.closest(".kit-popover"), opener = pop && pop.id ? document.querySelector('[data-kit-popover="' + pop.id + '"]') : null;
+    if (!box.getAttribute("role")) box.setAttribute("role", "listbox");
+    if (!box.hasAttribute("tabindex")) box.tabIndex = 0;
+    if (opener) opener.setAttribute("aria-haspopup", "listbox");
+    function options() { return Array.prototype.slice.call(box.querySelectorAll('[role="option"]')); }
+    function optionValue(o) { return o.getAttribute("data-value") || optionLabel(o); }
+    function picked() { return options().filter(function (o) { return o.getAttribute("aria-selected") === "true"; }); }
+    function activate(o) {
+      if (!o) return;
+      if (active) active.removeAttribute("data-active");
+      active = o;
+      o.setAttribute("data-active", "");
+      box.setAttribute("aria-activedescendant", idOf(o, "option"));
+      try { if (o.scrollIntoView) o.scrollIntoView({ block: "nearest" }); } catch (e) { /* an old engine */ }
+    }
+    function listSync(send) {
+      var on = picked(), vals = on.map(optionValue), name = box.getAttribute("data-name");
+      sent.forEach(function (h) { if (h.parentNode) h.parentNode.removeChild(h); });
+      sent = name && box.parentNode ? vals.map(function (v) { var h = hiddenInput(name, v); h.kitFor = box; box.parentNode.insertBefore(h, box.nextSibling); return h; }) : [];
+      var shown = opener && opener.querySelector("[data-kit-listbox-value]");
+      if (shown) shown.textContent = on.length ? on.map(optionLabel).join(", ") : (shown.getAttribute("data-empty") || "");
+      if (send) emit(box, "select", { value: vals[0] || "", values: vals });
+    }
+    function listPick(o, on) {
+      if (!o || isOff(o)) return;
+      if (multi) o.setAttribute("aria-selected", String(on === true ? true : o.getAttribute("aria-selected") !== "true"));
+      else options().forEach(function (x) { x.setAttribute("aria-selected", String(x === o)); });
+      activate(o);
+      listSync(true);
+      if (!multi && opener && opener.getAttribute("aria-expanded") === "true") { closePopovers(); opener.focus(); }
+    }
+    options().forEach(function (o) { if (!o.hasAttribute("aria-selected")) o.setAttribute("aria-selected", "false"); idOf(o, "option"); });
+    box.addEventListener("focus", function () { if (!active || !box.contains(active)) activate(picked()[0] || options()[0]); });
+    box.addEventListener("click", function (e) { var o = closestOf(e.target, '[role="option"]'); if (o && box.contains(o)) listPick(o); });
+    box.addEventListener("keydown", function (e) {
+      var list = options(), i = list.indexOf(active), k = e.key, to = null;
+      if (!list.length) return;
+      if (k === "ArrowDown") to = list[Math.min(i + 1, list.length - 1)];
+      else if (k === "ArrowUp") to = list[Math.max(i - 1, 0)];
+      else if (k === "Home") to = list[0];
+      else if (k === "End") to = list[list.length - 1];
+      else if (k === "Enter" || k === " ") { e.preventDefault(); listPick(active || list[0]); return; }
+      else if (multi && (e.ctrlKey || e.metaKey) && (k === "a" || k === "A")) {
+        e.preventDefault();
+        var can = list.filter(function (o) { return !isOff(o); }), all = can.some(function (o) { return o.getAttribute("aria-selected") !== "true"; });
+        can.forEach(function (o) { o.setAttribute("aria-selected", String(all)); });
+        listSync(true);
+        return;
+      }
+      else if (typeaheadKey(e)) to = typeahead(list, active, k, optionLabel);
+      if (!to) return;
+      e.preventDefault();
+      activate(to);
+      if (multi && e.shiftKey) listPick(to, true);
+      else if (!multi && !opener) listPick(to);
+    });
+    listSync(false);
+  }
+
+  // Number field (never type="number"): <div class="kit-number"><button class="kit-number__step" type="button"
+  // data-kit-nudge="-1" aria-label="Less">-</button><input class="kit-input" data-kit-number inputmode="decimal" min="0"
+  // max="99" step="1" value="4" name="qty" aria-label="Quantity"><button class="kit-number__step" type="button"
+  // data-kit-nudge="1" aria-label="More">+</button></div>. role="spinbutton" with aria-valuemin/max/now. Typing is a
+  // draft; blur or Enter commits it: the page language's decimal comma or point, groups, a leading + and a unit typed
+  // along are read, then the value shows formatted, kept within min and max (data-integer refuses a fraction,
+  // data-snap rounds to the step). Text that is no number stays, with a message. Arrows step, PageUp/PageDown and
+  // Shift+arrow take 10 steps (data-large-step), Home and End go to min and max. The step buttons are no Tab stops,
+  // keep the focus in the field, repeat while held and turn aria-disabled at a bound. The wheel changes nothing
+  // unless data-wheel, and then only while the field has focus. A named field sends the plain number ("1250.5").
+  // data-valuetext="{value} percent" sets aria-valuetext. kit:change with detail.value (null when emptied).
+  function numberSeps() {
+    var out = { decimal: ".", group: "," };
+    try { new Intl.NumberFormat(pageLang()).formatToParts(12345.6).forEach(function (p) { if (p.type === "decimal") out.decimal = p.value; if (p.type === "group") out.group = p.value; }); } catch (e) { /* the defaults */ }
+    return out;
+  }
+  // Which of . and , is the decimal mark ("" for none): with both, the last one; one that repeats groups; the
+  // page's own decimal mark is decimal; "1,250" in a page whose mark is "." groups.
+  function decimalMark(s, decimal) {
+    var dot = s.lastIndexOf("."), comma = s.lastIndexOf(",");
+    if (dot >= 0 && comma >= 0) return dot > comma ? "." : ",";
+    var mark = dot >= 0 ? "." : comma >= 0 ? "," : "";
+    if (!mark || s.split(mark).length > 2) return "";
+    if (mark === decimal) return mark;
+    return /^\d{1,3}[.,]\d{3}$/.test(s) ? "" : mark;
+  }
+  // A number as people type it, as { neg, int, frac } digit strings; null when it is no number.
+  function numberParts(text) {
+    var s = nfc(text).replace(/[\uff10-\uff19]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xfee0); })
+      .replace(/[\s'\u2019\u00a0\u202f]/g, "").replace(/\u2212/g, "-").replace(/^\+/, "");
+    s = s.replace(/^[$\u00a2-\u00a5\u20a0-\u20bf]+/, "").replace(/[^\d.,]+$/, "");   // a currency sign before it, a unit after it
+    var neg = s.charAt(0) === "-";
+    if (neg) s = s.slice(1).replace(/^[$\u00a2-\u00a5\u20a0-\u20bf]+/, "");
+    if (!/^[\d.,]+$/.test(s) || !/\d/.test(s)) return null;
+    var mark = decimalMark(s, numberSeps().decimal), at = mark ? s.lastIndexOf(mark) : -1;
+    var whole = at < 0 ? s : s.slice(0, at), frac = at < 0 ? "" : s.slice(at + 1);
+    if (/[.,]/.test(frac)) return null;
+    return { neg: neg, int: whole.replace(/[.,]/g, "") || "0", frac: frac };
+  }
+  function parseNumber(text) { var p = numberParts(text); return p ? Number((p.neg ? "-" : "") + p.int + (p.frac ? "." + p.frac : "")) : NaN; }
+  function stepDecimals(step) { var s = String(step), i = s.indexOf("."); return i < 0 ? 0 : s.length - i - 1; }
+  function setupNumber(input) {
+    if (input.kitNumber) return;
+    input.kitNumber = true;
+    var box = input.closest(".kit-number") || input.parentNode;
+    var attr = function (name, fallback) { var v = parseFloat(input.getAttribute(name)); return isNaN(v) ? fallback : v; };
+    var min = attr("min", -Infinity), max = attr("max", Infinity), step = attr("step", 1) || 1, large = attr("data-large-step", step * 10);
+    var dec = stepDecimals(input.getAttribute("step") || "1"), value = null, sent = null, msg = null, held = null, repeated = false;
+    input.setAttribute("role", "spinbutton");
+    if (!input.getAttribute("inputmode")) input.setAttribute("inputmode", dec ? "decimal" : "numeric");
+    if (!input.getAttribute("autocomplete")) input.setAttribute("autocomplete", "off");
+    if (isFinite(min)) input.setAttribute("aria-valuemin", String(min));
+    if (isFinite(max)) input.setAttribute("aria-valuemax", String(max));
+    if (input.name) { sent = hiddenInput(input.name, ""); sent.kitFor = input; input.removeAttribute("name"); input.parentNode.insertBefore(sent, input.nextSibling); }
+    var buttons = Array.prototype.slice.call(box.querySelectorAll("[data-kit-nudge]"));
+    function shown(n) { return n === null ? "" : n.toLocaleString(pageLang(), { maximumFractionDigits: Math.max(dec, 10) }); }
+    function showError(text) {
+      if (!text && !msg) return;
+      if (!msg) { msg = document.createElement("p"); msg.className = "kit-error-text"; idOf(msg, "error"); box.parentNode.insertBefore(msg, box.nextSibling); }
+      msg.textContent = text;
+      msg.hidden = !text;
+      if (text) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
+      describedBy(input, msg.id, !!text);
+      if (text) announce(text);
+    }
+    function set(n, send) {
+      var before = value;
+      value = n;
+      input.value = shown(n);
+      if (n === null) input.removeAttribute("aria-valuenow"); else input.setAttribute("aria-valuenow", String(n));
+      var vt = input.getAttribute("data-valuetext");
+      if (vt && n !== null) input.setAttribute("aria-valuetext", vt.replace("{value}", shown(n)));
+      if (sent) sent.value = n === null ? "" : String(n);
+      buttons.forEach(function (b) {
+        var d = parseFloat(b.getAttribute("data-kit-nudge")) || 0, atBound = n !== null && (d < 0 ? n <= min : n >= max);
+        if (atBound || isOff(input)) b.setAttribute("aria-disabled", "true"); else b.removeAttribute("aria-disabled");
+      });
+      showError("");
+      if (send && before !== n) emit(input, "change", { value: n });
+    }
+    function commit() {
+      var t = input.value.trim();
+      if (!t) { if (input.required && value !== null) set(value, false); else set(null, true); return; }
+      var n = parseNumber(t), mark = numberSeps().decimal;
+      if (isNaN(n)) { showError("Use a number, like 12" + (dec ? " or 3" + mark + "5" : "") + "."); return; }
+      if (input.hasAttribute("data-integer") && Math.round(n) !== n) { showError("Use a whole number, like 12."); return; }
+      if (input.hasAttribute("data-snap")) { var base = isFinite(min) ? min : 0; n = Number((base + Math.round((n - base) / step) * step).toFixed(dec)); }
+      set(clampNum(n, min, max), true);
+    }
+    function nudge(times, quiet) {
+      if (isOff(input) || input.readOnly) return false;
+      if (input.value !== shown(value)) commit();
+      var from = value === null ? (isFinite(min) ? min : 0) : value;
+      var n = clampNum(Number((from + times * step).toFixed(dec)), min, max);
+      if (n === value) return false;
+      set(n, !quiet);
+      return true;
+    }
+    input.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229) return;   // a key that composes text (IME) never steps
+      var k = e.key, times = 0;
+      if (k === "Enter") { commit(); return; }
+      if (k === "ArrowUp" || k === "ArrowDown") times = (k === "ArrowUp" ? 1 : -1) * (e.shiftKey ? large / step : 1);
+      else if (k === "PageUp" || k === "PageDown") times = (k === "PageUp" ? 1 : -1) * large / step;
+      else if ((k === "Home" && isFinite(min)) || (k === "End" && isFinite(max))) {
+        e.preventDefault();
+        if (!isOff(input) && !input.readOnly) set(k === "Home" ? min : max, true);
+        return;
+      }
+      if (!times) return;
+      e.preventDefault();
+      nudge(times);
+    });
+    input.addEventListener("blur", commit);
+    input.addEventListener("wheel", function (e) {
+      if (!input.hasAttribute("data-wheel") || document.activeElement !== input) return;   // the wheel scrolls the page
+      var d = e.deltaY < 0 ? 1 : e.deltaY > 0 ? -1 : 0;
+      if (d && nudge(d)) e.preventDefault();
+    }, { passive: false });
+    buttons.forEach(function (b) {
+      var d = parseFloat(b.getAttribute("data-kit-nudge")) || 0;
+      b.tabIndex = -1;
+      if (!b.getAttribute("aria-label")) b.setAttribute("aria-label", d < 0 ? "Less" : "More");
+      if (input.id) b.setAttribute("aria-controls", input.id);
+      b.addEventListener("mousedown", function (e) { e.preventDefault(); });   // the focus stays in the field
+      b.addEventListener("pointerdown", function (e) {
+        if (e.button !== 0 || isOff(b)) return;
+        repeated = false;
+        clearTimeout(held);
+        var again = function (wait) { held = setTimeout(function () { repeated = true; if (nudge(d, true)) again(80); }, wait); };
+        again(500);
+      });
+      ["pointerup", "pointerleave", "pointercancel"].forEach(function (n) {
+        b.addEventListener(n, function () { clearTimeout(held); held = null; if (repeated && n !== "pointerup") { repeated = false; emit(input, "change", { value: value }); } });
+      });
+      b.addEventListener("click", function () {
+        if (repeated) { repeated = false; emit(input, "change", { value: value }); return; }   // held: one change on release
+        nudge(d);
+      });
+    });
+    var start = input.value.trim(), first = start ? parseNumber(start) : NaN;
+    set(isNaN(first) ? null : clampNum(first, min, max), false);
+    if (start && isNaN(first)) input.value = start;
+  }
+
+  // Typed fields: data-kit-field="name|text|email|phone|postcode|iban|card|expiry|card-code|code|url|amount|password|
+  // new-password" on a kit-input with its type, inputmode and autocomplete (phone, postcode, card and codes are text
+  // or tel, never type="number"). Shape checks only, which help the person (the server checks again): blur shows the
+  // clean form (+31 20 123 4567, NL74 EXMP 0123 4567 89, 1234 AB) and the form sends the stored one (+31201234567);
+  // a password is never changed. Errors show on submit (put novalidate on the form): the submit stops and the first
+  // failing field takes focus, a closed section around it opens; from then on blur checks again and typing clears a
+  // fixed error. The message goes in a kit-error-text under the field (aria-invalid, aria-describedby). An email
+  // domain one typo from a common one gets "Did you mean ...?" with a button. Options: data-kit-country="ID" (the
+  // country select: its value for a postcode, its option's data-calling-code for a phone), data-calling-code="31",
+  // data-kit-card="ID" (for card-code), data-length (code), data-decimals and data-negative (amount), minlength
+  // (new-password, default 8), data-max (name, text). KitUI.check(kind, text, options) runs a check from code and
+  // gives { value, display, ok, message }. kit:check with detail.kind, value and ok after each check.
+  function fieldResult(value, display, ok, message) { return { value: value, display: display, ok: ok, message: ok ? "" : message }; }
+  function fieldFail(text, message) { return fieldResult(text, text, false, message); }
+  function graphemes(s) { try { return Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)).length; } catch (e) { return Array.from(s).length; } }
+  function tidyText(s) { return nfc(s).trim().replace(/\s+/g, " "); }
+  function digitsOf(s) { return nfc(s).replace(/\D/g, ""); }
+  function pad2(n) { return ("0" + n).slice(-2); }
+  function groupsOf(s, size) { var out = []; for (var i = 0; i < s.length; i += size) out.push(s.slice(i, i + size)); return out.join(" "); }
+  function checkLength(v, max, empty) {
+    if (!v) return fieldFail(v, empty);
+    var n = graphemes(v);
+    return n > max ? fieldFail(v, "Use at most " + max + " characters; this has " + n + ".") : fieldResult(v, v, true);
+  }
+  // Email: one @, something before it, a dot in the domain (lowercased). A common domain one typo away is offered.
+  var MAIL_DOMAINS = ["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "icloud.com", "me.com", "aol.com", "proton.me", "protonmail.com", "gmx.de", "gmx.net", "web.de"];
+  function editDistance(a, b) {
+    var d = [], i, j;
+    for (i = 0; i <= a.length; i++) d.push([i]);
+    for (j = 1; j <= b.length; j++) d[0][j] = j;
+    for (i = 1; i <= a.length; i++) {
+      for (j = 1; j <= b.length; j++) {
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);   // two letters swapped
+      }
+    }
+    return d[a.length][b.length];
+  }
+  function domainHint(domain) {
+    if (MAIL_DOMAINS.indexOf(domain) >= 0) return "";
+    return MAIL_DOMAINS.filter(function (m) { var n = editDistance(domain, m); return n === 1 || (n === 2 && m.length >= 10); })[0] || "";
+  }
+  function checkEmail(text) {
+    var v = nfc(text).trim(), ex = "like ana@studio.example";
+    if (!v) return fieldFail(v, "Enter an email address, " + ex + ".");
+    if (/\s/.test(v)) return fieldFail(v, "Remove the space: an email address has none, " + ex + ".");
+    var parts = v.split("@");
+    if (parts.length !== 2) return fieldFail(v, parts.length < 2 ? "Add the @ and the domain, " + ex + "." : "Use one @ only, " + ex + ".");
+    var domain = parts[1].toLowerCase();
+    if (!parts[0]) return fieldFail(v, "Add the part before the @, " + ex + ".");
+    if (!/^[^.]+(\.[^.]+)+$/.test(domain)) return fieldFail(v, "Add the domain after the @, with a dot in it, " + ex + ".");
+    var out = parts[0] + "@" + domain, r = fieldResult(out, out, true), hint = domainHint(domain);
+    r.suggestion = hint ? parts[0] + "@" + hint : "";
+    return r;
+  }
+  // Phone: spaces, dashes, dots, slashes, brackets and + or 00 accepted; stored as +DIGITS, 7 to 15 digits.
+  var TWO_DIGIT_CODES = " 20 27 30 31 32 33 34 36 39 40 41 43 44 45 46 47 48 49 51 52 53 54 55 56 57 58 60 61 62 63 64 65 66 81 82 84 86 90 91 92 93 94 95 98 ";
+  function callingCode(d) { return d.charAt(0) === "1" || d.charAt(0) === "7" ? d.charAt(0) : TWO_DIGIT_CODES.indexOf(" " + d.slice(0, 2) + " ") >= 0 ? d.slice(0, 2) : d.slice(0, 3); }
+  function checkPhone(text, o) {
+    var raw = nfc(text).trim(), ex = "like +31 20 123 4567";
+    if (!raw) return fieldFail(raw, "Enter a phone number, " + ex + ".");
+    var compact = raw.replace(/\(0\)/g, "").replace(/[\s().\-\/]/g, "");
+    if (!/^\+?\d+$/.test(compact)) return fieldFail(raw, "Use digits, spaces or dashes only, " + ex + ".");
+    var digits = null, cc = String(o.callingCode || "").replace(/^(\+|00)/, "");
+    if (compact.charAt(0) === "+") digits = compact.slice(1);
+    else if (compact.slice(0, 2) === "00") digits = compact.slice(2);
+    else if (/^\d{1,3}$/.test(cc)) digits = cc + (cc === "39" ? compact : compact.replace(/^0/, ""));   // Italy keeps its leading 0
+    if (!digits) return fieldFail(raw, "Add the country code, " + ex + ".");
+    var code = callingCode(digits), national = digits.slice(code.length);
+    if (national.length < 7 || digits.length > 15) return fieldFail(raw, "A phone number has 7 to 15 digits after the country code, " + ex + ".");
+    var groups = [], i = 0;
+    for (; national.length - i > 4; i += 3) groups.push(national.slice(i, i + 3));
+    groups.push(national.slice(i));
+    return fieldResult("+" + digits, "+" + code + " " + groups.join(" "), true);
+  }
+  // Web address: https:// added when missing; only http and https with a host that has a dot.
+  function checkUrl(text) {
+    var raw = nfc(text).trim(), ex = "like studio.example/menu", url = null;
+    if (!raw) return fieldFail(raw, "Enter a web address, " + ex + ".");
+    try { url = new URL(/^[a-z][a-z\d+.\-]*:\/\//i.test(raw) ? raw : "https://" + raw.replace(/^\/+/, "")); } catch (e) { url = null; }
+    if (!url) return fieldFail(raw, "This is not a web address that can be opened, " + ex + ".");
+    if (!/^https?:$/.test(url.protocol)) return fieldFail(raw, "Use an address that starts with https://, " + ex + ".");
+    if (url.hostname.indexOf(".") < 0 && url.hostname !== "localhost") return fieldFail(raw, "Add the domain with a dot in it, " + ex + ".");
+    var bare = url.pathname === "/" && !url.search && !url.hash && raw.slice(-1) !== "/";
+    return fieldResult(url.href, bare ? url.href.slice(0, -1) : url.href, true);
+  }
+  // Amount: the page language's decimal mark, groups and a currency sign accepted; stored as a decimal string
+  // ("1250.50", never a float), shown in the page's form ("1.250,50").
+  function checkAmount(text, o) {
+    var seps = numberSeps(), decimals = o.decimals === undefined ? 2 : o.decimals, raw = nfc(text).trim();
+    var ex = "like 1" + seps.group + "250" + (decimals ? seps.decimal + "50" : "");
+    if (!raw) return fieldFail(raw, "Enter an amount, " + ex + ".");
+    var p = numberParts(raw);
+    if (!p) return fieldFail(raw, "Use digits with one decimal mark, " + ex + ".");
+    if (p.neg && !o.negative) return fieldFail(raw, "Enter an amount of 0 or more, " + ex + ".");
+    if (p.frac.length > decimals) return fieldFail(raw, decimals ? "Use at most " + decimals + " decimals, " + ex + "." : "Use a whole number, like 1" + seps.group + "250.");
+    var whole = p.int.replace(/^0+(?=\d)/, ""), frac = decimals ? (p.frac + "000000000000").slice(0, decimals) : "";
+    var sign = p.neg && /[1-9]/.test(whole + frac) ? "-" : "";
+    var grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, seps.group);
+    return fieldResult(sign + whole + (frac ? "." + frac : ""), sign + grouped + (frac ? seps.decimal + frac : ""), true);
+  }
+  function checkCode(text, o) {
+    var v = digitsOf(text), n = o.length || 6, ex = "like " + "123456789123456789".slice(0, n);
+    if (!v) return fieldFail(v, "Enter the " + n + "-digit code from the message, " + ex + ".");
+    return v.length === n ? fieldResult(v, v, true) : fieldFail(v, "The code has " + n + " digits; this has " + v.length + ", " + ex + ".");
+  }
+  // A password is never trimmed or changed; a new one needs a length (counted as a person counts letters).
+  function checkPassword(text, min) {
+    var v = String(text);
+    if (!v) return fieldFail(v, min ? "Enter a password of at least " + min + " characters." : "Enter your password.");
+    var n = graphemes(v);
+    return n < min ? fieldFail(v, "Use at least " + min + " characters; this has " + n + ". A few unrelated words are easy to remember.") : fieldResult(v, v, true);
+  }
+  // IBAN: the length per country and the mod-97 check; stored uppercase without spaces, shown in groups of four.
+  var IBAN_LENGTHS = { AD: 24, AE: 23, AL: 28, AT: 20, AZ: 28, BA: 20, BE: 16, BG: 22, BH: 22, BR: 29, BY: 28, CH: 21, CR: 22, CY: 28, CZ: 24, DE: 22, DK: 18, DO: 28, EE: 20, EG: 29, ES: 24, FI: 18, FO: 18, FR: 27, GB: 22, GE: 22, GI: 23, GL: 18,
+    GR: 27, GT: 28, HR: 21, HU: 28, IE: 22, IL: 23, IQ: 23, IS: 26, IT: 27, JO: 30, KW: 30, KZ: 20, LB: 28, LC: 32, LI: 21, LT: 20, LU: 20, LV: 21, MC: 27, MD: 24, ME: 22, MK: 19, MR: 27, MT: 31, MU: 30, NL: 18, NO: 15, PK: 24,
+    PL: 28, PS: 29, PT: 25, QA: 29, RO: 24, RS: 22, SA: 24, SC: 31, SE: 24, SI: 19, SK: 24, SM: 27, ST: 25, SV: 28, TL: 23, TN: 24, TR: 26, UA: 29, VA: 22, VG: 24, XK: 20 };
+  function ibanRemainder(chars) {
+    var r = 0;
+    for (var i = 0; i < chars.length; i++) { var c = chars.charAt(i), n = c >= "A" ? c.charCodeAt(0) - 55 : Number(c); r = n > 9 ? (r * 100 + n) % 97 : (r * 10 + n) % 97; }
+    return r;
+  }
+  function checkIban(text) {
+    var v = nfc(text).toUpperCase().replace(/^IBAN:?/, "").replace(/[\s\-]/g, ""), ex = "like NL74 EXMP 0123 4567 89";
+    if (!v) return fieldFail(v, "Enter an IBAN, " + ex + ".");
+    if (!/^[A-Z]{2}\d{2}[A-Z\d]+$/.test(v)) return fieldFail(v, "An IBAN starts with two letters and two digits, then letters and digits, " + ex + ".");
+    var cc = v.slice(0, 2), len = IBAN_LENGTHS[cc];
+    if (!len) return fieldFail(v, cc + " is not a country code that uses IBANs; check the first two letters, " + ex + ".");
+    if (v.length !== len) return fieldFail(v, "An IBAN from " + cc + " has " + len + " characters; this has " + v.length + ".");
+    if (ibanRemainder(v.slice(4) + v.slice(0, 4)) !== 1) return fieldFail(v, "This IBAN has a typo: check each character against the bank details.");
+    return fieldResult(v, groupsOf(v, 4), true);
+  }
+  // Card number: 12 to 19 digits and the Luhn sum; the brand from the first digits; shown grouped as on the card.
+  var CARD_BRANDS = [["amex", /^3[47]/], ["diners", /^3(0[0-5]|[689])/], ["jcb", /^35(2[89]|[3-8]\d)/], ["mastercard", /^(5[1-5]|2(22[1-9]|2[3-9]\d|[3-6]\d\d|7[01]\d|720))/],
+    ["visa", /^4/], ["discover", /^(6011|65|64[4-9])/], ["unionpay", /^62/], ["maestro", /^(50|5[6-8]|6\d)/]];
+  function cardBrand(d) { return (CARD_BRANDS.filter(function (b) { return b[1].test(d); })[0] || [""])[0]; }
+  function luhn(d) {
+    var sum = 0;
+    for (var i = 0; i < d.length; i++) { var n = Number(d.charAt(d.length - 1 - i)); if (i % 2) n = n * 2 > 9 ? n * 2 - 9 : n * 2; sum += n; }
+    return d.length > 0 && sum % 10 === 0;
+  }
+  function checkCard(text) {
+    var raw = nfc(text).trim(), d = digitsOf(raw), brand = cardBrand(d), ex = "like 4000 1234 5678 9010", r;
+    if (!raw) r = fieldFail(raw, "Enter the card number from the front of the card, " + ex + ".");
+    else if (/[^\d\s\-]/.test(raw)) r = fieldFail(raw, "Use digits only, " + ex + ".");
+    else if (d.length < 12 || d.length > 19) r = fieldFail(raw, "A card number has 12 to 19 digits, " + ex + "; this has " + d.length + ".");
+    else if (!luhn(d)) r = fieldFail(raw, "This card number has a typo: check the digits against the card.");
+    else {
+      var sizes = brand === "amex" ? [4, 6, 5] : brand === "diners" && d.length === 14 ? [4, 6, 4] : null, at = 0;
+      r = fieldResult(d, sizes ? sizes.map(function (n) { var s = d.slice(at, at + n); at += n; return s; }).filter(Boolean).join(" ") + d.slice(at) : groupsOf(d, 4), true);
+    }
+    r.brand = brand;
+    return r;
+  }
+  // Expiry: MM/YY, MMYY, MM-YY and MM/YYYY accepted; stored YYYY-MM, shown MM/YY; not in the past.
+  function checkExpiry(text) {
+    var raw = nfc(text).trim(), ex = "like 08/29", now = new Date();
+    if (!raw) return fieldFail(raw, "Enter the expiry date from the card, " + ex + ".");
+    var m = /^(\d{1,2})\s*[\/.\-\s]?\s*(\d{2}|\d{4})$/.exec(raw);
+    if (!m) return fieldFail(raw, "Enter the month and the year, " + ex + ".");
+    var month = Number(m[1]), year = m[2].length === 2 ? 2000 + Number(m[2]) : Number(m[2]);
+    if (month < 1 || month > 12) return fieldFail(raw, "The month is 01 to 12, " + ex + ".");
+    var value = year + "-" + pad2(month);
+    if (value < now.getFullYear() + "-" + pad2(now.getMonth() + 1)) return fieldFail(raw, "This date has passed: use the expiry date of a card that is still valid.");
+    return fieldResult(value, pad2(month) + "/" + String(year).slice(-2), true);
+  }
+  function checkCardCode(text, o) {
+    var v = digitsOf(text), amex = o.brand === "amex", n = amex ? 4 : 3;
+    return v.length === n ? fieldResult(v, v, true) : fieldFail(v, "Enter the " + n + "-digit security code on the " + (amex ? "front" : "back") + " of the card, like " + "1234".slice(0, n) + ".");
+  }
+  // Postcodes: the country's format from a table (a loose check for a country not in it); none where the post
+  // uses none. The format says nothing about whether an address exists.
+  var PC4 = { re: /^\d{4}$/, ex: "1234" }, PC5 = { re: /^\d{5}$/, ex: "12345" }, PC6 = { re: /^\d{6}$/, ex: "123456" }, PC5S = { re: /^\d{5}$/, at: 3, ex: "123 45" };
+  var POSTCODES = {
+    NL: { re: /^[1-9]\d{3}[A-Z]{2}$/, at: 4, ex: "1234 AB" }, BE: { re: /^[1-9]\d{3}$/, ex: "1234" },
+    GB: { re: /^([A-Z]{1,2}\d[A-Z\d]?|GIR)\d[A-Z]{2}$/, at: -3, ex: "AB12 3CD" }, IE: { re: /^([AC-FHKNPRTV-Y]\d{2}|D6W)[\dAC-FHKNPRTV-Y]{4}$/, at: 3, ex: "A65 F4E2" },
+    US: { re: /^\d{5}(\d{4})?$/, at: 5, sep: "-", ex: "12345" }, CA: { re: /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z]\d[ABCEGHJ-NPRSTV-Z]\d$/, at: 3, ex: "A1B 2C3" },
+    PL: { re: /^\d{5}$/, at: 2, sep: "-", ex: "12-345" }, PT: { re: /^\d{7}$/, at: 4, sep: "-", ex: "1234-567" }, JP: { re: /^\d{7}$/, at: 3, sep: "-", ex: "123-4567" },
+    BR: { re: /^\d{8}$/, at: 5, sep: "-", ex: "12345-678" }, IL: { re: /^\d{7}$/, ex: "1234567" }, IS: { re: /^\d{3}$/, ex: "123" }, LV: { re: /^\d{4}$/, prefix: "LV-", ex: "LV-1234" },
+    MT: { re: /^[A-Z]{3}\d{4}$/, at: 3, ex: "ABC 1234" }
+  };
+  "LU AT CH DK NO HU SI BG CY AU NZ ZA PH".split(" ").forEach(function (c) { POSTCODES[c] = PC4; });
+  "DE FR ES IT FI EE HR LT MX TR MY TH UA KR".split(" ").forEach(function (c) { POSTCODES[c] = PC5; });
+  "GR SE CZ SK".split(" ").forEach(function (c) { POSTCODES[c] = PC5S; });
+  "IN RU CN SG RO".split(" ").forEach(function (c) { POSTCODES[c] = PC6; });
+  var NO_POSTCODE = " AE AG AO AW BS BZ CW DJ FJ GD HK KI MO QA TO TV UG VU ZW ";
+  var REGIONS = { US: ["State", true], CA: ["Province or territory", true], AU: ["State or territory", true], BR: ["State", true], MX: ["State", true], IN: ["State", true],
+    JP: ["Prefecture", true], CN: ["Province", true], IT: ["Province", false], ES: ["Province", false], IE: ["County", false] };
+  function addressFor(country) {
+    var cc = String(country || "").trim().toUpperCase(), rule = POSTCODES[cc], r = REGIONS[cc];
+    return { postcode: NO_POSTCODE.indexOf(" " + cc + " ") < 0, postcodeLabel: { US: "ZIP code", IE: "Eircode" }[cc] || "Postcode",
+      inputmode: rule && !/[A-Z]/.test(rule.ex) ? "numeric" : "text", example: rule ? rule.ex : "", region: r ? { label: r[0], required: r[1] } : null };
+  }
+  function checkPostcode(text, o) {
+    var cc = String(o.country || "").trim().toUpperCase(), shape = addressFor(cc), rule = POSTCODES[cc];
+    if (!shape.postcode) return fieldResult("", "", true);
+    var raw = nfc(text).trim().replace(/\s+/g, " ").toUpperCase();
+    if (!raw) return fieldFail(raw, "Enter the " + shape.postcodeLabel.toLowerCase() + ", like " + (shape.example || "1234 AB") + ".");
+    if (!rule) return /^[A-Z\d][A-Z\d \-]{1,9}$/.test(raw) ? fieldResult(raw, raw, true) : fieldFail(raw, "Use letters, digits, spaces or dashes, up to 10, like 1234 AB.");
+    var tries = [raw, raw.replace(/^[A-Z]{1,2}-\s*/, "")].map(function (s) { return s.replace(/[\s\-]/g, ""); });
+    tries.push(tries[0].indexOf(cc) === 0 ? tries[0].slice(cc.length) : "");
+    var c = tries.filter(function (t) { return t && rule.re.test(t); })[0];
+    var place = cc;
+    try { place = new Intl.DisplayNames(["en"], { type: "region" }).of(cc) || cc; } catch (e) { /* the code */ }
+    if (!c) return fieldFail(raw, shape.postcodeLabel + "s in " + place + " look like " + rule.ex + ".");
+    var i = rule.at < 0 ? c.length + rule.at : rule.at, out = (rule.prefix || "") + (i > 0 && i < c.length ? c.slice(0, i) + (rule.sep || " ") + c.slice(i) : c);
+    return fieldResult(out, out, true);
+  }
+  var FIELD_CHECKS = {
+    name: function (v, o) { return checkLength(tidyText(v), o.max || 300, "Enter a name, like Ana Lima."); },
+    text: function (v, o) { return checkLength(o.multiline ? nfc(v).trim() : tidyText(v), o.max || 1000, "Fill in this field."); },
+    email: checkEmail, phone: checkPhone, postcode: checkPostcode, iban: checkIban, card: checkCard, expiry: checkExpiry, "card-code": checkCardCode,
+    code: checkCode, url: checkUrl, amount: checkAmount,
+    password: function (v) { return checkPassword(v, 0); }, "new-password": function (v, o) { return checkPassword(v, o.min || 8); }
+  };
+  function checkField(kind, text, opts) { var f = FIELD_CHECKS[kind]; return f ? f(String(text == null ? "" : text), opts || {}) : null; }
+  var KEEP_TYPED = { password: 1, "new-password": 1 };
+  function fieldOpts(el) {
+    var byId = function (id) { return id ? document.getElementById(id) : null; };
+    var block = el.closest("[data-kit-address]"), country = byId(el.getAttribute("data-kit-country")) || (block ? block.querySelector('[autocomplete~="country"]') : null);
+    var opt = country && country.options ? country.options[country.selectedIndex] : null, card = byId(el.getAttribute("data-kit-card"));
+    var num = function (a) { var v = parseFloat(el.getAttribute(a)); return isNaN(v) ? undefined : v; };
+    return { country: country ? country.value : (el.getAttribute("data-country") || ""), callingCode: el.getAttribute("data-calling-code") || (opt && opt.getAttribute("data-calling-code")) || "",
+      brand: card ? checkCard(card.value).brand : "", length: num("data-length"), decimals: num("data-decimals"), negative: el.hasAttribute("data-negative"),
+      min: num("minlength"), max: num("data-max"), multiline: el.localName === "textarea" };
+  }
+  function fieldSkipped(el) { return !!el.closest("[hidden]") || isOff(el) || el.readOnly; }
+  function fieldEval(el) {
+    var kind = el.getAttribute("data-kit-field");
+    if (!FIELD_CHECKS[kind]) return null;
+    if (!String(el.value || "").trim() && !el.required) return { value: "", display: "", ok: true, message: "", empty: true };
+    return checkField(kind, el.value, fieldOpts(el));
+  }
+  function fieldNote(el, key, cls) {
+    var n = el[key] && document.getElementById(el[key]);
+    if (n) return n;
+    n = document.createElement("p");
+    n.className = cls;
+    n.hidden = true;
+    el[key] = idOf(n, "note");
+    (el.closest(".kit-field") || el.parentNode).appendChild(n);
+    return n;
+  }
+  function fieldShow(el, r) {
+    var own = el.getAttribute("aria-errormessage"), m = (own && document.getElementById(own)) || fieldNote(el, "kitErrorId", "kit-error-text");
+    if (r.ok) el.removeAttribute("aria-invalid"); else el.setAttribute("aria-invalid", "true");
+    describedBy(el, m.id, !r.ok);
+    m.hidden = r.ok;
+    m.textContent = r.ok ? "" : r.message;
+  }
+  // "Did you mean ana@gmail.com?" with a button that takes it: offered, never forced.
+  function fieldHint(el, r) {
+    var h = el.kitHintId && document.getElementById(el.kitHintId);
+    if (!r.suggestion) { if (h) { h.hidden = true; describedBy(el, h.id, false); } return; }
+    h = fieldNote(el, "kitHintId", "kit-help");
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "kit-link";
+    b.textContent = r.suggestion;
+    b.addEventListener("click", function () { el.value = r.suggestion; fieldCommit(el); el.focus(); });
+    h.textContent = "Did you mean ";
+    h.appendChild(b);
+    h.appendChild(document.createTextNode("?"));
+    h.hidden = false;
+    describedBy(el, h.id, true);
+  }
+  function fieldCommit(el, force) {
+    if (fieldSkipped(el)) return null;
+    var r = fieldEval(el), kind = el.getAttribute("data-kit-field");
+    if (!r) return null;
+    if (r.ok && !r.empty && !KEEP_TYPED[kind] && el.value !== r.display) el.value = r.display;
+    if (force || (el.form && el.form.kitChecked) || el.getAttribute("aria-invalid") === "true") fieldShow(el, r);
+    if (kind === "email") fieldHint(el, r);
+    emit(el, "check", { kind: kind, value: r.value, ok: r.ok });
+    return r;
+  }
+  function isTypedField(el) { return !!el && el.nodeType === 1 && el.hasAttribute("data-kit-field"); }
+  document.addEventListener("focusout", function (e) { if (isTypedField(e.target)) safe(fieldCommit, e.target); });
+  document.addEventListener("input", function (e) {
+    var el = e.target;
+    if (!isTypedField(el) || el.getAttribute("aria-invalid") !== "true") return;
+    var r = fieldEval(el);
+    if (r && r.ok) fieldShow(el, r);   // typing clears a fixed error, never shows a new one
+  });
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form || !form.querySelectorAll) return;
+    Array.prototype.forEach.call(form.querySelectorAll("[data-kit-password]"), function (g) { if (g.kitReveal) g.kitReveal(false); });   // the value hidden again
+    var fields = Array.prototype.filter.call(form.querySelectorAll("[data-kit-field]"), function (el) { return !fieldSkipped(el); });
+    if (!fields.length) return;
+    form.kitChecked = true;
+    var bad = fields.filter(function (el) { var r = fieldCommit(el, true); return r && !r.ok; });
+    if (!bad.length) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    openAround(bad[0]);
+    bad[0].focus();
+  }, true);
+  document.addEventListener("formdata", function (e) {
+    var form = e.target, data = e.formData;
+    if (!data || !form || !form.querySelectorAll) return;
+    Array.prototype.forEach.call(form.querySelectorAll("[data-kit-field]"), function (el) {
+      if (!el.name || KEEP_TYPED[el.getAttribute("data-kit-field")] || fieldSkipped(el)) return;
+      var r = fieldEval(el);
+      if (r && r.ok && !r.empty) data.set(el.name, r.value);   // the stored form, not the grouped display
+    });
+  }, true);
+
+  // Password: <div class="kit-input-group kit-password" data-kit-password><input class="kit-input" id="pw" type="password"
+  // autocomplete="current-password" data-kit-field="password"></div> (new-password with minlength="12" on a sign-up).
+  // The reveal button is added when missing: an icon button "Show password" with aria-pressed, inside the field. It
+  // keeps the focus, caret and selection where they were, and the value is hidden again on submit, so a new password
+  // needs no confirm field. A note shows while Caps Lock is on; with minlength and no description "At least N
+  // characters." is added before typing. For password managers: autocomplete set when missing or off, a maxlength under
+  // 64 removed, no spelling check. The value is never trimmed or changed.
+  function setupPassword(group) {
+    var input = group.querySelector("input");
+    if (group.kitPassword || !input) return;
+    group.kitPassword = true;
+    var auto = (input.getAttribute("autocomplete") || "").toLowerCase(), isNew = input.hasAttribute("minlength") || input.getAttribute("data-kit-field") === "new-password";
+    if (!auto || auto === "off") input.setAttribute("autocomplete", isNew ? "new-password" : "current-password");
+    var most = input.getAttribute("maxlength");
+    if (most !== null && Number(most) < 64) input.removeAttribute("maxlength");
+    input.setAttribute("spellcheck", "false");
+    input.setAttribute("autocapitalize", "off");
+    input.setAttribute("autocorrect", "off");
+    var btn = group.querySelector("[data-kit-reveal]");
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-password__reveal";
+      btn.setAttribute("data-kit-reveal", "");
+      btn.innerHTML = lineIcon("eye");
+      group.appendChild(btn);
+    }
+    btn.setAttribute("aria-label", "Show password");
+    btn.setAttribute("aria-pressed", "false");
+    if (input.id) btn.setAttribute("aria-controls", input.id);
+    if (isOff(input)) btn.setAttribute("aria-disabled", "true");
+    var field = group.closest(".kit-field") || group.parentNode, caps = document.createElement("p");
+    caps.className = "kit-help";
+    caps.setAttribute("role", "status");
+    caps.textContent = "Caps Lock is on.";
+    caps.hidden = true;
+    idOf(caps, "caps");
+    field.appendChild(caps);
+    var least = Number(input.getAttribute("minlength")) || 0;
+    if (least && !input.getAttribute("aria-describedby")) {
+      var help = document.createElement("p");
+      help.className = "kit-help";
+      help.textContent = "At least " + least + " characters. A few unrelated words are easy to remember.";
+      group.parentNode.insertBefore(help, group.nextSibling);
+      describedBy(input, idOf(help, "help"), true);
+    }
+    group.kitReveal = function (show) {
+      var focused = document.activeElement === input, a = input.selectionStart, b = input.selectionEnd;
+      input.type = show ? "text" : "password";
+      btn.setAttribute("aria-pressed", String(!!show));
+      if (!btn.querySelector("[data-kit-icon]")) btn.innerHTML = lineIcon(show ? "eye-off" : "eye");
+      if (focused) { input.focus(); try { input.setSelectionRange(a, b); } catch (e) { /* no caret here */ } }
+    };
+    btn.addEventListener("mousedown", function (e) { if (document.activeElement === input) e.preventDefault(); });   // the caret stays
+    btn.addEventListener("click", function () { if (!isOff(input)) group.kitReveal(btn.getAttribute("aria-pressed") !== "true"); });
+    var capsOn = function (e) { if (!e.getModifierState) return; var on = e.getModifierState("CapsLock"); caps.hidden = !on; describedBy(input, caps.id, on); };
+    input.addEventListener("keydown", capsOn);
+    input.addEventListener("keyup", capsOn);
+    input.addEventListener("blur", function () { caps.hidden = true; describedBy(input, caps.id, false); });
+  }
+
+  // One-time code in boxes (one data-kit-field="code" field is the default and autofills best): <div class="kit-otp"
+  // data-kit-otp data-name="code" role="group" aria-label="Code from the text message"> with one
+  // <input class="kit-input kit-otp__box"> per digit. A digit moves on to the next box, Backspace in an empty box goes
+  // back, Left and Right move; a pasted or autofilled code is spread over the boxes from there, never cut off. Boxes are
+  // named "Digit 1 of 6" when unnamed. The digits go into a hidden input named data-name. kit:code with detail.value
+  // and detail.complete.
+  function setupOtp(group) {
+    if (group.kitOtp) return;
+    group.kitOtp = true;
+    var boxes = function () { return Array.prototype.slice.call(group.querySelectorAll("input:not([type=hidden])")); };
+    var name = group.getAttribute("data-name"), sent = name ? group.appendChild(hiddenInput(name, "")) : null, list = boxes();
+    list.forEach(function (b, i) {
+      if (!b.getAttribute("aria-label") && !b.getAttribute("aria-labelledby")) b.setAttribute("aria-label", "Digit " + (i + 1) + " of " + list.length);
+      b.setAttribute("inputmode", "numeric");
+      b.setAttribute("autocomplete", i === 0 ? "one-time-code" : "off");
+      b.removeAttribute("maxlength");   // a maxlength would cut a pasted code
+    });
+    function otpSync() {
+      var all = boxes(), v = all.map(function (b) { return b.value; }).join("");
+      if (sent) sent.value = v;
+      emit(group, "code", { value: v, complete: v.length === all.length });
+    }
+    function fill(digits, at) {
+      var all = boxes(), n = Math.min(digits.length, all.length - at);
+      for (var k = 0; k < n; k++) all[at + k].value = digits.charAt(k);
+      var next = all[Math.min(at + Math.max(n, 1), all.length - 1)];
+      if (n && next) next.focus();
+      otpSync();
+    }
+    group.addEventListener("input", function (e) {
+      var all = boxes(), i = all.indexOf(e.target);
+      if (i < 0) return;
+      var d = digitsOf(e.target.value);
+      if (d.length > 1) { fill(d, i); return; }
+      e.target.value = d;
+      if (d && all[i + 1]) all[i + 1].focus();
+      otpSync();
+    });
+    group.addEventListener("keydown", function (e) {
+      var all = boxes(), i = all.indexOf(e.target), to = null;
+      if (i < 0 || isOff(e.target)) return;
+      if (e.key === "Backspace") to = !e.target.value && i > 0 ? all[i - 1] : null;
+      else if (e.key === "ArrowLeft") to = all[i - 1] || null;
+      else if (e.key === "ArrowRight") to = all[i + 1] || null;
+      if (!to) return;
+      e.preventDefault();
+      if (e.key === "Backspace") { to.value = ""; otpSync(); }
+      to.focus();
+    });
+  }
+
+  // Address, country first: <fieldset class="kit-fieldset" data-kit-address> with a country select (autocomplete="country",
+  // ISO codes as values), then street, city, a region field (autocomplete="address-level1") and a postcode field
+  // (autocomplete="postal-code" data-kit-field="postcode"), each in a kit-field with a label. The country decides the
+  // rest: the postcode field shows only where the post uses postcodes, labelled for it (ZIP code, Eircode) with an
+  // invented example; the region field only where the country has one, required where its post needs it and else
+  // marked (optional). A hidden field sends nothing. A postcode already typed is checked again. kit:address with
+  // detail.country.
+  function addressBox(input) { return input ? input.closest(".kit-field") || input.parentNode : null; }
+  function addressLabel(input) { return input && input.id ? document.querySelector('label[for="' + input.id + '"]') : null; }
+  function addressShow(input, show, required) {
+    var box = addressBox(input);
+    if (!box) return;
+    box.hidden = !show;
+    if (!show && input.name) { input.kitName = input.name; input.removeAttribute("name"); }
+    if (show && !input.name && input.kitName) input.setAttribute("name", input.kitName);
+    input.required = !!(show && required);
+    var l = addressLabel(input);
+    if (l) l.classList.toggle("kit-label--required", input.required);
+  }
+  function applyCountry(block) {
+    var select = block.querySelector('[autocomplete~="country"]');
+    if (!select) return null;
+    var shape = addressFor(select.value), pc = block.querySelector('[autocomplete~="postal-code"]'), region = block.querySelector('[autocomplete~="address-level1"]');
+    if (pc) {
+      addressShow(pc, shape.postcode, pc.getAttribute("data-required") !== "false");
+      if (addressLabel(pc)) addressLabel(pc).textContent = shape.postcodeLabel;
+      pc.setAttribute("inputmode", shape.inputmode);
+      if (shape.example) pc.setAttribute("placeholder", shape.example); else pc.removeAttribute("placeholder");
+      if (shape.postcode && pc.value) fieldCommit(pc);
+    }
+    if (region) {
+      var r = shape.region;
+      addressShow(region, !!r, !!(r && r.required));
+      if (r && addressLabel(region)) addressLabel(region).textContent = r.required ? r.label : r.label + " (optional)";
+    }
+    return shape;
+  }
+  function setupAddress(block) {
+    if (block.kitAddress) return;
+    block.kitAddress = true;
+    applyCountry(block);
+    block.addEventListener("change", function (e) {
+      if (!e.target.matches || !e.target.matches('[autocomplete~="country"]')) return;
+      applyCountry(block);
+      emit(block, "address", { country: e.target.value });
+    });
+  }
+
+  // Date range: <div class="kit-daterange" data-kit-daterange data-value="30d" aria-label="Period"></div> (data-presets
+  // as for kit-range, without custom; data-min and data-max as yyyy-mm-dd; data-value="custom" with data-from and
+  // data-to). A button shows the preset or the dates, named with the field ("Period, Last 30 days"), and opens a panel
+  // with the presets and two native date fields with Apply: a preset applies when picked, the dates on Apply or Enter
+  // (a reversed range is swapped; a date outside data-min and data-max shows an error under the fields). Escape or a
+  // click beside it closes it back to the button. kit:range with detail.preset, from and to (yyyy-mm-dd, both
+  // included; empty for all), as from kit-range.
+  function setupDateRange(el) {
+    if (el.kitDateRange) return;
+    el.kitDateRange = true;
+    var label = el.getAttribute("aria-label") || "Period", min = el.getAttribute("data-min") || "", max = el.getAttribute("data-max") || "";
+    var presets = (el.getAttribute("data-presets") || "7d,30d,month,quarter,year,all").split(",").map(function (p) { return p.trim(); })
+      .filter(function (p) { return p !== "custom" && (RANGE_NAMES[p] || /^\d+d$/.test(p)); });
+    if (!el.getAttribute("role")) el.setAttribute("role", "group");
+    var trigger = document.createElement("button"), panel = document.createElement("div");
+    trigger.type = "button";
+    trigger.className = "kit-select kit-daterange__trigger";
+    panel.className = "kit-popover kit-daterange__panel";
+    panel.hidden = true;
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", label);
+    trigger.setAttribute("data-kit-popover", idOf(panel, "range"));
+    trigger.setAttribute("aria-haspopup", "dialog");
+    trigger.setAttribute("aria-expanded", "false");
+    var list = document.createElement("div");
+    list.className = "kit-daterange__presets";
+    list.setAttribute("role", "group");
+    list.setAttribute("aria-label", label + " presets");
+    presets.forEach(function (p) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "kit-daterange__preset";
+      b.setAttribute("data-preset", p);
+      b.setAttribute("aria-pressed", "false");
+      b.textContent = RANGE_NAMES[p] || ("Last " + parseInt(p, 10) + " days");
+      list.appendChild(b);
+    });
+    var custom = document.createElement("div");
+    custom.className = "kit-daterange__custom";
+    custom.innerHTML = '<div class="kit-field"><label class="kit-label">From</label><input class="kit-input" type="date"></div>' +
+      '<div class="kit-field"><label class="kit-label">To</label><input class="kit-input" type="date"></div>' +
+      '<p class="kit-error-text" hidden></p><button class="kit-btn kit-btn--primary kit-btn--sm" type="button">Apply</button>';
+    var dates = custom.querySelectorAll("input"), fromIn = dates[0], toIn = dates[1], err = custom.querySelector("p"), apply = custom.querySelector("button");
+    Array.prototype.forEach.call(custom.querySelectorAll("label"), function (l, i) { l.htmlFor = idOf(dates[i], "date"); if (min) dates[i].min = min; if (max) dates[i].max = max; });
+    idOf(err, "range-error");
+    panel.appendChild(list);
+    panel.appendChild(custom);
+    el.appendChild(trigger);
+    el.appendChild(panel);
+    function rangeShow(preset, from, to) {
+      var text = preset === "custom" ? format.date(from) + " \u2013 " + format.date(to) : (RANGE_NAMES[preset] || ("Last " + parseInt(preset, 10) + " days"));
+      trigger.textContent = text;
+      trigger.setAttribute("aria-label", label + ", " + text);
+      el.setAttribute("data-value", preset);
+      el.setAttribute("data-from", from);
+      el.setAttribute("data-to", to);
+      el.classList.toggle("is-active", preset !== "all");
+      Array.prototype.forEach.call(list.children, function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-preset") === preset)); });
+    }
+    function done(preset, r) {
+      rangeShow(preset, r.from, r.to);
+      closePopovers();
+      trigger.focus();
+      emit(el, "range", { preset: preset, from: r.from, to: r.to });
+    }
+    function problem(text) {
+      err.textContent = text;
+      err.hidden = !text;
+      [fromIn, toIn].forEach(function (i) { if (text) i.setAttribute("aria-invalid", "true"); else i.removeAttribute("aria-invalid"); describedBy(i, err.id, !!text); });
+    }
+    function applyDates() {
+      var f = fromIn.value, t = toIn.value;
+      if (!f || !t) { problem("Choose a start and an end date."); return; }
+      if (f > t) { var x = f; f = t; t = x; fromIn.value = f; toIn.value = t; }   // reversed: swapped, not refused
+      if ((min && f < min) || (max && t > max)) { problem("Choose dates from " + format.date(min || f) + " to " + format.date(max || t) + "."); return; }
+      problem("");
+      done("custom", { from: f, to: t });
+    }
+    list.addEventListener("click", function (e) { var b = closestOf(e.target, "[data-preset]"); if (b) done(b.getAttribute("data-preset"), rangeOf(b.getAttribute("data-preset"))); });
+    apply.addEventListener("click", applyDates);
+    custom.addEventListener("keydown", function (e) { if (e.key === "Enter" && e.target.localName === "input") { e.preventDefault(); applyDates(); } });
+    var start = el.getAttribute("data-value");
+    if (start === "custom" && el.getAttribute("data-from") && el.getAttribute("data-to")) { fromIn.value = el.getAttribute("data-from"); toIn.value = el.getAttribute("data-to"); rangeShow("custom", fromIn.value, toIn.value); }
+    else { var p0 = presets.indexOf(start) >= 0 ? start : (presets.indexOf("all") >= 0 ? "all" : presets[0]), r0 = rangeOf(p0); rangeShow(p0, r0.from, r0.to); }
+  }
+
+  // Sheet with stops, for a phone or beside a map: <dialog class="kit-sheet" id="ID" data-kit-sheet data-detents="0.3 0.6 0.92"
+  // data-detent="0" aria-labelledby="TITLE-ID"><div class="kit-sheet__grab"><span class="kit-sheet__handle" aria-hidden="true">
+  // </span><div class="kit-sheet__head"><h2 class="kit-sheet__title" id="TITLE-ID">Stops</h2><button class="kit-btn kit-btn--sm"
+  // type="button" data-kit-detent aria-expanded="false">Expand</button><button class="kit-btn kit-btn--ghost kit-btn--icon
+  // kit-btn--sm" type="button" data-kit-close aria-label="Close">x</button></div></div><div class="kit-sheet__body">..</div>
+  // </dialog>, opened by a button with data-kit-open="ID". The stops are shares of the window height (peek, medium and full
+  // work too); the sheet is as tall as its highest stop and the lower stops are positions of it, so its content never
+  // reflows. Drag the grab strip (any pointer), or the body by touch from the top of its scroll: on release it settles
+  // on the stop nearest where it was heading, a flick down from the lowest stop or a pull past half below it closes it,
+  // and a release that turns back returns it to where it started; past the highest stop it resists. data-kit-detent
+  // steps through the stops (aria-expanded at the highest). Escape, the close button and a click beside it close it.
+  // kit:detent with detail.index and detail.detent.
+  var DETENT_NAMES = { peek: 0.25, medium: 0.5, full: 0.92 };
+  function setupSheet(d) {
+    if (d.kitSheet) return;
+    d.kitSheet = true;
+    var stops = (d.getAttribute("data-detents") || "0.5 0.92").split(/[\s,]+/).map(function (s) { return DETENT_NAMES[s] || parseFloat(s); })
+      .filter(function (v) { return v > 0 && v <= 1; }).sort(function (a, b) { return a - b; });
+    if (!stops.length) stops = [0.5];
+    var first = clampNum(parseInt(d.getAttribute("data-detent"), 10) || 0, 0, stops.length - 1), index = first, y = 0, drag = null;
+    var body = d.querySelector(".kit-sheet__body"), grab = d.querySelector(".kit-sheet__grab"), stepper = d.querySelector("[data-kit-detent]");
+    function winH() { return window.innerHeight || document.documentElement.clientHeight || 800; }
+    function offsetOf(i) { return (stops[stops.length - 1] - stops[i]) * winH(); }
+    function place(px, animate) {
+      y = px;
+      d.style.transition = animate && !reducedMotion() ? "transform var(--kit-speed-slow) ease-out" : "none";
+      d.style.transform = "translateY(" + Math.round(px) + "px)";
+    }
+    function sheetGo(i, animate) {
+      index = clampNum(i, 0, stops.length - 1);
+      d.style.height = Math.round(stops[stops.length - 1] * winH()) + "px";
+      place(offsetOf(index), animate);
+      if (stepper) stepper.setAttribute("aria-expanded", String(index === stops.length - 1));
+      emit(d, "detent", { index: index, detent: stops[index] });
+    }
+    d.kitDetent = function (i) { sheetGo(i, true); };
+    d.addEventListener("kit:open", function (e) { if (e.target === d) sheetGo(first, false); });
+    if (d.open) sheetGo(first, false);
+    d.addEventListener("click", function (e) { if (e.target === d) closePanel(d); });   // the backdrop
+    if (stepper) stepper.addEventListener("click", function () { sheetGo(index === stops.length - 1 ? 0 : index + 1, true); });
+    function sheetBegin(e, fromBody) {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      drag = { id: e.pointerId, y0: e.clientY, start: y, from: index, decided: !fromBody, samples: [{ y: e.clientY, t: Date.now() }] };
+      if (!fromBody) hold(e);
+    }
+    function hold(e) { try { d.setPointerCapture(e.pointerId); } catch (x) { /* not supported */ } d.style.transition = "none"; }
+    if (grab) grab.addEventListener("pointerdown", function (e) { if (!closestOf(e.target, "button, a, input, select, textarea")) sheetBegin(e, false); });
+    if (body) body.addEventListener("pointerdown", function (e) { if (e.pointerType === "touch" || e.pointerType === "pen") sheetBegin(e, true); });
+    d.addEventListener("pointermove", function (e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var dy = e.clientY - drag.y0;
+      if (!drag.decided) {
+        if (Math.abs(dy) < 10) return;
+        // From the body: down only from the top of its scroll, up only while the sheet is below its highest stop.
+        if ((dy > 0 && (!body || body.scrollTop <= 0)) || (dy < 0 && index < stops.length - 1)) { drag.decided = true; drag.y0 = e.clientY; dy = 0; hold(e); }
+        else { drag = null; return; }
+      }
+      e.preventDefault();
+      drag.samples.push({ y: e.clientY, t: Date.now() });
+      if (drag.samples.length > 5) drag.samples.shift();
+      var to = drag.start + dy;
+      place(to < 0 ? to * 0.3 : to, false);   // past the highest stop it resists
+    });
+    function release(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var m = drag, s = m.samples, dt = s[s.length - 1].t - s[0].t, v = dt > 0 ? (s[s.length - 1].y - s[0].y) / dt : 0;
+      drag = null;
+      if (!m.decided) return;
+      if (e.type === "pointercancel") { sheetGo(m.from, true); return; }
+      var low = offsetOf(0), projected = y + v * 100, moved = y - m.start;
+      if ((v > 0.11 && y >= low - 1) || projected > low + stops[0] * winH() / 2) { closePanel(d); return; }
+      if (moved * v < 0 && Math.abs(v) > 0.05) { sheetGo(m.from, true); return; }   // the release turned back
+      var best = 0;
+      stops.forEach(function (st, i) { if (Math.abs(offsetOf(i) - projected) < Math.abs(offsetOf(best) - projected)) best = i; });
+      sheetGo(best, true);
+    }
+    d.addEventListener("pointerup", release);
+    d.addEventListener("pointercancel", release);
+  }
+
+  // Carousel (like items where seeing a few is enough; what everyone must see goes in a grid or list; inside another
+  // section a div with role="region"): <section class="kit-carousel" data-kit-carousel aria-label="Recent reports"><div class="kit-carousel__head"><h2 class="kit-h3">
+  // Recent reports</h2><span class="kit-carousel__pos"></span><button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm"
+  // type="button" data-kit-prev aria-label="Previous reports">..</button><button ... data-kit-next aria-label="Next reports">
+  // ..</button></div><ul class="kit-carousel__track" tabindex="0" aria-label="Reports"><li class="kit-carousel__item">..</li>
+  // </ul></section>. The browser scrolls (snap, momentum); kit.js keeps the buttons (aria-disabled at their end), the
+  // position ("4-6 of 12") and the edge fade (data-more on the track) in step, after a swipe too. The buttons scroll a
+  // page, Left and Right on the track one item, Home and End to the ends; smooth only without reduced motion. No
+  // autoplay. kit:carousel with detail.atStart and detail.atEnd when an end changes.
+  function setupCarousel(root) {
+    var track = root.querySelector(".kit-carousel__track");
+    if (root.kitCarousel || !track) return;
+    root.kitCarousel = true;
+    var prev = root.querySelector("[data-kit-prev]"), next = root.querySelector("[data-kit-next]"), pos = root.querySelector(".kit-carousel__pos"), ends = "", frame = 0;
+    var items = function () { return Array.prototype.slice.call(track.children); };
+    if (!track.hasAttribute("tabindex")) track.tabIndex = 0;
+    function scrollToX(x) {
+      x = clampNum(x, 0, Math.max(0, track.scrollWidth - track.clientWidth));
+      if (typeof track.scrollTo === "function") { try { track.scrollTo({ left: x, behavior: reducedMotion() ? "auto" : "smooth" }); } catch (e) { track.scrollLeft = x; } }
+      else track.scrollLeft = x;
+      update();
+    }
+    function update() {
+      var left = track.scrollLeft, w = track.clientWidth, atStart = left <= 1, atEnd = left + w >= track.scrollWidth - 1;
+      [[prev, atStart], [next, atEnd]].forEach(function (p) { if (p[0]) { if (p[1]) p[0].setAttribute("aria-disabled", "true"); else p[0].removeAttribute("aria-disabled"); } });
+      track.setAttribute("data-more", atStart && atEnd ? "none" : atStart ? "end" : atEnd ? "start" : "both");
+      var list = items(), seen = [];
+      list.forEach(function (it, i) { if (it.offsetWidth && it.offsetLeft + it.offsetWidth > left + 1 && it.offsetLeft < left + w - 1) seen.push(i + 1); });
+      if (pos) pos.textContent = seen.length ? (seen.length > 1 ? seen[0] + "\u2013" + seen[seen.length - 1] : seen[0]) + " of " + list.length : list.length + " items";
+      var now = atStart + "," + atEnd;
+      if (now !== ends) { var was = ends; ends = now; if (was) emit(root, "carousel", { atStart: atStart, atEnd: atEnd }); }
+    }
+    if (prev) prev.addEventListener("click", function () { scrollToX(track.scrollLeft - track.clientWidth); });
+    if (next) next.addEventListener("click", function () { scrollToX(track.scrollLeft + track.clientWidth); });
+    track.addEventListener("keydown", function (e) {
+      if (e.target !== track) return;
+      var left = track.scrollLeft, list = items(), to = null;
+      if (e.key === "ArrowRight") { var n = list.filter(function (it) { return it.offsetLeft > left + 1; })[0]; to = n ? n.offsetLeft : track.scrollWidth; }
+      else if (e.key === "ArrowLeft") { var p = list.filter(function (it) { return it.offsetLeft < left - 1; }).pop(); to = p ? p.offsetLeft : 0; }
+      else if (e.key === "Home") to = 0;
+      else if (e.key === "End") to = track.scrollWidth;
+      if (to === null) return;
+      e.preventDefault();
+      scrollToX(to);
+    });
+    var later = function () { if (frame) return; frame = (window.requestAnimationFrame || setTimeout)(function () { frame = 0; update(); }); };
+    track.addEventListener("scroll", later, { passive: true });
+    window.addEventListener("resize", later);
+    update();
+  }
+
+  // Reorder by a handle: <ul class="kit-list kit-reorder" data-kit-reorder aria-label="Agenda"> of rows that each hold
+  // <button class="kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-reorder__handle" type="button" data-kit-handle
+  // aria-label="Move Budget review">(grip-vertical icon)</button>. Drag the handle (after 4 px): the row stays in place,
+  // dimmed, and a line shows where it lands; the order changes once, on the drop; Escape restores. On the handle: Space
+  // or Enter picks the row up, Up and Down move the line, Home and End to the ends, Space or Enter drops, Escape or
+  // leaving the handle cancels; Alt+Up/Down moves one place at once. The focus stays on the handle and every step is read
+  // out. kit:reorder with detail.item, id (data-id), from and to (0-based).
+  function setupReorder(list) {
+    if (list.kitReorder) return;
+    list.kitReorder = true;
+    var line = document.createElement("li"), moving = null;
+    line.className = "kit-reorder__line";
+    line.hidden = true;
+    line.setAttribute("aria-hidden", "true");
+    list.appendChild(line);
+    function reorderRows() { return Array.prototype.filter.call(list.children, function (c) { return c !== line; }); }
+    function rowOf(el) { while (el && el.parentNode !== list) el = el.parentNode; return el; }
+    function nameOf(r) { var t = r.querySelector(".kit-list__title"); return r.getAttribute("data-name") || (t || r).textContent.trim(); }
+    function where(i) { return "position " + (i + 1) + " of " + reorderRows().length; }
+    function showLine(to) {
+      if (to === moving.from) { line.hidden = true; return; }
+      var ref = reorderRows()[to].getBoundingClientRect(), box = list.getBoundingClientRect();
+      line.hidden = false;
+      line.style.top = Math.round((to > moving.from ? ref.bottom : ref.top) - box.top + list.scrollTop - 1) + "px";
+    }
+    function reorderPick(row, handle, pointer) {
+      moving = { row: row, from: reorderRows().indexOf(row), handle: handle, pointer: pointer };
+      moving.to = moving.from;
+      row.classList.add("is-moving");
+      if (!pointer) announce("Picked up " + nameOf(row) + ", " + where(moving.from) + ". Up and Down move it, Space drops it, Escape cancels.");
+    }
+    function moveTo(to) {
+      moving.to = clampNum(to, 0, reorderRows().length - 1);
+      showLine(moving.to);
+      if (!moving.pointer) announce(where(moving.to));
+    }
+    function put(row, from, to, handle) {
+      var all = reorderRows();
+      list.insertBefore(row, to > from ? all[to].nextSibling : all[to]);
+      if (handle) handle.focus();
+      announce(nameOf(row) + " moved to " + where(to) + ".");
+      emit(list, "reorder", { item: row, id: row.getAttribute("data-id") || "", from: from, to: to });
+    }
+    function finish(drop) {
+      if (!moving) return;
+      var m = moving;
+      moving = null;
+      m.row.classList.remove("is-moving");
+      line.hidden = true;
+      if (drop && m.to !== m.from) put(m.row, m.from, m.to, m.handle);
+      else announce(drop ? nameOf(m.row) + " dropped at " + where(m.from) + "." : "Move cancelled. " + nameOf(m.row) + " is back at " + where(m.from) + ".");
+    }
+    list.addEventListener("keydown", function (e) {
+      var h = closestOf(e.target, "[data-kit-handle]");
+      if (!h || !list.contains(h) || isOff(h)) return;
+      var row = rowOf(h), i = reorderRows().indexOf(row), n = reorderRows().length, k = e.key;
+      if (e.altKey && (k === "ArrowUp" || k === "ArrowDown")) {
+        e.preventDefault();
+        finish(false);
+        var to = clampNum(i + (k === "ArrowUp" ? -1 : 1), 0, n - 1);
+        if (to !== i) put(row, i, to, h);
+        return;
+      }
+      if (k === " " || k === "Enter") { e.preventDefault(); if (moving && moving.row === row) finish(true); else { finish(false); reorderPick(row, h, false); } return; }
+      if (!moving || moving.row !== row) return;
+      if (k === "ArrowUp" || k === "ArrowDown" || k === "Home" || k === "End") { e.preventDefault(); moveTo(k === "Home" ? 0 : k === "End" ? n - 1 : moving.to + (k === "ArrowUp" ? -1 : 1)); }
+      else if (k === "Escape") { escapeHandled(e); finish(false); }
+    });
+    list.addEventListener("focusout", function (e) { if (moving && !moving.pointer && e.target === moving.handle) finish(false); });
+    list.addEventListener("pointerdown", function (e) {
+      var h = closestOf(e.target, "[data-kit-handle]");
+      if (!h || !list.contains(h) || e.button !== 0 || isOff(h)) return;
+      var row = rowOf(h), y0 = e.clientY, started = false, id = e.pointerId;
+      function reorderMove(ev) {
+        if (ev.pointerId !== id) return;
+        if (!started) {
+          if (Math.abs(ev.clientY - y0) < 4) return;
+          started = true;
+          try { h.setPointerCapture(id); } catch (x) { /* not supported */ }
+          finish(false);
+          reorderPick(row, h, true);
+        }
+        ev.preventDefault();
+        var to = 0;
+        reorderRows().forEach(function (r) { if (r === row) return; var b = r.getBoundingClientRect(); if (ev.clientY > b.top + b.height / 2) to++; });
+        moveTo(to);
+      }
+      function reorderStop(ev) { if (ev.pointerId !== id) return; reorderOff(); if (started) finish(ev.type === "pointerup"); }
+      function reorderKey(ev) { if (ev.key === "Escape" && started) { escapeHandled(ev); reorderOff(); finish(false); } }
+      function reorderOff() { document.removeEventListener("pointermove", reorderMove); document.removeEventListener("pointerup", reorderStop); document.removeEventListener("pointercancel", reorderStop); document.removeEventListener("keydown", reorderKey, true); }
+      document.addEventListener("pointermove", reorderMove);
+      document.addEventListener("pointerup", reorderStop);
+      document.addEventListener("pointercancel", reorderStop);
+      document.addEventListener("keydown", reorderKey, true);
+    });
+  }
+
+  // Swipe actions, a touch shortcut only (every action is also in the row's visible kit-menu): <ul class="kit-list"
+  // data-kit-swipe> of <li class="kit-swipe" data-name="Budget review"><div class="kit-swipe__actions"><button class=
+  // "kit-swipe__action" type="button" data-value="archive" data-full>Archive</button><button class="kit-swipe__action
+  // kit-swipe__action--danger" type="button" data-value="delete" data-remove="Message deleted">Delete</button></div>
+  // <div class="kit-swipe__row">(the row, with its kit-menu)</div></li>. Touch and pen swipe a row toward the start (a
+  // mouse or the wheel never does); the direction is decided in the first 10 px and kept. A flick or a swipe past half
+  // the actions opens them, else they close; past 60% of the row the data-full action runs when let go (a flick never
+  // runs one). One row open at a time; a tap on the row, a press elsewhere, a scroll or Escape closes it. A closed
+  // panel is out of the Tab order; its buttons are named with the row ("Archive Budget review"). data-remove hides
+  // the row at once with a toast and Undo; it is final when the toast ends. kit:swipe with detail.item, value and
+  // state (done, removed, restored, committed).
+  var swipeOpen = null;
+  function swipeParts(li) { return { actions: li.querySelector(".kit-swipe__actions"), row: li.querySelector(".kit-swipe__row") }; }
+  function swipeShow(li, x, animate) {
+    var p = swipeParts(li);
+    if (!p.row || !p.actions) return;
+    p.row.style.transition = animate && !reducedMotion() ? "transform var(--kit-speed) ease-out" : "none";
+    p.row.style.transform = x ? "translateX(" + Math.round(x) + "px)" : "";
+    li.classList.toggle("is-open", !!x);
+    if (x) p.actions.removeAttribute("inert"); else p.actions.setAttribute("inert", "");
+  }
+  function swipeClose(li, animate) { if (!li) return; swipeShow(li, 0, animate); if (swipeOpen === li) swipeOpen = null; }
+  function swipeName(li) { var t = li.querySelector(".kit-list__title"); return li.getAttribute("data-name") || (t ? t.textContent.trim() : ""); }
+  function swipeAct(li, btn) {
+    var value = btn.getAttribute("data-value") || btn.textContent.trim(), gone = btn.getAttribute("data-remove"), undone = false;
+    swipeClose(li, false);
+    if (!gone) { emit(li, "swipe", { item: li, value: value, state: "done" }); return; }
+    li.hidden = true;
+    emit(li, "swipe", { item: li, value: value, state: "removed" });
+    toast(gone, {
+      action: { label: "Undo", onClick: function () { undone = true; li.hidden = false; emit(li, "swipe", { item: li, value: value, state: "restored" }); } },
+      onClose: function () { if (!undone) emit(li, "swipe", { item: li, value: value, state: "committed" }); }
+    });
+  }
+  function setupSwipe(list) {
+    if (list.kitSwipe) return;
+    list.kitSwipe = true;
+    Array.prototype.forEach.call(list.querySelectorAll(".kit-swipe"), function (li) {
+      var p = swipeParts(li), name = swipeName(li);
+      if (!p.actions) return;
+      p.actions.setAttribute("inert", "");
+      Array.prototype.forEach.call(p.actions.querySelectorAll("button"), function (b) { if (name && !b.getAttribute("aria-label")) b.setAttribute("aria-label", b.textContent.trim() + " " + name); });
+    });
+    list.addEventListener("pointerdown", function (e) {
+      if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+      var li = closestOf(e.target, ".kit-swipe"), p = li && swipeParts(li);
+      if (!p || !p.row || !p.actions || !p.row.contains(e.target)) return;
+      if (swipeOpen && swipeOpen !== li) swipeClose(swipeOpen, true);
+      var sign = getComputedStyle(list).direction === "rtl" ? 1 : -1, w = p.actions.offsetWidth || 1, base = li.classList.contains("is-open") ? sign * w : 0;
+      var s = { id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: "", x: base, raw: base * sign, samples: [] };
+      function swipeMove(ev) {
+        if (ev.pointerId !== s.id) return;
+        var dx = ev.clientX - s.x0, dy = ev.clientY - s.y0;
+        if (!s.axis) {
+          if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+          s.axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+          if (s.axis === "y") { swipeOff(); return; }   // the list scrolls
+          try { p.row.setPointerCapture(s.id); } catch (x) { /* not supported */ }
+          li.classList.add("is-swiping");
+          p.actions.removeAttribute("inert");
+        }
+        ev.preventDefault();
+        s.raw = (base + dx) * sign;
+        s.samples.push({ x: ev.clientX, t: Date.now() });
+        if (s.samples.length > 5) s.samples.shift();
+        var along = s.raw < 0 ? 0 : s.raw > w ? w + (s.raw - w) * 0.35 : s.raw;   // past its actions the row resists
+        s.x = sign * along;
+        swipeShow(li, s.x, false);
+      }
+      function swipeUp(ev) {
+        if (ev.pointerId !== s.id) return;
+        swipeOff();
+        if (s.axis !== "x") return;
+        li.classList.remove("is-swiping");
+        li.kitSwipedAt = Date.now();   // the click that follows the swipe does nothing
+        var a = s.samples[0], b = s.samples[s.samples.length - 1], dt = a && b ? b.t - a.t : 0, v = dt > 0 ? (b.x - a.x) / dt * sign : 0;
+        var full = p.actions.querySelector("[data-full]"), flick = Math.abs(v) > 0.11;
+        if (ev.type === "pointerup" && full && !flick && s.raw > 0.6 * (li.offsetWidth || Infinity)) { swipeAct(li, full); return; }
+        var open = ev.type === "pointerup" && (flick ? v > 0 : s.x * sign > w / 2);
+        if (open) { swipeShow(li, sign * w, true); swipeOpen = li; } else swipeClose(li, true);
+      }
+      function swipeOff() { document.removeEventListener("pointermove", swipeMove); document.removeEventListener("pointerup", swipeUp); document.removeEventListener("pointercancel", swipeUp); }
+      document.addEventListener("pointermove", swipeMove, { passive: false });
+      document.addEventListener("pointerup", swipeUp);
+      document.addEventListener("pointercancel", swipeUp);
+    });
+    list.addEventListener("click", function (e) {
+      var li = closestOf(e.target, ".kit-swipe");
+      if (!li) return;
+      var act = closestOf(e.target, ".kit-swipe__action");
+      if (act && li.contains(act)) { swipeAct(li, act); return; }
+      if ((li.classList.contains("is-open") || Date.now() - (li.kitSwipedAt || 0) < 400) && swipeParts(li).row.contains(e.target)) {
+        e.preventDefault();
+        e.stopPropagation();   // a tap on an open row closes it and activates nothing
+        swipeClose(li, true);
+      }
+    }, true);
+    list.addEventListener("scroll", function () { swipeClose(swipeOpen, true); }, { passive: true });
+  }
+  document.addEventListener("pointerdown", function (e) { if (swipeOpen && !swipeOpen.contains(e.target)) swipeClose(swipeOpen, true); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && swipeOpen) { escapeHandled(e); swipeClose(swipeOpen, true); } });
+  window.addEventListener("scroll", function () { if (swipeOpen) swipeClose(swipeOpen, true); }, { passive: true });
+
+  // Splitter: <div class="kit-splitpane"><div class="kit-splitpane__pane" id="list-pane">..</div><div class="kit-splitter"
+  // role="separator" tabindex="0" aria-controls="list-pane" aria-label="Resize the list" data-kit-splitter data-min="200"
+  // data-default="320" data-persist="mail-list"></div><div class="kit-splitpane__pane">..</div></div> (kit-splitpane--stacked
+  // with aria-orientation="horizontal" for panes above each other). Drag the bar (it follows the pointer, Escape puts it
+  // back), arrows step 16 px (Shift: 64; data-step), Home and End go to the limits, Enter folds the pane to its minimum
+  // and back, a double click restores data-default. The other pane keeps data-rest (160 px). data-persist keeps the size
+  // per key; a smaller window narrows the pane but keeps the chosen size for when room returns. aria-disabled keeps the
+  // size. kit:resize with detail.size once per finished change.
+  function setupSplitter(bar) {
+    var pane = document.getElementById(bar.getAttribute("aria-controls") || "") || bar.previousElementSibling;
+    if (bar.kitSplitter || !pane) return;
+    bar.kitSplitter = true;
+    var wrap = bar.parentNode, vertical = bar.getAttribute("aria-orientation") !== "horizontal", key = bar.getAttribute("data-persist"), folded = null;
+    if (!bar.getAttribute("role")) bar.setAttribute("role", "separator");
+    if (!bar.hasAttribute("tabindex")) bar.tabIndex = 0;
+    bar.setAttribute("aria-orientation", vertical ? "vertical" : "horizontal");
+    bar.setAttribute("aria-controls", idOf(pane, "pane"));
+    var attr = function (a, f) { var v = parseFloat(bar.getAttribute(a)); return isNaN(v) ? f : v; };
+    var size = function (el) { var r = el.getBoundingClientRect(); return vertical ? r.width : r.height; };
+    function limits() {
+      var lo = attr("data-min", 120), hi = attr("data-max", Infinity), whole = size(wrap);
+      if (whole > 0) hi = Math.min(hi, whole - size(bar) - attr("data-rest", 160));   // not laid out (hidden): no room limit
+      return { lo: lo, hi: Math.max(lo, hi) };
+    }
+    function splitApply(px, send) {
+      var l = limits(), s = Math.round(clampNum(px, l.lo, l.hi));
+      pane.style.flexBasis = s + "px";
+      bar.setAttribute("aria-valuemin", String(Math.round(l.lo)));
+      if (isFinite(l.hi)) bar.setAttribute("aria-valuemax", String(Math.round(l.hi))); else bar.removeAttribute("aria-valuemax");
+      bar.setAttribute("aria-valuenow", String(s));
+      if (send) { chosen = s; if (key) writeStore("kit-split:" + key, String(s)); emit(bar, "resize", { size: s }); }
+      return s;
+    }
+    function now() { return parseFloat(bar.getAttribute("aria-valuenow")) || size(pane) || attr("data-default", 280); }
+    var stored = key ? parseFloat(readStore("kit-split:" + key)) : NaN, chosen = isNaN(stored) ? attr("data-default", size(pane) || 280) : stored;
+    splitApply(chosen, false);
+    bar.addEventListener("keydown", function (e) {
+      if (isOff(bar)) return;
+      var k = e.key, rtl = vertical && getComputedStyle(bar).direction === "rtl", step = attr("data-step", 16) * (e.shiftKey ? 4 : 1), l = limits(), at = now(), to = null;
+      var less = vertical ? (rtl ? "ArrowRight" : "ArrowLeft") : "ArrowUp", more = vertical ? (rtl ? "ArrowLeft" : "ArrowRight") : "ArrowDown";
+      if (k === less) to = at - step;
+      else if (k === more) to = at + step;
+      else if (k === "Home") to = l.lo;
+      else if (k === "End") to = l.hi;
+      else if (k === "Enter") { if (at > l.lo) { folded = at; to = l.lo; } else to = folded || attr("data-default", 280); }
+      if (to === null || !isFinite(to)) return;
+      e.preventDefault();
+      splitApply(to, true);
+    });
+    bar.addEventListener("dblclick", function () { if (!isOff(bar)) splitApply(attr("data-default", 280), true); });
+    bar.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0 || isOff(bar)) return;
+      e.preventDefault();
+      var from = now(), p0 = vertical ? e.clientX : e.clientY, flip = vertical && getComputedStyle(bar).direction === "rtl", id = e.pointerId, last = from;
+      try { bar.setPointerCapture(id); } catch (x) { /* not supported */ }
+      bar.focus();
+      wrap.classList.add("is-resizing");
+      function splitMove(ev) { if (ev.pointerId === id) { var d = (vertical ? ev.clientX : ev.clientY) - p0; last = splitApply(from + (flip ? -d : d), false); } }
+      function end(cancel) {
+        document.removeEventListener("pointermove", splitMove); document.removeEventListener("pointerup", splitUp); document.removeEventListener("pointercancel", splitUp); document.removeEventListener("keydown", splitKey, true);
+        wrap.classList.remove("is-resizing");
+        if (cancel) splitApply(from, false); else if (last !== from) splitApply(last, true);
+      }
+      function splitUp(ev) { if (ev.pointerId === id) end(ev.type === "pointercancel"); }
+      function splitKey(ev) { if (ev.key === "Escape") { escapeHandled(ev); end(true); } }
+      document.addEventListener("pointermove", splitMove);
+      document.addEventListener("pointerup", splitUp);
+      document.addEventListener("pointercancel", splitUp);
+      document.addEventListener("keydown", splitKey, true);
+    });
+    window.addEventListener("resize", function () { splitApply(chosen, false); });
+  }
+
+  // Disclosure, for the rare part of a page (a plain section may stay a details kit-accordion): <div class="kit-disclosure"
+  // data-kit-disclosure> with per section <h3 class="kit-disclosure__heading"><button class="kit-disclosure__head"
+  // type="button" aria-expanded="false" aria-controls="P1">Delivery</button></h3><div class="kit-disclosure__panel" id="P1">
+  // <div class="kit-disclosure__body">..</div></div>. A click, Enter or Space toggles and the focus stays on the button.
+  // The panel slides open (at once under reduced motion and at the first placement); a closed one is out of the Tab and
+  // reading order (inert). data-single keeps one open; data-persist="KEY" keeps the open sections across visits. A
+  // section with an invalid field opens by itself. kit:toggle with detail.open, detail.trigger and detail.panel.
+  function disclosureHeads(root) { return Array.prototype.filter.call(root.querySelectorAll(".kit-disclosure__head[aria-controls]"), function (b) { return b.closest("[data-kit-disclosure]") === root; }); }
+  function disclosureSet(root, btn, open, send) {
+    var p = document.getElementById(btn.getAttribute("aria-controls"));
+    if (!p) return;
+    btn.setAttribute("aria-expanded", String(open));
+    p.setAttribute("data-state", open ? "open" : "closed");
+    if (open) p.removeAttribute("inert"); else p.setAttribute("inert", "");
+    if (send) emit(root, "toggle", { open: open, trigger: btn, panel: p });
+  }
+  function setupDisclosure(root) {
+    if (root.kitDisclosure) return;
+    root.kitDisclosure = true;
+    var key = root.getAttribute("data-persist"), saved = null;
+    try { saved = key ? JSON.parse(readStore("kit-open:" + key) || "null") : null; } catch (e) { saved = null; }
+    disclosureHeads(root).forEach(function (b) {
+      var id = b.getAttribute("aria-controls"), p = document.getElementById(id);
+      var open = saved ? saved.indexOf(id) >= 0 : b.getAttribute("aria-expanded") === "true";
+      disclosureSet(root, b, open || !!(p && p.querySelector('[aria-invalid="true"]')), false);
+    });
+    var ready = function () { root.setAttribute("data-ready", ""); };   // from now on the panels slide
+    if (window.requestAnimationFrame) requestAnimationFrame(function () { requestAnimationFrame(ready); }); else ready();
+    root.addEventListener("click", function (e) {
+      var b = closestOf(e.target, ".kit-disclosure__head[aria-controls]");
+      if (!b || b.closest("[data-kit-disclosure]") !== root) return;
+      var open = b.getAttribute("aria-expanded") !== "true";
+      if (open && root.hasAttribute("data-single")) disclosureHeads(root).forEach(function (o) { if (o !== b && o.getAttribute("aria-expanded") === "true") disclosureSet(root, o, false, true); });
+      disclosureSet(root, b, open, true);
+      if (key) writeStore("kit-open:" + key, JSON.stringify(disclosureHeads(root).filter(function (o) { return o.getAttribute("aria-expanded") === "true"; }).map(function (o) { return o.getAttribute("aria-controls"); })));
+    });
+  }
+  // A field that fails its check is never hidden in a closed section: the sections around it open.
+  function openAround(field) {
+    var p = field && field.closest ? field.closest('.kit-disclosure__panel[data-state="closed"]') : null;
+    while (p) {
+      var b = document.querySelector('[aria-controls="' + p.id + '"]'), root = b && b.closest("[data-kit-disclosure]");
+      if (!root) break;
+      disclosureSet(root, b, true, true);
+      p = p.parentNode && p.parentNode.closest ? p.parentNode.closest('.kit-disclosure__panel[data-state="closed"]') : null;
+    }
+    var d = field && field.closest ? field.closest("details:not([open])") : null;
+    if (d) d.open = true;
+  }
+  document.addEventListener("invalid", function (e) { openAround(e.target); }, true);
+
+  // Toolbar overflow: data-kit-overflow on a kit-toolbar (role="toolbar" with a name) that stays on one line. Buttons
+  // that do not fit move, from the end (data-priority="low" first), into a More menu at its end, in the same order with
+  // the same names and states (a pressed toggle is a ticked item, an unavailable one aria-disabled); choosing one presses
+  // the button. data-kit-keep, a primary button, the current item and fields never fold. The row is measured before it
+  // is painted and again only when its width changes; a folded button comes back with 6 px to spare. A focused button
+  // that folds hands the focus to More. data-more-label names the More button ("More actions"). row.kitRefit() measures
+  // again after the buttons changed. kit:overflow with detail.folded (the folded buttons).
+  function setupOverflow(row) {
+    if (row.kitOverflow) return;
+    row.kitOverflow = true;
+    var more = document.createElement("div");
+    more.className = "kit-menu kit-overflow__more";
+    more.innerHTML = '<button class="kit-btn kit-btn--ghost kit-btn--icon" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false">' + lineIcon("more") + '</button><div class="kit-menu__list" role="menu" hidden></div>';
+    var moreBtn = more.firstChild, menu = more.lastChild, lastW = -1, folded = [];
+    moreBtn.setAttribute("aria-label", row.getAttribute("data-more-label") || "More");
+    more.hidden = true;
+    row.appendChild(more);
+    function items() { return Array.prototype.filter.call(row.children, function (c) { return c !== more; }); }
+    function foldable(c) {
+      return c.matches("button, a[href], [role=button]") && !c.hasAttribute("data-kit-keep") && !c.classList.contains("kit-btn--primary") &&
+        !(c.getAttribute("aria-current") && c.getAttribute("aria-current") !== "false");
+    }
+    function itemFor(c, i) {
+      var b = document.createElement("button"), pressed = c.getAttribute("aria-pressed");
+      b.type = "button";
+      b.className = "kit-menu__item";
+      b.setAttribute("data-value", "fold-" + i);
+      b.setAttribute("role", pressed ? "menuitemcheckbox" : "menuitem");
+      if (pressed) b.setAttribute("aria-checked", String(pressed === "true"));
+      if (isOff(c) || c.disabled) b.setAttribute("aria-disabled", "true");
+      b.textContent = c.getAttribute("aria-label") || c.textContent.trim();
+      b.kitFor = c;
+      return b;
+    }
+    function fit(force) {
+      var w = row.clientWidth;
+      if (!force && Math.abs(w - lastW) <= 0.5) return;
+      lastW = w;
+      var list = items(), had = folded.length, gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      list.forEach(function (c) { if (c.kitFolded) { c.hidden = false; c.kitFolded = false; } });
+      more.hidden = false;
+      var sizes = list.map(function (c) { return c.classList.contains("kit-toolbar__spacer") ? 0 : rowWidth(c) + gap; });
+      var total = sizes.reduce(function (a, b) { return a + b; }, 0), room = w - (had ? 6 : 0), out = [];
+      if (w > 0 && total > room) {
+        var order = list.map(function (c, i) { return i; }).filter(function (i) { return foldable(list[i]); }).sort(function (a, b) {
+          var la = list[a].getAttribute("data-priority") === "low", lb = list[b].getAttribute("data-priority") === "low";
+          return la !== lb ? (la ? -1 : 1) : b - a;
+        });
+        var withMore = total + rowWidth(more) + gap;
+        for (var j = 0; j < order.length && withMore > room; j++) { withMore -= sizes[order[j]]; out.push(list[order[j]]); }
+      }
+      out.sort(function (a, b) { return list.indexOf(a) - list.indexOf(b); });
+      var focused = document.activeElement;
+      out.forEach(function (c) { c.hidden = true; c.kitFolded = true; });
+      more.hidden = !out.length;
+      menu.innerHTML = "";
+      out.forEach(function (c, i) { menu.appendChild(itemFor(c, i)); });
+      if (focused && out.some(function (c) { return c === focused || c.contains(focused); })) moreBtn.focus();
+      var changed = out.length !== folded.length || out.some(function (c, i) { return c !== folded[i]; });
+      folded = out;
+      if (changed) emit(row, "overflow", { folded: out.slice() });
+    }
+    // The states shown when the menu opens, as the buttons have them now.
+    moreBtn.addEventListener("click", function () { menu.innerHTML = ""; folded.forEach(function (c, i) { menu.appendChild(itemFor(c, i)); }); });
+    more.addEventListener("kit:menu", function (e) {
+      e.stopPropagation();
+      var b = menu.querySelector('[data-value="' + e.detail.value + '"]');
+      if (b && b.kitFor && !isOff(b.kitFor)) b.kitFor.click();
+    });
+    row.kitRefit = function () { fit(true); };
+    if (window.ResizeObserver) new ResizeObserver(function () { fit(false); }).observe(row); else window.addEventListener("resize", function () { fit(false); });
+    fit(true);
+  }
+
+  // Breadcrumbs on one line: data-kit-breadcrumbs on <nav class="kit-breadcrumbs" aria-label="Breadcrumb"><ol>...</ol></nav>.
+  // When the trail is wider than its box, the middle levels fold, from the start of the middle, into a "..." menu after
+  // the first level; the first level and the current page always stay, and room unfolds them again. A long level name
+  // is cut at about 24 letters with the whole name as its title. The last level gets aria-current="page" when none has it.
+  function setupCrumbs(nav) {
+    var ol = nav.querySelector("ol");
+    if (nav.kitCrumbs || !ol) return;
+    nav.kitCrumbs = true;
+    var levels = Array.prototype.slice.call(ol.children), lastW = -1;
+    if (levels.length && !ol.querySelector("[aria-current]")) levels[levels.length - 1].setAttribute("aria-current", "page");
+    levels.forEach(function (l) { var a = l.querySelector("a"); if (a && !a.title) a.title = a.textContent.trim(); });
+    var li = document.createElement("li");
+    li.className = "kit-breadcrumbs__more";
+    li.hidden = true;
+    li.innerHTML = '<div class="kit-menu kit-menu--left"><button class="kit-btn kit-btn--ghost kit-btn--sm" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false">\u2026</button><div class="kit-menu__list" role="menu" hidden></div></div>';
+    var btn = li.querySelector("button"), menu = li.querySelector('[role="menu"]');
+    if (levels.length > 2) ol.insertBefore(li, levels[1]);
+    function crumbsFit(force) {
+      var w = ol.clientWidth;
+      if (!force && Math.abs(w - lastW) <= 0.5) return;
+      lastW = w;
+      levels.forEach(function (l) { l.hidden = false; });
+      li.hidden = true;
+      var middle = levels.slice(1, -1), n = 0;
+      while (w > 0 && n < middle.length && ol.scrollWidth > ol.clientWidth + 0.5) { li.hidden = false; middle[n].hidden = true; n++; }
+      menu.innerHTML = "";
+      middle.slice(0, n).forEach(function (l) {
+        var a = l.querySelector("a"), item = document.createElement(a ? "a" : "button");
+        item.className = "kit-menu__item";
+        item.setAttribute("role", "menuitem");
+        if (a) item.href = a.getAttribute("href"); else { item.type = "button"; item.setAttribute("aria-disabled", "true"); }
+        item.textContent = (a || l).textContent.trim();
+        menu.appendChild(item);
+      });
+      btn.setAttribute("aria-label", n === 1 ? "Show 1 more level" : "Show " + n + " more levels");
+    }
+    nav.kitRefit = function () { crumbsFit(true); };
+    if (window.ResizeObserver) new ResizeObserver(function () { crumbsFit(false); }).observe(nav); else window.addEventListener("resize", function () { crumbsFit(false); });
+    crumbsFit(true);
+  }
+
   // The parts that need setting up, in what the page has now or writes later.
   var PARTS = [[".kit-tip[data-kit-tip], [data-kit-tip]", setupTip], ["select[data-kit-multi]", setupMulti], ["[data-kit-range]", setupRange], ["[data-kit-tree]", setupTree],
     ["[data-kit-iconbar]", setupIconbar], ["[data-kit-avatar]", setupAvatar], ["[data-kit-slider-range]", setupSliderRange], ["[data-kit-tags]", setupTags],
@@ -1844,7 +3391,11 @@
     [".kit-tabs--animated", function (g) { setupSlider(g, ".kit-tab", "aria-selected", "kit-tabs__indicator"); }],
     [".kit-segmented--animated", function (g) { setupSlider(g, "button", "aria-pressed", "kit-segmented__indicator"); }],
     ['[role="tablist"], .kit-tabs', setupTablist], ["[data-kit-shell-menu]", setupShellMenu],
-    ["[data-kit-tooltip]", setupTooltip], ["dialog[data-kit-palette]", setupPalette]];
+    ["[data-kit-tooltip]", setupTooltip], ["dialog[data-kit-palette]", setupPalette],
+    ["[data-kit-listbox]", setupListbox], ["[data-kit-number]", setupNumber], ["[data-kit-password]", setupPassword], ["[data-kit-otp]", setupOtp],
+    ["[data-kit-address]", setupAddress], ["[data-kit-daterange]", setupDateRange], ["dialog[data-kit-sheet]", setupSheet], ["[data-kit-carousel]", setupCarousel],
+    ["[data-kit-reorder]", setupReorder], ["[data-kit-swipe]", setupSwipe], ["[data-kit-splitter]", setupSplitter], ["[data-kit-disclosure]", setupDisclosure],
+    ["[data-kit-overflow]", setupOverflow], ["[data-kit-breadcrumbs]", setupCrumbs]];
   function setupParts(root) {
     PARTS.forEach(function (p) {
       if (root.matches && root.matches(p[0])) safe(p[1], root);
@@ -1976,6 +3527,7 @@
     stamp: function (el, when) { showStamp(typeof el === "string" ? document.querySelector(el) : el, when); },
     range: function (preset) { return rangeOf(preset); },
     calendar: function (el, opts) { setupCalendar(typeof el === "string" ? document.querySelector(el) : el, opts || {}); },
+    check: checkField,
   };
 
   var TABLES = "table[data-kit-sort], table[data-kit-pages]";
@@ -2053,6 +3605,7 @@
   // A part that fails to set up (odd markup) does not stop the parts after it.
   function safe(fn, el) { try { fn(el); } catch (e) { if (window.console) console.error("UI kit: a part could not be set up", el, e); } }
   function startKit() {
+    safe(setupGuard);
     toastRegion();
     fillBars(document);
     setupParts(document);

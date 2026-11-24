@@ -30,26 +30,47 @@ if (typeof document !== "undefined") {
   const s = saved();
   if (s === "dark" || s === "light") document.documentElement.setAttribute("data-theme", s);
 }
+// The computer switching between light and dark (while no choice is on <html>) is a theme change too:
+// one "kit:theme" on the document (as kit.js sends), so charts and canvas code read their colours again.
+if (typeof window !== "undefined" && window.matchMedia && !(window as { kitSystemThemeEvent?: boolean }).kitSystemThemeEvent) {
+  (window as { kitSystemThemeEvent?: boolean }).kitSystemThemeEvent = true;
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
+    const t = document.documentElement.getAttribute("data-theme");
+    if (t === "dark" || t === "light") return;
+    document.dispatchEvent(new CustomEvent("kit:theme", { detail: { theme: currentTheme() } }));
+  });
+}
 
 /** The light/dark button for the band header: follows the computer until clicked, keeps the choice; its icon and label say what a click does. */
-export function ThemeToggle({ onChange }: { onChange?: (theme: Theme) => void }) {
+export function ThemeToggle({ onChange, disabled }: { onChange?: (theme: Theme) => void; disabled?: boolean }) {
   const [theme, setTheme] = useState<Theme>(currentTheme);
   useEffect(() => {
-    if (!window.matchMedia) return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const follow = () => setTheme(currentTheme());
-    mq.addEventListener?.("change", follow);
-    return () => mq.removeEventListener?.("change", follow);
+    // Every theme button on the page says what a click does now, not only the one pressed (kit.js's too).
+    document.addEventListener("kit:theme", follow);
+    const mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    mq?.addEventListener?.("change", follow);
+    return () => {
+      document.removeEventListener("kit:theme", follow);
+      mq?.removeEventListener?.("change", follow);
+    };
   }, []);
   const label = theme === "dark" ? "Switch to the light theme" : "Switch to the dark theme";
   return (
     <Tooltip text={label}>
       <button
+        aria-disabled={disabled || undefined}
         aria-label={label}
         className="kit-btn kit-btn--ghost kit-btn--icon"
         onClick={(e) => {
+          if (disabled) return;
           const next: Theme = currentTheme() === "dark" ? "light" : "dark";
-          document.documentElement.setAttribute("data-theme", next);
+          // The whole page changes at once: kit.css stops its transitions while this is set (two frames).
+          const html = document.documentElement;
+          html.setAttribute("data-kit-theme-switching", "");
+          const raf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : (f: () => void) => window.setTimeout(f, 16);
+          raf(() => raf(() => html.removeAttribute("data-kit-theme-switching")));
+          html.setAttribute("data-theme", next);
           try {
             localStorage.setItem(KEY, next);
           } catch {

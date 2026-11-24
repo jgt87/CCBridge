@@ -8,13 +8,19 @@ ui-src/node_modules/
 coverage/
 *.tsbuildinfo
 
-# Machine-local: written on each machine by the installer, updater, probe or capture
+# Machine-local: written on each machine by the installer and updater
 version.txt
+config/*.local.json
+/.streamhub/
+
+# Captured third-party material (policy): what the probe and the capture tools record from
+# Copilot's page and traffic is reference-only, read-only, and never committed. It can hold tenant
+# names, ids and reply text. A recorded fixture goes into tests/fixtures only after scrubbing
+# (AGENTS.md "Repository"). tests/Repository.Tests.ps1 fails if one of these is tracked.
 probe-report.txt
 probe - Copy.txt
 capture-report.json
-config/*.local.json
-/.streamhub/
+StreamHub-agent-capture-*/
 
 # Secret or personal: never committed (the project has no .env; this keeps one out if it appears)
 .env

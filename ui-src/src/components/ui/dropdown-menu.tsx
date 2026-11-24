@@ -3,8 +3,26 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { cn } from "@/lib/utils"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 
-function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
-  return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+// CCBridge: a wheel turned outside the open menu closes it, as a scroll does (shared interaction
+// rules); a wheel over the menu itself scrolls its list.
+function DropdownMenu({ open: openProp, defaultOpen, onOpenChange, ...props }: MenuPrimitive.Root.Props) {
+  const [ownOpen, setOwnOpen] = React.useState(defaultOpen ?? false)
+  const open = openProp ?? ownOpen
+  const change: NonNullable<MenuPrimitive.Root.Props["onOpenChange"]> = (next, details) => {
+    if (openProp === undefined) setOwnOpen(next)
+    onOpenChange?.(next, details)
+  }
+  React.useEffect(() => {
+    // Only a menu that keeps its own state closes itself; a parent that holds it decides.
+    if (!open || openProp !== undefined) return
+    const onWheel = (e: WheelEvent) => {
+      if ((e.target as Element | null)?.closest?.('[data-slot="dropdown-menu-content"]')) return
+      setOwnOpen(false)
+    }
+    window.addEventListener("wheel", onWheel, { passive: true })
+    return () => window.removeEventListener("wheel", onWheel)
+  }, [open, openProp])
+  return <MenuPrimitive.Root data-slot="dropdown-menu" onOpenChange={change} open={open} {...props} />
 }
 
 function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {

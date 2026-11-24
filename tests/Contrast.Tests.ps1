@@ -16,6 +16,10 @@ Describe 'Get-ContrastRatio' {
         Get-ContrastRatio 'rgba(0, 0, 0, 0.5)' '#ffffff' | Should BeLessThan 4.5
         Get-ContrastRatio 'rgba(0, 0, 0, 0)' '#ffffff' | Should Be 1
     }
+    It 'reads a 00 or ff alpha as a decimal number, not a whole one' {
+        foreach ($c in '#000000ff', '#00000000', '#000f', '#0000') { (ConvertFrom-CssColor $c).a | Should BeOfType [double] }
+        (ConvertFrom-CssColor '#00000080').a | Should BeGreaterThan 0.5
+    }
     It 'reads short and long hex and rgb notations' {
         (ConvertFrom-CssColor '#abc').r | Should Be 170
         (ConvertFrom-CssColor '#10069f').b | Should Be 159

@@ -5,7 +5,10 @@ import { act, type ReactNode, useEffect, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppShell } from "../../templates/ui-kit/react/AppShell";
+import { Avatar, AvatarGroup } from "../../templates/ui-kit/react/Avatar";
 import { Board, type BoardCard } from "../../templates/ui-kit/react/Board";
+import { DropZone, acceptsFile } from "../../templates/ui-kit/react/DropZone";
+import { SearchBox } from "../../templates/ui-kit/react/SearchBox";
 import { Calendar } from "../../templates/ui-kit/react/Calendar";
 import { CommandPalette } from "../../templates/ui-kit/react/CommandPalette";
 import { useConfirm } from "../../templates/ui-kit/react/Confirm";
@@ -13,7 +16,10 @@ import { Drawer } from "../../templates/ui-kit/react/Drawer";
 import { HoldButton } from "../../templates/ui-kit/react/HoldButton";
 import { Menu } from "../../templates/ui-kit/react/Menu";
 import { Popover } from "../../templates/ui-kit/react/Popover";
-import { Tabs } from "../../templates/ui-kit/react/Tabs";
+import { CommandButton } from "../../templates/ui-kit/react/CommandButton";
+import { IconBar } from "../../templates/ui-kit/react/IconBar";
+import { Switch } from "../../templates/ui-kit/react/Switch";
+import { Segmented, Tabs } from "../../templates/ui-kit/react/Tabs";
 import { TagInput } from "../../templates/ui-kit/react/TagInput";
 import { ThemeToggle } from "../../templates/ui-kit/react/ThemeToggle";
 import { Toaster, toast } from "../../templates/ui-kit/react/Toast";
@@ -696,5 +702,302 @@ describe("AppShell", () => {
     key(document.body, "Escape");
     expect(nav.classList.contains("is-open")).toBe(false);
     expect(document.activeElement).toBe(menu);
+  });
+});
+
+describe("shared element specs: disabled, hold, type-ahead, theme", () => {
+  // Past the 600 ms in which typed letters add up, so one test's letters never join the next one's.
+  const later = () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 5000);
+  };
+  it("starts a hold only on the main button, ignores a repeating key, shows the done word and stays full", () => {
+    vi.useFakeTimers();
+    const onConfirm = vi.fn();
+    render(<HoldButton doneLabel="Deleted" holdMs={100} label="Delete" onConfirm={onConfirm} />);
+    const b = $("button");
+    fire(b, "pointerdown", { button: 2 });
+    expect(b.classList.contains("is-holding")).toBe(false);
+    fire(b, "pointerdown", { button: 0 });
+    expect(b.classList.contains("is-holding")).toBe(true);
+    fire(b, "pointerup");
+    expect(b.classList.contains("is-holding")).toBe(false);
+    key(b, "Enter");
+    act(() => vi.advanceTimersByTime(150));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(b.classList.contains("is-done")).toBe(true);
+    expect(b.textContent).toBe("Deleted");
+    expect($('[aria-live="polite"]').textContent).toBe("Deleted");
+    expect(key(b, " ", { repeat: true })).toBe(true); // taken, but it does not start again
+    expect(b.classList.contains("is-holding")).toBe(false);
+    const up = new KeyboardEvent("keyup", { key: " ", bubbles: true, cancelable: true });
+    act(() => {
+      b.dispatchEvent(up);
+    });
+    expect(up.defaultPrevented).toBe(true); // no native click from Space
+  });
+  it("keeps a disabled or busy hold button focusable and never starts it", () => {
+    vi.useFakeTimers();
+    const onConfirm = vi.fn();
+    render(
+      <>
+        <HoldButton disabled holdMs={100} label="Delete" onConfirm={onConfirm} />
+        <HoldButton busy holdMs={100} label="Remove" onConfirm={onConfirm} />
+      </>,
+    );
+    for (const b of $$<HTMLButtonElement>("button")) {
+      expect(b.disabled).toBe(false);
+      b.focus();
+      expect(document.activeElement).toBe(b);
+      key(b, "Enter");
+      fire(b, "pointerdown", { button: 0 });
+      expect(b.classList.contains("is-holding")).toBe(false);
+    }
+    expect($("button").getAttribute("aria-disabled")).toBe("true");
+    expect($$("button")[1].getAttribute("aria-busy")).toBe("true");
+    act(() => vi.advanceTimersByTime(200));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+  it("leaves a disabled switch as it is, focusable", () => {
+    const onChange = vi.fn();
+    render(<Switch checked={false} disabled label="Alerts" onChange={onChange} />);
+    const input = $<HTMLInputElement>('input[role="switch"]');
+    expect(input.disabled).toBe(false);
+    expect(input.getAttribute("aria-disabled")).toBe("true");
+    click(input);
+    click($("label.kit-switch"));
+    expect(input.checked).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+  it("ignores presses on disabled icon bar items, tabs, segments and command buttons", () => {
+    const onBar = vi.fn();
+    const onTab = vi.fn();
+    const onSeg = vi.fn();
+    const onRun = vi.fn();
+    render(
+      <>
+        <IconBar items={[{ value: "a", label: "List", icon: "L" }, { value: "b", label: "Grid", icon: "G", disabled: true }]} label="View" onChange={onBar} value={["a"]} />
+        <Tabs disabled={[1]} label="Sections" onChange={onTab} tabs={["One", "Two", "Three"]} value={0} />
+        <Segmented disabled={[0]} label="Range" onChange={onSeg} options={["Day", "Week"]} value={1} />
+        <CommandButton disabled keys="Ctrl+J" label="Run" onRun={onRun} />
+        <CommandButton busy keys="Ctrl+U" label="Save" onRun={onRun} />
+      </>,
+    );
+    click($$(".kit-iconbar__item")[1]);
+    expect(onBar).not.toHaveBeenCalled();
+    expect($$(".kit-iconbar__item")[1].getAttribute("aria-disabled")).toBe("true");
+    const tabs = $$<HTMLButtonElement>(".kit-tab");
+    click(tabs[1]);
+    expect(onTab).not.toHaveBeenCalled();
+    tabs[0].focus();
+    key(tabs[0], "ArrowRight");
+    expect(document.activeElement).toBe(tabs[1]); // keeps its place in the arrow order
+    expect(onTab).not.toHaveBeenCalled();
+    key(tabs[1], "ArrowRight");
+    expect(onTab).toHaveBeenCalledWith(2);
+    click($$(".kit-segmented button")[0]);
+    expect(onSeg).not.toHaveBeenCalled();
+    for (const b of $$(".kit-btn")) click(b);
+    key(document.body, "j", { ctrlKey: true });
+    key(document.body, "u", { ctrlKey: true });
+    expect(onRun).not.toHaveBeenCalled();
+  });
+  it("jumps to a menu item by its first letters, keeps an unavailable item in place and never picks it", () => {
+    later();
+    const onPick = vi.fn();
+    const items = [{ value: "edit", label: "Edit" }, { value: "export", label: "Export", disabled: true }, { value: "del", label: "Delete" }];
+    render(<Menu items={items} label="Actions" onPick={onPick} />);
+    click($(".kit-menu > .kit-btn"));
+    expect(document.activeElement?.textContent).toBe("Edit");
+    key(document.activeElement!, "ArrowDown");
+    expect(document.activeElement?.textContent).toBe("Export");
+    expect(document.activeElement?.getAttribute("aria-disabled")).toBe("true");
+    click(document.activeElement!);
+    expect(onPick).not.toHaveBeenCalled();
+    expect($(".kit-menu__list").hidden).toBe(false);
+    vi.setSystemTime(Date.now() + 1000);
+    key(document.activeElement!, "d");
+    expect(document.activeElement?.textContent).toBe("Delete");
+    vi.setSystemTime(Date.now() + 1000);
+    key(document.activeElement!, "e");
+    expect(document.activeElement?.textContent).toBe("Edit");
+    key(document.activeElement!, "x");
+    expect(document.activeElement?.textContent).toBe("Export"); // "ex" typed together
+  });
+  it("jumps to a tree row by its first letters", () => {
+    later();
+    const nodes: TreeNode[] = [{ value: "a", label: "Alpha" }, { value: "b", label: "Beta" }, { value: "c", label: "Bravo" }];
+    render(<Tree label="Files" nodes={nodes} onSelect={() => {}} />);
+    const row = (v: string) => $(`li[data-value="${v}"] > .kit-tree__row`);
+    row("a").focus();
+    expect(key(row("a"), "b")).toBe(true);
+    expect(document.activeElement).toBe(row("b"));
+    key(row("b"), "r");
+    expect(document.activeElement).toBe(row("c"));
+  });
+  it("updates every theme toggle when one is pressed and freezes the page's transitions for the switch", () => {
+    document.documentElement.removeAttribute("data-theme");
+    render(
+      <>
+        <ThemeToggle />
+        <ThemeToggle />
+      </>,
+    );
+    const [one, two] = $$<HTMLButtonElement>("button.kit-btn--icon");
+    click(one);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(document.documentElement.hasAttribute("data-kit-theme-switching")).toBe(true);
+    expect(two.getAttribute("aria-label")).toBe("Switch to the light theme");
+    document.documentElement.removeAttribute("data-theme");
+    document.documentElement.removeAttribute("data-kit-theme-switching");
+    localStorage.removeItem("kit-theme");
+  });
+});
+
+describe("element specs: names, fallbacks and keys", () => {
+  it("falls back from a broken photo to the initials, shows a person without a name, and can stay silent beside a name", () => {
+    render(
+      <>
+        <Avatar name="Ada Lovelace" src="broken.png" />
+        <Avatar name="" />
+        <Avatar decorative name="Grace Hopper" />
+      </>,
+    );
+    const [photo, empty, quiet] = $$(".kit-avatar");
+    fire(photo.querySelector("img")!, "error");
+    expect(photo.querySelector("img")).toBeNull();
+    expect(photo.textContent).toBe("AL");
+    expect(empty.querySelector("svg")).not.toBeNull();
+    expect(empty.getAttribute("aria-label")).toBe("Person");
+    expect(quiet.getAttribute("aria-hidden")).toBe("true");
+    expect(quiet.hasAttribute("role")).toBe(false);
+  });
+
+  it("shows two people of the same name in a group", () => {
+    render(<AvatarGroup label="Team" names={["Sam Lee", "Sam Lee"]} />);
+    expect($$(".kit-avatars .kit-avatar")).toHaveLength(2);
+  });
+
+  it("names the file field, keeps the highlight over its children and takes only accepted dropped files", () => {
+    const onFiles = vi.fn();
+    render(<DropZone accept=".csv" onFiles={onFiles} title="Drop the export" />);
+    const zone = $(".kit-drop");
+    expect($("input[type=file]").getAttribute("aria-label")).toBe("Drop the export");
+    fire(zone, "dragenter");
+    fire($(".kit-drop__title"), "dragenter");
+    fire(zone, "dragleave");
+    expect(zone.classList.contains("is-over")).toBe(true);
+    fire(zone, "dragleave");
+    expect(zone.classList.contains("is-over")).toBe(false);
+    const ok = new File(["a"], "sales.csv", { type: "text/csv" });
+    const bad = new File(["b"], "photo.png", { type: "image/png" });
+    fire(zone, "drop", { dataTransfer: { files: [ok, bad] } });
+    expect(onFiles).toHaveBeenCalledWith([ok]);
+    expect($("[role=alert]").textContent).toContain("photo.png");
+    expect($(".kit-drop__file").getAttribute("title")).toBe("sales.csv");
+    expect($(".kit-drop__ext").textContent).toBe(".csv");
+    expect(acceptsFile({ name: "a.PNG", type: "image/png" }, "image/*")).toBe(true);
+    expect(acceptsFile({ name: "a.txt", type: "text/plain" }, ".csv, application/pdf")).toBe(false);
+  });
+
+  it("gives the focus back to the button that asked once the confirm box closes", async () => {
+    let api: ReturnType<typeof useConfirm> | null = null;
+    function Harness() {
+      const c = useConfirm();
+      useEffect(() => {
+        api = c;
+      });
+      return (
+        <>
+          <button id="ask" type="button">
+            Ask
+          </button>
+          {c.box}
+        </>
+      );
+    }
+    render(<Harness />);
+    $<HTMLButtonElement>("#ask").focus();
+    let answer: Promise<boolean> | undefined;
+    act(() => {
+      answer = api!.confirm("Delete it?", { ok: "Delete" });
+    });
+    expect(document.activeElement).not.toBe($("#ask"));
+    click($(".kit-btn--primary"));
+    await expect(answer).resolves.toBe(true);
+    expect(document.activeElement).toBe($("#ask"));
+  });
+
+  it("makes the popover a non-modal dialog named by its button and leaves an input-method Escape alone", () => {
+    render(
+      <Popover label="Columns">
+        <input aria-label="Name" />
+      </Popover>,
+    );
+    click($(".kit-popover-wrap > button"));
+    const panel = $(".kit-popover");
+    expect(panel.getAttribute("role")).toBe("dialog");
+    expect(panel.hasAttribute("aria-modal")).toBe(false);
+    expect(document.getElementById(panel.getAttribute("aria-labelledby")!)!.textContent).toBe("Columns");
+    key(document.activeElement!, "Escape", { isComposing: true });
+    expect(panel.hidden).toBe(false);
+    key(document.activeElement!, "Escape");
+    expect(panel.hidden).toBe(true);
+  });
+
+  it("opens a menu from its button with ArrowDown on the first item and ArrowUp on the last; rows are not Tab stops", () => {
+    const items = [{ value: "a", label: "Alpha" }, { value: "b", label: "Beta" }];
+    render(<Menu items={items} label="Actions" onPick={() => {}} />);
+    key($(".kit-menu > .kit-btn"), "ArrowUp");
+    expect(document.activeElement?.textContent).toBe("Beta");
+    key(document.activeElement!, "Escape");
+    key($(".kit-menu > .kit-btn"), "ArrowDown");
+    expect(document.activeElement?.textContent).toBe("Alpha");
+    expect($$(".kit-menu__item").every((b) => b.tabIndex === -1)).toBe(true);
+  });
+
+  it("gives a tree row's name its full text as a title", () => {
+    render(<Tree label="Folders" nodes={[{ value: "r", label: "A very long folder name" }]} onSelect={() => {}} />);
+    expect($(".kit-tree__label").getAttribute("title")).toBe("A very long folder name");
+  });
+
+  it("closes the suggestions with Escape, then clears the text with a second Escape", () => {
+    render(<SearchBox onPick={() => {}} options={[{ value: "1", label: "Apple" }]} />);
+    const input = $<HTMLInputElement>(".kit-search input");
+    act(() => input.focus());
+    typeInto(input, "App");
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    key(input, "Escape");
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    expect(input.value).toBe("App");
+    expect(key(input, "Escape")).toBe(true);
+    expect(input.value).toBe("");
+  });
+
+  it("refuses a duplicate tag with a reason and splits a pasted list", () => {
+    const onChange = vi.fn();
+    render(<TagInput label="Tags" onChange={onChange} value={["red"]} />);
+    const input = $<HTMLInputElement>(".kit-tags__input");
+    typeInto(input, "red");
+    key(input, "Enter");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.value).toBe("red");
+    expect($(".kit-tags .kit-sr-only").textContent).toBe("red is already added");
+    typeInto(input, "");
+    fire(input, "paste", { clipboardData: { getData: () => "green, blue\nred" } });
+    expect(onChange).toHaveBeenCalledWith(["red", "green", "blue"]);
+  });
+
+  it("names today as Today and each board column as a region", () => {
+    const now = new Date();
+    const iso = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+    render(<Calendar events={[]} month={iso.slice(0, 7)} />);
+    expect($(`[data-date="${iso}"]`).getAttribute("aria-label")).toMatch(/^Today, /);
+    act(() => root?.unmount());
+    host?.remove();
+    render(<Board cards={[]} columns={[{ id: "to do", title: "To do" }]} onMove={() => {}} />);
+    const col = $(".kit-board__column");
+    expect(document.getElementById(col.getAttribute("aria-labelledby")!)!.textContent).toContain("To do");
+    expect($(".kit-board__list").getAttribute("aria-labelledby")).toBe(col.getAttribute("aria-labelledby"));
   });
 });

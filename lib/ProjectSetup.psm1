@@ -68,7 +68,14 @@ function Save-ProjectSetup {
     $o = [ordered]@{}; foreach ($k in 'build', 'liveSource', 'liveStamp', 'chosenBy', 'chosenAt') { $o[$k] = $s[$k] }
     $ans = [ordered]@{}; foreach ($a in @($s.answers.Keys | Sort-Object)) { $ans[$a] = $s.answers[$a] }
     $o.answers = $ans
-    [IO.File]::WriteAllText($f, (ConvertTo-Json -InputObject $o -Depth 4), (New-Object Text.UTF8Encoding($false)))
+    # Fields this version does not know (written by a newer one, or by hand) survive the save.
+    if (Test-Path -LiteralPath $f) {
+        try {
+            $old = [IO.File]::ReadAllText($f) | ConvertFrom-Json
+            foreach ($p in @($old.PSObject.Properties)) { if (-not $o.Contains($p.Name)) { $o[$p.Name] = $p.Value } }
+        } catch { Write-CCBLog info setup "project.json not read before saving: $($_.Exception.Message)" }
+    }
+    Write-AtomicText $f (ConvertTo-Json -InputObject $o -Depth 10) (New-Object Text.UTF8Encoding($false))
     $s
 }
 
@@ -224,7 +231,7 @@ function Get-KitBlockTexts {
     if ($hasCat) {
         $want = [ordered]@{
             'kit-icons.js'  = ($page -match 'data-kit-icon|KitIcons\.')
-            'kit.js'        = ($page -match 'data-kit-(sort|pages|rows|hold|search|drop|theme|open|close|multi|range|filter|tip|stamp|print|menu|iconbar|avatar|slider-range|tags|board|calendar|cycle|shell-menu|select|bulk|popover|tree|tooltip|context|palette)|KitUI\.|kit-(tabs|segmented)--animated|kit-progress[^>]*aria-valuenow|aria-valuenow[^>]*kit-progress')
+            'kit.js'        = ($page -match 'data-kit-(sort|pages|rows|hold|search|drop|theme|open|close|multi|range|filter|tip|stamp|print|menu|iconbar|avatar|slider-range|tags|board|calendar|cycle|shell-menu|select|bulk|popover|tree|tooltip|context|palette|listbox|number|nudge|field|password|reveal|otp|address|daterange|sheet|detent|carousel|prev|next|reorder|handle|swipe|splitter|disclosure|overflow|keep|breadcrumbs)|KitUI\.|kit-(tabs|segmented)--animated|kit-progress[^>]*aria-valuenow|aria-valuenow[^>]*kit-progress')
             'kit-charts.js' = ($page -match 'KitCharts\.|data-kit-chart')
             'kit-data.js'   = ($page -match 'KitData\.')
             # SQL in the page: the engine first, then the kit's helper (Python needs a served page, so not here).

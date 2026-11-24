@@ -8,6 +8,8 @@ export interface IconBarItem {
   value: string;
   label: string;
   icon: ReactNode;
+  /** Unavailable: stays in place and in the arrow-key order (aria-disabled), but a press does nothing. */
+  disabled?: boolean;
 }
 
 /** A row of icon buttons (a view switch, tools); the pressed one shows its label; arrow keys move between them. */
@@ -33,7 +35,7 @@ export function IconBar({ label, items, value, multiple = false, onChange }: { l
       role="toolbar"
     >
       {items.map((it) => (
-        <button aria-label={it.label} aria-pressed={value.includes(it.value)} className="kit-iconbar__item" key={it.value} onClick={() => press(it.value)} type="button">
+        <button aria-disabled={it.disabled || undefined} aria-label={it.label} aria-pressed={value.includes(it.value)} className="kit-iconbar__item" key={it.value} onClick={() => !it.disabled && press(it.value)} type="button">
           <span aria-hidden="true">{it.icon}</span>
           <span className="kit-iconbar__label">{it.label}</span>
         </button>

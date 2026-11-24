@@ -22,7 +22,13 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe("sourceDescription", () => {
   it("says how much a data file holds", () => {
-    expect(sourceDescription(csv)).toBe(`Source/sales.csv: ${(1250).toLocaleString()} row(s), 6 column(s)`);
+    // The machine's locale pinned, so the grouping is checked, not copied from the same call.
+    const toLocale = Number.prototype.toLocaleString;
+    const spy = vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (this: number) {
+      return toLocale.call(this, "en-US");
+    });
+    expect(sourceDescription(csv)).toBe("Source/sales.csv: 1,250 row(s), 6 column(s)");
+    spy.mockRestore();
     expect(sourceDescription(book)).toBe("Source/book.xlsx: 5 row(s), 3 column(s), 2 sheets");
     expect(sourceDescription({ ...csv, rows: 0, columns: 0 })).toMatch(/a report of its rows/);
   });
