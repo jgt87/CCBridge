@@ -54,7 +54,7 @@ export function CopilotStatus({ copilot, message, retryAt }: { copilot: AppState
   return (
     <span className="flex items-center gap-1.5 text-muted-foreground text-xs" title={tip}>
       {connecting ? <ConnectIcon done={copilot === "ready"} /> : <CircleX aria-hidden className="h-3.5 w-3.5" />}
-      <span>Copilot {LABELS[copilot].toLowerCase()}</span>
+      <span className="whitespace-nowrap">Copilot {LABELS[copilot].toLowerCase()}</span>
       {retry.kind === "auto" && (
         <>
           <span aria-hidden>·</span>

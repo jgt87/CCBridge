@@ -590,8 +590,10 @@ function TranscriptRow({
       return <UnfinishedCard item={item} onSend={onSend} />;
     case "editsRefused":
       return <EditsRefusedCard item={item} onSend={onSend} />;
-    case "action":
-      return <ActionCard item={item.item} took={rowTime(item.time, item.at, item.endAt)?.took} />;
+    case "action": {
+      const t = rowTime(item.time, item.at, item.endAt);
+      return <ActionCard at={item.at} item={item.item} started={t ? { label: t.label, title: t.title } : undefined} took={t?.took} />;
+    }
     case "note":
       return <NoteLine onOpenFile={onOpenFile} path={item.path} text={item.text} tone={item.tone} />;
     case "undo":

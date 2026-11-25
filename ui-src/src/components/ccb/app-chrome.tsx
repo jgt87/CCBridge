@@ -44,7 +44,8 @@ export function AppHeader({ state, showDrawerButton, drawerOpen, onOpenDrawer, o
       )}
       <div className="flex items-center gap-2 font-semibold tracking-tight">
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground text-background text-xs">SH</span>
-        <span>StreamHub <span className="ml-0.5 font-normal text-muted-foreground">by JGT</span></span>
+        {/* One line: the logo and name are one lockup; on a phone the project button beside it truncates instead. */}
+        <span className="whitespace-nowrap">StreamHub <span className="ml-0.5 font-normal text-muted-foreground">by JGT</span></span>
       </div>
       {state.project && (
         <button

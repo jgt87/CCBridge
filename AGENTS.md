@@ -153,11 +153,9 @@ The rules below hold for every change; their mechanisms, the rest of the product
 - UI: monochrome white/grey, flat buttons, no blue/green accents; side panel on the left.
 - Every task goes through `Submit-AgentTask`; every agent turn is one checkpoint (backups in `%LOCALAPPDATA%`, never OneDrive).
 
-## Decisions (operator, 2026-11-24)
+## Decisions
 
-- MCP contract unchanged: the tool descriptions already point to the job tools (`copilot_run_task`, `copilot_ask`); no tool is added, renamed or removed for this.
-- Starting the web app stops an older instance with `Stop-Process` on that one process, never `taskkill /T`: the tree holds the commands it opened in visible run windows, which belong to the person (`streamhub.ps1`).
-- `Set-StrictMode -Version 2.0` goes in one module at a time where tests cover it (so far SyncedFiles, RepoMap, ChatScope, SecretFiles); the rest is on the Later list in `tasks/todo.md`, with the other deferred items.
+Settled decisions are entries in `DECISIONS.md`; cite the id, never restate it. Here: MCP contract unchanged (D-009), a new start stops only the old process (D-010), strict mode one module at a time (D-011).
 
 ## Repository
 
@@ -186,6 +184,8 @@ and the project's own DESIGN.md / PRODUCT.md win where they are more specific.
   project's own rules in `.claude/rules/project-<area>.md`, which win on conflict.
 - Starters: its `templates/` (tokens, gitignore, gitattributes, editorconfig, check scripts,
   design-rule tests). Copy in; do not link.
+- Decisions: the operator's settled decisions and every deviation from a shared rule are
+  entries in `DECISIONS.md` (its docs/09 §8); elsewhere cite the id (`D-001`), never restate it.
 - Audit: `python -I C:/Files/Apps/__CommonShared/.claude/skills/new-project/scripts/check_project.py .`
 - A lesson learned here that would hold in any project goes in `tasks/lessons.md` (rule,
   Why with date, check). It is pulled upstream into the shared lessons, which load at every

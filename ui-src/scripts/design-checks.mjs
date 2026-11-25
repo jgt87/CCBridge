@@ -4,7 +4,10 @@
 // view in the config) and check-control-rows.mjs (the first screen at 1440, 720 and 390 px), then
 // stops the server. Never the person's running StreamHub (port 8765). Ports: 5297 (page), 9571 and
 // 9572 (the checks' browsers), chosen apart from the checks' defaults that other projects use.
-// The two checks are CommonShared's starters (templates/scripts), copied in with their browser fix.
+// The two checks are CommonShared's starters (templates/scripts), copied in with their browser fix;
+// check-design-rules.mjs imports probe-scan.mjs and api-stubs.mjs beside it (copies too). Refresh all
+// three by copying. Its first-line lint needs a view that shows wrapping text: the open card in the
+// stubs (design-check.json "dc-a1") is that state.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';

@@ -4,6 +4,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+### Added
+
+- Chat cards show when each step started (12:41) before how long it took, with the full date and time on hover. The centered times between items stay.
+
+### Fixed
+
+- In a narrow window the app name and the Copilot status in the top bar stay on one line, instead of wrapping beside their icons.
+- Chat cards: on an open card whose file list or command runs over several lines, the icon, "by StreamHub", the status, the time it took and the arrow now stay on the first line instead of floating to the middle of the text.
+
+### Changed
+
+- The project's settled decisions now live in one decision log, `DECISIONS.md`, each with an id that the notes, design file and code comments cite instead of repeating it.
+
 ## [v0.1.171] - 2026-11-25
 
 ### Changed

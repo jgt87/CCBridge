@@ -9,7 +9,10 @@
       "events": [
         { "seq": 1, "type": "user", "text": "Add a total row to the sales table" },
         { "seq": 2, "type": "assistant", "text": "I added a total row under the table. It sums the Amount column and updates when the data changes." },
-        { "seq": 3, "type": "done", "text": "Done" }
+        { "seq": 3, "type": "action", "id": "dc-a1", "action": "changes", "status": "running", "by": "streamhub", "time": "10:00:02", "at": "2026-11-14T10:00:02",
+          "target": "styles/kit/tokens.css, styles/kit/kit.js, styles/kit/react/CommandButton.tsx, styles/kit/react/DropZone.tsx, styles/kit/react/Icon.tsx (kit files this project changed stay as they are)" },
+        { "seq": 4, "type": "action-result", "id": "dc-a1", "status": "done", "summary": "Kit updated to the newer version.", "output": "Copied the newer kit.", "at": "2026-11-14T10:00:03" },
+        { "seq": 5, "type": "done", "text": "Done" }
       ],
       "state": {
         "project": { "name": "Budget tracker", "path": "C:/demo/Budget tracker", "location": ["Demo", "Budget tracker"] },

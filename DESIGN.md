@@ -145,12 +145,12 @@ A grey scale (pure in light; in dark, Copilot's warm graphite with a barely visi
 - **Paper** (oklch(1 0 0)): the light page and every light surface.
 - **Shelf** (oklch(0.97 0 0)): light muted surfaces and secondary fills.
 - **Hairline** (oklch(0.922 0 0)): light dividers and panel borders; in practice drawn as black at 10%.
-- **Edge** (oklch(0.62 0 0); **Edge Night** white at 38% in dark; CSS `--input`): the outline of every field and bordered control, at least 3:1 against the surface and the 5% bands it sits on, so a place to type or choose reads as one at rest (operator, 2026-11-16; before, fields used the Hairline).
-- **Pencil** (oklch(0.535 0 0); CSS `--muted-foreground`): light secondary text, labels, counts, placeholders' darker cousin. At least 4.5:1 on every band it sits on, down to the 5% black tint (#f2f2f2: the palette's active row, count chips) and the Shelf of the Beta tag (operator, 2026-11-24; at 0.556 it was 4.2:1 there).
+- **Edge** (oklch(0.62 0 0); **Edge Night** white at 38% in dark; CSS `--input`): the outline of every field and bordered control, at least 3:1 against the surface and the 5% bands it sits on, so a place to type or choose reads as one at rest (D-001).
+- **Pencil** (oklch(0.535 0 0); CSS `--muted-foreground`): light secondary text, labels, counts, placeholders' darker cousin. At least 4.5:1 on every band it sits on, down to the 5% black tint (#f2f2f2: the palette's active row, count chips) and the Shelf of the Beta tag (D-003).
 - **Graphite** (oklch(0.261 0.004 84.6), rgb 37 36 34): the dark page. It is exactly the base color of the Copilot window, measured from its page, so the two panes meet without a seam.
 - **Graphite Raised** (oklch(0.29 0.004 84.6)) and **Graphite Float** (oklch(0.305 0.004 84.6)): dark cards, the side panel, popovers and menus, one and two steps above the page in the same hue.
 - **Graphite Shelf** (oklch(0.348 0.004 84.6)): dark muted surfaces and the selected side panel tab; Copilot's own raised-control level (rgb 58).
-- **Dust** (oklch(0.765 0.003 84.6)): dark secondary text, one step above Copilot's secondary grey (rgb 178 against Copilot's 174; about 7:1 on Graphite), so it keeps 4.5:1 on a popover's 10% white active row too (operator, 2026-11-24; at 0.751 it was 4.38:1 there).
+- **Dust** (oklch(0.765 0.003 84.6)): dark secondary text, one step above Copilot's secondary grey (rgb 178 against Copilot's 174; about 7:1 on Graphite), so it keeps 4.5:1 on a popover's 10% white active row too (D-003).
 
 ### Tertiary (content signals only)
 - **Signal Red** (oklch(0.577 0.245 27.325); **Signal Red Night** oklch(0.704 0.191 22.216) in dark): errors, failed steps, destructive confirmation.
@@ -205,7 +205,7 @@ Flat and unassuming: controls look like part of the page until you need them.
 - **Tinted:** the default action in a row (Create, Send answer): a 5% tint at rest (10% in dark), 10% on hover.
 - **Solid:** Ink fill with Paper text (inverted in dark), for the one active choice; hover at 85% opacity.
 - **Disabled:** 40% opacity and no hover tint.
-- **Keyboard focus:** one ring for every control, a 2px Ring (`--ring`) outline 2px away (`src/index.css`, base layer, inside `:where()` so a component's own focus style wins). Text fields, selects and text areas are left out: they show focus by their border (Inputs below). Operator, 2026-11-24.
+- **Keyboard focus:** one ring for every control, a 2px Ring (`--ring`) outline 2px away (`src/index.css`, base layer, inside `:where()` so a component's own focus style wins). Text fields, selects and text areas are left out: they show focus by their border (Inputs below; D-004).
 - **Bordered (Settings, the message box header):** a 1px Edge, 32px tall, one fixed width (192px) so every control column lines up.
 
 ### Chips
@@ -260,11 +260,12 @@ Flat and unassuming: controls look like part of the page until you need them.
 - **Don't** wrap a Copilot reply in a card; replies sit directly on the page.
 
 ### Accepted deviations
-Places that differ from the shared element specs on purpose (operator decisions):
-- **Mode menu rows are 68px tall** (2026-11-24), above the usual menu row: each mode has a description line under its name, and that line is where a mode explains itself, so it stays.
-- **Modals keep the app's own overlay** (`ModalBackdrop`, not a native `<dialog>`; 2026-11-24): role dialog, aria-modal, focus kept inside, the page behind inert, and the dialog named by its visible title (aria-labelledby).
-- **The console view keeps the Windows console's own colours** in both themes (`console-view.tsx`, marked `/* design: */`): it shows a command's output as the window it would run in looks.
-- **UI kit parts that differ from the element specs** are listed in the header of `templates/ui-kit/kit.js`.
+Places that differ from the shared rules on purpose; each is an entry in `DECISIONS.md`:
+- **Mode menu rows are 68px tall** (D-005).
+- **Modals keep the app's own overlay**, `ModalBackdrop` (D-006).
+- **The console view keeps the Windows console's own colours** (D-007).
+- **UI kit parts that differ from the element specs**, listed in the header of `templates/ui-kit/kit.js` (D-008).
+- **On touch, selects and text fields are 44px themselves** (D-002).
 
 ### Rules a test holds
 `ui-src/src/design-rules.test.ts` reads the app's own source and fails with file and line:

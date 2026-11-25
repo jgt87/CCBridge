@@ -77,7 +77,10 @@ export const decidedVia = (decidedBy?: string): string => (decidedBy && decidedB
 export const needsTerminal = (item: ActionView): boolean =>
   /interactive terminal|needs a terminal|RUN-INTERACTIVE/i.test(`${item.output ?? ""} ${item.code ?? ""}`);
 
-/** The result text below a finished step (a run has its console; a written to-do list its checklist). */
+/** Open in a window gets the stronger look when the run asked for a terminal or is asking a question now. */
+export const strongWindow = (item: ActionView, liveState?: string): boolean => needsTerminal(item) || liveState === "question";
+
+/** The result text below a finished step(a run has its console; a written to-do list its checklist). */
 export const showsOutput = (item: ActionView, awaiting: boolean, isTodo: boolean): boolean =>
   Boolean(item.output) && !awaiting && item.action !== "run" && !(isTodo && item.status === "ok");
 
@@ -151,3 +154,6 @@ export function runTitle(command: string): string {
   })();
   return script ? `${program} ${script}` : program;
 }
+
+/** The header's target text: a run card is titled by its program (and script), since the whole command is in its console below. */
+export const headerTitle = (item: ActionView): string => (item.action === "run" ? runTitle(item.target) || item.target : item.target);

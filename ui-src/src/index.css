@@ -63,16 +63,13 @@
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
     --muted: oklch(0.97 0 0);
-    /* Secondary text (DESIGN.md "Pencil"): at least 4.5:1 on the darkest band it sits on, the 5% black
-       tint (#f2f2f2: the palette's active row, the count chip) and the 0.97 shelf of the Beta tag
-       (operator, 2026-11-24; at 0.556 it was 4.2:1 there). */
+    /* Secondary text (DESIGN.md "Pencil"): at least 4.5:1 on the darkest band it sits on (D-003). */
     --muted-foreground: oklch(0.535 0 0);
     --accent: oklch(0.97 0 0);
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
-    /* Field and button edges (DESIGN.md "Edge"): 3:1 against white and the 5% grey bands they sit on
-       (shared rule, operator 2026-11-16); dividers keep the hairline (--border). */
+    /* Field and button edges (DESIGN.md "Edge"): 3:1 against what they sit on (D-001). */
     --input: oklch(0.62 0 0);
     --ring: oklch(0.708 0 0);
     --chart-1: oklch(0.87 0 0);
@@ -106,8 +103,7 @@
     --secondary: oklch(0.348 0.004 84.6);
     --secondary-foreground: oklch(0.901 0.002 84.6);
     --muted: oklch(0.348 0.004 84.6);
-    /* Dust, one step above Copilot's 174 grey (rgb 178): at least 4.5:1 also on a popover's 10% white
-       active row (operator, 2026-11-24; at 0.751 it was 4.38:1 there). */
+    /* Dust, one step above Copilot's 174 grey (rgb 178): at least 4.5:1 on every band (D-003). */
     --muted-foreground: oklch(0.765 0.003 84.6);
     --accent: oklch(0.348 0.004 84.6);
     --accent-foreground: oklch(0.901 0.002 84.6);
@@ -148,9 +144,8 @@
     background-color: var(--popover);
     color: var(--popover-foreground);
     }
-  /* One keyboard focus ring for every control (DESIGN.md "Focus"; operator, 2026-11-24): 2px Ring,
-     2px away. In the base layer and inside :where(), so a component's own focus style still wins.
-     Text fields, selects and text areas are left out: they show focus by their border. */
+  /* One keyboard focus ring for every control; fields show focus by their border (D-004). In the
+     base layer and inside :where(), so a component's own focus style still wins. */
   :where(:focus-visible):where(:not(input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=reset], [type=color], [type=file]), select, textarea, [contenteditable])) {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
@@ -232,7 +227,7 @@
     content: ""; position: absolute; top: 50%; left: 50%;
     width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%);
   }
-  /* design: a select's or a field's reach is its own box (neither takes a ::after) */
+  /* design: D-002, a select's or a field's reach is its own box (neither takes a ::after) */
   :where(select, input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="hidden"])) { min-height: 44px; }
   :where(select, textarea, input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"])) { font-size: max(16px, 1em); }
 }

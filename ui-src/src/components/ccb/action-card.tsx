@@ -31,15 +31,15 @@ import {
   decidedVia,
   doneSummary,
   hasDetails,
-  needsTerminal,
+  headerTitle,
   offersAllow,
   ownsLive,
-  runTitle,
   shortError,
   showsOutput,
   shownStatus,
   statusClass,
   statusLabel,
+  strongWindow,
   verbFor,
 } from "@/lib/action-card-view";
 import { cn } from "@/lib/utils";
@@ -147,7 +147,12 @@ const ICONS: Record<string, React.ReactNode> = {
 };
 
 function StatusBadge({ status }: { status: string }) {
-  return <span className={cn("text-xs", statusClass(status))}>{statusLabel(status)}</span>;
+  return <span className={cn("text-xs leading-5", statusClass(status))}>{statusLabel(status)}</span>;
+}
+
+/** A 20px box (one header line, the change pill's height) that centres an icon on the header's first line. */
+function LineIcon({ children }: { children: React.ReactNode }) {
+  return <span className="flex h-5 shrink-0 items-center">{children}</span>;
 }
 
 type TodoState = ReturnType<typeof todoChange>;
@@ -158,20 +163,51 @@ function HeaderMarks({ item, todo, counts }: { item: ActionItem; todo: TodoState
   return (
     <>
       {todo ? (
-        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="Items done in this list">
+        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums leading-5" title="Items done in this list">
           {todo.done}/{todo.total} done
         </span>
       ) : (
         counts && <ChangePill added={counts.add} removed={counts.del} />
       )}
       {item.by === "streamhub" && (
-        <span className="text-[11px] text-muted-foreground" title="StreamHub made this change itself, not Copilot">
+        <span className="text-[11px] text-muted-foreground leading-5" title="StreamHub made this change itself, not Copilot">
           by StreamHub
         </span>
       )}
       {via && (
-        <span className="text-[11px] text-muted-foreground" title="This action was approved or rejected by another program, not in this window">
+        <span className="text-[11px] text-muted-foreground leading-5" title="This action was approved or rejected by another program, not in this window">
           via {via}
+        </span>
+      )}
+    </>
+  );
+}
+
+/** The header's target text: one line while closed (the whole text on hover); open, the card shows all of it. */
+function HeaderTarget({ item, expanded }: { item: ActionItem; expanded: boolean }) {
+  // 12px text on 16px lines, 2px down, so its first line sits centred on the header's 20px line.
+  return (
+    <span
+      className={cn("min-w-0 flex-1 py-0.5 font-mono text-muted-foreground text-xs", expanded ? "whitespace-pre-wrap break-words" : "truncate")}
+      title={expanded ? undefined : item.target}
+    >
+      {headerTitle(item)}
+    </span>
+  );
+}
+
+/** Each tile's own start time, before how long it took; the minute dividers between items stay. */
+function HeaderTimes({ took, started, at }: { took?: string; started?: StepStart; at?: string }) {
+  return (
+    <>
+      {started && (
+        <time className="shrink-0 text-[11px] text-muted-foreground tabular-nums leading-5" dateTime={at} title={started.title}>
+          {started.label}
+        </time>
+      )}
+      {took && (
+        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums leading-5" title="How long this step took">
+          {took}
         </span>
       )}
     </>
@@ -188,6 +224,8 @@ function CardHeader({
   expanded,
   onToggle,
   took,
+  started,
+  at,
 }: {
   item: ActionItem;
   todo: TodoState | null;
@@ -197,28 +235,24 @@ function CardHeader({
   expanded: boolean;
   onToggle: () => void;
   took?: string;
+  started?: StepStart;
+  at?: string;
 }) {
-  // A run card is titled by its program (and script): the whole command is in its console below.
-  const title = item.action === "run" ? runTitle(item.target) || item.target : item.target;
+  // Top-aligned on one 20px first line: an open card's target wraps over several lines, and the icon,
+  // verb, marks, status and chevron stay on its first line instead of floating to the middle.
   return (
-    <button className="flex w-full items-center gap-2 px-3 py-2 text-left" disabled={!details} onClick={onToggle} type="button">
-      {ICONS[item.action] ?? <Play className="h-4 w-4" />}
-      <span className="font-medium">{verbFor(item.action)}</span>
-      {/* One line while closed (the whole text on hover); open, the card shows all of it. */}
-      <span
-        className={cn("min-w-0 flex-1 font-mono text-muted-foreground text-xs", expanded ? "whitespace-pre-wrap break-words" : "truncate")}
-        title={expanded ? undefined : item.target}
-      >
-        {title}
-      </span>
+    <button className="flex w-full items-start gap-2 px-3 py-2 text-left" disabled={!details} onClick={onToggle} type="button">
+      <LineIcon>{ICONS[item.action] ?? <Play className="h-4 w-4" />}</LineIcon>
+      <span className="font-medium leading-5">{verbFor(item.action)}</span>
+      <HeaderTarget expanded={expanded} item={item} />
       <HeaderMarks counts={counts} item={item} todo={todo} />
       <StatusBadge status={shownStatus(item.status, sent)} />
-      {took && (
-        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums" title="How long this step took">
-          {took}
-        </span>
+      <HeaderTimes at={at} started={started} took={took} />
+      {details && (
+        <LineIcon>
+          <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />
+        </LineIcon>
       )}
-      {details && <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-90")} />}
     </button>
   );
 }
@@ -426,32 +460,35 @@ function CardNotices({ item }: { item: ActionItem }) {
   );
 }
 
-/** What a step did: a run's console and notes, the result text, and Open in a window. */
-function CardResult({
-  item,
-  todo,
-  awaiting,
-  running,
-  myLive,
-  myWindow,
-}: {
+interface RunParts {
   item: ActionItem;
-  todo: ReturnType<typeof todoChange> | null;
   awaiting: boolean;
   running: boolean;
   myLive: RunLive | null;
   myWindow?: RunWindowState;
-}) {
-  const ran = item.action === "run" && item.output ? parseRunOutput(item.output) : null;
+}
+
+/** A run's console, and the notes that came with its output. */
+function RunResult({ item, awaiting, running, myLive, myWindow }: RunParts) {
+  const ran = item.output ? parseRunOutput(item.output) : null;
   return (
     <>
-      {item.action === "run" && <RunConsole awaiting={awaiting} item={item} myLive={myLive} myWindow={myWindow} ran={ran} running={running} />}
+      <RunConsole awaiting={awaiting} item={item} myLive={myLive} myWindow={myWindow} ran={ran} running={running} />
       {ran?.notes && !awaiting && <div className="whitespace-pre-wrap text-muted-foreground text-xs">{ran.notes}</div>}
+    </>
+  );
+}
+
+/** What a step did: a run's console and notes, the result text, and Open in a window. */
+function CardResult({ todo, ...run }: RunParts & { todo: TodoState | null }) {
+  const { item, awaiting, running, myLive } = run;
+  const liveState = myLive?.state;
+  return (
+    <>
+      {item.action === "run" && <RunResult {...run} />}
       {/* A to-do list that was written shows as its checklist; the result text would only repeat its lines. */}
       {showsOutput(item, awaiting, Boolean(todo)) && <ActionOutput fallbackPath={item.target} output={item.output ?? ""} />}
-      {canOpenInWindow(item, awaiting, running, myLive?.state) && (
-        <OpenInWindow command={item.target} strong={needsTerminal(item) || myLive?.state === "question"} />
-      )}
+      {canOpenInWindow(item, awaiting, running, liveState) && <OpenInWindow command={item.target} strong={strongWindow(item, liveState)} />}
     </>
   );
 }
@@ -478,8 +515,14 @@ function useApprovalChoice() {
   return { note, setNote, skip, setSkip, allow, setAllow };
 }
 
-/** `took`: how long the step took, once it finished (shown in the header). */
-export function ActionCard({ item, took }: { item: ActionItem; took?: string }) {
+/** When a step started: the header's label (HH:mm, the day before it for an earlier day) and the full date on hover. */
+export interface StepStart {
+  label: string;
+  title: string;
+}
+
+/** `started`: when the step started, and `at` its ISO stamp; `took`: how long it took, once it finished (all in the header). */
+export function ActionCard({ item, took, started, at }: { item: ActionItem; took?: string; started?: StepStart; at?: string }) {
   // null: follow the setting (Settings > This browser > Cards) until the person opens or closes it.
   const [open, setOpen] = useState<boolean | null>(null);
   const view = useCardView();
@@ -510,7 +553,18 @@ export function ActionCard({ item, took }: { item: ActionItem; took?: string }) 
         awaiting ? "border-(--kit-border-strong) shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:shadow-[0_0_0_3px_rgba(255,255,255,0.05)]" : "border-(--kit-border)"
       )}
     >
-      <CardHeader counts={counts} details={hasDetails(item)} expanded={expanded} item={item} onToggle={() => setOpen(!expanded)} sent={sent} todo={todo} took={took} />
+      <CardHeader
+        at={at}
+        counts={counts}
+        details={hasDetails(item)}
+        expanded={expanded}
+        item={item}
+        onToggle={() => setOpen(!expanded)}
+        sent={sent}
+        started={started}
+        todo={todo}
+        took={took}
+      />
 
       {expanded && (
         <div className="space-y-3 border-(--kit-border) border-t px-3 pt-3 pb-3">

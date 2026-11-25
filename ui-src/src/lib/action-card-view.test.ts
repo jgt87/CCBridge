@@ -7,6 +7,7 @@ import {
   decidedVia,
   doneSummary,
   hasDetails,
+  headerTitle,
   needsTerminal,
   offersAllow,
   ownsLive,
@@ -16,6 +17,7 @@ import {
   shownStatus,
   statusClass,
   statusLabel,
+  strongWindow,
   verbFor,
 } from "./action-card-view";
 
@@ -129,5 +131,23 @@ describe("runTitle", () => {
     expect(runTitle("npm run build")).toBe("npm");
     expect(runTitle("cmd /c dir")).toBe("cmd");
     expect(runTitle("   ")).toBe("");
+  });
+
+  it("titles a run card by its program, and any other card by its whole target", () => {
+    const at = (action: string, target: string) => headerTitle({ action, target, status: "ok" });
+    expect(at("run", "powershell -NoProfile -File Work/Check.ps1")).toBe("powershell Work/Check.ps1");
+    expect(at("run", "   ")).toBe("   ");
+    expect(at("edit", "npm run build")).toBe("npm run build");
+  });
+});
+
+describe("strongWindow", () => {
+  it("is strong for a run that asked for a terminal or asks a question now", () => {
+    const run = { action: "run", target: "npm init", status: "ok" };
+    expect(strongWindow(run)).toBe(false);
+    expect(strongWindow(run, "stuck")).toBe(false);
+    expect(strongWindow(run, "question")).toBe(true);
+    expect(strongWindow({ ...run, output: "This needs a terminal" })).toBe(true);
+    expect(strongWindow({ ...run, code: "RUN-INTERACTIVE" })).toBe(true);
   });
 });
