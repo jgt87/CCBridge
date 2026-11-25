@@ -130,7 +130,9 @@ Describe 'Generic action hooks' {
             }
             $s = New-HookState $p; $s.Headless = $true
             $s.HooksApproved = Get-ScriptHash (Join-Path $p '.streamhub\hooks.json')
-            $s.Config.hookTimeoutSec = 1
+            # Its own limit, read from the settings. Not 1 second: beside the gate's other test processes
+            # starting "echo hook" took longer than that, and the hook was reported as timed out.
+            $s.Config.hookTimeoutSec = 20
             @(Invoke-ProjectHooks $s 'afterAction' @() @{ action = 'run' }).Count | Should Be 0
             @($s.HookTrace).Count | Should Be 1
             $s.HookTrace[0].status | Should Be 'ok'
