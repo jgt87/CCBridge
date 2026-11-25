@@ -4,6 +4,8 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+## [v0.1.172] - 2026-11-25
+
 ### Added
 
 - Chat cards show when each step started (12:41) before how long it took, with the full date and time on hover. The centered times between items stay.
