@@ -1,6 +1,6 @@
 /**
  * UI kit icon for React projects: a Lucide icon (ISC licence, see ../LICENSE-lucide.txt) from
- * ../kit-icons.js, which the helper program keeps filled with every icon name the project uses.
+ * ../kit-icons.js, which the kit tools keep filled with every icon name the project uses.
  * Needs only React.
  */
 import "../kit-icons.js";
@@ -21,12 +21,13 @@ export function Icon({ name, label, className }: { name: string; label?: string;
     warned.add(name);
     console.warn("Unknown icon: " + name + " (kit-icons.js has no icon of that name)");
   }
+  const html = { __html: markup }; // injection: markup from the kit's icon table only
   return (
     <span
       aria-hidden={label ? undefined : true}
       aria-label={label}
       className={className}
-      dangerouslySetInnerHTML={{ __html: markup }}
+      dangerouslySetInnerHTML={html}
       role={label ? "img" : undefined}
       style={{ display: "inline-flex", lineHeight: 0 }}
     />

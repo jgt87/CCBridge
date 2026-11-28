@@ -374,7 +374,7 @@ $script:Companions = @{
 }
 # The kit's revision: raise it when the kit changes in a way projects should get (new classes, chart
 # options the rules name). Update-UiKitCatalog brings an older project catalogue up to date.
-$script:KitRevision = 17
+$script:KitRevision = 19
 
 $script:ScanCache = @{ root = ''; at = [datetime]::MinValue; files = @() }
 $script:ScanSkip = '^(node_modules|dist|build|out|\.git|\.streamhub|Source)$'

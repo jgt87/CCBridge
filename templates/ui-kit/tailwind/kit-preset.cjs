@@ -1,5 +1,8 @@
-/* UI kit for Tailwind CSS 3, written by the helper program: do not edit (change the values in
-   styles/kit/tokens.css). In tailwind.config: presets: [require("./styles/kit/tailwind/kit-preset.cjs")],
+/* UI kit for Tailwind CSS 3.
+   kit:project-begin tool
+   Written by the helper program: do not edit.
+   kit:project-end
+   Change the values in styles/kit/tokens.css. In tailwind.config: presets: [require("./styles/kit/tailwind/kit-preset.cjs")],
    and load styles/kit/tokens.css and styles/kit/kit.css in the page. The kit's tokens become Tailwind
    names: bg-kit-accent, text-kit-muted, border-kit-border, bg-kit-chart-1, rounded-kit, shadow-kit,
    font-kit, p-kit-4, gap-kit-3, text-kit-sm, text-kit-title, bg-kit-accent-tint-1, duration-kit, z-kit-dropdown ... They follow the project's colour preset and its light

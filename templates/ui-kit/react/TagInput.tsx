@@ -71,6 +71,7 @@ export function TagInput({ value, onChange, label, suggestions }: { value: strin
           addMany((text + pasted).split(/[,\r\n]+/));
         }}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return; // a key that ends an IME composition is not Enter
           if (e.key === "Enter" || e.key === ",") {
             e.preventDefault();
             add(text);

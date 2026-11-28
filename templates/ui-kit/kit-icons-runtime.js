@@ -24,7 +24,7 @@
     // The icon goes before any text the element already has (a button with an icon and a word).
     var old = el.querySelector("svg.kit-icon");
     if (old) old.parentNode.removeChild(old);
-    if (el.firstChild) el.insertAdjacentHTML("afterbegin", markup); else el.innerHTML = markup;
+    if (el.firstChild) el.insertAdjacentHTML("afterbegin", markup); else el.innerHTML = markup;   // injection: markup from the icon table only
     el.setAttribute("data-kit-icon-drawn", name);
     // A named icon on its own is an image; a button, link or field with a label stays what it is.
     if (el.getAttribute("aria-label") && !isInteractive(el)) el.setAttribute("role", "img");

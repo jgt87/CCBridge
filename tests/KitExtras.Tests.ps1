@@ -25,7 +25,7 @@ Describe 'More components' {
         $examples | Should Match 'data-kit-calendar'
     }
     It 'keeps the kokonutui licence with the components adapted from it, and not with the kit''s own' {
-        $kok = $kitCss.IndexOf('Interactive components adapted from kokonutui')
+        $kok = $kitCss.IndexOf('Interactive components adapted from an open-source component library')
         $bk = $kitCss.IndexOf('Charts (kit-charts.js): design adapted from bklit-ui')
         foreach ($c in '.kit-switch {', '.kit-menu {', '.kit-iconbar {', '.kit-avatar {', '.kit-bento {', '.kit-success {') { $i = $kitCss.IndexOf($c); ($i -gt $kok -and $i -lt $bk) | Should Be $true }
         foreach ($c in '.kit-accordion {', '.kit-board {', '.kit-calendar__grid {', '.kit-drawer {') { $kitCss.IndexOf($c) -lt $kok | Should Be $true }
@@ -48,7 +48,7 @@ Describe 'More components' {
 
 Describe 'Forms and touch parts (kit revision 17)' {
     It 'has the styles, the behaviour and an example of every part, before the kokonutui licence note' {
-        $kok = $kitCss.IndexOf('Interactive components adapted from kokonutui')
+        $kok = $kitCss.IndexOf('Interactive components adapted from an open-source component library')
         foreach ($c in 'kit-listbox', 'kit-option', 'kit-option__meta', 'kit-number', 'kit-number__step', 'kit-password', 'kit-password__reveal', 'kit-otp', 'kit-otp__box', 'kit-daterange', 'kit-daterange__preset',
             'kit-sheet', 'kit-sheet__grab', 'kit-sheet__body', 'kit-carousel', 'kit-carousel__track', 'kit-carousel__item', 'kit-reorder', 'kit-reorder__line', 'kit-swipe', 'kit-swipe__actions', 'kit-swipe__row',
             'kit-splitpane', 'kit-splitpane__pane', 'kit-splitter', 'kit-disclosure', 'kit-disclosure__head', 'kit-disclosure__panel', 'kit-overflow', 'kit-breadcrumbs__more') {
@@ -88,7 +88,7 @@ Describe 'Forms and touch parts (kit revision 17)' {
 
 Describe 'Status bars and chart bars' {
     It 'rounds a progress or status bar at both ends' {
-        [regex]::Match($kitCss, '\.kit-progress \{[^}]*\}').Value | Should Match 'border-radius: 999px;'
+        [regex]::Match($kitCss, '\.kit-progress \{[^}]*\}').Value | Should Match 'border-radius: var\(--kit-radius-full\);'
         $rule | Should Match 'Bars in a track \(progress and status bars, bar lists'
     }
 }

@@ -4,6 +4,19 @@ All notable changes to StreamHub are listed here, newest first.
 
 ## [Unreleased]
 
+### Added
+
+- UI kit (revision 18): a share in a table cell, `kit-share` with its bar and the number beside it, shown in the examples table. A bar without a value now fills to the percentage shown in its cell, the cell next to it or its row, and a value written as a fraction (0.42 next to 42%) fills to that percentage. Bars also fill again when a row's text changes.
+- UI kit (revision 19), now kept in the shared kit master that projects sync from: check and radio rows and submenus in menus, a menubar, a navigation menu of link panels, a preview card on links, a meter, progress with no known end, a select-all checkbox group, a toolbar with one tab stop, tabs with manual activation, F6 into the newest toast, a context menu by a long touch press, and closed sections that the browser's find opens. The pages' kit hooks for these load `kit.js`.
+
+### Changed
+
+- UI kit: hovers are off on disabled controls; the focus ring hides after a click and returns with the keyboard; Enter waits for an IME composition; round marks use `--kit-radius-full`; scrollbars are 8px on a clear track; the skeleton pulses instead of a gradient shimmer; progress and segment widths no longer animate; hover colours are derived from the accent. The kit's licence notes are worded generically and name their licence files, which the helper program still delivers with each part.
+
+### Fixed
+
+- UI kit rules: the canvas note on bar ends (`roundRect` with `[r, r, 0, 0]`) now sits with chart bars, which are flat at the axis, instead of with track bars, which are round at both ends.
+
 ## [v0.1.172] - 2026-11-25
 
 ### Added

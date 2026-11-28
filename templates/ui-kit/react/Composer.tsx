@@ -1,6 +1,6 @@
 /**
  * UI kit component for React projects: renders the kit's markup (styles/kit/kit.css), needs only React.
- * Adapted from kokonutui ai-prompt (MIT licence, see ../LICENSE-kokonutui.txt; https://kokonutui.com).
+ * Adapted from an open-source component library (MIT licence; see ../LICENSE-kokonutui.txt).
  */
 import { type ReactNode, useState } from "react";
 
@@ -30,7 +30,7 @@ export function Composer({
         aria-label={label}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          if (e.key === "Enter" && !e.nativeEvent.isComposing && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             send();
           }
@@ -41,7 +41,7 @@ export function Composer({
       <div className="kit-composer__actions">
         {actions}
         <span className="kit-toolbar__spacer" />
-        <button className="kit-btn kit-btn--primary kit-btn--sm" disabled={!text.trim()} onClick={send} type="button">
+        <button className="kit-btn kit-btn--primary kit-btn--sm" aria-disabled={!text.trim() || undefined} onClick={send} type="button">
           {sendLabel}
         </button>
       </div>

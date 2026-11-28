@@ -18,6 +18,12 @@ function load(code: string) {
 // The kit sets up parts a page writes later through a MutationObserver, which runs after the
 // current task: wait for it (the scripts run once per document, so later tests rely on it).
 const tick = () => new Promise((r) => setTimeout(r, 0));
+// A closed disclosure panel is out of the Tab and reading order: inert, or (where the browser can find
+// text in it, the kit's choice since the shared master of 28 Nov 2026) its body hidden="until-found".
+const outOfOrder = (id: string) => {
+  const p = document.getElementById(id)!;
+  return p.hasAttribute("inert") || p.querySelector(".kit-disclosure__body")?.getAttribute("hidden") === "until-found";
+};
 
 type KitWindow = Window & { KitUI: { toast: (t: string) => HTMLElement }; KitCharts: Record<string, (host: HTMLElement, data: unknown) => void> };
 const w = window as unknown as KitWindow;
@@ -1324,7 +1330,7 @@ describe("kit.js forms and touch parts (kit revision 17)", () => {
     const form = document.getElementById("f") as HTMLFormElement, mail = document.getElementById("m") as HTMLInputElement;
     let sent = 0;
     form.addEventListener("submit", (e) => { e.preventDefault(); sent++; });
-    expect(document.getElementById("p1")!.hasAttribute("inert")).toBe(true);
+    expect(outOfOrder("p1")).toBe(true);
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     expect(sent).toBe(0);
     expect(mail.getAttribute("aria-invalid")).toBe("true");
@@ -1555,8 +1561,8 @@ describe("kit.js forms and touch parts (kit revision 17)", () => {
     await tick();
     const [b1, b2] = Array.from(document.querySelectorAll(".kit-disclosure__head")) as HTMLButtonElement[];
     const got = events(document.querySelector(".kit-disclosure")!, "kit:toggle");
-    expect(document.getElementById("dp1")!.hasAttribute("inert")).toBe(false);
-    expect(document.getElementById("dp2")!.hasAttribute("inert")).toBe(true);
+    expect(outOfOrder("dp1")).toBe(false);
+    expect(outOfOrder("dp2")).toBe(true);
     b2.click();
     expect(b2.getAttribute("aria-expanded")).toBe("true");
     expect(b1.getAttribute("aria-expanded")).toBe("false");
@@ -1608,5 +1614,50 @@ describe("kit.js forms and touch parts (kit revision 17)", () => {
     const links = Array.from(more.querySelectorAll("a.kit-menu__item")).map((a) => a.textContent);
     expect(links).toEqual(["Region", "Station"]);
     expect(more.querySelector("button")!.getAttribute("aria-label")).toBe("Show 2 more levels");
+  });
+});
+
+describe("kit.js bars", () => {
+  const bar = (attrs: string) => `<div class="kit-progress" ${attrs}><div class="kit-progress__bar"></div></div>`;
+  const widths = () => Array.from(document.querySelectorAll<HTMLElement>(".kit-progress__bar")).map((b) => b.style.width);
+  async function page(html: string) {
+    document.body.innerHTML = html;
+    load(kitJs);
+    await tick();
+  }
+
+  it("fills to aria-valuenow or data-value (a comma as the decimal mark too), within aria-valuemin and -max", async () => {
+    await page(bar('aria-valuenow="45"') + bar('data-value="45,5"') + bar('aria-valuenow="5" aria-valuemin="0" aria-valuemax="20"') + bar('aria-valuenow="140"'));
+    expect(widths()).toEqual(["45%", "45.5%", "25%", "100%"]);
+  });
+
+  it("without a value takes the percentage shown in its cell, the cell next to it or its row, and says it", async () => {
+    await page(`<table><tbody>
+      <tr><td>${bar("")} 42%</td></tr>
+      <tr><td>${bar("")}</td><td>12,5 %</td></tr>
+      <tr><td>${bar("")}</td><td>x</td><td>7%</td></tr>
+      <tr><td>${bar("")}</td><td>1%</td><td>x</td><td>2%</td></tr>
+    </tbody></table>`);
+    expect(widths()).toEqual(["42%", "12.5%", "7%", "1%"]);
+    const first = document.querySelector(".kit-progress")!;
+    expect(first.getAttribute("aria-valuenow")).toBe("42");
+    expect(first.getAttribute("role")).toBe("progressbar");
+  });
+
+  it("fills a fraction to the percentage its row shows, and leaves a width the page set alone", async () => {
+    await page(`<table><tbody><tr><td>${bar('aria-valuenow="0.42"')}</td><td>42%</td></tr>
+      <tr><td><div class="kit-progress"><div class="kit-progress__bar" style="width: 30%"></div></div></td><td>80%</td></tr></tbody></table>`);
+    expect(widths()).toEqual(["42%", "30%"]);
+  });
+
+  it("fills a bar again when its row's percentage is written later", async () => {
+    await page(`<ul><li>${bar("")}<span>-</span></li></ul>`);
+    expect(widths()).toEqual([""]);
+    (document.querySelector("li span")!.firstChild as Text).data = "70%";
+    await tick();
+    expect(widths()).toEqual(["70%"]);
+    document.querySelector("li")!.insertAdjacentHTML("beforeend", "<span></span>");
+    await tick();
+    expect(widths()).toEqual(["70%"]);
   });
 });

@@ -112,7 +112,10 @@
     ul.className = "kit-chart__legend";
     names.forEach(function (n, i) {
       var li = document.createElement("li");
-      li.innerHTML = '<span class="kit-chart__swatch" style="background:' + (opts && opts.colors ? opts.colors[i] : color(i)) + '"></span>';
+      var sw = document.createElement("span");
+      sw.className = "kit-chart__swatch";
+      sw.style.background = opts && opts.colors ? opts.colors[i] : color(i);
+      li.appendChild(sw);
       li.appendChild(document.createTextNode(n));
       li.addEventListener("mouseenter", function () { onHover(i); });
       li.addEventListener("mouseleave", function () { onHover(-1); });
@@ -158,7 +161,7 @@
     host.appendChild(tip);
     return {
       show: function (html, x, y) {
-        tip.innerHTML = html;
+        tip.innerHTML = html;   // injection: every caller builds the tip from esc()-escaped values
         tip.hidden = false;
         var w = tip.offsetWidth, hw = host.clientWidth;
         tip.style.left = Math.max(0, Math.min(hw - w, x - w / 2)) + "px";
@@ -472,7 +475,7 @@
       if (!it.value) li.classList.add("is-zero");
       li.style.setProperty("--kit-legend-color", it.color);
       if (isOff(data.selected, it.label)) li.classList.add("is-off");
-      li.innerHTML = '<span class="kit-chart__swatch" style="background:' + it.color + '"></span><span class="kit-chart__legend-label">' + esc(it.label) +
+      li.innerHTML = /* injection: every value esc()-escaped */ '<span class="kit-chart__swatch" style="background:' + esc(it.color) + '"></span><span class="kit-chart__legend-label">' + esc(it.label) +
         '</span> <span class="kit-chart__legend-value">' + esc(fmt(it.value, data)) + '</span> <span class="kit-chart__legend-share">' + share(it.value) + "</span>";   // spaces: readable as text too
       li.addEventListener("mouseenter", function () { hover(i); });
       li.addEventListener("mouseleave", function () { hover(-1); });
@@ -619,8 +622,8 @@
     var said = it.label + ": " + fmt(it.value, data) + (share ? " \u00b7 " + share : "");
     row.className = "kit-barlist__row" + (m.sel ? (m.sel.indexOf(it.label) >= 0 ? " is-on" : " is-off") : "");
     row.title = said;
-    row.innerHTML = '<span class="kit-barlist__label">' + esc(it.label) + '</span><span class="kit-barlist__track"><span class="kit-barlist__fill" style="width:' +
-      Math.min(100, 100 * Math.max(0, it.value) / m.max).toFixed(1) + "%;background:" + it.color + '"></span></span><span class="kit-barlist__value">' +
+    row.innerHTML = /* injection: every value esc()-escaped */ '<span class="kit-barlist__label">' + esc(it.label) + '</span><span class="kit-barlist__track"><span class="kit-barlist__fill" style="width:' +
+      Math.min(100, 100 * Math.max(0, it.value) / m.max).toFixed(1) + "%;background:" + esc(it.color) + '"></span></span><span class="kit-barlist__value">' +
       (share ? "<b>" + esc(fmt(it.value, data)) + "</b> \u00b7 " + share : esc(fmt(it.value, data))) + "</span>";
     growIn(host, row.querySelector(".kit-barlist__fill"), true);
     pickable(host, data, row, { chart: "barlist", part: "row", value: it.label, index: x.i }, said);

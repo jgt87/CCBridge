@@ -137,7 +137,7 @@ Describe 'Bars flat at the axis' {
     It 'the kit draws bars in a track (bar lists, progress and status bars) round at both ends' {
         $css = [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\kit.css'))
         foreach ($sel in 'kit-progress', 'kit-progress__bar', 'kit-barlist__track', 'kit-barlist__fill') {
-            [regex]::Match($css, "\.$sel \{[^}]*\}").Value | Should Match 'border-radius: 999px;'
+            [regex]::Match($css, "\.$sel \{[^}]*\}").Value | Should Match 'border-radius: var\(--kit-radius-full\);'
         }
     }
 }

@@ -76,7 +76,8 @@ export function toast(text: string, opts: { tone?: ToastTone; ms?: number; close
 // The kit's x icon when kit-icons.js is on the page, else the multiplication sign.
 function closeMark() {
   const svg = (window as { KitIcons?: { svg: (name: string) => string } }).KitIcons?.svg("x");
-  return svg ? <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} style={{ display: "inline-flex", lineHeight: 0 }} /> : "\u00d7";
+  const html = svg ? { __html: svg } : null; // injection: markup from the kit's icon table only
+  return html ? <span aria-hidden="true" dangerouslySetInnerHTML={html} style={{ display: "inline-flex", lineHeight: 0 }} /> : "\u00d7";
 }
 
 /** Put once on the page (at the end of the app): the place where toasts show. */

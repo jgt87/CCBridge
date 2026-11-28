@@ -2,8 +2,8 @@
   UI kit behaviour for plain pages (no build step, works from file://). Load after the page's
   markup: <script src="styles/kit/kit.js"></script>. Each part starts on its data-kit-* attribute
   and reports through a DOM event, so page code listens instead of editing this file.
-  Behaviour adapted from kokonutui (MIT licence, see LICENSE-kokonutui.txt; https://kokonutui.com):
-  hold-button, action-search-bar, file-upload, smooth-tab.
+  Behaviour adapted from an open-source component library (MIT licence; see
+  LICENSE-kokonutui.txt): the hold button, search with suggestions, file drop zone and animated tabs.
   The sortable table with pages (data-kit-sort, data-kit-pages, data-kit-rows="external") and the
   theme switch (data-kit-theme) are the kit's own.
 
@@ -20,6 +20,18 @@
 */
 (function () {
   "use strict";
+
+  // The focus ring is for keyboard navigation (docs/17 section 8): the last input is recorded on
+  // <html data-modality>, "keyboard" after a navigation key, "pointer" after a press and at the start,
+  // and kit.css hides the ring while it is "pointer". A browser's :focus-visible alone shows it after
+  // a click and Shift, and for a focus set at load.
+  (function () {
+    var root = document.documentElement, NAV = ["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "F6"];
+    var set = function (v) { if (root.getAttribute("data-modality") !== v) root.setAttribute("data-modality", v); };
+    set("pointer");
+    document.addEventListener("keydown", function (e) { if (NAV.indexOf(e.key) >= 0 && !e.altKey && !e.metaKey && !(e.ctrlKey && e.key === "Tab")) set("keyboard"); }, true);
+    ["pointerdown", "mousedown", "touchstart"].forEach(function (t) { document.addEventListener(t, function () { set("pointer"); }, { capture: true, passive: true }); });
+  })();
   if (window.KitUI) return;   // loaded twice (head and tail of the page): once is enough
 
   // Short announcements for screen readers (a tag added, a card moved, a search's result count): one
@@ -311,7 +323,7 @@
     move();
   }
 
-  // Sortable table with pages (the kit's own part, not from kokonutui):
+  // Sortable table with pages (the kit's own part, not adapted):
   // <table class="kit-table" data-kit-sort data-kit-pages="25">. data-kit-sort makes every header
   // a sort button (a th with data-kit-nosort stays plain; th.kit-num sorts as numbers; a cell's
   // data-sort="VALUE" sorts by that value, for dates or formatted numbers); data-kit-pages="N"
@@ -664,20 +676,58 @@
     showTheme();
   }
 
-  // A kit-progress bar shows its value: aria-valuenow (with aria-valuemin / aria-valuemax, else
-  // 0..100) sets the width of its kit-progress__bar, also for bars written or changed later.
+  // A kit-progress bar shows its value: aria-valuenow (or data-value; with aria-valuemin /
+  // aria-valuemax, else 0..100) sets the width of its kit-progress__bar, also for bars written or
+  // changed later. A bar without a value takes the percentage shown in its own cell, then the cell
+  // next to it, then its row (a table with a % column next to its bars), unless the page set the
+  // width itself. A value written as a fraction (0.42) while the row shows 42% fills to 42%. A bar
+  // with no value and no percentage near it stays a progress with no known end (kit.css).
+  var PERCENT = /(-?\d+(?:[.,]\d+)?)\s*%/g;
+  function percentsIn(el, track) {
+    if (!el) return [];
+    var text = el.textContent || "";
+    var own = track.textContent || "";
+    if (own && el.contains(track)) text = text.replace(own, " ");
+    var out = [], m;
+    PERCENT.lastIndex = 0;
+    while ((m = PERCENT.exec(text))) out.push(parseFloat(m[1].replace(",", ".")));
+    return out;
+  }
+  function shownPercent(track) {
+    var cell = track.closest("td, th");
+    var inCell = percentsIn(cell || track.parentElement, track);
+    if (inCell.length) return inCell[0];
+    if (cell) {
+      var near = percentsIn(cell.nextElementSibling, track).concat(percentsIn(cell.previousElementSibling, track));
+      if (near.length) return near[0];
+    }
+    var inRow = percentsIn(track.closest("tr, li"), track);
+    return inRow.length === 1 ? inRow[0] : null;
+  }
   function fillBar(track) {
     var bar = track.querySelector(".kit-progress__bar");
-    var now = parseFloat(track.getAttribute("aria-valuenow"));
-    if (!bar || isNaN(now)) return;
-    var min = parseFloat(track.getAttribute("aria-valuemin")); if (isNaN(min)) min = 0;
-    var max = parseFloat(track.getAttribute("aria-valuemax")); if (isNaN(max)) max = 100;
-    var pct = max > min ? (now - min) / (max - min) * 100 : 0;
+    if (!bar) return;
+    var raw = track.getAttribute("aria-valuenow") || track.getAttribute("data-value");
+    var now = raw === null ? NaN : parseFloat(String(raw).replace(",", "."));
+    var shown = shownPercent(track);
+    var pct;
+    if (!isNaN(now)) {
+      var min = parseFloat(track.getAttribute("aria-valuemin")); if (isNaN(min)) min = 0;
+      var max = parseFloat(track.getAttribute("aria-valuemax")); if (isNaN(max)) max = 100;
+      pct = max > min ? (now - min) / (max - min) * 100 : 0;
+      if (shown !== null && now > 0 && now <= 1 && max === 100 && Math.abs(now * 100 - shown) < 1) pct = shown;
+    } else {
+      if (shown === null || (bar.style.width && !bar.hasAttribute("data-kit-filled"))) return; // no value, or the page set the width itself
+      pct = shown;
+      track.setAttribute("aria-valuenow", String(shown));
+    }
+    if (!track.hasAttribute("role")) track.setAttribute("role", "progressbar");
+    bar.setAttribute("data-kit-filled", "");
     bar.style.width = Math.max(0, Math.min(100, pct)) + "%";
   }
   function fillBars(root) {
-    if (root.matches && root.matches(".kit-progress[aria-valuenow]")) fillBar(root);
-    if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(".kit-progress[aria-valuenow]"), fillBar);
+    if (root.matches && root.matches(".kit-progress")) fillBar(root);
+    if (root.querySelectorAll) Array.prototype.forEach.call(root.querySelectorAll(".kit-progress"), fillBar);
   }
 
   // Side panel and dialog: a button with data-kit-open="ID" opens <dialog id="ID"> (the side panel
@@ -759,6 +809,7 @@
       clearTimeout(timer); timer = null;
       if (t.classList.contains("is-leaving")) return;
       t.classList.add("is-leaving");
+      if (t.contains(document.activeElement)) { focusBack(toastBack, null); toastBack = null; }   // reached by F6
       setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); if (typeof opts.onClose === "function") safe(opts.onClose); }, 400);   // onClose: gone, after its action ran
     };
     var run = function () { if (timer || t.classList.contains("is-leaving")) return; since = Date.now(); timer = setTimeout(leave, left); };
@@ -1076,7 +1127,7 @@
   });
 
   // When the data is from: <span class="kit-stamp" data-kit-stamp="2026-10-09T14:00"> or
-  // data-kit-stamp-of="GLOBAL" (the time the helper program gives a data block: window.kitDataAsOf).
+  // data-kit-stamp-of="GLOBAL" (a time the page's data sets in a global, such as window.kitDataAsOf).
   // Shows "Data as of 14:00 (2 hours ago)" for today and "Data as of 9 Oct 2026, 14:00 (3 days ago)" for an
   // earlier day; data-kit-prefix changes the first words.
   function ago(ms) {
@@ -1121,16 +1172,63 @@
     Array.prototype.forEach.call(document.querySelectorAll("table"), function (t) { if (t.kitPrint) t.kitPrint(false); });
   });
 
-  // Menu (from kokonutui profile-dropdown): a button with data-kit-menu opens the kit-menu__list next to
+  // Menu (adapted from an open-source component library, MIT): a button with data-kit-menu opens the kit-menu__list next to
   // it; arrow keys move, Escape or a click beside it closes; "kit:menu" with detail.value on the kit-menu.
   function menuList(btn) { var m = btn.closest(".kit-menu"); return m ? m.querySelector(".kit-menu__list") : btn.nextElementSibling; }
-  function menuItems(list) { return Array.prototype.slice.call(list.querySelectorAll(".kit-menu__item:not([disabled])")); }
+  // The list's own rows: a submenu's rows belong to the submenu.
+  function menuItems(list) { return Array.prototype.filter.call(list.querySelectorAll(".kit-menu__item:not([disabled])"), function (it) { return it.closest(".kit-menu__list") === list; }); }
   function closeMenus(except) {
     Array.prototype.forEach.call(document.querySelectorAll("[data-kit-menu][aria-expanded=true]"), function (b) {
       if (b === except) return;
       b.setAttribute("aria-expanded", "false");
-      var l = menuList(b); if (l) { l.hidden = true; unplaceMenu(l); }
+      var l = menuList(b); if (l) { l.hidden = true; unplaceMenu(l); closeSubs(l); }
     });
+  }
+  // Submenus: <div class="kit-menu__sub"> holding a row with aria-haspopup="menu" and its own kit-menu__list.
+  // ArrowRight, Enter or Space opens it on its first row, a pointer resting on the row for 100 ms too;
+  // ArrowLeft or Escape closes only the submenu and goes back to its row.
+  function subList(row) { var s = row.closest(".kit-menu__sub"); return s && s.querySelector(":scope > .kit-menu__list"); }
+  function isSubRow(row) { return !!row && row.getAttribute("aria-haspopup") === "menu" && !!subList(row); }
+  function closeSubs(list, except) {
+    Array.prototype.forEach.call(list.querySelectorAll('.kit-menu__item[aria-haspopup="menu"][aria-expanded="true"]'), function (r) {
+      if (except && (r === except || r.contains(except))) return;
+      r.setAttribute("aria-expanded", "false");
+      var l = subList(r); if (l) { l.hidden = true; closeSubs(l); }
+    });
+  }
+  function openSub(row, focusFirst) {
+    var l = subList(row), parent = row.closest(".kit-menu__list");
+    if (!l) return;
+    if (parent) closeSubs(parent, row);
+    row.setAttribute("aria-expanded", "true");
+    l.hidden = false;
+    menuItems(l).forEach(function (it) { if (!it.hasAttribute("tabindex")) it.setAttribute("tabindex", "-1"); });
+    if (focusFirst && menuItems(l)[0]) menuItems(l)[0].focus();
+  }
+  function closeSub(list) {
+    var row = list.parentNode && list.parentNode.querySelector(':scope > .kit-menu__item[aria-haspopup="menu"]');
+    if (!row) return false;
+    row.setAttribute("aria-expanded", "false");
+    list.hidden = true;
+    closeSubs(list);
+    row.focus();
+    return true;
+  }
+  // Check and radio rows (role="menuitemcheckbox" / "menuitemradio" with aria-checked): a press turns them
+  // and the menu stays open; a radio row turns off the others in its role="group" (else in its list).
+  // "kit:menu" gets detail.checked.
+  function checkRow(item) {
+    var role = item.getAttribute("role");
+    if (role !== "menuitemcheckbox" && role !== "menuitemradio") return false;
+    var on = role === "menuitemradio" ? true : item.getAttribute("aria-checked") !== "true";
+    if (role === "menuitemradio") {
+      var scope = item.closest('[role="group"]') || item.closest(".kit-menu__list");
+      Array.prototype.forEach.call(scope.querySelectorAll('[role="menuitemradio"]'), function (r) { if (r.closest(".kit-menu__list") === item.closest(".kit-menu__list")) r.setAttribute("aria-checked", "false"); });
+    }
+    item.setAttribute("aria-checked", String(on));
+    var menu = item.closest(".kit-menu");
+    if (menu) menu.dispatchEvent(new CustomEvent("kit:menu", { bubbles: true, detail: { value: item.getAttribute("data-value") || item.textContent.trim(), checked: on } }));
+    return true;
   }
   function closestOf(target, selector) { return target.closest ? target.closest(selector) : null; }
   function toggleMenu(btn) {
@@ -1160,8 +1258,19 @@
     var btn = closestOf(e.target, "[data-kit-menu]");
     if (btn) { toggleMenu(btn); return; }
     var item = closestOf(e.target, ".kit-menu__item");
+    if (item && isSubRow(item)) { if (item.getAttribute("aria-expanded") === "true") closeSub(subList(item)); else openSub(item, true); return; }
+    if (item && checkRow(item)) return;
     if (item) { pickMenuItem(item); return; }
     if (!closestOf(e.target, ".kit-menu__list")) closeMenus();
+  });
+  // A pointer resting on a submenu row opens it; on another row, the open submenu beside it closes.
+  var subTimer = null;
+  document.addEventListener("pointerover", function (e) {
+    if (e.pointerType === "touch") return;
+    var row = closestOf(e.target, ".kit-menu__item"), list = row && row.closest(".kit-menu__list");
+    if (!list || list.hidden) return;
+    clearTimeout(subTimer);
+    subTimer = setTimeout(function () { if (isSubRow(row)) openSub(row, false); else closeSubs(list); }, 100);
   });
   // The menu's button: in its kit-menu, else the list's previous sibling when that is one.
   function menuButtonOf(list) {
@@ -1203,6 +1312,12 @@
     }
     var list = closestOf(e.target, ".kit-menu__list");
     if (!list) return;
+    var row = closestOf(e.target, ".kit-menu__item");
+    // Enter and Space click the row (a button): the click handler opens a submenu or turns a check row.
+    if (isSubRow(row) && e.key === "ArrowRight") { e.preventDefault(); openSub(row, true); return; }
+    var isSub = !!list.parentNode && !!list.parentNode.classList && list.parentNode.classList.contains("kit-menu__sub");
+    if (isSub && (e.key === "ArrowLeft" || e.key === "Escape")) { e.preventDefault(); if (e.key === "Escape") escapeHandled(e); closeSub(list); return; }
+    if (!isSub && (e.key === "ArrowLeft" || e.key === "ArrowRight") && menubarMove(list, e.key === "ArrowRight" ? 1 : -1)) { e.preventDefault(); return; }
     var items = menuItems(list);
     var to = menuTarget(items, items.indexOf(document.activeElement), e.key);
     if (to === undefined && typeaheadKey(e)) { to = typeahead(items, document.activeElement, e.key); if (!to) return; }
@@ -1275,7 +1390,7 @@
   window.addEventListener("wheel", closeContext, { passive: true });
   window.addEventListener("resize", function () { closeContext(); });
 
-  // Icon toolbar (from kokonutui toolbar): data-kit-iconbar="single" (one pressed) or "multiple";
+  // Icon toolbar (adapted from an open-source component library, MIT): data-kit-iconbar="single" (one pressed) or "multiple";
   // arrow keys move between the buttons; "kit:select" with detail.value and detail.values.
   function setupIconbar(bar) {
     if (bar.kitIconbar) return;
@@ -1300,7 +1415,7 @@
     });
   }
 
-  // Avatars (from kokonutui team-selector): data-kit-avatar="NAME" writes the initials and gives every
+  // Avatars (adapted from an open-source component library, MIT): data-kit-avatar="NAME" writes the initials and gives every
   // name its own chart colour (the same name always the same colour); an <img> inside stays.
   // The first letters of the first and the last word.
   function initialsOf(name) {
@@ -1409,6 +1524,7 @@
       input.value = "";
     }
     input.addEventListener("keydown", function (e) {
+      if (e.isComposing) return;   // a key that ends an IME composition is not Enter
       if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(input.value); }
       else if (e.key === "Backspace" && !input.value && values.length) { var gone = values.pop(); draw(true); announce("Removed " + gone); }
     });
@@ -1793,7 +1909,7 @@
     relative: function (v) { var d = v instanceof Date ? v : new Date(v); return !v || isNaN(d.getTime()) ? "-" : ago(d.getTime()); }
   };
 
-  // Loading text that changes (from kokonutui dynamic text, toned down): data-kit-cycle="First|Second|Third"
+  // Loading text that changes (adapted from an open-source component library, MIT; toned down): data-kit-cycle="First|Second|Third"
   // on a kit-loading__text shows the next line every 2.4 seconds while it is on the page.
   function setupCycle(el) {
     if (el.kitCycle) return;
@@ -2483,7 +2599,9 @@
       brand: card ? checkCard(card.value).brand : "", length: num("data-length"), decimals: num("data-decimals"), negative: el.hasAttribute("data-negative"),
       min: num("minlength"), max: num("data-max"), multiline: el.localName === "textarea" };
   }
-  function fieldSkipped(el) { return !!el.closest("[hidden]") || isOff(el) || el.readOnly; }
+  // A field in a closed section is still the form's: hidden="until-found" (a closed disclosure the
+  // browser's find can reach) does not skip it; any other hidden ancestor does.
+  function fieldSkipped(el) { return !!el.closest('[hidden]:not([hidden="until-found"])') || isOff(el) || el.readOnly; }
   function fieldEval(el) {
     var kind = el.getAttribute("data-kit-field");
     if (!FIELD_CHECKS[kind]) return null;
@@ -2589,7 +2707,7 @@
       btn.type = "button";
       btn.className = "kit-btn kit-btn--ghost kit-btn--icon kit-btn--sm kit-password__reveal";
       btn.setAttribute("data-kit-reveal", "");
-      btn.innerHTML = lineIcon("eye");
+      btn.innerHTML = lineIcon("eye");   // injection: the kit's own icon markup, no outside text
       group.appendChild(btn);
     }
     btn.setAttribute("aria-label", "Show password");
@@ -2615,7 +2733,7 @@
       var focused = document.activeElement === input, a = input.selectionStart, b = input.selectionEnd;
       input.type = show ? "text" : "password";
       btn.setAttribute("aria-pressed", String(!!show));
-      if (!btn.querySelector("[data-kit-icon]")) btn.innerHTML = lineIcon(show ? "eye-off" : "eye");
+      if (!btn.querySelector("[data-kit-icon]")) btn.innerHTML = lineIcon(show ? "eye-off" : "eye");   // injection: the kit's own icon markup
       if (focused) { input.focus(); try { input.setSelectionRange(a, b); } catch (e) { /* no caret here */ } }
     };
     btn.addEventListener("mousedown", function (e) { if (document.activeElement === input) e.preventDefault(); });   // the caret stays
@@ -2764,7 +2882,7 @@
     });
     var custom = document.createElement("div");
     custom.className = "kit-daterange__custom";
-    custom.innerHTML = '<div class="kit-field"><label class="kit-label">From</label><input class="kit-input" type="date"></div>' +
+    custom.innerHTML = /* injection: fixed markup, no outside text */ '<div class="kit-field"><label class="kit-label">From</label><input class="kit-input" type="date"></div>' +
       '<div class="kit-field"><label class="kit-label">To</label><input class="kit-input" type="date"></div>' +
       '<p class="kit-error-text" hidden></p><button class="kit-btn kit-btn--primary kit-btn--sm" type="button">Apply</button>';
     var dates = custom.querySelectorAll("input"), fromIn = dates[0], toIn = dates[1], err = custom.querySelector("p"), apply = custom.querySelector("button");
@@ -2805,7 +2923,7 @@
     }
     list.addEventListener("click", function (e) { var b = closestOf(e.target, "[data-preset]"); if (b) done(b.getAttribute("data-preset"), rangeOf(b.getAttribute("data-preset"))); });
     apply.addEventListener("click", applyDates);
-    custom.addEventListener("keydown", function (e) { if (e.key === "Enter" && e.target.localName === "input") { e.preventDefault(); applyDates(); } });
+    custom.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.isComposing && e.target.localName === "input") { e.preventDefault(); applyDates(); } });
     var start = el.getAttribute("data-value");
     if (start === "custom" && el.getAttribute("data-from") && el.getAttribute("data-to")) { fromIn.value = el.getAttribute("data-from"); toIn.value = el.getAttribute("data-to"); rangeShow("custom", fromIn.value, toIn.value); }
     else { var p0 = presets.indexOf(start) >= 0 ? start : (presets.indexOf("all") >= 0 ? "all" : presets[0]), r0 = rangeOf(p0); rangeShow(p0, r0.from, r0.to); }
@@ -2889,6 +3007,8 @@
     }
     d.addEventListener("pointerup", release);
     d.addEventListener("pointercancel", release);
+    // A capture taken away (the sheet closed, another element took it) ends the drag like a cancel.
+    d.addEventListener("lostpointercapture", function (e) { if (drag && e.pointerId === drag.id) release({ type: "pointercancel", pointerId: e.pointerId }); });
   }
 
   // Carousel (like items where seeing a few is enough; what everyone must see goes in a grid or list; inside another
@@ -3227,9 +3347,22 @@
     var p = document.getElementById(btn.getAttribute("aria-controls"));
     if (!p) return;
     btn.setAttribute("aria-expanded", String(open));
+    var body = p.querySelector(".kit-disclosure__body");
     p.setAttribute("data-state", open ? "open" : "closed");
-    if (open) p.removeAttribute("inert"); else p.setAttribute("inert", "");
+    if (FIND_OPENS && body) findable(root, p, body, open);
+    else if (open) p.removeAttribute("inert"); else p.setAttribute("inert", "");
     if (send) emit(root, "toggle", { open: open, trigger: btn, panel: p });
+  }
+  // Find in page: where the browser supports hidden="until-found", a closed section's body gets it (after the
+  // slide) instead of inert, so the browser's find still reaches its text and opens the section (beforematch).
+  var FIND_OPENS = !!document.documentElement && "onbeforematch" in document.documentElement;
+  function findable(root, p, body, open) {
+    p.classList.add("is-findable");
+    p.removeAttribute("inert");
+    clearTimeout(p.kitFindTimer);
+    if (open) { body.removeAttribute("hidden"); return; }
+    var hide = function () { if (p.getAttribute("data-state") === "closed") body.setAttribute("hidden", "until-found"); };
+    if (root.hasAttribute("data-ready") && !reducedMotion()) p.kitFindTimer = setTimeout(hide, 400); else hide();
   }
   function setupDisclosure(root) {
     if (root.kitDisclosure) return;
@@ -3240,6 +3373,11 @@
       var id = b.getAttribute("aria-controls"), p = document.getElementById(id);
       var open = saved ? saved.indexOf(id) >= 0 : b.getAttribute("aria-expanded") === "true";
       disclosureSet(root, b, open || !!(p && p.querySelector('[aria-invalid="true"]')), false);
+    });
+    // The browser found text in a closed section: it opens, as if its button was pressed.
+    root.addEventListener("beforematch", function (e) {
+      var b = disclosureHeads(root).filter(function (h) { var p = document.getElementById(h.getAttribute("aria-controls")); return p && p.contains(e.target); })[0];
+      if (b) disclosureSet(root, b, true, true);
     });
     var ready = function () { root.setAttribute("data-ready", ""); };   // from now on the panels slide
     if (window.requestAnimationFrame) requestAnimationFrame(function () { requestAnimationFrame(ready); }); else ready();
@@ -3278,7 +3416,7 @@
     row.kitOverflow = true;
     var more = document.createElement("div");
     more.className = "kit-menu kit-overflow__more";
-    more.innerHTML = '<button class="kit-btn kit-btn--ghost kit-btn--icon" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false">' + lineIcon("more") + '</button><div class="kit-menu__list" role="menu" hidden></div>';
+    more.innerHTML = /* injection: fixed markup and the kit's icon */ '<button class="kit-btn kit-btn--ghost kit-btn--icon" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false">' + lineIcon("more") + '</button><div class="kit-menu__list" role="menu" hidden></div>';
     var moreBtn = more.firstChild, menu = more.lastChild, lastW = -1, folded = [];
     moreBtn.setAttribute("aria-label", row.getAttribute("data-more-label") || "More");
     more.hidden = true;
@@ -3381,6 +3519,248 @@
     crumbsFit(true);
   }
 
+  // ---------- Parts added from a comparison with an open-source headless component library (MIT), 28 Nov 2026 ----------
+
+  // Menubar: <div class="kit-menubar" role="menubar" aria-label="..."> of kit-menu blocks whose buttons
+  // (data-kit-menu) become role="menuitem" and one tab stop. ArrowLeft and ArrowRight move between them
+  // (round), Home and End go to the ends, ArrowDown opens. While a menu is open, ArrowLeft and ArrowRight in
+  // it, or a pointer on another button, open the neighbour instead.
+  function menubarButtons(bar) { return Array.prototype.filter.call(bar.querySelectorAll("[data-kit-menu]"), function (b) { return b.closest('[role="menubar"]') === bar; }); }
+  function menubarRove(bar, cur) { menubarButtons(bar).forEach(function (b) { b.setAttribute("tabindex", b === cur ? "0" : "-1"); }); cur.focus(); }
+  function menubarMove(list, step) {
+    var btn = menuButtonOf(list), bar = btn && btn.closest('[role="menubar"]');
+    if (!bar) return false;
+    var all = menubarButtons(bar), to = all[(all.indexOf(btn) + step + all.length) % all.length];
+    if (!to || to === btn) return false;
+    closeMenus();
+    menubarRove(bar, to);
+    toggleMenu(to);
+    return true;
+  }
+  function setupMenubar(bar) {
+    if (bar.kitMenubar) return;
+    bar.kitMenubar = true;
+    menubarButtons(bar).forEach(function (b, i) { b.setAttribute("role", "menuitem"); b.setAttribute("tabindex", i ? "-1" : "0"); });
+    bar.addEventListener("keydown", function (e) {
+      var b = closestOf(e.target, "[data-kit-menu]"), list = menubarButtons(bar), i = list.indexOf(b);
+      if (i < 0) return;
+      var to = { ArrowRight: list[(i + 1) % list.length], ArrowLeft: list[(i - 1 + list.length) % list.length], Home: list[0], End: list[list.length - 1] }[e.key];
+      if (!to) return;
+      e.preventDefault();
+      var wasOpen = b.getAttribute("aria-expanded") === "true";
+      closeMenus();
+      menubarRove(bar, to);
+      if (wasOpen) toggleMenu(to);
+    });
+    bar.addEventListener("pointerover", function (e) {
+      var b = closestOf(e.target, "[data-kit-menu]");
+      if (!b || b.getAttribute("aria-expanded") === "true" || menubarButtons(bar).indexOf(b) < 0) return;
+      if (menubarButtons(bar).some(function (x) { return x.getAttribute("aria-expanded") === "true"; })) { closeMenus(); menubarRove(bar, b); toggleMenu(b); }
+    });
+  }
+
+  // Navigation menu: <nav class="kit-navmenu" data-kit-navmenu aria-label="Main"><ul class="kit-navmenu__list"><li>
+  // <button class="kit-navmenu__trigger" type="button" aria-expanded="false" aria-controls="P">Products</button>
+  // <div class="kit-navmenu__panel" id="P" hidden>links</div></li>...</ul></nav>. A disclosure of links (no menu
+  // roles: the links stay links). A click, Enter or Space opens one panel and closes the others; a pointer resting
+  // on a trigger for 100 ms opens it, and leaving the nav closes it after 200 ms; Escape closes and goes back to
+  // the trigger; the focus or a click leaving the nav closes it. ArrowLeft and ArrowRight move between triggers.
+  function setupNavmenu(nav) {
+    if (nav.kitNavmenu) return;
+    nav.kitNavmenu = true;
+    var triggers = function () { return Array.prototype.slice.call(nav.querySelectorAll(".kit-navmenu__trigger[aria-controls]")); };
+    var timer = null, hoverAt = 0;
+    var set = function (t, open) {
+      triggers().forEach(function (x) { var on = open && x === t, p = document.getElementById(x.getAttribute("aria-controls")); x.setAttribute("aria-expanded", String(on)); if (p) p.hidden = !on; });
+    };
+    var later = function (fn, ms) { clearTimeout(timer); timer = setTimeout(fn, ms); };
+    nav.addEventListener("click", function (e) {
+      var t = closestOf(e.target, ".kit-navmenu__trigger");
+      if (!t || !nav.contains(t)) return;
+      clearTimeout(timer);
+      // A click right after the pointer opened it keeps it open (the press that follows the rest).
+      if (t.getAttribute("aria-expanded") === "true" && Date.now() - hoverAt < 500) return;
+      set(t, t.getAttribute("aria-expanded") !== "true");
+    });
+    nav.addEventListener("keydown", function (e) {
+      var open = triggers().filter(function (x) { return x.getAttribute("aria-expanded") === "true"; })[0];
+      if (e.key === "Escape" && open) { escapeHandled(e); set(null, false); open.focus(); return; }
+      var list = triggers(), i = list.indexOf(closestOf(e.target, ".kit-navmenu__trigger"));
+      if (i < 0 || (e.key !== "ArrowRight" && e.key !== "ArrowLeft")) return;
+      e.preventDefault();
+      list[(i + (e.key === "ArrowRight" ? 1 : -1) + list.length) % list.length].focus();
+    });
+    nav.addEventListener("focusout", function (e) { if (!withinEl(nav, e)) set(null, false); });
+    nav.addEventListener("pointerover", function (e) {
+      if (e.pointerType === "touch") return;
+      var t = closestOf(e.target, ".kit-navmenu__trigger");
+      if (t && t.getAttribute("aria-expanded") !== "true") later(function () { hoverAt = Date.now(); set(t, true); }, 100);
+      else clearTimeout(timer);
+    });
+    nav.addEventListener("pointerleave", function (e) { if (e.pointerType !== "touch") later(function () { set(null, false); }, 200); });
+    document.addEventListener("click", function (e) { if (!nav.contains(e.target)) set(null, false); });
+  }
+
+  // Preview card: <a href="..." data-kit-preview="ID"> and <div class="kit-preview" id="ID" hidden> anywhere. A
+  // pointer resting on the link for 600 ms, or the focus on it, shows the card under the link (above it when
+  // there is no room); it stays while the pointer is on the card and goes 300 ms after the pointer left both, at
+  // once on Escape, blur or scroll. The card only repeats what the link's page says: it is aria-hidden and holds no
+  // controls, so nothing can be reached through it alone. Not for touch: a tap follows the link.
+  function setupPreview(a) {
+    if (a.kitPreview) return;
+    var card = document.getElementById(a.getAttribute("data-kit-preview"));
+    if (!card) return;
+    a.kitPreview = true;
+    card.setAttribute("aria-hidden", "true");
+    var openT = null, closeT = null;
+    var place = function () {
+      var r = a.getBoundingClientRect(), s = card.style, gap = 8, edge = 8;
+      s.position = "fixed"; s.left = "0px"; s.top = "0px"; card.hidden = false;
+      var w = card.offsetWidth, h = card.offsetHeight;
+      var below = r.bottom + gap + h <= window.innerHeight - edge || r.top - gap - h < edge;
+      s.left = Math.round(Math.max(edge, Math.min(r.left, window.innerWidth - w - edge))) + "px";
+      s.top = Math.round(below ? r.bottom + gap : r.top - gap - h) + "px";
+    };
+    var show = function (ms) { clearTimeout(closeT); clearTimeout(openT); openT = setTimeout(place, ms); };
+    var hide = function (ms) { clearTimeout(openT); clearTimeout(closeT); closeT = setTimeout(function () { card.hidden = true; }, ms); };
+    a.addEventListener("pointerenter", function (e) { if (e.pointerType !== "touch") show(600); });
+    a.addEventListener("pointerleave", function (e) { if (e.pointerType !== "touch") hide(300); });
+    card.addEventListener("pointerenter", function () { clearTimeout(closeT); });
+    card.addEventListener("pointerleave", function () { hide(300); });
+    a.addEventListener("focus", function () { show(600); });
+    a.addEventListener("blur", function () { hide(0); });
+    a.addEventListener("keydown", function (e) { if (e.key === "Escape" && !card.hidden) { escapeHandled(e); hide(0); } });
+    window.addEventListener("scroll", function () { if (!card.hidden) hide(0); }, true);
+  }
+
+  // Meter: <div class="kit-meter" data-kit-meter data-value="72" aria-label="Disk used"> with data-min (0),
+  // data-max (100), data-low, data-high, data-optimum and data-unit ("GB"): a measure in a known range (disk space,
+  // a score), not the progress of a task. role="meter" with the values and a text ("72%", or "72 GB"), the bar
+  // filled, and its tone as the native meter element judges it: the zone of data-optimum is ok, the next warn,
+  // the far one error. A changed data-value draws again.
+  function meterTone(v, lo, hi, opt) {
+    if (isNaN(lo) && isNaN(hi)) return "";
+    var zone = function (x) { return !isNaN(lo) && x < lo ? 0 : !isNaN(hi) && x > hi ? 2 : 1; };
+    var d = Math.abs((isNaN(opt) ? 1 : zone(opt)) - zone(v));
+    return ["ok", "warn", "error"][d];
+  }
+  function setupMeter(el) {
+    var num = function (n, d) { var v = parseFloat(el.getAttribute("data-" + n)); return isNaN(v) ? d : v; };
+    var min = num("min", 0), max = num("max", 100), v = Math.min(max, Math.max(min, num("value", min)));
+    var share = max > min ? (v - min) / (max - min) : 0, unit = el.getAttribute("data-unit");
+    el.setAttribute("role", "meter");
+    el.setAttribute("aria-valuemin", String(min));
+    el.setAttribute("aria-valuemax", String(max));
+    el.setAttribute("aria-valuenow", String(v));
+    el.setAttribute("aria-valuetext", unit ? v + " " + unit : Math.round(share * 100) + "%");
+    var bar = el.querySelector(".kit-meter__bar");
+    if (!bar) { bar = document.createElement("span"); bar.className = "kit-meter__bar"; el.appendChild(bar); }
+    bar.style.width = (share * 100).toFixed(1) + "%";
+    var tone = meterTone(v, num("low", NaN), num("high", NaN), num("optimum", NaN));
+    el.classList.remove("kit-meter--ok", "kit-meter--warn", "kit-meter--error");
+    if (tone) el.classList.add("kit-meter--" + tone);
+  }
+
+  // Toolbar: role="toolbar" with data-kit-toolbar is one tab stop. ArrowLeft and ArrowRight (ArrowUp and
+  // ArrowDown with aria-orientation="vertical") move between its controls, round; Home and End go to the ends.
+  // A disabled control stays reachable (aria-disabled). A text field, select or slider keeps its own arrow
+  // keys, so it is best the last control (Tab leaves it). A part that moves its own focus (an icon bar) wins.
+  function toolbarItems(bar) {
+    return Array.prototype.filter.call(bar.querySelectorAll("button, a[href], input, select, textarea, [tabindex]"), function (c) {
+      return !c.disabled && c.closest('[role="toolbar"]') === bar && !c.closest("[hidden], .kit-menu__list, .kit-popover");
+    });
+  }
+  function ownsArrows(t) { return /^(input|textarea|select)$/.test(t.localName) && !/^(checkbox|radio|button|submit|reset|color|file)$/.test(t.type || ""); }
+  function setupToolbar(bar) {
+    if (bar.kitToolbar) return;
+    bar.kitToolbar = true;
+    var rove = function (cur) { toolbarItems(bar).forEach(function (c) { c.setAttribute("tabindex", c === cur ? "0" : "-1"); }); };
+    var all = toolbarItems(bar);
+    rove(all.filter(function (c) { return c.getAttribute("tabindex") === "0"; })[0] || all[0]);
+    bar.addEventListener("focusin", function (e) { if (toolbarItems(bar).indexOf(e.target) >= 0) rove(e.target); });
+    bar.addEventListener("keydown", function (e) {
+      var l = toolbarItems(bar), i = l.indexOf(e.target);
+      if (i < 0 || e.defaultPrevented || ownsArrows(e.target)) return;
+      var vertical = bar.getAttribute("aria-orientation") === "vertical";
+      var keys = {}; keys[vertical ? "ArrowDown" : "ArrowRight"] = (i + 1) % l.length; keys[vertical ? "ArrowUp" : "ArrowLeft"] = (i - 1 + l.length) % l.length; keys.Home = 0; keys.End = l.length - 1;
+      if (!Object.prototype.hasOwnProperty.call(keys, e.key)) return;
+      e.preventDefault();
+      l[keys[e.key]].focus();
+    });
+  }
+
+  // Select all: data-kit-checkall on a fieldset (or any group) of checkboxes, one of them
+  // data-kit-checkall-parent. The parent is checked when all are and mixed (indeterminate) when some are; it
+  // checks or clears them all, leaving a disabled one as it is. A group inside a group counts as one child
+  // through its own parent. "kit:change" on the group with detail.values (the checked values).
+  function setupCheckall(group) {
+    if (group.kitCheckall) return;
+    var parent = Array.prototype.filter.call(group.querySelectorAll("input[type=checkbox][data-kit-checkall-parent]"), function (c) { return c.closest("[data-kit-checkall]") === group; })[0];
+    if (!parent) return;
+    group.kitCheckall = true;
+    var kids = function () {
+      return Array.prototype.filter.call(group.querySelectorAll("input[type=checkbox]"), function (c) {
+        if (c === parent) return false;
+        var own = c.closest("[data-kit-checkall]");
+        return own === group || (c.hasAttribute("data-kit-checkall-parent") && own.parentNode.closest("[data-kit-checkall]") === group);
+      });
+    };
+    var off = function (c) { return c.disabled || !!c.closest('[aria-disabled="true"]'); };
+    var sync = function () {
+      var k = kids(), on = k.filter(function (c) { return c.checked && !c.indeterminate; }).length, part = k.some(function (c) { return c.indeterminate; });
+      parent.checked = k.length > 0 && on === k.length;
+      parent.indeterminate = !parent.checked && (on > 0 || part);
+    };
+    group.addEventListener("change", function (e) {
+      if (e.target === parent) kids().forEach(function (c) {
+        if (off(c) || (c.checked === parent.checked && !c.indeterminate)) return;
+        c.checked = parent.checked; c.indeterminate = false;
+        if (c.hasAttribute("data-kit-checkall-parent")) c.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      sync();
+      if (e.target === parent || kids().indexOf(e.target) >= 0) emit(group, "change", { values: kids().filter(function (c) { return c.checked && !c.hasAttribute("data-kit-checkall-parent"); }).map(function (c) { return c.value; }) });
+    });
+    sync();
+  }
+
+  // F6 moves the focus into the newest toast (its first button) and F6 there goes back to where it was, so a
+  // toast's action can be reached without the pointer; the toast waits while it has the focus.
+  var toastBack = null;
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "F6" || e.ctrlKey || e.altKey || e.metaKey) return;
+    var region = document.querySelector(".kit-toasts");
+    if (!region) return;
+    if (region.contains(document.activeElement)) { e.preventDefault(); focusBack(toastBack, null); toastBack = null; return; }
+    var list = region.querySelectorAll(".kit-toast:not(.is-leaving)"), last = list[list.length - 1];
+    if (!last) return;
+    var to = last.querySelector("button");
+    if (!to) { to = last; last.setAttribute("tabindex", "-1"); }
+    e.preventDefault();
+    toastBack = document.activeElement;
+    to.focus();
+  });
+
+  // Context menu by touch: a long press (500 ms, a finger or pen moving less than 10 px) on a data-kit-context
+  // area opens its menu at the press, for browsers that send no contextmenu then; the click after it is dropped.
+  var press = null, dropClick = false;
+  function pressEnd() { if (press) { clearTimeout(press.timer); press = null; } }
+  document.addEventListener("pointerdown", function (e) {
+    if (e.pointerType === "mouse") return;
+    var area = contextArea(e.target);
+    if (!area) return;
+    var x = e.clientX, y = e.clientY;
+    pressEnd();
+    press = { x: x, y: y, id: e.pointerId, timer: setTimeout(function () {
+      press = null;
+      if (contextOpen() || !openContextMenu(area, x, y)) return;
+      contextKeyAt = Date.now(); dropClick = true;
+      setTimeout(function () { dropClick = false; }, 800);
+    }, 500) };
+  }, { passive: true });
+  document.addEventListener("pointermove", function (e) { if (press && e.pointerId === press.id && Math.abs(e.clientX - press.x) + Math.abs(e.clientY - press.y) > 10) pressEnd(); }, { passive: true });
+  ["pointerup", "pointercancel", "contextmenu"].forEach(function (t) { document.addEventListener(t, pressEnd, { passive: true }); });
+  document.addEventListener("click", function (e) { if (dropClick) { dropClick = false; e.preventDefault(); e.stopPropagation(); } }, true);
+
   // The parts that need setting up, in what the page has now or writes later.
   var PARTS = [[".kit-tip[data-kit-tip], [data-kit-tip]", setupTip], ["select[data-kit-multi]", setupMulti], ["[data-kit-range]", setupRange], ["[data-kit-tree]", setupTree],
     ["[data-kit-iconbar]", setupIconbar], ["[data-kit-avatar]", setupAvatar], ["[data-kit-slider-range]", setupSliderRange], ["[data-kit-tags]", setupTags],
@@ -3395,7 +3775,9 @@
     ["[data-kit-listbox]", setupListbox], ["[data-kit-number]", setupNumber], ["[data-kit-password]", setupPassword], ["[data-kit-otp]", setupOtp],
     ["[data-kit-address]", setupAddress], ["[data-kit-daterange]", setupDateRange], ["dialog[data-kit-sheet]", setupSheet], ["[data-kit-carousel]", setupCarousel],
     ["[data-kit-reorder]", setupReorder], ["[data-kit-swipe]", setupSwipe], ["[data-kit-splitter]", setupSplitter], ["[data-kit-disclosure]", setupDisclosure],
-    ["[data-kit-overflow]", setupOverflow], ["[data-kit-breadcrumbs]", setupCrumbs]];
+    ["[data-kit-overflow]", setupOverflow], ["[data-kit-breadcrumbs]", setupCrumbs],
+    ['.kit-menubar[role="menubar"]', setupMenubar], ["[data-kit-navmenu]", setupNavmenu], ["a[data-kit-preview]", setupPreview], ["[data-kit-meter]", setupMeter],
+    ['[role="toolbar"][data-kit-toolbar]', setupToolbar], ["[data-kit-checkall]", setupCheckall]];
   function setupParts(root) {
     PARTS.forEach(function (p) {
       if (root.matches && root.matches(p[0])) safe(p[1], root);
@@ -3596,8 +3978,10 @@
       if (n < 0) return;
       e.preventDefault();
       list[n].focus();
-      list[n].click();
-      roving();
+      // data-activation="manual": the arrow keys only move the focus; Enter or Space selects (a large panel
+      // that is slow to draw is then not drawn for every tab passed on the way).
+      if (group.getAttribute("data-activation") !== "manual") { list[n].click(); roving(); }
+      else tabs().forEach(function (b) { b.setAttribute("tabindex", b === list[n] ? "0" : "-1"); });
     });
     group.addEventListener("click", function () { setTimeout(roving, 0); });
     roving();
@@ -3613,10 +3997,20 @@
     if (window.MutationObserver) {
       new MutationObserver(function (list) {
         list.forEach(function (m) {
-          if (m.type === "attributes") { fillBars(m.target); if (/^data-kit-(sort|pages)$/.test(m.attributeName)) setupTables(m.target); }
-          else Array.prototype.forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1) { fillBars(n); setupTables(n); setupParts(n); } });
+          if (m.type === "attributes") {
+            fillBars(m.target);
+            if (/^data-kit-(sort|pages)$/.test(m.attributeName)) setupTables(m.target);
+            if (m.attributeName === "data-value" && m.target.matches && m.target.matches("[data-kit-meter]")) safe(setupMeter, m.target);
+          }
+          else if (m.type === "characterData") { var row = m.target.parentElement && m.target.parentElement.closest("tr, li"); if (row) fillBars(row); }
+          else {
+            Array.prototype.forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1) { fillBars(n); setupTables(n); setupParts(n); } });
+            // A percentage written next to a bar (a cell filled after its row) fills that row's bars.
+            var near = m.target.closest && m.target.closest("tr, li");
+            if (near) fillBars(near);
+          }
         });
-      }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-valuenow", "aria-valuemin", "aria-valuemax", "data-kit-sort", "data-kit-pages"] });
+      }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["aria-valuenow", "aria-valuemin", "aria-valuemax", "data-value", "data-kit-sort", "data-kit-pages"] });
     }
     setupTables(document);
   }

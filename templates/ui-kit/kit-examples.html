@@ -63,8 +63,8 @@
     <button class="kit-btn kit-btn--sm" type="button">Small</button>
     <!-- While an action runs: aria-busy="true" on the button (a spinner takes the place of its text, no
          clicks) and a kit-sr-only role="status" line beside it that says what runs (the spinner alone
-         says nothing to a screen reader; empty it when done); a form that saves gets <fieldset disabled>
-         around its fields. -->
+         says nothing to a screen reader; empty it when done); a form that saves sets aria-disabled="true"
+         on a fieldset around its fields. -->
     <button class="kit-btn kit-btn--primary" type="button" aria-busy="true">Saving</button>
     <span class="kit-sr-only" role="status">Saving the report</span>
     <!-- Not available yet: aria-disabled="true", never the disabled attribute, so the button keeps its
@@ -127,7 +127,7 @@
       <div class="kit-choices">
         <label class="kit-check"><input type="radio" name="ex-often" checked> Every week</label>
         <label class="kit-check"><input type="radio" name="ex-often"> Every month</label>
-        <label class="kit-check"><input type="radio" name="ex-often" disabled> Every quarter (not yet)</label>
+        <label class="kit-check"><input type="radio" name="ex-often" aria-disabled="true"> Every quarter (not yet)</label>
       </div>
     </fieldset>
     <fieldset class="kit-fieldset kit-fieldset--plain">
@@ -151,7 +151,9 @@
      (a kit-pager under the table); events kit:sort and kit:page. Every table has an empty state: a
      <tr data-kit-empty> row with a kit-empty block when there are no rows. From data, write no rows yourself:
      give each th data-key="FIELD" (and data-format="number|percent|date") and call KitUI.fillTable(table, rows);
-     a filter select: KitUI.options(select, values, { all: "All ITEMS" }). -->
+     a filter select: KitUI.options(select, values, { all: "All ITEMS" }).
+     A share with its bar: kit-share with kit-progress (aria-valuenow = the percentage, 0 to 100; kit.js
+     fills the bar to it) and kit-share__value with the same number; data-sort on the cell sorts by it. -->
 <section id="table" class="kit-stack">
   <h2 class="kit-h2">Toolbar and table</h2>
   <div class="kit-toolbar">
@@ -166,12 +168,12 @@
   </div>
   <div class="kit-table-wrap">
     <table class="kit-table" data-kit-sort data-kit-pages="3">
-      <thead><tr><th>Item</th><th>Status</th><th class="kit-num">Count</th><th>Changed</th></tr></thead>
+      <thead><tr><th>Item</th><th>Status</th><th class="kit-num">Count</th><th class="kit-num">Share</th><th>Changed</th></tr></thead>
       <tbody>
-        <tr><td>First example</td><td><span class="kit-badge kit-badge--ok">Done</span></td><td class="kit-num">12</td><td data-sort="2026-03-02">2 Mar</td></tr>
-        <tr><td>Second example</td><td><span class="kit-badge kit-badge--warn">Waiting</span></td><td class="kit-num">3</td><td data-sort="2026-01-15">15 Jan</td></tr>
-        <tr><td>Third example</td><td><span class="kit-badge kit-badge--error">Failed</span></td><td class="kit-num">0</td><td data-sort="2026-02-20">20 Feb</td></tr>
-        <tr><td>Fourth example</td><td><span class="kit-badge kit-badge--accent">New</span></td><td class="kit-num">7</td><td data-sort="2026-03-09">9 Mar</td></tr>
+        <tr><td>First example</td><td><span class="kit-badge kit-badge--ok">Done</span></td><td class="kit-num">12</td><td data-sort="54.5"><div class="kit-share"><div class="kit-progress" role="progressbar" aria-label="Share" aria-valuemin="0" aria-valuemax="100" aria-valuenow="54.5"><div class="kit-progress__bar"></div></div><span class="kit-share__value">54.5%</span></div></td><td data-sort="2026-03-02">2 Mar</td></tr>
+        <tr><td>Second example</td><td><span class="kit-badge kit-badge--warn">Waiting</span></td><td class="kit-num">3</td><td data-sort="13.6"><div class="kit-share"><div class="kit-progress" role="progressbar" aria-label="Share" aria-valuemin="0" aria-valuemax="100" aria-valuenow="13.6"><div class="kit-progress__bar"></div></div><span class="kit-share__value">13.6%</span></div></td><td data-sort="2026-01-15">15 Jan</td></tr>
+        <tr><td>Third example</td><td><span class="kit-badge kit-badge--error">Failed</span></td><td class="kit-num">0</td><td data-sort="0"><div class="kit-share"><div class="kit-progress" role="progressbar" aria-label="Share" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="kit-progress__bar"></div></div><span class="kit-share__value">0%</span></div></td><td data-sort="2026-02-20">20 Feb</td></tr>
+        <tr><td>Fourth example</td><td><span class="kit-badge kit-badge--accent">New</span></td><td class="kit-num">7</td><td data-sort="31.8"><div class="kit-share"><div class="kit-progress" role="progressbar" aria-label="Share" aria-valuemin="0" aria-valuemax="100" aria-valuenow="31.8"><div class="kit-progress__bar"></div></div><span class="kit-share__value">31.8%</span></div></td><td data-sort="2026-03-09">9 Mar</td></tr>
       </tbody>
     </table>
   </div>
@@ -463,7 +465,7 @@ GROUP BY station;</pre>
 </section>
 
 <!-- kit-part:interactive -->
-<!-- Adapted from kokonutui (MIT, see LICENSE-kokonutui.txt): the parts below need kit.js. -->
+<!-- Adapted from an open-source component library (MIT, see LICENSE-kokonutui.txt): the parts below need kit.js. -->
 
 <!-- kit-btn--hold with data-kit-hold (ms); listens: kit:hold. kit.js describes it as a hold to screen readers
      and says when it is done; data-kit-hold-done gives the done word (the same verb), shown in the
@@ -590,7 +592,7 @@ GROUP BY station;</pre>
 
 <!-- kit-part:icons -->
 <!-- Icons (kit-icons.js, Lucide, ISC: see LICENSE-lucide.txt): data-kit-icon="NAME"; any Lucide name works,
-     the helper program adds the icons a project uses. Icon-only buttons need aria-label. -->
+     the kit tools add the icons a project uses. Icon-only buttons need aria-label. -->
 <section id="icons">
   <h2 class="kit-h2">Icons</h2>
   <div class="kit-row">
@@ -962,6 +964,70 @@ GROUP BY station;</pre>
     });
   </script>
 </section>
+<!-- Menus and navigation (kit.js): a menubar (kit-menubar role="menubar" of kit-menu blocks), check and radio rows
+     (role="menuitemcheckbox" / "menuitemradio" with aria-checked; the menu stays open; kit:menu has detail.checked),
+     a submenu (kit-menu__sub: a row with aria-haspopup="menu" and its own kit-menu__list), a navigation menu of
+     link panels (kit-navmenu, data-kit-navmenu, kit-navmenu__trigger, kit-navmenu__panel), a preview card on a link
+     (data-kit-preview="ID", kit-preview: only repeats the page it links to), a toolbar with one tab stop
+     (role="toolbar" data-kit-toolbar), a meter (kit-meter, data-kit-meter with data-low, data-high, data-optimum),
+     progress with no known end (kit-progress role="progressbar" without aria-valuenow) and a select-all group
+     (data-kit-checkall, data-kit-checkall-parent; kit:change). Closed kit-disclosure sections can be found with the
+     browser's find. F6 moves into the newest toast and back. -->
+<section id="menus-navigation" class="kit-stack">
+  <h2 class="kit-h2">Menus and navigation</h2>
+  <div class="kit-menubar" role="menubar" aria-label="Report">
+    <div class="kit-menu kit-menu--left"><button class="kit-btn kit-btn--ghost kit-btn--sm" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false">File</button>
+      <div class="kit-menu__list" role="menu" hidden>
+        <button class="kit-menu__item" role="menuitem" type="button" data-value="new">New report</button>
+        <div class="kit-menu__sub"><button class="kit-menu__item" role="menuitem" type="button" aria-haspopup="menu" aria-expanded="false">Export as</button>
+          <div class="kit-menu__list" role="menu" hidden>
+            <button class="kit-menu__item" role="menuitem" type="button" data-value="pdf">PDF</button>
+            <button class="kit-menu__item" role="menuitem" type="button" data-value="xlsx">Excel</button>
+            <button class="kit-menu__item" role="menuitem" type="button" data-value="csv">CSV</button>
+          </div></div>
+        <hr class="kit-menu__sep">
+        <button class="kit-menu__item" role="menuitem" type="button" data-value="print">Print</button>
+      </div></div>
+    <div class="kit-menu kit-menu--left"><button class="kit-btn kit-btn--ghost kit-btn--sm" type="button" data-kit-menu aria-haspopup="menu" aria-expanded="false">View</button>
+      <div class="kit-menu__list" role="menu" hidden>
+        <button class="kit-menu__item" role="menuitemcheckbox" aria-checked="true" type="button" data-value="legend">Legend</button>
+        <button class="kit-menu__item" role="menuitemcheckbox" aria-checked="false" type="button" data-value="grid">Grid lines</button>
+        <hr class="kit-menu__sep">
+        <div role="group" aria-label="Period">
+          <button class="kit-menu__item" role="menuitemradio" aria-checked="true" type="button" data-value="week">By week</button>
+          <button class="kit-menu__item" role="menuitemradio" aria-checked="false" type="button" data-value="month">By month</button>
+        </div>
+      </div></div>
+  </div>
+  <nav class="kit-navmenu" data-kit-navmenu aria-label="Sections">
+    <ul class="kit-navmenu__list">
+      <li><button class="kit-navmenu__trigger" type="button" aria-expanded="false" aria-controls="ex-nav-reports">Reports</button>
+        <div class="kit-navmenu__panel" id="ex-nav-reports" hidden><ul class="kit-list--plain"><li><a class="kit-link" href="#charts">Charts</a></li><li><a class="kit-link" href="#dashboard">Dashboard</a></li></ul></div></li>
+      <li><button class="kit-navmenu__trigger" type="button" aria-expanded="false" aria-controls="ex-nav-stations">Stations</button>
+        <div class="kit-navmenu__panel" id="ex-nav-stations" hidden><ul class="kit-list--plain"><li><a class="kit-link" href="#context-menu">Out of order</a></li><li><a class="kit-link" href="#form-parts">New station</a></li></ul></div></li>
+    </ul>
+  </nav>
+  <p>Opening hours are on the <a class="kit-link" href="#form-parts" data-kit-preview="ex-preview">station page</a>.</p>
+  <div class="kit-preview" id="ex-preview" hidden><strong>Central station</strong><p class="kit-small kit-muted">Open 6:00 to 23:00, 42 docks.</p></div>
+  <div class="kit-toolbar" role="toolbar" data-kit-toolbar aria-label="Text">
+    <button class="kit-btn kit-btn--sm" type="button" aria-pressed="false">Bold</button>
+    <button class="kit-btn kit-btn--sm" type="button" aria-pressed="false">Italic</button>
+    <button class="kit-btn kit-btn--sm" type="button" aria-disabled="true">Link</button>
+  </div>
+  <div class="kit-field"><span class="kit-label" id="ex-disk">Disk used</span><div class="kit-meter" data-kit-meter data-value="72" data-max="100" data-high="85" data-low="30" data-optimum="10" aria-labelledby="ex-disk"></div></div>
+  <div class="kit-progress" role="progressbar" aria-label="Loading stations"><span class="kit-progress__bar"></span></div>
+  <fieldset class="kit-fieldset" data-kit-checkall><legend class="kit-legend">Columns</legend>
+    <label class="kit-check"><input type="checkbox" data-kit-checkall-parent> All columns</label>
+    <label class="kit-check"><input type="checkbox" value="name" checked> Name</label>
+    <label class="kit-check"><input type="checkbox" value="team"> Team</label>
+    <label class="kit-check"><input type="checkbox" value="status"> Status</label>
+  </fieldset>
+  <script>
+    document.querySelector("#menus-navigation .kit-menubar").addEventListener("kit:menu", function (e) {
+      KitUI.toast(e.detail.value + (e.detail.checked === undefined ? "" : e.detail.checked ? " on" : " off"));
+    });
+  </script>
+</section>
 <!-- Form parts (kit.js): a listbox for rich rows (kit-listbox, kit-option, kit-option__label, kit-option__meta;
      data-kit-listbox, aria-multiselectable for several, data-name; kit:select), a number field (kit-number,
      kit-number__step; data-kit-number, data-kit-nudge; kit:change), typed fields with shape checks (data-kit-field on a
@@ -1112,7 +1178,7 @@ GROUP BY station;</pre>
     }
     function draw() {
       table.setAttribute("data-kit-total", String(rows.length));
-      table.tBodies[0].innerHTML = rows.slice(start, end).map(function (r) {
+      table.tBodies[0].innerHTML = /* injection: every text esc()-escaped */ rows.slice(start, end).map(function (r) {
         return "<tr><td>" + esc(r.name) + "</td><td>" + esc(r.team) + '</td><td><span class="kit-badge kit-badge--' + kind(r.status) + '">' + esc(r.status) + '</span></td><td class="kit-num">' + r.score + "</td></tr>";
       }).join("") || '<tr data-kit-empty><td colspan="4"><div class="kit-empty"><p class="kit-empty__title">No one found</p>Change the search.</div></td></tr>';
     }
@@ -1185,12 +1251,13 @@ GROUP BY station;</pre>
       var bar = function (label, a, kind) {
         return '<div class="kit-progress kit-figure__bar' + (kind ? " kit-progress--" + kind : "") + '" role="progressbar" aria-label="' + label + '" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + share(a) + '"><div class="kit-progress__bar" style="width: ' + share(a) + '%"></div></div>';
       };
-      el("kit-dash-figures").innerHTML = [["Rentals", shown.length.toLocaleString(), "of " + rows.length.toLocaleString() + " this year"],
+      el("kit-dash-figures").innerHTML = /* injection: numbers and fixed labels */ [["Rentals", shown.length.toLocaleString(), "of " + rows.length.toLocaleString() + " this year"],
         ["E-bike share", pct(ebike), ebike.toLocaleString() + " rentals", bar("E-bike share", ebike)], ["Returned to a dock", pct(docked), docked.toLocaleString() + " rentals", bar("Returned to a dock", docked, "ok")],
         ["Short trips", pct(short), "under 15 minutes"], ["Months shown", String(months), MONTHS[first] + " to Dec"]]
         .map(function (f) { return '<div><div class="kit-figure__label">' + f[0] + '</div><div class="kit-figure__value">' + f[1] + '</div><div class="kit-figure__note">' + f[2] + "</div>" + (f[3] || "") + "</div>"; }).join("");
-      el("kit-dash-chips").innerHTML = Object.keys(filters).map(function (d) {
-        return filters[d].map(function (v) { return '<button class="kit-chip" type="button" data-dim="' + d + '" data-value="' + v + '" aria-label="Remove filter ' + DIMS[d].label + ": " + v + '">' + DIMS[d].label + ": " + v + ' <span aria-hidden="true">&times;</span></button>'; }).join("");
+      var q = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+      el("kit-dash-chips").innerHTML = /* injection: every value q()-escaped */ Object.keys(filters).map(function (d) {
+        return filters[d].map(function (v) { return '<button class="kit-chip" type="button" data-dim="' + q(d) + '" data-value="' + q(v) + '" aria-label="Remove filter ' + q(DIMS[d].label) + ": " + q(v) + '">' + q(DIMS[d].label) + ": " + q(v) + ' <span aria-hidden="true">&times;</span></button>'; }).join("");
       }).join("");
     }
     var toggle = function (dim, v) { var f = filters[dim], i = f.indexOf(v); if (i >= 0) f.splice(i, 1); else f.push(v); draw(); };

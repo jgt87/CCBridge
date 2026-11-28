@@ -1,6 +1,9 @@
 <#
-  Helpers for PowerShell window apps (WPF, Windows PowerShell 5.1, nothing to install), written by the
-  helper program: do not edit (a newer version replaces this file). Dot-source it at the top of the app:
+  Helpers for PowerShell window apps (WPF, Windows PowerShell 5.1, nothing to install).
+  kit:project-begin tool
+  Written by the helper program: do not edit (a newer version replaces this file).
+  kit:project-end
+  Dot-source it at the top of the app:
     . (Join-Path $PSScriptRoot 'styles\kit\wpf\KitWpf.ps1')      # the path from the app to this file
     $ui = New-KitWindow -Path (Join-Path $PSScriptRoot 'MainWindow.xaml')
     $ui.Refresh.Add_Click({ ... })                                # every x:Name of the window, by name
@@ -25,8 +28,8 @@
   Charts       Set-KitBars $ui.Chart ITEMS -Label NAME -Value NAME   a bar list in a StackPanel, kit colours
   Database     Invoke-KitSql -Database NAME -Query 'SELECT ... WHERE Region = @region' -Parameters @{ region = $x }
                -> rows (objects, ready for Set-KitGrid); Start-KitSql (the same, in the background) -OnDone { param($rows) }
-               NAME is a database from the project's Databases list (.streamhub\databases.json: SQL Server,
-               your Windows sign-in). Read-only: one SELECT, a read-only connection, everything rolled
+               NAME is a database from the project's database list (the file Invoke-KitSql reads: a list of
+               { name, server, database }; SQL Server, your Windows sign-in). Read-only: one SELECT, a read-only connection, everything rolled
                back; values only as @name parameters, never pasted into the query text
   Work         Start-KitWork { work } -Arguments @{ } -OnDone { param($result) } [-OnProgress { param($pct, $text) }]
                runs in the background so the window stays responsive; inside: Send-KitProgress PCT TEXT
@@ -34,9 +37,11 @@
   Other        Add-KitShortcut $ui.Window 'Ctrl+S' { }; New-KitTimer SECONDS { } (on the window's thread)
                Get-KitSettings NAME / Save-KitSettings NAME OBJECT (JSON in %APPDATA%\NAME)
                Use-KitSingleInstance NAME (returns $false when the app is already open)
-               Test-KitGuiTest   $true while the helper program only checks that the window opens
+               Test-KitGuiTest   $true while a test run only checks that the window opens
   Names        dot-sourced, these helpers share the app's script scope: the app never defines a function
                with one of their names, and their own variables start with __kit (never use that start)
+  Project      the lines between "kit:project-begin" and "kit:project-end" are the project's own (the
+               test switch, where the database list is, the connection's name): a kit update keeps them
 #>
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
@@ -56,7 +61,9 @@ function Get-KitApp {
     $app
 }
 
+# kit:project-begin gui-test
 function Test-KitGuiTest { [bool]$env:STREAMHUB_GUI_TEST }
+# kit:project-end
 
 function Set-KitLayout {
     <# Lines up the panels marked with a Tag (row, actions, form; see the header). Only what the window
@@ -297,18 +304,20 @@ function Set-KitBars {
 }
 
 function Invoke-KitSql {
-    <# Reads rows from a SQL Server database of the project's Databases list (.streamhub\databases.json
-       in the project; -ProjectRoot when the app sits elsewhere) with the person's Windows sign-in.
+    <# Reads rows from a SQL Server database of the project's database list (the file named in the
+       project block below; -ProjectRoot when the app sits elsewhere) with the person's Windows sign-in.
        Only one SELECT / WITH statement runs, nothing that writes or runs code, on a read-only
        connection, inside a transaction that is always rolled back; values go in as parameters (@name
        in the query, -Parameters @{ name = value }). Returns objects (one per row), at most -MaxRows.
-       While the helper program checks the window (Test-KitGuiTest) it connects to nothing and returns
+       While a test run checks the window (Test-KitGuiTest) it connects to nothing and returns
        no rows. Self-contained, so Start-KitSql can run it in the background. #>
     param([Parameter(Mandatory)][string]$Database, [Parameter(Mandatory)][string]$Query, [hashtable]$Parameters = @{}, [int]$MaxRows = 50000, [int]$TimeoutSec = 120, [string]$ProjectRoot = '')
+    # kit:project-begin sql-source
     if ($env:STREAMHUB_GUI_TEST) { return @() }
     if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $script:__kitRoot)) }
     $cfg = Join-Path $ProjectRoot '.streamhub\databases.json'
     if (-not (Test-Path -LiteralPath $cfg)) { throw "No databases are set up for this project ($cfg). Add one in StreamHub: Files > Project setup > Databases." }
+    # kit:project-end
     $all = Get-Content -LiteralPath $cfg -Raw -Encoding UTF8 | ConvertFrom-Json   # assigned first: piped on, a JSON array is one object in 5.1
     $conn = @(foreach ($x in $all) { if ($x.name -eq $Database) { $x } }) | Select-Object -First 1
     if (-not $conn) { throw "The project has no database named $Database." }
@@ -322,7 +331,9 @@ function Invoke-KitSql {
     foreach ($m in [regex]::Matches($bare, '@(\w+)')) { if (-not $Parameters.ContainsKey($m.Groups[1].Value)) { throw "The query uses @$($m.Groups[1].Value): give it in -Parameters." } }
     $b = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
     $b['Data Source'] = "$($conn.server)"; $b['Initial Catalog'] = "$($conn.database)"; $b['Integrated Security'] = $true
+    # kit:project-begin sql-name
     $b['ApplicationIntent'] = 'ReadOnly'; $b['Connect Timeout'] = 15; $b['Application Name'] = 'StreamHub window app (read-only)'
+    # kit:project-end
     if ($conn.trustCertificate) { $b['TrustServerCertificate'] = $true }
     $c = New-Object System.Data.SqlClient.SqlConnection $b.ConnectionString
     try {

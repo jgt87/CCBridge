@@ -1,7 +1,7 @@
 /*
   UI kit: Python in the page, through Pyodide (Mozilla Public License 2.0, vendor/pyodide/: Python's
   standard library only, no extra packages). It loads its parts from vendor/pyodide/, which a page
-  opened from disk cannot do: it works when the page is served (StreamHub: Open app, or any web server).
+  opened from disk cannot do: it works when the page is served (by the app or any web server).
     <script src="styles/kit/kit-python.js"></script>
   KitPython.run("import statistics\nstatistics.median([r['amount'] for r in sales])", { data: { sales: rows } })
     .then(function (r) { r.result; r.output; });
@@ -15,7 +15,7 @@
   var base = here + "vendor/pyodide/";
   var ready = null;
   function engine() {
-    if (location.protocol === "file:") return Promise.reject(new Error("Python in the page works when the page is served (StreamHub: Open app), not when it is opened from disk"));
+    if (location.protocol === "file:") return Promise.reject(new Error("Python in the page works when the page is served (by a web server), not when it is opened from disk"));
     if (!ready) {
       ready = new Promise(function (resolve, reject) {
         var s = document.createElement("script");

@@ -1,6 +1,9 @@
 <#
-  UI kit for PowerShell window apps with Windows Forms, written by the helper program from
-  styles/kit/tokens.css: do not edit (change the colours in tokens.css). After building the form:
+  UI kit for PowerShell window apps with Windows Forms, made from styles/kit/tokens.css.
+  kit:project-begin tool
+  Written by the helper program: do not edit.
+  kit:project-end
+  Change the colours in tokens.css. After building the form:
     . (Join-Path $root 'styles\kit\winforms\KitTheme.ps1')
     Set-KitFormStyle $form
     $okButton.Tag = 'primary'   # the main action, before Set-KitFormStyle

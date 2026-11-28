@@ -61,7 +61,7 @@ Describe 'Taking what the pages use from the catalogue' {
         $u.added -contains 'styles/kit/LICENSE-kokonutui.txt' | Should Be $true
         $c = & $css
         $c | Should Match '\.kit-search__list'
-        $c | Should Match 'adapted from kokonutui'
+        $c | Should Match 'LICENSE-kokonutui\.txt'
     }
     It 'takes classes made in code by prefix, and leaves pdf.js out until a page loads it' {
         [IO.File]::WriteAllText((Join-Path $p 'badge.js'), 'el.className = "kit-badge kit-badge--" + tone;')
@@ -478,7 +478,7 @@ Describe 'The kit files themselves' {
     It 'credit kokonutui where its parts are used, with its licence alongside' {
         [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\LICENSE-kokonutui.txt')) | Should Match 'Copyright \(c\) 2025 kokonutUI'
         foreach ($f in @(Get-ChildItem (Join-Path $root 'templates\ui-kit\react') -Filter *.tsx | Where-Object { $_.BaseName -in 'HoldButton', 'SearchBox', 'DropZone', 'Tabs', 'Loading', 'Composer', 'CommandButton', 'Switch', 'Menu', 'IconBar', 'Avatar' }) + @(Get-Item (Join-Path $root 'templates\ui-kit\kit.js'))) {
-            [IO.File]::ReadAllText($f.FullName) | Should Match '(?s)kokonutui.*MIT'
+            [IO.File]::ReadAllText($f.FullName) | Should Match '(?s)MIT licence; see\s+(\.\./)?LICENSE-kokonutui\.txt'
         }
         [IO.File]::ReadAllText((Join-Path $root 'templates\ui-kit\LICENSE-bklit-ui.txt')) | Should Match 'Copyright \(c\) 2026 uixmat'
         foreach ($f in 'kit-charts.js', 'react\Chart.tsx') { [IO.File]::ReadAllText((Join-Path $root "templates\ui-kit\$f")) | Should Match '(?s)bklit-ui.*MIT' }

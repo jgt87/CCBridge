@@ -7,13 +7,13 @@
   color-scheme: light;   /* the browser draws its own parts (scrollbars, pickers) to match */
   --kit-gradient-from: #5a5f66;
   --kit-gradient-to: #1f2328;
-  --kit-gradient: linear-gradient(45deg, var(--kit-gradient-from) 0%, var(--kit-gradient-to) 100%);
+  --kit-gradient: linear-gradient(45deg, var(--kit-gradient-from) 0%, var(--kit-gradient-to) 100%);   /* design: the kit's one gradient, for the header band */
   --kit-on-gradient: #ffffff;
 
   --kit-accent: #1f2328;
   --kit-title: #1f2328;
   --kit-icon: #1f2328;
-  --kit-accent-hover: #3a3f45;
+  --kit-accent-hover: color-mix(in srgb, var(--kit-accent) 87%, white);
   --kit-accent-soft: #ececee;
   --kit-on-accent: #ffffff;
   --kit-accent-2: #5a5f66;
@@ -97,7 +97,7 @@
   --kit-icon: #ededee;
     --kit-title: #ededee;
     --kit-icon: #ededee;
-    --kit-accent-hover: #ffffff;
+    --kit-accent-hover: color-mix(in srgb, var(--kit-accent) 20%, white);
     --kit-accent-soft: #2e3034;
     --kit-on-accent: #1f2328;
     --kit-bg: #141517;
@@ -130,7 +130,7 @@
   --kit-accent: #e6e6e6;
   --kit-title: #ededee;
   --kit-icon: #ededee;
-  --kit-accent-hover: #ffffff;
+  --kit-accent-hover: color-mix(in srgb, var(--kit-accent) 20%, white);
   --kit-accent-soft: #2e3034;
   --kit-on-accent: #1f2328;
   --kit-bg: #141517;

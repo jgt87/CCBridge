@@ -25,7 +25,7 @@ Describe 'Every control and content element has a kit form' {
         $kitCss | Should Match '\.kit-tree li\[aria-expanded="false"\] > ul \{ display: none; \}'
         $kitCss | Should Match '\.kit-table caption'
         # Every value is a token: no colour, size or shadow of its own in the new block.
-        $block = [regex]::Match($kitCss, '(?s)/\* Basics \(kit revision 11\).*?/\*\s+Interactive components adapted from kokonutui').Value
+        $block = [regex]::Match($kitCss, '(?s)/\* Basics \(kit revision 11\).*?/\*\s+Interactive components adapted from an open-source component library').Value
         $block.Length | Should BeGreaterThan 3000
         ([regex]::Matches($block, '(?<![-\w])#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(')).Count | Should Be 0
     }

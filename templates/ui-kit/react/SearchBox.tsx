@@ -1,6 +1,6 @@
 /**
  * UI kit component for React projects: renders the kit's markup (styles/kit/kit.css), needs only React.
- * Adapted from kokonutui action-search-bar (MIT licence, see ../LICENSE-kokonutui.txt; https://kokonutui.com).
+ * Adapted from an open-source component library (MIT licence; see ../LICENSE-kokonutui.txt).
  */
 import { useId, useMemo, useState } from "react";
 

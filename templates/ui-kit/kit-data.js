@@ -17,7 +17,7 @@
     KitData.toCsv(rows, columns)    -> CSV text (columns: [{ key, label }] or key names)
     KitData.download(name, text)    saves it as a file (an export of the filtered rows)
 
-  Values in a table are typed per column, the same rules the helper program uses for data/NAME.json:
+  Values in a table are typed per column:
   a column is a number, true/false or a date only when every value in it is one; numbers with a
   decimal comma are read when the file uses ; between values; dates come out as yyyy-MM-dd text;
   codes with a leading zero (007) stay text; empty cells are null.

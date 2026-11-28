@@ -1,5 +1,8 @@
-/* UI kit for Tailwind CSS 4, written by the helper program: do not edit (change the values in
-   styles/kit/tokens.css). Import it after Tailwind, with the kit's tokens and stylesheet:
+/* UI kit for Tailwind CSS 4.
+   kit:project-begin tool
+   Written by the helper program: do not edit.
+   kit:project-end
+   Change the values in styles/kit/tokens.css. Import it after Tailwind, with the kit's tokens and stylesheet:
      @import "tailwindcss";
      @import "./styles/kit/tailwind/kit-tailwind.css";   (the path from your stylesheet)
    and load styles/kit/tokens.css and styles/kit/kit.css in the page. The kit's tokens become Tailwind

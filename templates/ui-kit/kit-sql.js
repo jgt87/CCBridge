@@ -51,7 +51,7 @@
     if (!cols.length) cols = ["value"];
     db.run("DROP TABLE IF EXISTS " + quote(name));
     db.run("CREATE TABLE " + quote(name) + " (" + cols.map(function (c) { return quote(c) + " " + typeOf(rows, c); }).join(", ") + ")");
-    var st = db.prepare("INSERT INTO " + quote(name) + " VALUES (" + cols.map(function () { return "?"; }).join(", ") + ")");
+    var st = db.prepare(/* injection: a quoted name; the values are bound (?) */ "INSERT INTO " + quote(name) + " VALUES (" + cols.map(function () { return "?"; }).join(", ") + ")");
     db.run("BEGIN");
     try { rows.forEach(function (r) { st.run(cols.map(function (c) { return value(r ? r[c] : null); })); }); db.run("COMMIT"); }
     catch (e) { db.run("ROLLBACK"); throw e; }

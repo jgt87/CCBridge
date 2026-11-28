@@ -1,7 +1,7 @@
 /**
  * UI kit component for React projects: renders the kit's markup (styles/kit/kit.css), needs only React.
- * Adapted from kokonutui ai-text-loading, with a soft pulse instead of the gradient
- * (MIT licence, see ../LICENSE-kokonutui.txt; https://kokonutui.com).
+ * Adapted from an open-source component library, with a soft pulse instead of the gradient
+ * (MIT licence; see ../LICENSE-kokonutui.txt).
  */
 
 /** Loading text with a spinner. */
