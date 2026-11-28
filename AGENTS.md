@@ -184,6 +184,9 @@ and the project's own DESIGN.md / PRODUCT.md win where they are more specific.
   project's own rules in `.claude/rules/project-<area>.md`, which win on conflict.
 - Starters: its `templates/` (tokens, gitignore, gitattributes, editorconfig, check scripts,
   design-rule tests). Copy in; do not link.
+- UI kit: a copy of its shared kit (a folder whose `kit.css` came from its
+  `templates/shared-kit`) is changed there, not here, and reaches this project by its sync.
+  Values only this project needs go between the `kit:project` markers.
 - Decisions: the operator's settled decisions and every deviation from a shared rule are
   entries in `DECISIONS.md` (its docs/09 §8); elsewhere cite the id (`D-001`), never restate it.
 - Audit: `python -I C:/Files/Apps/__CommonShared/.claude/skills/new-project/scripts/check_project.py .`
